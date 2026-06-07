@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { overlayPositionLabel, tvwIsScored, TvWhiteBoard } from '../display.jsx';
+import { overlayPositionLabel, TvWhiteBoard } from '../display.jsx';
+import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
-// mp-13y: white TvDisplay scoreboard + position-label fallback.
+// mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
+// row, NEXT, sponsor) that delegates the scoreboard body to the SHARED
+// match_scoreboard.jsx components (TeamScoreboard / IndividualScore) — the same
+// ones the viewer card uses. The scoreboard's own rendering (slots, IV/PW
+// summary, DH banner) is covered by match_scoreboard.test.jsx.
 
 describe('overlayPositionLabel — FIK names only for 5-person teams', () => {
   it('returns Senpo..Taisho for a 5-person team', () => {
@@ -23,24 +28,15 @@ describe('overlayPositionLabel — FIK names only for 5-person teams', () => {
   });
 });
 
-describe('tvwIsScored', () => {
-  it('true when a side has an ippon', () => {
-    expect(tvwIsScored({ ipponsA: ['M'], ipponsB: [] })).toBe(true);
-  });
-  it('false for an empty bout', () => {
-    expect(tvwIsScored({ ipponsA: [], ipponsB: [] })).toBe(false);
-  });
-});
-
-function teamPromoted() {
+function teamPromoted(promotedKind = 'live') {
   return {
-    kind: 'live',
+    kind: promotedKind,
     match: {
       id: 'm1', round: 'Round 1',
       sideA: { name: 'Red Team' }, sideB: { name: 'White Team' },
       subResults: [
         { position: 1, ipponsB: ['M'], ipponsA: [] },
-        { position: 2, ipponsB: [], ipponsA: [] }, // unfought → in progress
+        { position: 2, ipponsB: [], ipponsA: [] },
       ],
     },
     competition: { id: 'c1', name: 'Teams', kind: 'team', teamSize: 5 },
@@ -48,21 +44,17 @@ function teamPromoted() {
   };
 }
 
-function render(props) {
-  return JSON.stringify(TvWhiteBoard(props));
-}
+function render(props) { return JSON.stringify(TvWhiteBoard(props)); }
 
-// Walk the vnode tree and collect every bout-row child vnode (TvWhiteBoutRow
-// is a child component, so its rendered testid isn't in the parent's
-// stringified tree — identify it by its `sub` prop instead).
-function collectBoutRows(vnode, out = []) {
-  if (!vnode || typeof vnode !== 'object') return out;
-  if (Array.isArray(vnode)) { vnode.forEach((v) => collectBoutRows(v, out)); return out; }
-  const props = vnode.props || {};
-  if (props.sub && (typeof props.index === 'number')) out.push(props);
-  if (vnode.children) collectBoutRows(vnode.children, out);
-  if (props.children) collectBoutRows(props.children, out);
-  return out;
+// Depth-first search for a vnode matching the predicate (TvWhiteBoard delegates
+// the body to a child component vnode, so we assert on its type + props).
+function findVnode(node, pred) {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
+  if (pred(node)) return node;
+  const kids = node.children || node.props?.children || [];
+  for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
+  return null;
 }
 
 describe('TvWhiteBoard', () => {
@@ -71,7 +63,7 @@ describe('TvWhiteBoard', () => {
     lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
   };
 
-  it('renders a white board for a live team match with bout rows and NO "LIVE"', () => {
+  it('renders a white board for a live team match, delegating to TeamScoreboard, NO "LIVE"', () => {
     const p = teamPromoted();
     const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
@@ -81,28 +73,31 @@ describe('TvWhiteBoard', () => {
     expect(str).toContain('White Team');
     expect(str).toContain('Red Team');
     expect(str).not.toContain('LIVE');
-    const rows = collectBoutRows(TvWhiteBoard(props));
-    expect(rows.length).toBe(2); // 2 regular bouts
-    expect(rows.some((r) => r.isDH)).toBe(false);
+    const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.variant).toBe('tv');
+    expect(sb.props.subResults.length).toBe(2);
   });
 
-  it('individual match keeps the ippon score and shows no bout grid', () => {
+  it('delegates an individual match to IndividualScore (no team bout grid)', () => {
     const p = {
       kind: 'live',
       match: { id: 'i1', round: 'Round 1', sideA: { name: 'Aka P' }, sideB: { name: 'Shiro P' },
         ipponsB: ['K'], ipponsA: ['M'], subResults: [] },
       competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
     };
-    const str = render({ ...base, promoted: p, promotedKind: 'live', isTeamMatch: false,
-      subResults: [], teamSize: 0 });
+    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: false, subResults: [], teamSize: 0 };
+    const str = render(props);
     expect(str).toContain('tvd--white');
     expect(str).not.toContain('tvd-team-bouts');
     expect(str).toContain('Shiro P');
     expect(str).toContain('Aka P');
     expect(str).not.toContain('LIVE');
+    expect(findVnode(TvWhiteBoard(props), n => n.type === IndividualScore)).toBeTruthy();
+    expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeNull();
   });
 
-  it('shows the Daihyosen banner row when showDH and a DH sub exists', () => {
+  it('passes showDH to TeamScoreboard when a DH sub exists', () => {
     const p = teamPromoted();
     p.match.subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: [] },
@@ -110,7 +105,18 @@ describe('TvWhiteBoard', () => {
     ];
     const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5, showDH: true };
-    const rows = collectBoutRows(TvWhiteBoard(props));
-    expect(rows.some((r) => r.isDH)).toBe(true); // DH row rendered
+    const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.showDH).toBe(true);
+  });
+
+  it('an up-next team match shows "Starts soon" (not an empty bout grid)', () => {
+    const p = teamPromoted('upnext');
+    p.match.subResults = [];
+    const props = { ...base, promoted: p, promotedKind: 'upnext', isTeamMatch: true, subResults: [], teamSize: 5 };
+    const str = render(props);
+    expect(str).toContain('Starts soon');
+    expect(str).toContain('up next');
+    expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeNull();
   });
 });

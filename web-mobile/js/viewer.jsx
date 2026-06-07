@@ -1,7 +1,10 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup } from './lineup_resolver.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore } from './match_scoreboard.jsx';
+// Re-export the shared scoreboard primitives so existing tests that import them
+// from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
+export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -1778,147 +1781,6 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   );
 }
 
-// boutHansokuMark — returns the FIK-canonical outstanding hansoku marker for a
-// side's foul count. fouls % 2 === 1 → red ▲ (one outstanding hansoku);
-// fouls % 2 === 0 → "" (none or already converted to an H ippon on the
-// opponent). Never renders two triangles — FIK Table 1 (p.15) requires the ▲
-// to be deleted when the second hansoku is recorded and 1 ippon awarded.
-// Exported for vitest.
-export function boutHansokuMark(foulCount) {
-  return (foulCount || 0) % 2 === 1 ? "▲" : "";
-}
-
-// useTeamLineups — async effect hook that fetches per-match lineups for both
-// sides of a team match. Returns { lineupA, lineupB } where each is either a
-// lineup object ({ positions: {...} }) or null when no lineup has been set.
-// Degrades gracefully: if window.API is missing (public viewer with no auth)
-// both lineups remain null and the caller falls back to bout numbers.
-//
-// sideAKey / sideBKey are the raw `id` values from match.sideA / match.sideB
-// which api_serializers sets to the team name; resolveLineupTeamId maps them
-// to the participant UUID that the lineup API is keyed under.
-function useTeamLineups(match) {
-  const [lineupA, setLineupA] = useState(null);
-  const [lineupB, setLineupB] = useState(null);
-
-  const compId = match?.compId;
-  const matchId = match?.id;
-  const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
-  const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
-
-  useEffect(() => {
-    if (!compId || !matchId || !window.API) return undefined;
-    let cancelled = false;
-
-    (async () => {
-      // Fetch competition detail to resolve name-keyed side → UUID (same
-      // pattern as TeamScoreEditorModal; see admin_scoring_modal.jsx).
-      let players = [];
-      try {
-        const detail = await window.API.fetchCompetitionDetails(compId);
-        if (cancelled) return;
-        players =
-          (detail && detail.players && detail.players.length ? detail.players : null)
-          || (detail && detail.config && detail.config.players)
-          || [];
-      } catch (_e) {
-        // Soft-fail: lineup stays null, viewer falls back to bout number.
-        console.warn("useTeamLineups: competition fetch failed", _e);
-      }
-
-      // Extract a numeric round index for the round-lineup fallback.
-      let round = 0;
-      if (typeof match.round === "string") {
-        const mr = /^Round\s+(\d+)$/.exec(match.round);
-        if (mr) round = parseInt(mr[1], 10) - 1;
-      } else if (typeof match.round === "number") {
-        round = match.round;
-      }
-
-      const teamAId = resolveLineupTeamId(sideAId, players);
-      const teamBId = resolveLineupTeamId(sideBId, players);
-
-      if (teamAId) {
-        const l = await resolveMatchLineup(compId, teamAId, matchId, round, window.API);
-        if (!cancelled) setLineupA(l);
-      }
-      if (teamBId) {
-        const l = await resolveMatchLineup(compId, teamBId, matchId, round, window.API);
-        if (!cancelled) setLineupB(l);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [compId, matchId]);
-
-  return { lineupA, lineupB };
-}
-
-// BoutSubRow — canonical FIK team-match bout row used by both MatchDetailCard
-// and MatchViewerModal. Format: Shiro name (left) | bout marks (centre) | Aka name (right).
-// names on the outside, marks in the centre — matching the TvDisplay format.
-//
-// Props:
-//   sub        — subResult object { ipponsA, ipponsB, hansokuA, hansokuB,
-//                                   position, decidedByHantei, sideA, sideB }
-//   index      — 0-based position index (for fallback label)
-//   lineupA    — resolved lineup for sideA (Aka / right side)
-//   lineupB    — resolved lineup for sideB (Shiro / left side)
-//   teamSize   — number of bout positions (for named key lookup)
-//   isDH       — true for the daihyosen row (position -1)
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH }) {
-  const ipponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-  const ipponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-  const hansokuB = sub.hansokuB || 0;
-  const hansokuA = sub.hansokuA || 0;
-
-  // Outstanding hansoku on each side (fouls % 2 === 1).
-  const foulMarkB = boutHansokuMark(hansokuB);
-  const foulMarkA = boutHansokuMark(hansokuA);
-
-  // Bout marks centre: shiro-score [▲] – [▲] aka-score, or X for draw,
-  // or DH label for the daihyosen row.
-  const isDraw = sub.decidedByHantei
-    ? false
-    : (window.isHikiwake && (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision)));
-
-  // Resolve player names from the pinned lineup; fall back to the bare bout
-  // number (1-indexed). Do NOT fall back to sub.sideA/sideB — for team matches
-  // those hold the TEAM name, which would repeat on every row.
-  const boutNum = isDH ? "DH" : String((sub && sub.position > 0 ? sub.position : index + 1));
-  const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || boutNum;
-  const akaName   = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || boutNum;
-
-  // Centre marks: ippon letters + draw/hantei indicators.
-  const centreMarks = isDH
-    ? (
-        <span>
-          <span style={{ fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>Daihyosen</span>
-          {sub.decidedByHantei && <span style={{ marginLeft: 4, fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }} data-testid="sub-row-hantei">Hantei</span>}
-        </span>
-      )
-    : isDraw
-      ? <span style={{ fontWeight: 700 }}>X</span>
-      : (
-          <span>
-            {foulMarkB && <span style={{ color: "var(--red, #c1121f)", marginRight: 2 }} data-testid="foul-mark-b">{foulMarkB}</span>}
-            <span>{ipponsB || "—"}</span>
-            <span style={{ opacity: 0.5, margin: "0 4px" }}>–</span>
-            <span>{ipponsA || "—"}</span>
-            {foulMarkA && <span style={{ color: "var(--red, #c1121f)", marginLeft: 2 }} data-testid="foul-mark-a">{foulMarkA}</span>}
-            {sub.decidedByHantei && <span style={{ marginLeft: 4, fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }} data-testid="sub-row-hantei">Hantei</span>}
-          </span>
-        );
-
-  return (
-    <div className="match-detail-card__sub-row" data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
-      <span className="match-detail-card__sub-name" data-testid="sub-shiro-name">{shiroName}</span>
-      <span className="match-detail-card__sub-pos" data-testid="sub-marks">{centreMarks}</span>
-      <span className="match-detail-card__sub-name match-detail-card__sub-name--right" data-testid="sub-aka-name">{akaName}</span>
-    </div>
-  );
-}
-
 // Inline match detail card — shown directly on the page (no modal needed).
 function MatchDetailCard({ match, onClose }) {
   if (!match) return null;
@@ -1930,14 +1792,12 @@ function MatchDetailCard({ match, onClose }) {
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
   const isDone = match.status === "completed";
-  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
-  // same fallback used in VSchedItem so the score display is consistent.
-  const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
-  const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
 
   // mp-13y: fetch per-match lineups for team matches so bout rows show
   // competitor names instead of bout numbers.
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
+  // Show the Daihyosen row when a rep-bout subResult exists (position -1).
+  const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
 
   return (
     <div className="match-detail-card">
@@ -1960,63 +1820,20 @@ function MatchDetailCard({ match, onClose }) {
           <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
           <span className="match-detail-card__name">{bName}</span>
         </div>
-        <div className="match-detail-card__score">
-          {isDone
-            ? <span>{window.matchScoreStr(match, mdcIpponsB, mdcIpponsA) || "—"}</span>
-            : <span className="match-detail-card__vs">vs</span>}
-        </div>
+        <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
         <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
           <span className="match-detail-card__name">{aName}</span>
           <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
         </div>
       </div>
 
-      {isDone && !isTeam && (
-        <div className="match-detail-card__ippons">
-          <div className="match-detail-card__ippons-side">
-            <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
-            {/* mp-13y: outstanding hansoku shown as red ▲ (FIK Table 1 p.15).
-                fouls % 2 === 1 → one outstanding ▲; 0 → cleared (converted to H). */}
-            {boutHansokuMark(match.hansokuB) && (
-              <span className="match-detail-card__fouls" style={{ color: "var(--red, #c1121f)" }} data-testid="mdc-foul-b">
-                {boutHansokuMark(match.hansokuB)}
-              </span>
-            )}
-          </div>
-          <div className="match-detail-card__ippons-center">
-            {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
-            {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
-          </div>
-          <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
-            <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
-            {boutHansokuMark(match.hansokuA) && (
-              <span className="match-detail-card__fouls" style={{ color: "var(--red, #c1121f)" }} data-testid="mdc-foul-a">
-                {boutHansokuMark(match.hansokuA)}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* mp-13y: team sub-bout rows in canonical FIK format:
-          Shiro name (left) | bout marks (centre) | Aka name (right).
-          Works for both completed and live (in-progress) team matches so
-          lineup names appear during play too. */}
-      {isTeam && match.subResults && match.subResults.length > 0 && (
-        <div className="match-detail-card__team-subs">
-          {match.subResults.map((sub, i) => (
-            <BoutSubRow
-              key={i}
-              sub={sub}
-              index={i}
-              lineupA={lineupA}
-              lineupB={lineupB}
-              teamSize={teamSize}
-              isDH={sub.position === -1}
-            />
-          ))}
-        </div>
-      )}
+      {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx) — same
+          component the TV display uses. Team → IV/PW summary + per-bout rows
+          (+ Daihyosen); individual → ippon-letter slots. */}
+      {isTeam
+        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} showDH={showDH} variant="card" />
+        : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );
 }

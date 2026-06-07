@@ -239,29 +239,20 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
     vi.resetModules();
   });
 
-  it('renders DH row with "Daihyosen" in centre marks (position -1)', () => {
+  it('renders the DH row with the sub-row-dh testid (position -1)', () => {
+    // The "DAIHYOSEN" banner is rendered by TeamScoreboard, not the bout row;
+    // the rep-bout row itself carries data-testid="sub-row-dh".
     const sub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: false };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    const text = collectText(tree);
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Match -1');
-    // Hantei marker absent when decidedByHantei is false.
-    expect(text).not.toContain('Hantei');
-    // data-testid should be sub-row-dh for the DH row.
-    const node = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-dh');
-    expect(node).toBeTruthy();
+    expect(collectText(tree)).not.toContain('Match -1');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-dh')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
   });
 
-  it('renders DH row with "Hantei" marker when decidedByHantei=true', () => {
+  it('renders the "Ht" hantei marker when decidedByHantei=true', () => {
     const sub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    const text = collectText(tree);
-    expect(text).toContain('Daihyosen');
-    expect(text).toContain('Hantei');
-    // Hantei marker must have left margin (not render flush as "DaihyosenHantei").
-    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
-    expect(marker).toBeTruthy();
-    expect(marker.props.style?.marginLeft).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
   });
 
   it('falls back to bout number when no lineup provided (individual index + 1)', () => {
@@ -309,16 +300,12 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
 // display.jsx: boutHansokuMarkD + findCurrentBoutIndex
 // ──────────────────────────────────────────────────
 
-describe('display: boutHansokuMarkD (mp-13y)', () => {
-  let boutHansokuMarkD;
+describe('shared: boutHansokuMark (mp-13y)', () => {
+  let boutHansokuMark;
 
   beforeEach(async () => {
     vi.resetModules();
-    global.React = { createElement: vi.fn(() => ({})), useState: vi.fn(() => [null, vi.fn()]), useEffect: vi.fn(), useMemo: (f) => f(), useRef: vi.fn(() => ({ current: null })), useCallback: (f) => f, memo: (c) => c };
-    // display.jsx depends on window globals at import time.
-    global.window = global.window || {};
-    global.window.renderQR = vi.fn();
-    ({ boutHansokuMarkD } = await import('../display.jsx'));
+    ({ boutHansokuMark } = await import('../match_scoreboard.jsx'));
   });
 
   afterEach(() => {
@@ -327,15 +314,15 @@ describe('display: boutHansokuMarkD (mp-13y)', () => {
   });
 
   it('returns "▲" for an odd foul count', () => {
-    expect(boutHansokuMarkD(1)).toBe('▲');
-    expect(boutHansokuMarkD(3)).toBe('▲');
+    expect(boutHansokuMark(1)).toBe('▲');
+    expect(boutHansokuMark(3)).toBe('▲');
   });
 
   it('returns "" for an even foul count or null', () => {
-    expect(boutHansokuMarkD(0)).toBe('');
-    expect(boutHansokuMarkD(2)).toBe('');
-    expect(boutHansokuMarkD(null)).toBe('');
-    expect(boutHansokuMarkD(undefined)).toBe('');
+    expect(boutHansokuMark(0)).toBe('');
+    expect(boutHansokuMark(2)).toBe('');
+    expect(boutHansokuMark(null)).toBe('');
+    expect(boutHansokuMark(undefined)).toBe('');
   });
 });
 

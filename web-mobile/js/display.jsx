@@ -18,7 +18,8 @@
 // remain stable when those land — only the layout primitives around them
 // are expected to evolve.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup } from './lineup_resolver.jsx';
+import { pickFromLineup } from './lineup_resolver.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -240,13 +241,6 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
     return m.round || "";
 }
 
-// boutHansokuMarkD — display-layer ▲ for an outstanding hansoku (fouls % 2 === 1).
-// Duplicated from viewer.jsx as a module-local copy so display.jsx does not
-// depend on viewer.jsx (separate ES module). Mirrors boutHansokuMark exactly.
-function boutHansokuMarkD(foulCount) {
-    return (foulCount || 0) % 2 === 1 ? "▲" : "";
-}
-
 // overlayPositionLabel — FIK position label for the current bout, used as the
 // fallback when no per-match lineup pins a player name. Mirrors
 // positionLabelFor in admin_scoring_modal.jsx (module-local copy; display.jsx
@@ -280,61 +274,6 @@ function findCurrentBoutIndex(subResults) {
     return 0;
 }
 
-// useTvTeamLineups — fetch per-match lineups for both sides of a team match
-// within TvDisplay/StreamingOverlay. Returns { lineupA, lineupB }.
-// Requires window.API to be present; degrades gracefully when it is not
-// (public display pages don't have auth).
-function useTvTeamLineups(match, competition) {
-    const [lineupA, setLineupA] = useSD(null);
-    const [lineupB, setLineupB] = useSD(null);
-
-    const compId = competition?.id;
-    const matchId = match?.id;
-    const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
-    const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
-
-    useED(() => {
-        if (!compId || !matchId || !window.API) return undefined;
-        let cancelled = false;
-
-        (async () => {
-            let players = [];
-            try {
-                const detail = await window.API.fetchCompetitionDetails(compId);
-                if (cancelled) return;
-                players =
-                    (detail && detail.players && detail.players.length ? detail.players : null)
-                    || (detail && detail.config && detail.config.players)
-                    || [];
-            } catch (_e) { /* soft-fail */ }
-
-            let round = 0;
-            if (typeof match.round === "string") {
-                const mr = /^Round\s+(\d+)$/.exec(match.round);
-                if (mr) round = parseInt(mr[1], 10) - 1;
-            } else if (typeof match.round === "number") {
-                round = match.round;
-            }
-
-            const teamAId = resolveLineupTeamId(sideAId, players);
-            const teamBId = resolveLineupTeamId(sideBId, players);
-
-            if (teamAId) {
-                const l = await resolveMatchLineup(compId, teamAId, matchId, round, window.API);
-                if (!cancelled) setLineupA(l);
-            }
-            if (teamBId) {
-                const l = await resolveMatchLineup(compId, teamBId, matchId, round, window.API);
-                if (!cancelled) setLineupB(l);
-            }
-        })();
-
-        return () => { cancelled = true; };
-    }, [compId, matchId]);
-
-    return { lineupA, lineupB };
-}
-
 
 // TvWhiteTeamBoard — mp-13y: white scoreboard for a live TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
@@ -343,89 +282,17 @@ function useTvTeamLineups(match, competition) {
 // grid (done / in-progress amber / queued grey), optional Daihyosen banner,
 // and a single "Next" line. Individual matches, empty states and the lobby
 // keep the existing dark surface (no mockup for those).
-function tvwIsScored(s) {
-    const a = (s.ipponsA || []).filter(x => x && x !== "•").length;
-    const b = (s.ipponsB || []).filter(x => x && x !== "•").length;
-    return a > 0 || b > 0 || s.decidedByHantei ||
-        (typeof window.isHikiwake === "function" &&
-            (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
-}
-
-function TvWhiteBoutRow({ sub, index, lineupA, lineupB, teamSize, isDH, state }) {
-    const ipponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-    const ipponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-    const foulMarkB = boutHansokuMarkD(sub.hansokuB);
-    const foulMarkA = boutHansokuMarkD(sub.hansokuA);
-    const isDraw = !sub.decidedByHantei && typeof window.isHikiwake === "function" &&
-        (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
-    const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
-    // Pinned lineup name, else the bare bout number. NOT sub.sideA/sideB —
-    // those hold the team name for team matches and would repeat per row.
-    const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || boutNum;
-    const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || boutNum;
-
-    const rowBg = state === "now" ? "#fef3c7" : "transparent";
-    const queued = state === "queued";
-    const centre = isDH
-        ? <span style={{ background: "#111", color: "#fff", fontSize: "1.8vh", fontWeight: 700, letterSpacing: "0.12em", padding: "0.4vh 1.2vh", borderRadius: 4 }}>DH</span>
-        : isDraw
-            ? <span style={{ fontWeight: 800, fontSize: "2.6vh", color: "#111" }}>X</span>
-            : (
-                <span style={{ fontFamily: "var(--font-mono, monospace)", fontSize: "2.6vh", fontWeight: 700, color: queued ? "#9ca3af" : "#374151" }}>
-                    <span>{ipponsB || "—"}</span>
-                    {foulMarkB && <span style={{ color: "#dc2626", marginLeft: 4 }} data-testid="tvw-foul-b">{foulMarkB}</span>}
-                    <span style={{ opacity: 0.35, margin: "0 0.5em" }}>–</span>
-                    <span>{ipponsA || "—"}</span>
-                    {foulMarkA && <span style={{ color: "#dc2626", marginLeft: 4 }} data-testid="tvw-foul-a">{foulMarkA}</span>}
-                    {sub.decidedByHantei && <span style={{ marginLeft: 8, fontSize: "1.6vh", color: "#6b7280" }}>Ht</span>}
-                </span>
-            );
-
-    return (
-        <div
-            data-testid={isDH ? "tvw-sub-row-dh" : `tvw-sub-row-${index}`}
-            style={{
-                display: "flex", alignItems: "center",
-                padding: "1.4vh 1.5vw", borderTop: "1px solid #e5e7eb",
-                background: rowBg, fontSize: "3vh",
-            }}
-        >
-            <span data-testid="tvw-sub-shiro-name" style={{ flex: 1, minWidth: 0, fontWeight: 600, color: queued ? "#9ca3af" : "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroName}</span>
-            <span data-testid="tvw-sub-marks" style={{ flexShrink: 0, minWidth: "14vw", textAlign: "center" }}>{centre}</span>
-            <span data-testid="tvw-sub-aka-name" style={{ flex: 1, minWidth: 0, textAlign: "right", fontWeight: 600, color: queued ? "#d4a5a8" : "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaName}</span>
-        </div>
-    );
-}
 
 function TvWhiteBoard({ tournament, court, connected, promoted, promotedKind, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
-    const regular = subResults.filter(s => s.position !== -1);
-    const currentIdx = regular.findIndex(s => !tvwIsScored(s));
     const shiroTeam = sideLabel(promoted.match.sideB, zekken);
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
-    const dhSub = showDH ? subResults.find(s => s.position === -1) : null;
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
     const isLive = promotedKind === "live";
-
-    // Individual matches keep the ippon score in the centre of the name row
-    // (it is the result); team matches show "vs" (the bout grid carries the
-    // score). Up-next promotions show "vs" (not started).
-    const indScoreB = (promoted.match.ipponsB || []).filter(x => x && x !== "•").join("") || "—";
-    const indScoreA = (promoted.match.ipponsA || []).filter(x => x && x !== "•").join("") || "—";
     const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
-    const indFouls = !isTeamMatch && ((promoted.match.hansokuA || 0) + (promoted.match.hansokuB || 0)) > 0;
-    const nameCentre = (!isTeamMatch && isLive)
-        ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <div style={{ fontFamily: "var(--font-impact)", fontSize: "9vh", lineHeight: 0.9, display: "flex", alignItems: "center", gap: "0.18em" }}>
-                    <span style={{ color: "#111" }}>{indScoreB}</span>
-                    <span style={{ color: "#9ca3af", fontSize: "0.55em" }}>–</span>
-                    <span style={{ color: "#b91c1c" }}>{indScoreA}</span>
-                </div>
-                {sfx && <div style={{ fontWeight: 700, fontSize: "2.4vh", color: "#374151" }}>{sfx}</div>}
-                {indFouls && <div style={{ fontSize: "2vh", color: "#6b7280" }}>Fouls {promoted.match.hansokuB || 0} – {promoted.match.hansokuA || 0}</div>}
-            </div>
-        )
-        : <div style={{ fontSize: "2.4vh", color: "#9ca3af", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
+    // The shared scoreboard below carries the score (IV/PW summary for teams,
+    // ippon slots for individuals), so the team-name row centre is just "vs"
+    // (+ any decision suffix).
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "#9ca3af", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
 
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
@@ -465,23 +332,22 @@ function TvWhiteBoard({ tournament, court, connected, promoted, promotedKind, is
                 </div>
             </div>
 
-            {/* Per-bout grid (team matches only; individual matches show the
-                score in the name row above and have no sub-bouts) */}
-            {isTeamMatch ? (
-                <div data-testid="tvd-team-bouts" style={{ flex: 1 }}>
-                    {regular.map((sub, i) => (
-                        <TvWhiteBoutRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
-                            isDH={false} state={i < currentIdx || currentIdx === -1 ? "done" : i === currentIdx ? "now" : "queued"} />
-                    ))}
-                    {showDH && (
-                        <div style={{ borderTop: "3px solid #111", marginTop: "0.4vh" }}>
-                            {dhSub
-                                ? <TvWhiteBoutRow sub={dhSub} index={regular.length} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize} isDH={true} state="now" />
-                                : <div data-testid="tvd-dh-pending" style={{ textAlign: "center", padding: "1.2vh 0", fontSize: "2vh", color: "#6b7280" }}>Daihyosen pending</div>}
-                        </div>
-                    )}
+            {/* Shared FIK scoreboard (match_scoreboard.jsx) — the SAME component
+                the viewer card uses; variant="tv" only scales it up. Up-next
+                matches have no bouts yet, so show a compact "Starts soon"
+                instead of an empty grid. */}
+            {promotedKind === "upnext" ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "3vh", color: "#9ca3af" }}>Starts soon</div>
+            ) : isTeamMatch ? (
+                <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
+                    <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
+                        teamSize={teamSize} showDH={showDH} variant="tv" />
                 </div>
-            ) : <div style={{ flex: 1 }} />}
+            ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
+                    <IndividualScore match={promoted.match} variant="tv" />
+                </div>
+            )}
 
             {/* Next line */}
             {next && (
@@ -583,10 +449,10 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         (promoted.competition.kind === "team" || (promoted.competition.teamSize || 0) > 0));
     const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
 
-    // mp-13y: fetch lineups for the live team match. useTvTeamLineups
+    // mp-13y: fetch lineups for the live team match. useTeamLineups
     // degrades gracefully (returns null/null) when the promoted slot is
     // not a team match or when window.API is unavailable.
-    const { lineupA, lineupB } = useTvTeamLineups(
+    const { lineupA, lineupB } = useTeamLineups(
         isTeamMatch && promoted && promoted.match ? promoted.match : null,
         isTeamMatch && promoted ? promoted.competition : null
     );
@@ -1183,7 +1049,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const teamSizeOvl = (comp && comp.teamSize) || 0;
 
     // mp-13y: per-match lineups for team overlay.
-    const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTvTeamLineups(
+    const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTeamLineups(
         isTeamMatch && hasLive ? live.match : null,
         isTeamMatch && hasLive ? comp : null
     );
@@ -1420,10 +1286,8 @@ export {
     LOBBY_ROWS,
     buildCourtSlots,
     // mp-13y: helpers exported for vitest.
-    boutHansokuMarkD,
     findCurrentBoutIndex,
     overlayPositionLabel,
-    tvwIsScored,
     TvWhiteBoard,
 };
 

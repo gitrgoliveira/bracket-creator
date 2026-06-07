@@ -368,15 +368,14 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     subResults: subs,
   });
 
-  let BoutSubRow;
+  let TeamScoreboard;
+  let IndividualScore;
 
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
     global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
-    // Only globals MatchDetailCard executes on the team path. The non-team
-    // ippons block (which calls window.isHikiwake) is gated out for teams.
     global.window.formatIpponsScore = vi.fn(() => '3-2');
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m, ippB, ippA) =>
@@ -385,7 +384,8 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     global.window.ipponsFromScore = vi.fn(() => []);
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
-    ({ MatchDetailCard, BoutSubRow } = await import('../viewer.jsx'));
+    ({ MatchDetailCard } = await import('../viewer.jsx'));
+    ({ TeamScoreboard, IndividualScore } = await import('../match_scoreboard.jsx'));
   });
 
   afterEach(() => {
@@ -402,26 +402,22 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     vi.resetModules();
   });
 
-  // mp-13y: BoutSubRow is now a standalone component — MatchDetailCard renders
-  // <BoutSubRow/> as a child component vnode. The reactive shim does NOT expand
-  // child component vnodes (it only runs the root factory), so text assertions
-  // on the overall MatchDetailCard tree can't see inside BoutSubRow. Instead,
-  // mount BoutSubRow directly to verify the DH row's text and hantei marker.
-  it('labels the daihyosen row "Daihyosen" and shows "Hantei" when decidedByHantei', () => {
-    // Verify the DH row via a direct BoutSubRow mount (canonical layout test).
-    const dhSub = { position: -1, ipponsA: ['K'], ipponsB: [], decidedByHantei: true };
-    const dhTree = runtime.mount(BoutSubRow, { sub: dhSub, index: 1, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    const dhText = collectText(dhTree);
-    expect(dhText).toContain('Daihyosen');
-    expect(dhText).not.toContain('Match -1');
-    expect(dhText).toContain('Hantei');
-    // The marker must carry left spacing so it does not render flush against
-    // the label as "DaihyosenHantei" (Copilot review on #192).
-    const marker = findInTree(dhTree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
-    expect(marker).toBeTruthy();
-    expect(marker.props.style?.marginLeft).toBeTruthy();
+  // mp-13y: MatchDetailCard now delegates the scoreboard to the shared
+  // match_scoreboard.jsx components — TeamScoreboard (team) / IndividualScore
+  // (individual). These are child component vnodes which the reactive shim does
+  // not expand, so we assert delegation (type + props). The scoreboard's own
+  // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
+  // match_scoreboard.test.jsx.
+  function findVnode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
+    return null;
+  }
 
-    // MatchDetailCard must still render the team-subs container for team matches.
+  it('delegates a team match to TeamScoreboard (showDH when a DH sub exists)', () => {
     const tree = runtime.mount(MatchDetailCard, {
       match: mkTeamMatch([
         { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
@@ -429,73 +425,23 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       ]),
       onClose: null,
     });
-    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-    expect(teamSubs).toBeTruthy();
+    const sb = findVnode(tree, n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.showDH).toBe(true);
+    expect(sb.props.subResults.length).toBe(2);
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeNull();
   });
 
-  it('omits the "Hantei" marker when no sub was decided by hantei', () => {
-    // Mount BoutSubRow directly for the DH row without hantei.
-    const dhSub = { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false };
-    const dhTree = runtime.mount(BoutSubRow, { sub: dhSub, index: 1, lineupA: null, lineupB: null, teamSize: 3, isDH: true });
-    const dhText = collectText(dhTree);
-    expect(dhText).toContain('Daihyosen');
-    expect(dhText).not.toContain('Hantei');
-  });
-
-  // mp-116: Overview "Recent results" bug — allMatches useMemo was not threading
-  // compKind/teamSize, so isTeam evaluated false and the individual ippons block
-  // rendered instead of the team sub-bout rows.
-  // Verify that a match carrying compKind="team" (as allMatches now produces)
-  // renders match-detail-card__team-subs, NOT match-detail-card__ippons.
-  it('renders team sub-bout block (not individual ippons) when compKind="team" from allMatches', () => {
+  it('delegates an individual match to IndividualScore (not TeamScoreboard)', () => {
     const match = {
-      ...mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: 2, ipponsA: [], ipponsB: ['D'], decidedByHantei: false },
-      ]),
-      // These flags are what allMatches now correctly supplies for team comps.
-      compKind: 'team',
-      teamSize: 3,
+      compKind: 'individual', teamSize: 0, status: 'completed', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'], ipponsB: [], winner: { id: 'pA' },
     };
     const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-    // Team sub-rows container must be present.
-    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-    expect(teamSubs).toBeTruthy();
-    // Individual ippons block must NOT appear.
-    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-    expect(ipponsBlock).toBeNull();
-  });
-
-  // mp-116: Individual match must still render the ippons block (regression guard).
-  it('renders individual ippons block (not team subs) for an individual match', () => {
-    // The individual path calls window.isHikiwake — stub it for this test,
-    // restoring any prior value in finally so a thrown assertion can't leak
-    // the stub into later tests (mirrors the roundLabel pattern above).
-    const savedIsHikiwake = global.window.isHikiwake;
-    global.window.isHikiwake = vi.fn(() => false);
-    try {
-      const match = {
-        compKind: 'individual',
-        teamSize: 0,
-        status: 'completed',
-        court: 'A',
-        phase: 'bracket',
-        round: 'QF',
-        sideA: { id: 'pA', name: 'Alice' },
-        sideB: { id: 'pB', name: 'Bob' },
-        ipponsA: ['M'],
-        ipponsB: [],
-        winner: { id: 'pA' },
-      };
-      const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-      const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-      expect(ipponsBlock).toBeTruthy();
-      const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-      expect(teamSubs).toBeNull();
-    } finally {
-      if (savedIsHikiwake === undefined) delete global.window.isHikiwake;
-      else global.window.isHikiwake = savedIsHikiwake;
-    }
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeTruthy();
+    expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
 });
 

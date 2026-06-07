@@ -845,19 +845,23 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
   });
 
-  it('omits numbers entirely when player.number is not set', () => {
+  it('falls back to draw-order index when player.number is not set', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
     const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
-    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
+    // Column headers always show a visible label — the 1-based draw-order
+    // position index when the player has no assigned number.
+    expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
 
     const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
       const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
-      return numSpan;
+      return textContent(numSpan);
     });
-    expect(rowNums).toEqual([undefined, undefined, undefined]);
+    // The number span is now always rendered, mirroring the column index so
+    // row N and column N cross-reference the same player.
+    expect(rowNums).toEqual(['1', '2', '3']);
   });
 });
 

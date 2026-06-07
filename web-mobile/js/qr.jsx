@@ -493,3 +493,11 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
     }
   }
 }
+
+// Expose on window so non-importing surfaces (the /display StreamingOverlay,
+// which is loaded as a standalone module and reads window.renderQR) can draw
+// the QR. Mirrors the window-global convention used across the web-mobile
+// modules (e.g. window.TvDisplay / window.StreamingOverlay in display.jsx).
+if (typeof window !== "undefined") {
+  window.renderQR = renderQR;
+}

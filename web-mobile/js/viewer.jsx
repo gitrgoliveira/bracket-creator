@@ -462,7 +462,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
-      const titlePrefix = m.status === "running" ? "🔴 LIVE NOW — " : "(1) Your match is next — ";
+      const titlePrefix = m.status === "running" ? "🔴 NOW — " : "(1) Your match is next — ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
 
@@ -499,7 +499,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
-      const notifTitle = m.status === "running" ? "Your match is LIVE" : "Your match is next";
+      const notifTitle = m.status === "running" ? "Your match is on now" : "Your match is next";
       window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
     }
 
@@ -511,7 +511,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
 // Banner component: rendered when the followed match is on-deck.
 function MyMatchAlertBanner({ match, onView, onDismiss }) {
   if (!match) return null;
-  const kind = match.status === "running" ? "LIVE NOW" : "Next up";
+  const kind = match.status === "running" ? "NOW" : "Next up";
   const sideA = matchSideName(match.sideA, match.sideAName);
   const sideB = matchSideName(match.sideB, match.sideBName);
   const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
@@ -708,7 +708,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  // Live-comp set: gates the home LIVE NOW / Up-next strips and the live dot.
+  // Live-comp set: gates the home NOW / Up-next strips and the live dot.
   // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
   // draw but no match has been called, so it is NOT live. (The competition
   // detail view still shows its Pools/Bracket tabs; that is governed separately
@@ -716,7 +716,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
-  // placeholder would appear in the public LIVE NOW strip, even though
+  // placeholder would appear in the public NOW strip, even though
   // the upcoming list / cards / detail view all reject placeholder
   // sides. Mirrors the upNext filter below.
   const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
@@ -810,7 +810,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
           {live.length > 0 && (
             <div className="hero-live">
-              <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
+              <div className="hero-live__lbl"><span className="dot dot--live"></span> NOW · {pluralize(live.length, "match", "matches")}</div>
               <div className="vsched" style={{ marginTop: 8 }}>
                 {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
@@ -852,7 +852,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                 <div className="empty">
                   <div className="icon">⏳</div>
                   <h3>No competitions yet</h3>
-                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and live updates.</div>
+                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and updates.</div>
                 </div>
               </div>
             </>
@@ -885,7 +885,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__progress">
                             <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                             <div className="vlist-item__pct">
-                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>
                           </div>
                         )}
@@ -1028,12 +1028,12 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 // Contract:
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
-//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - status==="running"                       → null (round label already shows " · NOW")
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// the my-match__round label already appends " · LIVE NOW" — rendering it
+// the my-match__round label already appends " · NOW" — rendering it
 // again in the Queue chip would be a duplicate. We intentionally do NOT
 // fall back to "Scheduled HH:MM" the way display.jsx does — the
 // MyMatchPanel already has a dedicated Time chip.
@@ -1131,7 +1131,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   // gracefully empty for non-queued matches and pre-T046 responses. Wording
   // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
   // so all three viewer surfaces agree. Running matches show null here
-  // because the round label already appends " · LIVE NOW".
+  // because the round label already appends " · NOW".
   const queueLabel = mymatchQueueLabel(nextMatch);
   const queueHighlight = queueLabel === "Next up";
 
@@ -1145,7 +1145,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
-        {nextMatch.status === "running" ? " · LIVE NOW" : ""}
+        {nextMatch.status === "running" ? " · NOW" : ""}
       </div>
       <div className="my-match__row">
         <div className="my-match__chip">
@@ -1953,7 +1953,7 @@ function MatchDetailCard({ match, onClose }) {
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLive && <span className="bc-live">● LIVE</span>}
+          {isLive && <span className="bc-live">● NOW</span>}
           {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
           {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
         </div>
@@ -2100,7 +2100,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
             {myUpcoming.phase === "pool" ? poolLabel(myUpcoming) : myUpcoming.round}
-            {myUpcoming.status === "running" ? " · LIVE NOW" : ""}
+            {myUpcoming.status === "running" ? " · NOW" : ""}
           </div>
           <div className="my-match__row">
             <div className="my-match__chip">
@@ -2211,7 +2211,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
       {liveMatches.length > 1 && (
         <>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> LIVE NOW · {liveMatches.length}
+            <span className="dot dot--live"></span> NOW · {liveMatches.length}
           </div>
           <div className="vsched">
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
@@ -2299,7 +2299,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
+        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● NOW</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
@@ -2431,7 +2431,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2984,7 +2984,7 @@ function ScheduleViewer({ tournament, tweaks }) {
                   <div className="tw-court__title">SHIAIJO {cc}</div>
                   <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · live now" : ""}</div>
                 </div>
-                {liveOn && <span className="bc-live">● LIVE</span>}
+                {liveOn && <span className="bc-live">● NOW</span>}
               </div>
               <div className="tw-court__list">
                 {list.length === 0 ? (

@@ -330,7 +330,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div className="stat-box"><div className="v">{comps.length}</div><div className="l">Competitions</div></div>
           <div className="stat-box"><div className="v">{totalParticipants}</div><div className="l">Participants</div></div>
           <div className="stat-box"><div className="v">{doneMatches}/{totalMatches}</div><div className="l">Matches done</div></div>
-          <div className="stat-box"><div className="v" style={{ color: liveMatches > 0 ? "var(--red)" : "inherit" }}>{liveMatches}</div><div className="l">Live now</div></div>
+          <div className="stat-box"><div className="v" style={{ color: liveMatches > 0 ? "var(--red)" : "inherit" }}>{liveMatches}</div><div className="l">Now</div></div>
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
@@ -340,7 +340,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           </button>
           <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
             <div className="card__title" style={{ marginBottom: 6 }}>✎ Score editor →</div>
-            <div className="card__sub">Update live results or correct past matches across the tournament.</div>
+            <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
         </div>
 
@@ -576,14 +576,14 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
           <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
           <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
           <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
-          {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Live</div></div>}
+          {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
           {c.status === "setup" && playerCount >= 2 && (
             <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
-            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Live Scoring →</button>
+            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>
           )}
           {c.status === "completed" && (
             <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>

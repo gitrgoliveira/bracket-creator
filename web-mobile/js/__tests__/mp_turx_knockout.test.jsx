@@ -372,7 +372,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     }).not.toThrow();
   });
 
-  it('bracket tab label is "Bracket — live" for a running competition', () => {
+  it('bracket tab label is "Bracket — now" for a running competition', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       section: 'overview',
@@ -380,7 +380,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       bracket: liveBracket,
     });
     const text = collectText(tree);
-    expect(text).toContain('Bracket — live');
+    expect(text).toContain('Bracket — now');
     expect(text).not.toContain('Bracket — preview');
   });
 
@@ -404,8 +404,8 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       bracket: placeholderBracket, // preview: true
     });
     const text = collectText(tree);
-    // status is 'pools' (not draw-ready), so label should be "Bracket — live"
-    expect(text).toContain('Bracket — live');
+    // status is 'pools' (not draw-ready), so label should be "Bracket — now"
+    expect(text).toContain('Bracket — now');
     expect(text).not.toContain('Bracket — preview');
   });
 

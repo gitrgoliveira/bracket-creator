@@ -212,7 +212,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       <div className="bc-match-meta">
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
-        {live ? <span className="bc-live">● LIVE</span> : null}
+        {live ? <span className="bc-live">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}

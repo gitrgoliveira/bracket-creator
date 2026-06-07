@@ -884,12 +884,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div className="editor-modal__title">
-              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
+              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
-              {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
+              {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
             <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>
@@ -1585,12 +1585,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div className="editor-modal__title">
-              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Live"}
+              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--live" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
-              {isComplete ? "CORRECTION" : m.status === "running" ? "● LIVE" : "PRE-MATCH"}
+              {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
             <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
           </div>

@@ -1798,6 +1798,13 @@ function MatchDetailCard({ match, onClose }) {
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
   // Show the Daihyosen row when a rep-bout subResult exists (position -1).
   const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
+  // mp-13y: a not-yet-started team match has no bouts, so the full scoreboard
+  // would render as a lone "IV 0 PW 0" summary with no rows — reads as broken.
+  // Mirror the TV up-next treatment: show a placeholder. Distinguish "lineups
+  // not submitted" (both rosters empty) from "starts soon" (rosters pinned).
+  const hasResults = (match.subResults || []).length > 0;
+  const lineupHasNames = (l) => !!(l && l.positions && Object.keys(l.positions).length > 0);
+  const anyLineup = lineupHasNames(lineupA) || lineupHasNames(lineupB);
 
   return (
     <div className="match-detail-card">
@@ -1831,8 +1838,12 @@ function MatchDetailCard({ match, onClose }) {
           component the TV display uses. Team → IV/PW summary + per-bout rows
           (+ Daihyosen); individual → ippon-letter slots. */}
       {isTeam
-        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} showDH={showDH} variant="card" />
+        ? ((isDone || isLive || hasResults)
+            ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+                teamSize={teamSize} showDH={showDH} variant="card" />
+            : <div className="match-detail-card__pending" data-testid="match-detail-pending">
+                {anyLineup ? "Starts soon" : "Lineups not yet submitted"}
+              </div>)
         : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );

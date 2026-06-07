@@ -38,6 +38,13 @@
   --line-2: #eef0f4;
   --bg: #f7f8fa;
   --surface: #ffffff;
+  /* Secondary surface — slightly tinted fill for cards/cells that sit on
+     --surface or on a modal backdrop. Referenced as var(--bg-2) by the
+     match-detail card, pool-matrix cells and the shiro foul-counter; was
+     never defined, so those backgrounds resolved to transparent (the
+     match-detail card bled the page through in the modal). mp-13y. */
+  --bg-2: #f1f5f9;
+  --surface-2: #f1f5f9;
 
   --r-sm: 6px;
   --r: 10px;
@@ -4742,6 +4749,15 @@ button.my-match__opp {
   border-radius: 10px;
   padding: 12px 14px;
   margin: 4px 0 8px;
+}
+
+/* Placeholder shown in a not-yet-started team match's detail card in place
+   of an empty scoreboard (mp-13y). */
+.match-detail-card__pending {
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 13px;
+  padding: 14px 0 6px;
 }
 
 .match-detail-card__head {

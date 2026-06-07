@@ -864,13 +864,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
           const playerCount = (c.players || []).length;
           const ct = (n) => n === 1 ? "1 court" : `${n} courts`;
-          if (playerCount < 2) return <div className="field__hint">Suggested: up to {ct(Math.max(1, Math.floor(playerCount / 2) - 1))} for {playerCount} players</div>;
+          const pt = (n) => n === 1 ? "1 player" : `${n} players`;
+          if (playerCount < 2) return <div className="field__hint">Suggested: up to {ct(Math.max(1, Math.floor(playerCount / 2) - 1))} for {pt(playerCount)}</div>;
           const numCourts = local.courts.length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));
           const suggestedCourts = Math.max(1, hardCap - 1);
-          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts — {hardCap} max for {playerCount} players (suggested: {suggestedCourts})</div>;
-          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts — consider {ct(suggestedCourts)} for {playerCount} players</div>;
-          return <div className="field__hint">Suggested: up to {ct(suggestedCourts)} for {playerCount} players</div>;
+          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts — {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;
+          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts — consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
+          return <div className="field__hint">Suggested: up to {ct(suggestedCourts)} for {pt(playerCount)}</div>;
         })() : (
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
         )}

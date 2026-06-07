@@ -1552,7 +1552,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           </tbody>
         </table>
         {standings.length > 0 && (
-          <div className="pool-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+          <div className="league-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
             Ranked by: wins → points scored (PW) → head-to-head.
           </div>
         )}
@@ -2207,9 +2207,9 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
 });
 PoolMatchRow.displayName = "PoolMatchRow";
 
-// Round-robin matrix for a single pool. Each off-diagonal cell shows the row
-// player's result (W/L/X) against the column player; diagonal cells are self.
-function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
+// Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
+// row player's result (W/L/X) against the column player; diagonal cells are self.
+function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, isLeague }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
@@ -2239,28 +2239,28 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
 
   return (
-    <div className="pool-matrix-wrap">
-      <table className="pool-matrix">
+    <div className="league-matrix-wrap">
+      <table className="league-matrix">
         <thead>
           <tr>
-            <th className="pool-matrix__corner"></th>
-            {players.map((p) => (
-              <th key={p.name} scope="col" aria-label={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{p.number || ""}</th>
+            <th className="league-matrix__corner"></th>
+            {players.map((p, i) => (
+              <th key={p.name} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={isLeague ? (tweaks.showDojo ? p.name : shortName(p)) : p.name}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "pool-matrix__row--me" : ""}>
-              <td className="pool-matrix__row-head" title={rowPlayer.name}>
-                {rowPlayer.number ? <span className="pool-matrix__num">{rowPlayer.number}</span> : null}
-                <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
+            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
+              <td className="league-matrix__row-head" title={rowPlayer.name}>
+                <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
+                <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
-                const colMe = isHighlighted(colPlayer) ? " pool-matrix__col--me" : "";
-                if (ri === ci) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--self${colMe}`}>&mdash;</td>;
+                const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
+                if (ri === ci) return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
                 const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--empty${colMe}`}></td>;
+                if (!m) return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
                 const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
@@ -2274,7 +2274,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={colPlayer.name} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2288,18 +2288,18 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 let cellContent;
                 let resultLabel;
                 if (isDraw) {
-                  cellContent = <span className="pool-matrix__draw">X</span>;
+                  cellContent = <span className="league-matrix__draw">X</span>;
                   resultLabel = "Draw";
                 } else if (rowWon) {
-                  cellContent = <span className="pool-matrix__win">{rowIppons.join("") || "W"}</span>;
+                  cellContent = <span className="league-matrix__win">{rowIppons.join("") || "W"}</span>;
                   resultLabel = "Win";
                 } else {
-                  cellContent = <span className="pool-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                  cellContent = <span className="league-matrix__loss">{rowIppons.join("") || "L"}</span>;
                   resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={colPlayer.name} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );
@@ -2308,10 +2308,10 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
           ))}
         </tbody>
       </table>
-      <div className="pool-matrix__legend">
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
+      <div className="league-matrix__legend">
+        <span className="league-matrix__legend-item league-matrix__legend-item--win">W = win</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--loss">L = loss</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--draw">X = draw</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
@@ -2526,7 +2526,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} isLeague={isLeague} />
               </div>
             )}
           </div>
@@ -2666,7 +2666,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

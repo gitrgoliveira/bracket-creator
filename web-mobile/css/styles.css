@@ -4909,23 +4909,23 @@ button.my-match__opp {
 .match-detail-card__sub-score--right { text-align: right; }
 
 /* ---------- Pool Round-Robin Matrix (Viewer) ---------- */
-.pool-matrix-wrap {
+.league-matrix-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-.pool-matrix {
+.league-matrix {
   border-collapse: collapse;
   font-size: 11px;
   min-width: 100%;
 }
 
-.pool-matrix__corner {
+.league-matrix__corner {
   background: transparent;
   min-width: 80px;
 }
 
-.pool-matrix__col-head {
+.league-matrix__col-head {
   text-align: center;
   padding: 4px 6px;
   font-weight: 700;
@@ -4933,9 +4933,10 @@ button.my-match__opp {
   color: var(--ink-3);
   border-bottom: 2px solid var(--line);
   min-width: 36px;
+  cursor: help;
 }
 
-.pool-matrix__row-head {
+.league-matrix__row-head {
   padding: 6px 8px 6px 0;
   text-align: left;
   border-right: 1px solid var(--line);
@@ -4943,7 +4944,7 @@ button.my-match__opp {
   max-width: 120px;
 }
 
-.pool-matrix__num {
+.league-matrix__num {
   font-weight: 700;
   color: var(--ink-3);
   font-size: 11px;
@@ -4951,13 +4952,13 @@ button.my-match__opp {
   font-family: var(--font-mono);
 }
 
-.pool-matrix__pname {
+.league-matrix__pname {
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pool-matrix__cell {
+.league-matrix__cell {
   text-align: center;
   padding: 4px 2px;
   font-weight: 700;
@@ -4966,22 +4967,22 @@ button.my-match__opp {
   border: 1px solid var(--line-light);
 }
 
-.pool-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
-.pool-matrix__cell--empty { background: var(--bg-2); }
-.pool-matrix__cell--pending { color: var(--ink-3); }
-.pool-matrix__cell--live { color: var(--accent); }
-.pool-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
-.pool-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
-.pool-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
-.pool-matrix__cell[role="button"] { cursor: pointer; }
-.pool-matrix__cell[role="button"]:hover { filter: brightness(0.92); }
-.pool-matrix__cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
+.league-matrix__cell--empty { background: var(--bg-2); }
+.league-matrix__cell--pending { color: var(--ink-3); }
+.league-matrix__cell--live { color: var(--accent); }
+.league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
+.league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
+.league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+.league-matrix__cell[role="button"] { cursor: pointer; }
+.league-matrix__cell[role="button"]:hover { filter: brightness(0.92); }
+.league-matrix__cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.pool-matrix__win { color: #16a34a; }
-.pool-matrix__loss { color: #dc2626; }
-.pool-matrix__draw { color: var(--ink-2); }
+.league-matrix__win { color: #16a34a; }
+.league-matrix__loss { color: #dc2626; }
+.league-matrix__draw { color: var(--ink-2); }
 
-.pool-matrix__legend {
+.league-matrix__legend {
   display: flex;
   gap: 12px;
   margin-top: 6px;
@@ -4991,14 +4992,14 @@ button.my-match__opp {
   align-items: center;
 }
 
-.pool-matrix__legend-item {
+.league-matrix__legend-item {
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 700;
 }
-.pool-matrix__legend-item--win { color: #16a34a; background: rgba(22, 163, 74, 0.1); }
-.pool-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
-.pool-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
+.league-matrix__legend-item--win { color: #16a34a; background: rgba(22, 163, 74, 0.1); }
+.league-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
+.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
 
 /* ---------- FoulCounter (Individual Scoring) ---------- */
 .sb-fouls {
@@ -6226,13 +6227,13 @@ button.my-match__opp {
 /* mp-wvkh: followed-player highlights */
 .pool__row--me { background: rgba(29,53,87,0.07); }
 /* Matrix row: top inset shadow on every cell so the highlight shows through win/loss/draw backgrounds */
-.pool-matrix__row--me td,
-.pool-matrix__row--me th { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35); }
-.pool-matrix__row--me .pool-matrix__row-head { background: rgba(29,53,87,0.07); font-weight: 700; }
+.league-matrix__row--me td,
+.league-matrix__row--me th { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35); }
+.league-matrix__row--me .league-matrix__row-head { background: rgba(29,53,87,0.07); font-weight: 700; }
 /* Matrix col: left inset shadow so it doesn't override win/loss/draw cell backgrounds */
-.pool-matrix__col--me { box-shadow: inset 2px 0 0 rgba(29,53,87,0.35); font-weight: 700; }
+.league-matrix__col--me { box-shadow: inset 2px 0 0 rgba(29,53,87,0.35); font-weight: 700; }
 /* Corner cell (row and col): combine both shadows */
-.pool-matrix__row--me .pool-matrix__col--me { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35), inset 2px 0 0 rgba(29,53,87,0.35); }
+.league-matrix__row--me .league-matrix__col--me { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35), inset 2px 0 0 rgba(29,53,87,0.35); }
 .bc-match--my-match { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
 .vsched-item--me { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
 

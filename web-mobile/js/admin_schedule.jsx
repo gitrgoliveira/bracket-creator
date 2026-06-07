@@ -565,7 +565,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
         <div className="tw-match__phase">
           {m.phase === "pool" ? m.poolName : m.round}
           {m.round != null && typeof m.round === "number" && m.round >= 0 && (
-            <span class="tw-match__round">R{m.round + 1}</span>
+            <span className="tw-match__round">R{m.round + 1}</span>
           )}
         </div>
       </div>

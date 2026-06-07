@@ -335,8 +335,10 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 14 {
 			m.ResultSource = rec[14]
 		}
-		if len(rec) > 15 {
+		if len(rec) > 15 && rec[15] != "" {
 			m.Round, _ = strconv.Atoi(rec[15])
+		} else {
+			m.Round = -1
 		}
 
 		results = append(results, m)

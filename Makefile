@@ -12,6 +12,9 @@ EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# BUILD_DATE matches the format embedded by get_build_info.sh (git %ci style:
+# "2006-01-02 15:04:05 -0700") so docker/build stamps the version page correctly.
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%d %H:%M:%S %z")
 
 # OS detection
 UNAME_S := $(shell uname -s)
@@ -155,6 +158,7 @@ docker/build: ## Build Docker image
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(IMAGE_NAME):latest \
 		-t $(IMAGE_NAME):$(VERSION) \
 		.

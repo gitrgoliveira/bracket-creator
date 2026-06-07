@@ -12,9 +12,20 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v6
+        with:
+          # Need tags + full history so `git describe` produces a real version
+          # for the build args below (the binary embeds these via go generate).
+          fetch-depth: 0
+
+      - name: Compute build metadata
+        id: meta
+        run: |
+          echo "version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "build_date=$(date -u +'%Y-%m-%d %H:%M:%S %z')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Docker Registry
-        uses: docker/login-action@v4 
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -26,6 +37,10 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/${{ github.repository }}:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
 
       - name: Build and push Mobile Docker image
         uses: docker/build-push-action@v7
@@ -34,6 +49,10 @@ jobs:
           file: Dockerfile.mobile
           push: true
           tags: ghcr.io/${{ github.repository }}-mobile:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
 
       - name: Build and push Mobile PDF Docker image
         uses: docker/build-push-action@v7
@@ -42,3 +61,7 @@ jobs:
           file: Dockerfile.mobile-pdf
           push: true
           tags: ghcr.io/${{ github.repository }}-mobile-pdf:latest
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}

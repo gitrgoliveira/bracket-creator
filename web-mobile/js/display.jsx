@@ -335,66 +335,6 @@ function useTvTeamLineups(match, competition) {
     return { lineupA, lineupB };
 }
 
-// TvBoutSubRow — per-bout row for TvDisplay and the team-match section of
-// TvDisplay. Follows the strict canonical format:
-//   Shiro name (left) | bout marks (centre) | Aka name (right)
-// Uses the same layout as BoutSubRow in viewer.jsx but tuned for the
-// dark TV surface (larger type, TV color tokens).
-function TvBoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH }) {
-    const ipponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-    const ipponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-    const foulMarkB = boutHansokuMarkD(sub.hansokuB);
-    const foulMarkA = boutHansokuMarkD(sub.hansokuA);
-
-    const isDraw = !sub.decidedByHantei &&
-        typeof window.isHikiwake === "function" &&
-        (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
-
-    const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
-    const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || sub.sideB || boutNum;
-    const akaName   = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || sub.sideA || boutNum;
-
-    const centreMarks = isDH
-        ? <span style={{ fontSize: '1.6vh', fontWeight: 600, opacity: 0.7 }}>DH</span>
-        : isDraw
-            ? <span style={{ fontWeight: 700, fontSize: '2vh' }}>X</span>
-            : (
-                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '1.8vh' }}>
-                    {foulMarkB && <span style={{ color: '#ff5b54', marginRight: 2 }} data-testid="tv-foul-b">{foulMarkB}</span>}
-                    <span>{ipponsB || "—"}</span>
-                    <span style={{ opacity: 0.4, margin: '0 4px' }}>–</span>
-                    <span>{ipponsA || "—"}</span>
-                    {foulMarkA && <span style={{ color: '#ff5b54', marginLeft: 2 }} data-testid="tv-foul-a">{foulMarkA}</span>}
-                    {sub.decidedByHantei && <span style={{ marginLeft: 6, fontSize: '1.2vh', opacity: 0.7 }}>Ht</span>}
-                </span>
-            );
-
-    return (
-        <div
-            data-testid={isDH ? "tv-sub-row-dh" : `tv-sub-row-${index}`}
-            style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0.6vh 0',
-                borderBottom: '1px solid rgba(255,255,255,0.07)',
-                fontSize: '1.8vh',
-            }}
-        >
-            <span
-                data-testid="tv-sub-shiro-name"
-                style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.9 }}
-            >{shiroName}</span>
-            <span
-                data-testid="tv-sub-marks"
-                style={{ flexShrink: 0, minWidth: '12vw', textAlign: 'center' }}
-            >{centreMarks}</span>
-            <span
-                data-testid="tv-sub-aka-name"
-                style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.9 }}
-            >{akaName}</span>
-        </div>
-    );
-}
 
 // TvWhiteTeamBoard — mp-13y: white scoreboard for a live TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
@@ -1480,7 +1420,9 @@ export {
     // mp-13y: helpers exported for vitest.
     boutHansokuMarkD,
     findCurrentBoutIndex,
-    TvBoutSubRow,
+    overlayPositionLabel,
+    tvwIsScored,
+    TvWhiteBoard,
 };
 
 if (typeof window !== 'undefined') {

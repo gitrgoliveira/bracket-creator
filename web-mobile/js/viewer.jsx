@@ -2001,9 +2001,10 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
                     <div style={{ fontWeight: 500 }}>
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
-                      {/* Rank badge for parity with the full League standings table.
-                          This summary is already rank-sorted, so rank === i + 1. */}
-                      <span className="rank-badge">{rankOrdinal(i + 1)}{s.isOverridden ? "*" : ""}</span>
+                      {/* No rank badge here: this summary is rank-sorted, so the
+                          "#" column already IS the rank — a badge would just echo
+                          it. The rank badge only carries information when rows are
+                          in draw order (non-league pools), where rank ≠ position. */}
                     </div>
                     {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
                   </td>
@@ -2520,7 +2521,12 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
-                          {rank !== null ? (
+                          {/* The rank badge is only informative when rows are in
+                              DRAW order (non-league pools), where rank ≠ the "#"
+                              draw-position column. League standings are rank-sorted,
+                              so "#" already equals the rank and a badge would just
+                              duplicate it — suppress it there. */}
+                          {!isLeague && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

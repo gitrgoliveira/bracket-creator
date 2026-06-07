@@ -1408,7 +1408,7 @@ function DisplayModes({ tournament }) {
                   <span key={cc}>
                     <a href={`/display?court=${encodeURIComponent(cc)}${row.suffix}`} target="_blank" rel="noopener noreferrer"
                       style={{ color: "var(--text-link, #2563eb)" }}>Shiaijo {cc}</a>
-                    {i < courts.length - 1 && <span style={{ color: "var(--text-3, #999)", marginLeft: 8 }}>·</span>}
+                    {i < courts.length - 1 && <span aria-hidden="true" style={{ color: "var(--text-3, #999)", marginLeft: 8 }}>·</span>}
                   </span>
                 ))}
               </div>

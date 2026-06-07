@@ -217,7 +217,7 @@ function GlossaryPage({ onBack }) {
                 <article key={id} className="glossary-entry" id={`g-${id}`}>
                   <header className="glossary-entry__head">
                     <span className="glossary-entry__romaji">{entry.id.split('-').map(capitalise).join('-')}</span>
-                    {entry.kanji && <span className="glossary-entry__kanji"> · {entry.kanji}</span>}
+                    {entry.kanji && <span className="glossary-entry__kanji"><span aria-hidden="true"> · </span>{entry.kanji}</span>}
                     <span className="glossary-entry__short"> — {entry.short}</span>
                   </header>
                   <p className="glossary-entry__tooltip">

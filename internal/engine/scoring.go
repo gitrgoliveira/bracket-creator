@@ -137,6 +137,38 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 	}
 }
 
+// backfillMatchIdentity preserves the participant ids stamped on a pool/league
+// match at generation, and resolves the winner id. It runs inside every
+// score-write closure right before the whole-struct `*r = *result` overwrite:
+// score requests carry side NAMES only (no ids), so without this the overwrite
+// would wipe SideAID/SideBID on the first score and break league-matrix cell
+// mapping. WinnerID is resolved from an explicit WinnerSide hint when present
+// (the only way to tell apart two participants who share a name), else from a
+// name match (unambiguous unless both sides share a name). `stored` is the
+// on-disk record (with the generation-time ids); `result` is the incoming
+// score. Purely additive — never touches name-based scoring/standings logic.
+func backfillMatchIdentity(result, stored *state.MatchResult) {
+	if result.SideAID == "" {
+		result.SideAID = stored.SideAID
+	}
+	if result.SideBID == "" {
+		result.SideBID = stored.SideBID
+	}
+	if result.WinnerID != "" {
+		return
+	}
+	switch {
+	case result.WinnerSide == "A":
+		result.WinnerID = result.SideAID
+	case result.WinnerSide == "B":
+		result.WinnerID = result.SideBID
+	case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
+		result.WinnerID = result.SideAID
+	case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
+		result.WinnerID = result.SideBID
+	}
+}
+
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
 	result.ID = matchId // normalize ID-less payloads before overwriting
 	applyHansokuIppons(result)
@@ -154,33 +186,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if result.SideB == "" {
 			result.SideB = r.SideB
 		}
-		// Preserve the participant ids stamped at generation: score
-		// requests carry names only, so without this backfill the
-		// whole-struct `*r = *result` below would wipe SideAID/SideBID
-		// on the first score, breaking league-matrix cell mapping.
-		if result.SideAID == "" {
-			result.SideAID = r.SideAID
-		}
-		if result.SideBID == "" {
-			result.SideBID = r.SideBID
-		}
-		// Resolve WinnerID from the side ids now that they are present.
-		// Prefer an explicit WinnerSide hint (set by handlers that know
-		// the winning side by score, not name — the only way to tell apart
-		// two participants who share a name); otherwise fall back to a
-		// name match, which is unambiguous unless both sides share a name.
-		if result.WinnerID == "" {
-			switch {
-			case result.WinnerSide == "A":
-				result.WinnerID = result.SideAID
-			case result.WinnerSide == "B":
-				result.WinnerID = result.SideBID
-			case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
-				result.WinnerID = result.SideAID
-			case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
-				result.WinnerID = result.SideBID
-			}
-		}
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
@@ -235,33 +241,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		if result.SideB == "" {
 			result.SideB = r.SideB
 		}
-		// Preserve the participant ids stamped at generation: score
-		// requests carry names only, so without this backfill the
-		// whole-struct `*r = *result` below would wipe SideAID/SideBID
-		// on the first score, breaking league-matrix cell mapping.
-		if result.SideAID == "" {
-			result.SideAID = r.SideAID
-		}
-		if result.SideBID == "" {
-			result.SideBID = r.SideBID
-		}
-		// Resolve WinnerID from the side ids now that they are present.
-		// Prefer an explicit WinnerSide hint (set by handlers that know
-		// the winning side by score, not name — the only way to tell apart
-		// two participants who share a name); otherwise fall back to a
-		// name match, which is unambiguous unless both sides share a name.
-		if result.WinnerID == "" {
-			switch {
-			case result.WinnerSide == "A":
-				result.WinnerID = result.SideAID
-			case result.WinnerSide == "B":
-				result.WinnerID = result.SideBID
-			case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
-				result.WinnerID = result.SideAID
-			case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
-				result.WinnerID = result.SideBID
-			}
-		}
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}

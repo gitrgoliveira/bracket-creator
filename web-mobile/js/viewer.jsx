@@ -2258,6 +2258,11 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
   const handleCellKeyDown = (e, m) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCellClick(m); } };
 
   const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
+  // Hover-tooltip label. Always include the dojo when present so two
+  // same-name participants are distinguishable on hover (the visible grid
+  // only shows the shared name). Hover-only, so the extra text is free.
+  const playerLabel = (p) => (p && p.dojo ? `${p.name} (${p.dojo})` : (p && p.name) || "");
+  const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
 
   return (
     <div className="league-matrix-wrap">
@@ -2266,14 +2271,14 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
           <tr>
             <th className="league-matrix__corner"></th>
             {players.map((p, i) => (
-              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={isLeague ? (tweaks.showDojo ? p.name : shortName(p)) : p.name}>{p.number || (i + 1)}</th>
+              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
             <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
-              <td className="league-matrix__row-head" title={rowPlayer.name}>
+              <td className="league-matrix__row-head" title={playerLabel(rowPlayer)}>
                 <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
@@ -2283,7 +2288,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 // Look up the match by id-pair first (collision-free),
                 // then by name-pair for legacy/un-migrated data.
                 const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
+                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
                 const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
@@ -2301,7 +2306,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2332,7 +2337,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer, is
                 }
 
                 return (
-                  <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );

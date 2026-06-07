@@ -617,8 +617,8 @@ describe('TournamentInfo', () => {
   });
 });
 
-// mp-f4xo: PoolMatrix — clickable cross-table cells
-describe('PoolMatrix (mp-f4xo)', () => {
+// mp-f4xo: LeagueMatrix — clickable cross-table cells
+describe('LeagueMatrix (mp-f4xo)', () => {
   const realReact = global.React;
   let runtime;
   let PM;
@@ -671,7 +671,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
-    ({ PoolMatrix: PM } = await import('../viewer.jsx'));
+    ({ LeagueMatrix: PM } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -717,8 +717,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('renders W/L cells for a completed match', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
-    const lossCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--loss'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
     expect(winCell).toBeTruthy();
     expect(lossCell).toBeTruthy();
   });
@@ -727,7 +727,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeTypeOf('function');
     winCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -744,7 +744,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [pendingMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const pendingCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--pending'));
+    const pendingCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--pending'));
     expect(pendingCell).toBeTruthy();
     pendingCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -754,7 +754,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const liveCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--live'));
+    const liveCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--live'));
     expect(liveCell).toBeTruthy();
     liveCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -763,8 +763,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('self-diagonal and empty cells have no onClick', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const selfCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--self'));
-    const emptyCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--empty'));
+    const selfCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--self'));
+    const emptyCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--empty'));
     expect(selfCells.length).toBeGreaterThan(0);
     selfCells.forEach(c => expect(c.props.onClick).toBeUndefined());
     emptyCells.forEach(c => expect(c.props.onClick).toBeUndefined());
@@ -773,7 +773,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have role=button and tabIndex=0 for a11y', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.role).toBe('button');
     expect(winCell.props.tabIndex).toBe(0);
   });
@@ -781,7 +781,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have aria-label describing the matchup', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props['aria-label']).toContain('Alice');
     expect(winCell.props['aria-label']).toContain('Bob');
     expect(winCell.props['aria-label']).toContain('Win');
@@ -791,7 +791,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: 'Enter', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -802,7 +802,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: ' ', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -812,7 +812,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('cells are not interactive when onMatchClick is not provided', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeUndefined();
     expect(winCell.props.role).toBeUndefined();
   });
@@ -833,13 +833,13 @@ describe('PoolMatrix (mp-f4xo)', () => {
     };
     const tree = runtime.mount(PM, { pool: numberedPool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
     expect(colHeaders.map(h => textContent(h))).toEqual(['A1', 'A2', 'A3']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
       return textContent(numSpan);
     });
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
@@ -848,13 +848,13 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('omits numbers entirely when player.number is not set', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
     expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
       return numSpan;
     });
     expect(rowNums).toEqual([undefined, undefined, undefined]);

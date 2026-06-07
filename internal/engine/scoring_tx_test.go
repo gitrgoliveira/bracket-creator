@@ -287,6 +287,50 @@ func TestRecordMatchResultWithIneligibilityTx_Basic(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
 }
 
+// TestRecordMatchResultWithIneligibilityTx_PreservesSideIDs guards the
+// regression where scoring through the /score (transaction) path wiped the
+// SideAID/SideBID stamped at generation: the whole-struct overwrite in the Tx
+// write closure dropped them because score requests carry names only. It also
+// checks WinnerID resolves from the WinnerSide hint, the only way to tell apart
+// a winner when both sides share a name.
+func TestRecordMatchResultWithIneligibilityTx_PreservesSideIDs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "tx-ids"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aID := helper.NewUUID4()
+	bID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aID, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: bID, Name: "Tanaka Kenji", Dojo: "Osaka"}, // same name, different id
+	}))
+	// Match with ids stamped at generation (sides stored by name).
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Tanaka Kenji",
+			SideAID: aID, SideBID: bID, Status: state.MatchStatusScheduled},
+	}))
+
+	// Score via the Tx path with NAMES only (no ids) — exactly what /score sends.
+	result := &state.MatchResult{
+		ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Tanaka Kenji",
+		Winner: "Tanaka Kenji", WinnerSide: "A", IpponsA: []string{"M"},
+		Status: state.MatchStatusCompleted,
+	}
+	var engErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, engErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
+		return nil
+	})
+	require.NoError(t, engErr)
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, aID, matches[0].SideAID, "Tx score must preserve SideAID")
+	assert.Equal(t, bID, matches[0].SideBID, "Tx score must preserve SideBID")
+	assert.Equal(t, aID, matches[0].WinnerID, "WinnerSide=A must resolve WinnerID even when both sides share a name")
+}
+
 // TestStartMatchTx_BlocksIneligibleParticipant verifies the FR-035
 // pre-flight gate. After Alice is recorded as kiken'd on Pool A-0
 // (her status: ineligible, matchID=Pool A-0), StartMatchTx for

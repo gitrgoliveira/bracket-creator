@@ -297,6 +297,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -422,6 +423,7 @@ func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, r
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {

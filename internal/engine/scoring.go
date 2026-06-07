@@ -160,6 +160,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -213,6 +214,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {

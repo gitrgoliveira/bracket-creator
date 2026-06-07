@@ -71,6 +71,7 @@ function competitionKindLabel(c) {
 const pluralize = window.pluralize;
 const isPoolDaihyosenID = id => id.includes('-DH-');
 const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
+window.poolLabel = poolLabel;
 
 function compMatches(c) {
   const out = [];

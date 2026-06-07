@@ -1535,7 +1535,9 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => (
               <tr key={s.player?.id || s.player?.name || i}>
-                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
+                    DRY with the backend tiebreak/override logic, not the row index. */}
+                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                 <td>
                   <div style={{ fontWeight: 500 }}>{s.player?.name || ""}</div>
                   {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
@@ -1996,7 +1998,10 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => (
                 <tr key={s.player?.id || s.player?.name || i}>
-                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                  {/* Rank-ordered summary: "#" is the authoritative standing rank
+                      (s.rank), not the row index — DRY with the full standings and
+                      the backend tiebreak/override logic. */}
+                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div style={{ fontWeight: 500 }}>
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
@@ -2284,14 +2289,14 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
           <tr>
             <th className="league-matrix__corner"></th>
             {players.map((p, i) => (
-              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={p.name} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
+              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
             <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
-              <td className="league-matrix__row-head" title={playerLabel(rowPlayer)}>
+              <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
                 <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
@@ -2457,15 +2462,19 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         }) : [];
 
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
-        // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
-        // without resorting the table (mp-938b: table is draw-order, not rank-order).
+        // Rank is the backend's authoritative PlayerStanding.rank (single source of
+        // truth — it already folds in tiebreakers and manual rank overrides; see
+        // engine/scoring.go). We do NOT re-derive it as index+1 here (DRY), falling
+        // back to index+1 only if a legacy payload omitted the field.
+        // Used to look up each draw-position row's rank without resorting the table
+        // (mp-938b: table is draw-order, not rank-order).
         // Key = player.id when available; falls back to "name||dojo" composite so that
         // duplicate names across different dojos don't collide — mirrors the lookup below.
         const rankByPlayerKey = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
             const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
-            rankByPlayerKey.set(key, { rank: i + 1, standing: s });
+            rankByPlayerKey.set(key, { rank: s.rank || i + 1, standing: s });
           });
         }
 
@@ -2516,7 +2525,19 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      {/* The "#" column means different things by format, and that is
+                          intentional and explicit:
+                          - League: the table is ordered by rank, so "#" shows the
+                            authoritative standing rank (s.rank). No separate rank
+                            badge — rank is shown exactly once here.
+                          - Pools: the table is in DRAW order (operators read it as a
+                            fight-order chart), so "#" is the draw position and the
+                            rank is surfaced separately by the badge next to the name. */}
+                      {isLeague ? (
+                        <td className="pool-standings__draw-pos" style={{ color: (s && s.isOverridden) ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: (s && s.isOverridden) ? 700 : 400 }}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
+                      ) : (
+                        <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      )}
                       <td>
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}

@@ -419,14 +419,26 @@ function gatherIndividualGroup(promoted) {
     });
 }
 
+// At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
+// so ~10 rows fit comfortably. Cap at TV_INDIV_MAX_VISIBLE and take the TAIL
+// of the gathered group so the current match (already sorted to the end by
+// gatherIndividualGroup) is always shown — the oldest completed rows drop off
+// the top first. The visible rows then render top-anchored on the panel so
+// there's no empty space above when the pool is small.
+const TV_INDIV_MAX_VISIBLE = 10;
+
 // TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
-// name, via the shared IndividualScore). The list is bottom-anchored so the
-// currently-played match sits at the bottom; when there are more matches than
-// fit, the oldest completed rows scroll off the top (no animation). FIK §263.
+// name, via the shared IndividualScore). Layout: TOP-anchored — the rows fill
+// from the top of the panel; the running match stays at the bottom of the
+// visible list because gatherIndividualGroup sorts current LAST. When the
+// group exceeds TV_INDIV_MAX_VISIBLE, the oldest completed rows drop off the
+// top so the current match stays on screen (no animation). FIK §263.
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
-    const rows = gatherIndividualGroup(promoted);
+    const all = gatherIndividualGroup(promoted);
+    const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
+    const rows = dropped > 0 ? all.slice(dropped) : all;
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
     return (
@@ -451,9 +463,12 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 </div>
             </div>
 
-            {/* Bottom-anchored match feed: completed above, current at the bottom.
-                overflow:hidden + flex-end clips the oldest rows off the top. */}
-            <div data-testid="tvd-indiv-group" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: "1vh", overflow: "hidden" }}>
+            {/* Top-anchored match feed: the visible rows fill from the top of
+                the panel; gatherIndividualGroup sorts the current match LAST
+                so it stays at the bottom of the visible list. When the group
+                exceeds TV_INDIV_MAX_VISIBLE, we slice the tail above so the
+                oldest completed rows drop off the top first. */}
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
                     return (

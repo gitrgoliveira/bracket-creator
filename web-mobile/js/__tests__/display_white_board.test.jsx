@@ -177,7 +177,31 @@ describe('TvIndividualBoard', () => {
     { id: 'Pool A-0', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
     { id: 'Pool A-1', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
   ] };
-  it('renders one IndividualScore row per pool match, current highlighted, in the bottom-anchored group', () => {
+  it('caps visible rows at TV_INDIV_MAX_VISIBLE (10) — oldest completed drop off the top, current stays', () => {
+    // 15 completed rows + 1 running → 16 total; tail 10 = 9 completed + the running one.
+    const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `Pool A-${i+1}`, sideA: `A${i+1}`, sideB: `B${i+1}`, status: 'completed',
+        ipponsA: ['M'], ipponsB: [], scheduledAt: `09:${String(10+i).padStart(2,'0')}`,
+      })),
+      { id: 'Pool A-0', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: ['K'], scheduledAt: '11:00' },
+    ] };
+    const promoted = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const scores = [];
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === IndividualScore) scores.push(n);
+      const k=n.children||n.props?.children||[]; [].concat(k).forEach(walk); })(tree);
+    expect(scores.length).toBe(10);
+    // Current match is the LAST visible row (running, status running).
+    expect(scores[scores.length - 1].props.match.status).toBe('running');
+    // First visible row is one of the LATER completed matches (oldest 6 dropped).
+    expect(scores[0].props.match.id).toBe('Pool A-7'); // 15 - (10-1) = 7
+    const str = JSON.stringify(tree);
+    expect(str).toContain('"data-dropped":6'); // 16 total - 10 visible
+  });
+
+  it('renders one IndividualScore row per pool match, current highlighted, in the top-anchored group', () => {
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     const tree = TvIndividualBoard({ ...base, promoted });
     const scores = [];

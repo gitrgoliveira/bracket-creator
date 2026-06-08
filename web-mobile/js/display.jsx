@@ -19,7 +19,7 @@
 // are expected to evolve.
 
 import { pickFromLineup } from './lineup_resolver.jsx';
-import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, withNumber } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -35,18 +35,13 @@ function TermD(props) {
   return React.createElement('span', null, props.children);
 }
 
-// Resolve a side's rendered label respecting competition.withZekkenName.
-// When the competition has zekken/display-name mode on, players use a short
-// stage name; otherwise we fall back to the canonical full name. Mirrors
-// the same predicate used by buildSide in handlers_display.go so the OBS
-// overlay and the TV display agree on what to render.
+// sideLabel — thin delegate to the shared `withNumber` helper from
+// match_scoreboard.jsx so display.jsx and the OBS overlay agree on what to
+// render with no risk of the two implementations drifting. Kept as a named
+// export for the TV/lobby/overlay call sites and for test imports
+// (display_white_board.test.jsx asserts on `sideLabel`).
 function sideLabel(side, withZekkenName) {
-    if (!side) return "TBD";
-    const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
-    // Prefix the assigned competitor number (e.g. "K1") when present — set by
-    // AssignPlayerNumbers when the competition has a numberPrefix configured.
-    // Empty `.number` (the common case) renders as the bare name unchanged.
-    return side.number ? `${side.number} ${name}` : name;
+    return withNumber(side, withZekkenName);
 }
 
 // Reject a bracket side that is still a placeholder rather than a resolved
@@ -363,12 +358,19 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 than an empty grid. */}
             {isTeamMatch ? (
                 <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
+                    {/* tri-review #1: thread the team names so the Daihyosen
+                        win-mark lands on the winning side when the backend
+                        persists the winner as the team name (mirrors viewer
+                        MatchDetailCard). */}
                     <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
-                        teamSize={teamSize} showDH={showDH} variant="tv" />
+                        teamSize={teamSize} showDH={showDH} variant="tv"
+                        shiroName={shiroTeam} akaName={akaTeam} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
-                    <IndividualScore match={promoted.match} variant="tv" />
+                    {/* tri-review #2: thread withZekkenName so IndividualScore
+                        renders the zekken display name on zekken-mode comps. */}
+                    <IndividualScore match={promoted.match} variant="tv" withZekkenName={zekken} />
                 </div>
             )}
 
@@ -488,7 +490,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                                 background: isNow ? "#fef3c7" : "transparent",
                                 opacity: isNow ? 1 : 0.78,
                             }}>
-                            <IndividualScore match={m} variant="tv" showNames />
+                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
                         </div>
                     );
                 })}

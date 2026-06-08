@@ -83,13 +83,13 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				}
 				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
 				// mp-13y: merge numberPrefix-derived numbers from pools.csv
-				// onto the players slice so buildSide can include "number" in
-				// the polled OBS/vMix overlay payload.
+				// directly onto the slice so buildSide can include "number"
+				// in the polled OBS/vMix overlay payload. Skip the pools.csv
+				// read entirely when no prefix is configured (the common
+				// case).
 				if comp.NumberPrefix != "" {
 					pools, _ := store.LoadPools(compID)
-					comp.Players = players
-					mergePoolNumbersIntoPlayers(comp, pools)
-					players = comp.Players
+					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
 				}
 
 				sideA := buildSide(m.SideA, players, comp.WithZekkenName)

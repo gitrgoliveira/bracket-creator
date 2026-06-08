@@ -126,6 +126,35 @@ describe('TvWhiteBoard', () => {
     expect(sb.props.showDH).toBe(true);
   });
 
+  it('threads shiroName/akaName into TeamScoreboard so DH team-name winner resolves (tri-review #1)', () => {
+    // Without this, centreMarks falls back to centre Ht on a daihyosen result
+    // persisted with the team name as the winner — the round-5 win-mark fix
+    // never reaches the TV display path.
+    const p = teamPromoted();
+    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5 };
+    const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.shiroName).toBe('White Team');
+    expect(sb.props.akaName).toBe('Red Team');
+  });
+
+  it('threads withZekkenName to IndividualScore so zekken-mode shows displayName (tri-review #2)', () => {
+    const p = {
+      kind: 'live',
+      match: { id: 'i1', round: 'Round 1',
+        sideA: { name: 'Aka Player', displayName: 'AKA' },
+        sideB: { name: 'Shiro Player', displayName: 'SHI' },
+        ipponsB: [], ipponsA: [], subResults: [] },
+      competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
+    };
+    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: false,
+      subResults: [], teamSize: 0, zekken: true };
+    const is = findVnode(TvWhiteBoard(props), n => n.type === IndividualScore);
+    expect(is).toBeTruthy();
+    expect(is.props.withZekkenName).toBe(true);
+  });
+
   it('an up-next team match renders the TeamScoreboard (numbered rows), no "Starts soon" / "up next" badge', () => {
     // mp-13y #6/#9: up-next now shows the real scoreboard (TeamScoreboard
     // renders teamSize numbered rows when subResults is empty), and the

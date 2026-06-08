@@ -237,7 +237,7 @@ export function withNumber(side, withZekkenName) {
   return side.number ? `${side.number} ${name}` : name;
 }
 
-export function IndividualScore({ match, variant, showNames }) {
+export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
   const sideId = (v) => (v && v.id != null && v.id !== "") ? String(v.id) : "";
   // centreMarks marks the ippon-less (hantei/decision) winner by comparing the
@@ -263,8 +263,10 @@ export function IndividualScore({ match, variant, showNames }) {
   // Always display the human NAME (never the id key used for comparison).
   // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
   // the competition has a numberPrefix configured; falls back to the bare name.
-  const shiroDisplay = withNumber(match.sideB);
-  const akaDisplay = withNumber(match.sideA);
+  // tri-review #2: pass withZekkenName so zekken-mode comps render the
+  // displayName ("K1 TANAKA") instead of the canonical full name.
+  const shiroDisplay = withNumber(match.sideB, withZekkenName);
+  const akaDisplay = withNumber(match.sideA, withZekkenName);
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">

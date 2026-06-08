@@ -892,9 +892,11 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const tree = runtime.mount(PM, { pool: samePool, matches: [mWin, mLoss], tweaks: {} });
     const labels = allCells(tree).map(c => c.props?.['aria-label']).filter(Boolean);
     // The id-keyed mapping yields BOTH outcomes for the same name vs Alice —
-    // proof the two Tanakas resolved to different matches.
-    expect(labels).toContain('Match: Tanaka Kenji vs Alice — Win');
-    expect(labels).toContain('Match: Tanaka Kenji vs Alice — Loss');
+    // proof the two Tanakas resolved to different matches. The aria-label also
+    // carries the disambiguating dojo (a11y: screen readers can't rely on the
+    // hover title), so the two Tanakas are distinguishable in the label itself.
+    expect(labels).toContain('Match: Tanaka Kenji (Tokyo) vs Alice (Kyoto) — Win');
+    expect(labels).toContain('Match: Tanaka Kenji (Osaka) vs Alice (Kyoto) — Loss');
   });
 
   // Regression: the head-to-head between two same-name participants. The

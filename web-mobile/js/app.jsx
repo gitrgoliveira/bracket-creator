@@ -545,8 +545,8 @@ function App() {
     const unsub = window.API.subscribeToEvents((event) => {
         // P1/P4 (mp-9afd): two jitter windows.
         //   detailJitter — tight (0–500ms) for per-competition detail fetches
-        //     that target a single comp. Only one viewer's comp is affected per
-        //     event so the fan-out cost is O(1) per viewer.
+        //     that target a single competition. Each event targets one comp,
+        //     and each viewer does O(1) work when it's viewing that comp.
         //   listJitter — wider (0–2000ms) for full-list fetches (display mode
         //     and genuine list-level transitions: competition_started/completed,
         //     draw_generated/discarded, schedule_updated, participants_updated).

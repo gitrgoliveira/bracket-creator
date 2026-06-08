@@ -17,6 +17,7 @@
 - [Competitor Colours (Aka and Shiro)](#competitor-colours-aka-and-shiro)
 - [Scoreboard Structure](#scoreboard-structure)
 - [How a Match Is Decided](#how-a-match-is-decided)
+- [Pool Match Order](#pool-match-order)
 - [How an Individual Pool Is Decided](#how-an-individual-pool-is-decided)
 - [Team Matches](#team-matches)
 - [Seeding](#seeding)
@@ -353,6 +354,39 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
 2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
 3. **Draw in knockout**: encho is played. If still tied after encho, **hantei** decides the winner.
+
+## Pool Match Order
+
+Pools are played in a fixed rotation order that ensures even rest between bouts for each competitor.
+
+### 3-person pool
+
+Fighters are numbered 1, 2, 3. The three bouts are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 1 | 3 |
+| 3 | 2 | 3 |
+
+### 4-person pool
+
+Each fighter has 3 bouts. The six matches are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 3 | 2 |
+| 3 | 3 | 4 |
+| 4 | 1 | 4 |
+| 5 | 1 | 3 |
+| 6 | 2 | 4 |
+
+This ordering ensures that no fighter has consecutive bouts — each competitor rests for at least one bout between their matches.
+
+### Larger pools
+
+For pools of 5 or more, the same principle applies: matches are ordered so that each competitor rests between bouts. The exact rotation follows the tournament's published schedule.
 
 ## How an Individual Pool Is Decided
 

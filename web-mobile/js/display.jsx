@@ -270,16 +270,17 @@ function overlayPositionLabel(teamSize, index, sub) {
 }
 
 // findCurrentBoutIndex — returns the 0-based index of the bout that is
-// currently being fought (last non-empty subResult). Falls back to 0.
-// Used by StreamingOverlay to pick which bout names and score to show.
+// currently being fought (the first UNSCORED regular bout, position != -1).
+// Falls back to 0 on an empty subResults. Used by StreamingOverlay to pick
+// which bout names and score to show.
 function findCurrentBoutIndex(subResults) {
     if (!subResults || !subResults.length) return 0;
-    // Return the first UNSCORED regular bout — the bout currently in progress.
     // A bout is scored if it has real ippons, a hansoku, a hantei decision, an
     // explicit winner/decision (quick-score and forfeit-style outcomes set
     // these without ippon letters), or a hikiwake. This aligns with
     // TeamScoreboard's isScored logic. When all regular bouts are complete,
-    // returns subResults.length (signals DH/done).
+    // returns regular.length (= subResults.length excluding any DH row at
+    // position -1) — the caller treats that as the "DH/done" signal.
     const regular = subResults.filter(s => s.position !== -1);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
@@ -1266,8 +1267,11 @@ function StreamingOverlay({ court, position, competitions }) {
     const decSfx = hasLive && !isTeamMatch && window.decisionSuffix ? window.decisionSuffix(live.match) : '';
     const compName = comp?.name || '';
 
-    // QR target URL: the per-match results page for team matches.
-    // Uses the current page origin so the QR works on the local network.
+    // QR target URL: the tournament viewer home page (NOT a per-match deep
+    // link — viewers land on the schedule and navigate themselves). Only
+    // emitted on team matches so the lower-third doesn't crowd the
+    // individual-match layout. Uses the current page origin so the QR
+    // works on the local network.
     const qrUrl = hasLive && isTeamMatch
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/viewer`
         : '';

@@ -384,6 +384,111 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     );
 }
 
+// poolNameOf — derive the pool name from a pool-match id shaped "<Pool>-<idx>"
+// (e.g. "Pool A-0" → "Pool A"). Returns "" when the id isn't pool-shaped.
+function poolNameOf(id) {
+    if (typeof id !== "string") return "";
+    const cut = id.lastIndexOf("-");
+    return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
+}
+
+// gatherIndividualGroup — the sibling matches for an individual TV board:
+// every match in the same POOL (pool phase) or the same ROUND (knockout) as
+// the promoted match. Returns them ordered completed-first with the CURRENT
+// (running, or the promoted up-next) match LAST, so a bottom-anchored list
+// keeps the active match at the bottom and older results scroll off the top.
+// Not-yet-started matches other than the promoted one are omitted (feed model).
+function gatherIndividualGroup(promoted) {
+    if (!promoted || !promoted.competition || !promoted.match) return [];
+    const comp = promoted.competition;
+    const cur = promoted.match;
+    let group;
+    if (promoted.isBracket) {
+        const rounds = (comp.bracket && comp.bracket.rounds) || [];
+        group = rounds[promoted.roundIndex] || [];
+    } else {
+        const pool = poolNameOf(cur.id);
+        group = (comp.poolMatches || []).filter(m => poolNameOf(m.id) === pool);
+    }
+    const isCurrent = m => m.id === cur.id || m.status === "running";
+    const shown = group.filter(m => m.status === "completed" || isCurrent(m));
+    return shown.slice().sort((a, b) => {
+        const d = (isCurrent(a) ? 1 : 0) - (isCurrent(b) ? 1 : 0); // current sinks to bottom
+        if (d !== 0) return d;
+        return String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id));
+    });
+}
+
+// TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
+// body lists the whole pool's matches (pool phase) or the whole round's matches
+// (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
+// name, via the shared IndividualScore). The list is bottom-anchored so the
+// currently-played match sits at the bottom; when there are more matches than
+// fit, the oldest completed rows scroll off the top (no animation). FIK §263.
+function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
+    const rows = gatherIndividualGroup(promoted);
+    const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);
+    const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    return (
+        <div className="tvd tvd--white" data-testid="tv-display-root" style={{
+            position: "fixed", inset: 0, background: "#ffffff", color: "#111",
+            display: "flex", flexDirection: "column", padding: "4vh 5vw",
+        }}>
+            {/* Court header + black rule */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh" }}>
+                <div style={{ fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
+                    {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
+                </div>
+                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
+                    <span>{promoted.competition?.name}{groupLabel ? " · " + groupLabel : ""}</span>
+                    {!connected && (
+                        <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
+                            style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
+                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                            RECONNECTING
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Bottom-anchored match feed: completed above, current at the bottom.
+                overflow:hidden + flex-end clips the oldest rows off the top. */}
+            <div data-testid="tvd-indiv-group" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: "1vh", overflow: "hidden" }}>
+                {rows.map(m => {
+                    const isNow = m.id === promoted.match.id || m.status === "running";
+                    return (
+                        <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
+                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "")}
+                            style={{
+                                padding: "1vh 1.5vw", borderRadius: "0.6vw",
+                                background: isNow ? "#fef3c7" : "transparent",
+                                opacity: isNow ? 1 : 0.78,
+                            }}>
+                            <IndividualScore match={m} variant="tv" showNames />
+                        </div>
+                    );
+                })}
+                {rows.length === 0 && (
+                    <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "3vh", padding: "4vh 0" }}>No matches yet</div>
+                )}
+            </div>
+
+            {/* Next line */}
+            {next && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
+                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
+                    <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
+                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken)}</span>
+                        <span style={{ color: "#9ca3af", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
+                    </span>
+                </div>
+            )}
+            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
+        </div>
+    );
+}
+
 // <TvDisplay court="A"> — fullscreen per-court board.
 //
 // Implements T061 (visual treatment), T062 (auto-promote first scheduled
@@ -514,14 +619,22 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         return ivShiro === ivAka && pwShiro === pwAka;
     }, [subResults, isTeamMatch, isKnockoutPhase]);
 
-    // White scoreboard for any promoted match — team (bout grid) or individual
-    // (ippon score), live or up-next.
+    // White scoreboard for any promoted match.
+    // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped
+    // board listing every match in the same POOL (pool phase) or ROUND
+    // (knockout), bottom-anchored with the current match at the bottom.
     if (promoted) {
-        return <TvWhiteBoard
+        if (isTeamMatch) {
+            return <TvWhiteBoard
+                tournament={tournament} court={court} connected={connected}
+                promoted={promoted} promotedKind={promotedKind} isTeamMatch={isTeamMatch}
+                subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
+                showDH={showDH} queueMatches={queueMatches} zekken={zekken}
+            />;
+        }
+        return <TvIndividualBoard
             tournament={tournament} court={court} connected={connected}
-            promoted={promoted} promotedKind={promotedKind} isTeamMatch={isTeamMatch}
-            subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
-            showDH={showDH} queueMatches={queueMatches} zekken={zekken}
+            promoted={promoted} queueMatches={queueMatches} zekken={zekken}
         />;
     }
 
@@ -1325,6 +1438,9 @@ export {
     findCurrentBoutIndex,
     overlayPositionLabel,
     TvWhiteBoard,
+    TvIndividualBoard,
+    gatherIndividualGroup,
+    poolNameOf,
 };
 
 if (typeof window !== 'undefined') {

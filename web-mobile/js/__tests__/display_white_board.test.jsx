@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayPositionLabel, TvWhiteBoard } from '../display.jsx';
+import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, poolNameOf } from '../display.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -121,5 +121,74 @@ describe('TvWhiteBoard', () => {
     expect(str).not.toContain('Starts soon');
     expect(str).not.toContain('up next');
     expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeTruthy();
+  });
+});
+
+// mp-13y: individual TV board lists the whole pool (pool phase) / round
+// (knockout) as a bottom-anchored feed with the current match LAST.
+describe('poolNameOf', () => {
+  it('derives the pool name from a "<Pool>-<idx>" id', () => {
+    expect(poolNameOf('Pool A-0')).toBe('Pool A');
+    expect(poolNameOf('Pool B-12')).toBe('Pool B');
+  });
+  it('returns "" when the id has no "<name>-<digits>" tail', () => {
+    expect(poolNameOf('')).toBe('');
+    expect(poolNameOf(undefined)).toBe('');
+    expect(poolNameOf('Pool A')).toBe('');     // no trailing -<digits>
+    expect(poolNameOf('Pool A-x')).toBe('');   // trailing token not digits
+    // Note: a bracket id "m-r1-0" looks pool-shaped to this helper (last - is
+    // followed by digits), so it would return "m-r1". That's harmless because
+    // gatherIndividualGroup only calls poolNameOf on the pool-phase branch.
+  });
+});
+
+describe('gatherIndividualGroup', () => {
+  const poolComp = {
+    poolMatches: [
+      { id: 'Pool A-0', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', scheduledAt: '09:00' },
+      { id: 'Pool A-1', sideA: 'Yamada', sideB: 'Mori', status: 'completed', scheduledAt: '09:10' },
+      { id: 'Pool A-2', sideA: 'Tanaka', sideB: 'Yamada', status: 'completed', scheduledAt: '09:20' },
+      { id: 'Pool B-0', sideA: 'X', sideB: 'Y', status: 'completed', scheduledAt: '09:00' }, // other pool
+      { id: 'Pool A-3', sideA: 'Suzuki', sideB: 'Mori', status: 'scheduled', scheduledAt: '09:30' }, // not started
+    ],
+  };
+  it('gathers the same pool, completed first, current (running) LAST', () => {
+    const promoted = { competition: poolComp, match: poolComp.poolMatches[0], isBracket: false };
+    const rows = gatherIndividualGroup(promoted);
+    expect(rows.map(m => m.id)).toEqual(['Pool A-1', 'Pool A-2', 'Pool A-0']); // running last; Pool B + scheduled excluded
+    expect(rows[rows.length - 1].status).toBe('running');
+  });
+  it('gathers the same bracket round, current LAST', () => {
+    const comp = { bracket: { rounds: [
+      [ { id: 'm-r1-0', status: 'completed', sideA: 'A', sideB: 'B', scheduledAt: '10:00' },
+        { id: 'm-r1-1', status: 'running', sideA: 'C', sideB: 'D', scheduledAt: '10:00' } ],
+      [ { id: 'm-r2-0', status: 'scheduled', sideA: '', sideB: '' } ],
+    ] } };
+    const promoted = { competition: comp, match: comp.bracket.rounds[0][1], isBracket: true, roundIndex: 0 };
+    const rows = gatherIndividualGroup(promoted);
+    expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-1']);
+    expect(rows[rows.length - 1].id).toBe('m-r1-1'); // running at the bottom
+  });
+});
+
+describe('TvIndividualBoard', () => {
+  const base = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false, queueMatches: [] };
+  const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+    { id: 'Pool A-0', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+    { id: 'Pool A-1', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
+  ] };
+  it('renders one IndividualScore row per pool match, current highlighted, in the bottom-anchored group', () => {
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const scores = [];
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === IndividualScore) scores.push(n);
+      const k=n.children||n.props?.children||[]; [].concat(k).forEach(walk); })(tree);
+    expect(scores.length).toBe(2);
+    // every row delegates to the shared IndividualScore with showNames
+    expect(scores.every(s => s.props.showNames)).toBe(true);
+    const str = JSON.stringify(tree);
+    expect(str).toContain('tvd-indiv-group');
+    expect(str).toContain('tvd-indiv-row-now'); // the running match is flagged current
   });
 });

@@ -205,7 +205,7 @@ export function teamIVPW(subResults) {
 
 // IndividualScore — §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
-export function IndividualScore({ match, variant }) {
+export function IndividualScore({ match, variant, showNames }) {
   // Normalise side/winner to names so centreMarks can mark the ippon-less
   // (hantei/decision) winner. Sides may be {id,name} objects or bare strings.
   const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
@@ -216,12 +216,15 @@ export function IndividualScore({ match, variant }) {
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
     winner: sideName(match.winner), sideA: sideName(match.sideA), sideB: sideName(match.sideB),
   };
+  // showNames fills the (otherwise empty) name spans with the two competitors,
+  // colour-coded Shiro dark / Aka red — used by the TV pool/round list where
+  // each row IS a full match. The card leaves them empty (names render above).
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" />
+        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? sub.sideB : ""}</span>
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" />
+        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? sub.sideA : ""}</span>
       </div>
     </div>
   );

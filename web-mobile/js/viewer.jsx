@@ -1827,19 +1827,18 @@ function MatchDetailCard({ match, onClose }) {
         </div>
       </div>
 
-      {/* Individual matches keep the SHIRO/AKA player header (there is no
-          summary row to carry the names); team matches put the team names in
-          the scoreboard's summary row instead (mp-13y #2). */}
+      {/* Individual matches show the two player names colour-coded — Shiro
+          dark (left), Aka red (right) — matching the team scoreboard's
+          summary-row name colours, instead of SHIRO/AKA text badges
+          (mp-13y). Team matches carry the names in the summary row. */}
       {!isTeam && (
         <div className="match-detail-card__players">
           <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
-            <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
-            <span className="match-detail-card__name">{bName}</span>
+            <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
           </div>
           <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
           <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-            <span className="match-detail-card__name">{aName}</span>
-            <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
+            <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
           </div>
         </div>
       )}

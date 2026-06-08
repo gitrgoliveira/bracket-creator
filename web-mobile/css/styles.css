@@ -4807,28 +4807,22 @@ button.my-match__opp {
   text-align: right;
 }
 
+/* Winner: bold only — keep the side colour (Shiro dark / Aka red) so the
+   colour coding still reads after a result. */
 .match-detail-card__side--win .match-detail-card__name {
-  font-weight: 700;
-  color: var(--accent);
+  font-weight: 800;
 }
 
 .match-detail-card__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.match-detail-card__color-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  flex-shrink: 0;
 }
-.match-detail-card__color-badge--aka { background: var(--red); color: #fff; }
-.match-detail-card__color-badge--shiro { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+/* Colour-coded player names (replaces the SHIRO/AKA badges), matching the
+   shared scoreboard's .msb-name / .msb-name--aka. */
+.match-detail-card__name--shiro { color: #111; }
+.match-detail-card__name--aka { color: var(--red, #b91c1c); }
 
 .match-detail-card__score {
   font-size: 18px;

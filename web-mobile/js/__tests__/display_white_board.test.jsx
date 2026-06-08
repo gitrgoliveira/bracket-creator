@@ -169,22 +169,33 @@ describe('gatherIndividualGroup', () => {
     expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-1']);
     expect(rows[rows.length - 1].id).toBe('m-r1-1'); // running at the bottom
   });
+  it('filters bracket round to the promoted court — cross-court matches excluded', () => {
+    const comp = { bracket: { rounds: [
+      [ { id: 'm-r1-0', court: 'A', status: 'completed', sideA: 'A', sideB: 'B', scheduledAt: '10:00' },
+        { id: 'm-r1-1', court: 'B', status: 'running', sideA: 'C', sideB: 'D', scheduledAt: '10:00' },
+        { id: 'm-r1-2', court: 'A', status: 'running', sideA: 'E', sideB: 'F', scheduledAt: '10:05' } ],
+    ] } };
+    // Court A display: should see m-r1-0 + m-r1-2, NOT m-r1-1 (court B).
+    const promoted = { competition: comp, match: comp.bracket.rounds[0][2], isBracket: true, roundIndex: 0 };
+    const rows = gatherIndividualGroup(promoted, 'A');
+    expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-2']);
+  });
 });
 
 describe('TvIndividualBoard', () => {
   const base = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false, queueMatches: [] };
   const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
-    { id: 'Pool A-0', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
-    { id: 'Pool A-1', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
+    { id: 'Pool A-0', court: 'B', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+    { id: 'Pool A-1', court: 'B', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
   ] };
   it('caps visible rows at TV_INDIV_MAX_VISIBLE (10) — oldest completed drop off the top, current stays', () => {
     // 15 completed rows + 1 running → 16 total; tail 10 = 9 completed + the running one.
     const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       ...Array.from({ length: 15 }, (_, i) => ({
-        id: `Pool A-${i+1}`, sideA: `A${i+1}`, sideB: `B${i+1}`, status: 'completed',
+        id: `Pool A-${i+1}`, court: 'B', sideA: `A${i+1}`, sideB: `B${i+1}`, status: 'completed',
         ipponsA: ['M'], ipponsB: [], scheduledAt: `09:${String(10+i).padStart(2,'0')}`,
       })),
-      { id: 'Pool A-0', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: ['K'], scheduledAt: '11:00' },
+      { id: 'Pool A-0', court: 'B', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: ['K'], scheduledAt: '11:00' },
     ] };
     const promoted = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
     const tree = TvIndividualBoard({ ...base, promoted });

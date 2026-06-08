@@ -395,14 +395,17 @@ function poolNameOf(id) {
 
 // gatherIndividualGroup — the sibling matches for an individual TV board:
 // every match in the same POOL (pool phase) or the same ROUND (knockout) as
-// the promoted match. Returns them ordered completed-first with the CURRENT
-// (running, or the promoted up-next) match LAST, so a bottom-anchored list
-// keeps the active match at the bottom and older results scroll off the top.
+// the promoted match, **on the same court**. The TV display is per-court, so
+// bracket rounds that span multiple courts must not leak cross-court matches.
+// Returns them ordered completed-first with the CURRENT (running, or the
+// promoted up-next) match LAST, so the feed keeps the active match at the
+// bottom of the visible list and older results scroll off the top.
 // Not-yet-started matches other than the promoted one are omitted (feed model).
-function gatherIndividualGroup(promoted) {
+function gatherIndividualGroup(promoted, court) {
     if (!promoted || !promoted.competition || !promoted.match) return [];
     const comp = promoted.competition;
     const cur = promoted.match;
+    const matchCourt = court || cur.court || "";
     let group;
     if (promoted.isBracket) {
         const rounds = (comp.bracket && comp.bracket.rounds) || [];
@@ -411,8 +414,10 @@ function gatherIndividualGroup(promoted) {
         const pool = poolNameOf(cur.id);
         group = (comp.poolMatches || []).filter(m => poolNameOf(m.id) === pool);
     }
+    // Filter to the same court — bracket rounds can span multiple courts.
+    const onCourt = group.filter(m => (m.court || "") === matchCourt);
     const isCurrent = m => m.id === cur.id || m.status === "running";
-    const shown = group.filter(m => m.status === "completed" || isCurrent(m));
+    const shown = onCourt.filter(m => m.status === "completed" || isCurrent(m));
     return shown.slice().sort((a, b) => {
         const d = (isCurrent(a) ? 1 : 0) - (isCurrent(b) ? 1 : 0); // current sinks to bottom
         if (d !== 0) return d;
@@ -437,7 +442,7 @@ const TV_INDIV_MAX_VISIBLE = 10;
 // group exceeds TV_INDIV_MAX_VISIBLE, the oldest completed rows drop off the
 // top so the current match stays on screen (no animation). FIK §263.
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
-    const all = gatherIndividualGroup(promoted);
+    const all = gatherIndividualGroup(promoted, court);
     const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
     const rows = dropped > 0 ? all.slice(dropped) : all;
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);

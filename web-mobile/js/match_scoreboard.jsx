@@ -168,7 +168,7 @@ function centreMarks(sub) {
 }
 
 // BoutSubRow — one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
-// variant: "card" (default) | "tv" (larger, via the parent .msb--tv selector).
+// TV sizing is driven by the parent `.msb--tv` CSS selector, not a prop.
 // state: "now" | "queued" | "done" (TV highlight only). Names come from the
 // pinned lineup, else the per-bout competitor stored on the sub (kachinuki
 // matches carry sub.sideA/sub.sideB), else the bout number — never the team
@@ -305,7 +305,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {/* per-bout rows */}
       {regular.map((sub, i) => (
         <BoutSubRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} variant={variant} state={rowState(i)} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} />
       ))}
 
       {/* No bouts recorded yet (lineups not submitted / up-next): show the
@@ -314,7 +314,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           pinned player name when a lineup exists, else the bout number. */}
       {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
         <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} variant={variant} state="queued" />
+          teamSize={teamSize} isDH={false} state="queued" />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only) */}
@@ -325,7 +325,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           </div>
           {dhSub
             ? <BoutSubRow sub={dhSub} index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} variant={variant} state="now" />
+                teamSize={teamSize} isDH={true} state="now" />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>
       )}

@@ -110,7 +110,7 @@ Production-hardening defaults applied in the `mobile-app` command. Constants liv
 | `MaxHeaderBytes` | 1 MB | — | Header-bomb defense |
 | Body cap (admin JSON) | 1 MB | `DefaultMaxBodyBytes` const | `c.BindJSON` payloads are tiny in practice; cap is enforced by `MaxBodyBytes` middleware (returns 413) |
 | Body cap (`/tournament/import`) | 64 MB | `MaxImportBodyBytes` const | Matches `ParseMultipartForm` already in the handler |
-| SSE subscribers | 1000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation |
+| SSE subscribers | 5000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation (~10–16 KB resident per client); raised from 1000 → 5000 by mp-9afd for EKC-scale (1000+ viewers); real hardware load test still required |
 | Graceful shutdown | 30s | `httpShutdownTimeout` const | `Hub.Close` is wired via `srv.RegisterOnShutdown` so SSE goroutines exit before the deadline |
 
 **`safeGo` convention.** Any goroutine spawned inside a request handler MUST use the `safeGo` helper in [internal/mobileapp/safego.go](internal/mobileapp/safego.go). Gin's Recovery middleware only catches panics on the request goroutine — a panic in a spawned goroutine crashes the entire process. The helper guarantees `wg.Done()` on panic and captures the recovered value into a shared `atomic.Pointer[recoveredPanic]` so the handler can return a single HTTP 500 without leaking internals. Pattern:

@@ -543,9 +543,19 @@ function App() {
     };
 
     const unsub = window.API.subscribeToEvents((event) => {
-        const jitter = Math.random() * 500;
+        // P1/P4 (mp-9afd): two jitter windows.
+        //   detailJitter — tight (0–500ms) for per-competition detail fetches
+        //     that target a single comp. Only one viewer's comp is affected per
+        //     event so the fan-out cost is O(1) per viewer.
+        //   listJitter — wider (0–2000ms) for full-list fetches (display mode
+        //     and genuine list-level transitions: competition_started/completed,
+        //     draw_generated/discarded, schedule_updated, participants_updated).
+        //     These are infrequent and the wider window staggers 1000+ display
+        //     walls so they don't simultaneously storm GET /viewer/competitions.
+        const detailJitter = Math.random() * 500;
+        const listJitter = Math.random() * 2000;
         if (event.type === "tournament_updated") {
-            if (!authPromptRef.current) jitteredTimeout(load, jitter);
+            if (!authPromptRef.current) jitteredTimeout(load, listJitter);
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
             // POST /api/tournament/reset. Any logged-in admin's
@@ -594,9 +604,11 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            // competitor_status_updated is a list-level event (eligibility
+            // badges on the lobby): always refresh the full list.
+            jitteredTimeout(load, listJitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -608,35 +620,42 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                jitteredTimeout(load, jitter);
+                jitteredTimeout(load, listJitter);
             } else if (viewerCompId === event.data.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
                     setSelectedCompData(prev => patchCompetitionData(prev, event));
                 }
-                // Refresh current competition (jittered) — the backend has
-                // already persisted the new status before broadcasting, so
+                // Refresh current competition detail (jittered) — the backend
+                // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            // Also refresh tournament list for status updates
-            jitteredTimeout(load, jitter);
+            // P1 (mp-9afd): only fire a full-list refetch for genuine
+            // list-level transitions (competition_started / competition_completed
+            // change which comps are active or their status badges). A plain
+            // match_updated for a non-display viewer is covered by the
+            // per-comp detail fetch above — the redundant GET
+            // /viewer/competitions on every ippon is the dominant scaling wall.
+            if (mode === "display" || event.type === "competition_started" || event.type === "competition_completed") {
+                jitteredTimeout(load, listJitter);
+            }
         } else if (event.type === "schedule_updated") {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(load, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
             // Draw generated/discarded: refresh the selected competition's
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(load, listJitter);
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13 — FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound
@@ -645,20 +664,22 @@ function App() {
             // tournament list, so we refetch both. Mirrors the match_updated
             // path's jittered fetchCompetitionDetails + load pattern.
             if (mode === "display") {
-                jitteredTimeout(load, jitter);
+                jitteredTimeout(load, listJitter);
             } else if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            // swiss_round_generated adds new matches to the tournament list
+            // (swissCurrentRound counter): always do a list refresh.
+            jitteredTimeout(load, listJitter);
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need
             // the updated player list. Refetch the selected competition when the
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(load, listJitter);
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];

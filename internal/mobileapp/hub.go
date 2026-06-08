@@ -61,18 +61,27 @@ const (
 const DefaultHistorySize = 100
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
-// Each subscriber allocates one buffered channel + one streaming goroutine,
-// and Broadcast fan-out is O(N) in the subscriber count. 1000 is well
-// above what a typical tournament floor needs (operator + ~5-20 viewers
-// per court × ~10 courts ≈ 50-200 connections) and well below the point
-// where the linear fan-out becomes a noticeable latency tax.
+// Each subscriber allocates one buffered channel (100-element string buffer)
+// plus one streaming goroutine, so the per-connection cost is roughly
+// 100×~100B (string headers) + goroutine stack ≈ 10–16 KB resident per
+// client. At 5000 clients that is ~50–80 MB — comfortably within the RAM
+// budget of a single-core VPS or RPi-class hardware used for EKC-scale
+// deployments (~45 teams, 1000+ live spectators).
+//
+// Broadcast fan-out is O(N) in the subscriber count and serialises under
+// h.mu.Lock(). At 5000 clients the lock window is bounded by the
+// non-blocking channel send (select/default), so stalled clients are
+// dropped rather than blocking the broadcaster.
 //
 // Override at startup via the SSE_MAX_CLIENTS env var or by passing a
 // positive value to NewHubWithLimits. A non-positive (zero or negative)
 // value disables the cap entirely — used by tests that need to exceed
 // the default and not enforced anywhere production. The cap is mp-663
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
-const DefaultMaxSSEClients = 1000
+// Raised from 1000 → 5000 by mp-9afd to support EKC-scale (1000+ viewers).
+// A real hardware load test (goroutine/fd/memory budget at 5000 clients) is
+// still required before a live EKC deployment — see bead mp-9afd test plan.
+const DefaultMaxSSEClients = 5000
 
 // SSEEvent represents the payload sent to clients.
 //

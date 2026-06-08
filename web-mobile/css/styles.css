@@ -4903,9 +4903,10 @@ button.my-match__opp {
 .msb { width: 100%; }
 .msb-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
   border-top: 1px solid var(--line, #eee); font-size: 13px; }
-/* Drop the leading hairline on the first bout row, but keep the summary row's
-   own thick rule (it renders first, so an unconditional :first-child reset
-   would strip it). */
+/* Remove the leading hairline only when the FIRST row is not a summary row —
+   i.e. the individual scoreboard, whose first (and only) row is a score row.
+   In a team scoreboard the summary row is first and keeps its own thick rule
+   (below); the first bout row sits second, so it keeps its hairline. */
 .msb-row:first-child:not(.msb-row--summary) { border-top: none; }
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

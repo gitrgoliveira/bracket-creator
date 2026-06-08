@@ -473,7 +473,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // not a team match or when window.API is unavailable.
     const { lineupA, lineupB } = useTeamLineups(
         isTeamMatch && promoted && promoted.match ? promoted.match : null,
-        isTeamMatch && promoted ? promoted.competition : null
+        isTeamMatch && promoted ? promoted.competition : null,
+        promoted ? promoted.roundIndex : undefined
     );
 
     // mp-13y: DH (Daihyosen) row gating — shown when:
@@ -1071,7 +1072,8 @@ function StreamingOverlay({ court, position, competitions }) {
     // mp-13y: per-match lineups for team overlay.
     const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTeamLineups(
         isTeamMatch && hasLive ? live.match : null,
-        isTeamMatch && hasLive ? comp : null
+        isTeamMatch && hasLive ? comp : null,
+        hasLive ? live.roundIndex : undefined
     );
 
     // Current bout for the overlay (last active sub-result, index 0 fallback).

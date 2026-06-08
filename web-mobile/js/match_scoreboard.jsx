@@ -30,7 +30,13 @@ export function boutHansokuMark(foulCount) {
 // match.compId (viewer). Returns { lineupA, lineupB }; degrades to null/null
 // when window.API is unavailable (public surfaces) → callers fall back to bout
 // numbers.
-export function useTeamLineups(match, competition) {
+//
+// `roundIndex` (optional, 0-based) is the authoritative round for the
+// round-scoped lineup fallback. Callers that know the bracket round (the TV
+// display / overlay carry it as promoted.roundIndex) MUST pass it — do not
+// rely on parsing match.round, which now holds a bracket-size display label
+// ("Round 16"/"Round 32") in some surfaces and would misderive the round.
+export function useTeamLineups(match, competition, roundIndex) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
 
@@ -58,12 +64,19 @@ export function useTeamLineups(match, competition) {
       } catch (_e) {
         console.warn("useTeamLineups: competition fetch failed", _e);
       }
+      // Prefer the explicit 0-based round index. Only when it is absent do we
+      // fall back to match.round — a raw numeric index, or the legacy engine
+      // label "Round <number>" (1-based round NUMBER → 0-based). We deliberately
+      // do NOT trust a bracket-size label here; callers with a real round pass
+      // roundIndex so this parse is never reached on those surfaces.
       let round = 0;
-      if (typeof match.round === "string") {
-        const mr = /^Round\s+(\d+)$/.exec(match.round);
-        if (mr) round = parseInt(mr[1], 10) - 1;
+      if (typeof roundIndex === "number" && roundIndex >= 0) {
+        round = roundIndex;
       } else if (typeof match.round === "number") {
         round = match.round;
+      } else if (typeof match.round === "string") {
+        const mr = /^Round\s+(\d+)$/.exec(match.round);
+        if (mr) round = parseInt(mr[1], 10) - 1;
       }
       const teamAId = resolveLineupTeamId(sideAId, players);
       const teamBId = resolveLineupTeamId(sideBId, players);
@@ -80,7 +93,7 @@ export function useTeamLineups(match, competition) {
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, match?.round]);
+  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round]);
 
   return { lineupA, lineupB };
 }

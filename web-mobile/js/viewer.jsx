@@ -109,6 +109,10 @@ function compMatches(c) {
     phase: "bracket",
     round: window.roundLabel(ri, rounds.length),
     phaseName: window.roundLabel(ri, rounds.length),
+    // Raw 0-based round index alongside the display label so consumers
+    // (useTeamLineups) need not parse the label — now a bracket-size string
+    // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.
+    roundIndex: ri,
     compId: c.id,
     compName: c.name,
     compFormat: c.format,
@@ -1583,7 +1587,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
@@ -1795,7 +1799,7 @@ function MatchDetailCard({ match, onClose }) {
 
   // mp-13y: fetch per-match lineups for team matches so bout rows show
   // competitor names instead of bout numbers.
-  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
+  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
   // Show the Daihyosen row when a rep-bout subResult exists (position -1);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);

@@ -23,8 +23,10 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
-  if (fromEnd === 3) return "Round of 16";
-  if (fromEnd === 4) return "Round of 32";
+  // mp-ucvb #8: "Round N" (drop the "of") — e.g. "Round 16", "Round 32".
+  if (fromEnd === 3) return "Round 16";
+  if (fromEnd === 4) return "Round 32";
+  if (fromEnd === 5) return "Round 64";
   return `Round ${roundIdx + 1}`;
 }
 

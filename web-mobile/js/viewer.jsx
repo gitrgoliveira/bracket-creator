@@ -1796,15 +1796,9 @@ function MatchDetailCard({ match, onClose }) {
   // mp-13y: fetch per-match lineups for team matches so bout rows show
   // competitor names instead of bout numbers.
   const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null);
-  // Show the Daihyosen row when a rep-bout subResult exists (position -1).
+  // Show the Daihyosen row when a rep-bout subResult exists (position -1);
+  // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
-  // mp-13y: a not-yet-started team match has no bouts, so the full scoreboard
-  // would render as a lone "IV 0 PW 0" summary with no rows — reads as broken.
-  // Mirror the TV up-next treatment: show a placeholder. Distinguish "lineups
-  // not submitted" (both rosters empty) from "starts soon" (rosters pinned).
-  const hasResults = (match.subResults || []).length > 0;
-  const lineupHasNames = (l) => !!(l && l.positions && Object.keys(l.positions).length > 0);
-  const anyLineup = lineupHasNames(lineupA) || lineupHasNames(lineupB);
 
   return (
     <div className="match-detail-card">
@@ -1822,28 +1816,30 @@ function MatchDetailCard({ match, onClose }) {
         </div>
       </div>
 
-      <div className="match-detail-card__players">
-        <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
-          <span className="match-detail-card__name">{bName}</span>
+      {/* Individual matches keep the SHIRO/AKA player header (there is no
+          summary row to carry the names); team matches put the team names in
+          the scoreboard's summary row instead (mp-ucvb #2). */}
+      {!isTeam && (
+        <div className="match-detail-card__players">
+          <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
+            <span className="match-detail-card__name">{bName}</span>
+          </div>
+          <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
+          <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__name">{aName}</span>
+            <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
+          </div>
         </div>
-        <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
-        <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__name">{aName}</span>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
-        </div>
-      </div>
+      )}
 
       {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx) — same
-          component the TV display uses. Team → IV/PW summary + per-bout rows
-          (+ Daihyosen); individual → ippon-letter slots. */}
+          component the TV display uses. Team → team-name + IV/PW summary row +
+          per-bout rows (numbered when not yet started) + Daihyosen (tie only);
+          individual → ippon-letter slots. */}
       {isTeam
-        ? ((isDone || isLive || hasResults)
-            ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} showDH={showDH} variant="card" />
-            : <div className="match-detail-card__pending" data-testid="match-detail-pending">
-                {anyLineup ? "Starts soon" : "Lineups not yet submitted"}
-              </div>)
+        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName} />
         : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );

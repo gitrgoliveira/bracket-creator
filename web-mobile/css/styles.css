@@ -4749,15 +4749,10 @@ button.my-match__opp {
   border-radius: 10px;
   padding: 12px 14px;
   margin: 4px 0 8px;
-}
-
-/* Placeholder shown in a not-yet-started team match's detail card in place
-   of an empty scoreboard (mp-13y). */
-.match-detail-card__pending {
-  text-align: center;
-  color: var(--ink-3);
-  font-size: 13px;
-  padding: 14px 0 6px;
+  /* When expanded inline inside the .vsched 2-column grid (≥1024px), span the
+     full width so the card stacks BELOW the clicked row, not beside it
+     (mp-ucvb #1). Harmless in the flex/block single-column layout. */
+  grid-column: 1 / -1;
 }
 
 .match-detail-card__head {
@@ -4923,6 +4918,10 @@ button.my-match__opp {
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
 .msb-ht { font-size: 10px; color: #6b7280; font-weight: 600; }
+/* Win indicator (○) for an ippon-less decision (hantei/fusensho/kiken): the
+   winning side's slot turns green so it's clear who won (mp-ucvb #3/#7). */
+.msb-slots--win .msb-slot { color: #15803d; border-color: #86efac; background: #f0fdf4; font-weight: 800; }
+.msb--tv .msb-slots--win .msb-slot { color: #15803d; }
 /* §277 summary row: labelled IV/PW per side */
 .msb-row--summary { border-top: 2px solid #111; }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;

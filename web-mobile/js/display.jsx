@@ -302,11 +302,10 @@ function findCurrentBoutIndex(subResults) {
 // and a single "Next" line. Individual matches, empty states and the lobby
 // keep the existing dark surface (no mockup for those).
 
-function TvWhiteBoard({ tournament, court, connected, promoted, promotedKind, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
+function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
     const shiroTeam = sideLabel(promoted.match.sideB, zekken);
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
-    const isLive = promotedKind === "live";
     const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
     // The shared scoreboard below carries the score (IV/PW summary for teams,
     // ippon slots for individuals), so the team-name row centre is just "vs"
@@ -325,9 +324,8 @@ function TvWhiteBoard({ tournament, court, connected, promoted, promotedKind, is
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
                     <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}</span>
-                    {!isLive && (
-                        <span data-testid="tvd-upnext" style={{ fontWeight: 700, letterSpacing: "0.1em", color: "#b45309", textTransform: "uppercase" }}>↑ up next</span>
-                    )}
+                    {/* mp-ucvb #9: no "UP NEXT" badge — the promoted match is shown
+                        plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
                             style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
@@ -353,11 +351,10 @@ function TvWhiteBoard({ tournament, court, connected, promoted, promotedKind, is
 
             {/* Shared FIK scoreboard (match_scoreboard.jsx) — the SAME component
                 the viewer card uses; variant="tv" only scales it up. Up-next
-                matches have no bouts yet, so show a compact "Starts soon"
-                instead of an empty grid. */}
-            {promotedKind === "upnext" ? (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "3vh", color: "#9ca3af" }}>Starts soon</div>
-            ) : isTeamMatch ? (
+                matches have no bouts yet: TeamScoreboard renders numbered/roster
+                rows (mp-ucvb #6) so the board reads as a real scoreboard rather
+                than an empty grid. */}
+            {isTeamMatch ? (
                 <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
                     <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
                         teamSize={teamSize} showDH={showDH} variant="tv" />
@@ -1046,7 +1043,8 @@ function StreamingQR({ url, label }) {
 //
 // mp-13y: team match lower-third — for team matches the centre holds a
 // QR code ("scan for results") flanked by the team names; the current
-// bout's competitor names appear on the outer sides. No IV aggregate.
+// bout's competitor names appear on the outer sides, with a running IV/PW
+// aggregate per side beneath them (mp-ucvb #10).
 function StreamingOverlay({ court, position, competitions }) {
     const pos = position === 'top' ? 'top' : 'bottom';
 
@@ -1100,6 +1098,11 @@ function StreamingOverlay({ court, position, competitions }) {
     const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '—') : '—';
     const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
 
+    // mp-ucvb #10: running IV/PW aggregate per side, so the lower-third shows
+    // the team-match standing (not just the current bout). teamIVPW excludes
+    // the Daihyosen (position -1) row. sideB = shiro, sideA = aka.
+    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+
     // Team names (outer flanks of QR in team mode).
     const shiroTeamName = hasLive ? sideLabel(live.match.sideB, zekken) : '';
     const akaTeamName = hasLive ? sideLabel(live.match.sideA, zekken) : '';
@@ -1148,15 +1151,15 @@ function StreamingOverlay({ court, position, competitions }) {
 
             {isTeamMatch ? (
                 /* mp-13y: team match lower-third.
-                   Layout: [Shiro bout name] [QR centred] [Aka bout name]
-                   Below the main row: current bout score + bout position label.
-                   Team names flank the QR at a smaller size.
-                   No IV aggregate (meaningless on a lower-third mid-match). */
+                   Layout: [Shiro team/bout/IV·PW] [QR + bout score] [Aka …]
+                   Each side shows the team name, the current bout competitor,
+                   and a running IV/PW aggregate (mp-ucvb #10). */
                 <>
                     {/* Shiro bout competitor — left side (white) */}
                     <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro-bout">
                         <div style={{ fontSize: '1.4vh', opacity: 0.7, marginBottom: 2, color: '#ffffff' }}>{shiroTeamName}</div>
                         <div style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutShiroName}</div>
+                        <div data-testid="overlay-shiro-ivpw" style={{ fontSize: '1.5vh', opacity: 0.8, marginTop: '0.4vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)' }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</div>
                     </div>
 
                     {/* QR + score centre */}
@@ -1174,6 +1177,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka-bout">
                         <div style={{ fontSize: '1.4vh', opacity: 0.85, marginBottom: 2, color: '#fda4af' }}>{akaTeamName}</div>
                         <div style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutAkaName}</div>
+                        <div data-testid="overlay-aka-ivpw" style={{ fontSize: '1.5vh', opacity: 0.85, marginTop: '0.4vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)' }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</div>
                     </div>
                 </>
             ) : (

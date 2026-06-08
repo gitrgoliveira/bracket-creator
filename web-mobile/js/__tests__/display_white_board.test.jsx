@@ -110,13 +110,16 @@ describe('TvWhiteBoard', () => {
     expect(sb.props.showDH).toBe(true);
   });
 
-  it('an up-next team match shows "Starts soon" (not an empty bout grid)', () => {
+  it('an up-next team match renders the TeamScoreboard (numbered rows), no "Starts soon" / "up next" badge', () => {
+    // mp-ucvb #6/#9: up-next now shows the real scoreboard (TeamScoreboard
+    // renders teamSize numbered rows when subResults is empty), and the
+    // "↑ up next" badge was dropped.
     const p = teamPromoted('upnext');
     p.match.subResults = [];
     const props = { ...base, promoted: p, promotedKind: 'upnext', isTeamMatch: true, subResults: [], teamSize: 5 };
     const str = render(props);
-    expect(str).toContain('Starts soon');
-    expect(str).toContain('up next');
-    expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeNull();
+    expect(str).not.toContain('Starts soon');
+    expect(str).not.toContain('up next');
+    expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeTruthy();
   });
 });

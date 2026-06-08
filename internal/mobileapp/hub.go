@@ -80,7 +80,7 @@ const DefaultHistorySize = 100
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
 // Raised from 1000 → 5000 by mp-9afd to support EKC-scale (1000+ viewers).
 // A real hardware load test (goroutine/fd/memory budget at 5000 clients) is
-// still required before a live EKC deployment — see bead mp-9afd test plan.
+// still required before a live EKC deployment.
 const DefaultMaxSSEClients = 5000
 
 // SSEEvent represents the payload sent to clients.

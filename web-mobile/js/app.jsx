@@ -638,7 +638,9 @@ function App() {
             // match_updated for a non-display viewer is covered by the
             // per-comp detail fetch above — the redundant GET
             // /viewer/competitions on every ippon is the dominant scaling wall.
-            if (mode === "display" || event.type === "competition_started" || event.type === "competition_completed") {
+            // Display mode is excluded here because it already fires load()
+            // unconditionally in the block above (line 622-623).
+            if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed")) {
                 jitteredTimeout(load, listJitter);
             }
         } else if (event.type === "schedule_updated") {

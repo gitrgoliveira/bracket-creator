@@ -119,6 +119,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 	displayName := name
 	dojo := ""
 	playerID := ""
+	number := ""
 	for i := range players {
 		if players[i].Name == name {
 			if withZekkenName && players[i].DisplayName != "" {
@@ -126,6 +127,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 			}
 			dojo = players[i].Dojo
 			playerID = players[i].ID
+			number = players[i].Number
 			break
 		}
 	}
@@ -134,6 +136,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 		"name":        name,
 		"displayName": displayName,
 		"dojo":        dojo,
+		"number":      number,
 	}
 }
 

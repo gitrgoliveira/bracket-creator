@@ -24,6 +24,7 @@ type courtLiveSide struct {
 	Name        string `json:"name"`
 	DisplayName string `json:"displayName"`
 	Dojo        string `json:"dojo"`
+	Number      string `json:"number"`
 }
 
 // courtLiveResponse mirrors the full live/idle response shape from the

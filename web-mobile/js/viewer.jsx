@@ -1,7 +1,7 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-import { useTeamLineups, TeamScoreboard, IndividualScore } from './match_scoreboard.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 // Re-export the shared scoreboard primitives so existing tests that import them
 // from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
 export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
@@ -1797,8 +1797,11 @@ function MatchDetailCard({ match, onClose }) {
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const teamSize = match.teamSize || 0;
-  const aName = match.sideA?.name || "TBD";
-  const bName = match.sideB?.name || "TBD";
+  // withNumber prepends the assigned competitor number (e.g. "K1") when the
+  // competition has numberPrefix; team-level sides have no .number so this
+  // degrades to the bare team name.
+  const aName = withNumber(match.sideA);
+  const bName = withNumber(match.sideB);
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
@@ -2151,7 +2154,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
-          <span className="n">{m.sideB?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
           <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
@@ -2164,7 +2167,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         )}
         <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
-          <span className="n">{m.sideA?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideA)}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>
@@ -2174,11 +2177,16 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
 VSchedItem.displayName = "VSchedItem";
 
 const PoolMatchRow = React.memo(({ m, onClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when
+  // present; the winner comparison below still uses the bare name.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : aRawName;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : bRawName;
   const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-  const aWin = winnerName && winnerName === aName;
-  const bWin = winnerName && winnerName === bName;
+  // Winner comparison must use the bare name (numberPrefix not included).
+  const aWin = winnerName && winnerName === aRawName;
+  const bWin = winnerName && winnerName === bRawName;
 
   const scoreStr = m.status === "completed"
     ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
@@ -2392,8 +2400,9 @@ function rankOrdinal(rank) {
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right) — matches PoolMatchRow convention.
 const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when present.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
 
   // scoreStr: non-null only for completed matches; the render span below
   // handles the empty-string/null → "—" fallback in one place.
@@ -2956,11 +2965,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
-          {m.sideB?.name || "TBD"}
+          {withNumber(m.sideB)}
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {m.sideA?.name || "TBD"}
+          {withNumber(m.sideA)}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>

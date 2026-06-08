@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, poolNameOf } from '../display.jsx';
+import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, poolNameOf, sideLabel } from '../display.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -7,6 +7,22 @@ import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 // match_scoreboard.jsx components (TeamScoreboard / IndividualScore) — the same
 // ones the viewer card uses. The scoreboard's own rendering (slots, IV/PW
 // summary, DH banner) is covered by match_scoreboard.test.jsx.
+
+describe('sideLabel — numberPrefix + zekken', () => {
+  it('returns the bare name when there is no number', () => {
+    expect(sideLabel({ name: 'Tanaka' })).toBe('Tanaka');
+  });
+  it('prepends the assigned number when set (numberPrefix support)', () => {
+    expect(sideLabel({ name: 'Tanaka', number: 'K1' })).toBe('K1 Tanaka');
+  });
+  it('honours the zekken displayName when withZekkenName=true and includes the number', () => {
+    expect(sideLabel({ name: 'Tanaka Kenji', displayName: 'TANAKA', number: 'K1' }, true)).toBe('K1 TANAKA');
+  });
+  it('returns "TBD" for null sides', () => {
+    expect(sideLabel(null)).toBe('TBD');
+    expect(sideLabel(undefined, true)).toBe('TBD');
+  });
+});
 
 describe('overlayPositionLabel — FIK names only for 5-person teams', () => {
   it('returns Senpo..Taisho for a 5-person team', () => {
@@ -225,5 +241,27 @@ describe('TvIndividualBoard', () => {
     const str = JSON.stringify(tree);
     expect(str).toContain('tvd-indiv-group');
     expect(str).toContain('tvd-indiv-row-now'); // the running match is flagged current
+  });
+
+  it('passes match sides with .number through to IndividualScore (numberPrefix support)', () => {
+    // mp-13y: when a competition has numberPrefix configured, the assigned
+    // number (e.g. "K1") rides on match.sideA.number / match.sideB.number
+    // — TvIndividualBoard must pass the full side object through so the
+    // shared IndividualScore can render "K1 Tanaka".
+    const numbered = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'B', status: 'running',
+        sideA: { name: 'Suzuki', number: 'K2' },
+        sideB: { name: 'Tanaka', number: 'K1' },
+        ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+    ] };
+    const promoted = { competition: numbered, match: numbered.poolMatches[0], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const scores = [];
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === IndividualScore) scores.push(n);
+      const k=n.children||n.props?.children||[]; [].concat(k).forEach(walk); })(tree);
+    expect(scores.length).toBe(1);
+    expect(scores[0].props.match.sideA.number).toBe('K2');
+    expect(scores[0].props.match.sideB.number).toBe('K1');
   });
 });

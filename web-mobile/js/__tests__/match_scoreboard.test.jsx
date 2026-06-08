@@ -31,6 +31,33 @@ function boutRows(node, out = []) {
   return out;
 }
 
+describe('match_scoreboard: withNumber', () => {
+  let withNumber;
+  beforeEach(async () => { vi.resetModules(); ({ withNumber } = await import('../match_scoreboard.jsx')); });
+  afterEach(() => { vi.resetModules(); });
+
+  it('prepends the assigned competitor number when present', () => {
+    expect(withNumber({ name: 'Tanaka', number: 'K1' })).toBe('K1 Tanaka');
+    expect(withNumber({ name: 'Suzuki', number: 'K12' })).toBe('K12 Suzuki');
+  });
+  it('returns the bare name when no number is set', () => {
+    expect(withNumber({ name: 'Tanaka' })).toBe('Tanaka');
+    expect(withNumber({ name: 'Tanaka', number: '' })).toBe('Tanaka');
+  });
+  it('returns "TBD" for null/undefined sides', () => {
+    expect(withNumber(null)).toBe('TBD');
+    expect(withNumber(undefined)).toBe('TBD');
+  });
+  it('returns plain-string sides verbatim (bracket placeholders)', () => {
+    expect(withNumber('Pool A-1st')).toBe('Pool A-1st');
+  });
+  it('honours the zekken displayName when withZekkenName=true', () => {
+    const side = { name: 'Tanaka Kenji', displayName: 'TANAKA', number: 'K1' };
+    expect(withNumber(side, true)).toBe('K1 TANAKA');
+    expect(withNumber(side, false)).toBe('K1 Tanaka Kenji');
+  });
+});
+
 describe('match_scoreboard: teamIVPW', () => {
   let teamIVPW;
   beforeEach(async () => { vi.resetModules(); ({ teamIVPW } = await import('../match_scoreboard.jsx')); });
@@ -170,6 +197,36 @@ describe('match_scoreboard components', () => {
     const text = collectText(tree);
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'individual-score')).toBeTruthy();
     expect(text).toContain('M'); expect(text).toContain('K');
+  });
+
+  it('IndividualScore prepends the assigned competitor number (numberPrefix) when showNames is set', () => {
+    // mp-13y: when a competition has a numberPrefix configured, the assigned
+    // number (e.g. "K1") is set on match.sideA.number / match.sideB.number by
+    // AssignPlayerNumbers and surfaced via normalizeMatch. The TV pool/round
+    // feed renders names with showNames=true, so each name reads "K1 Tanaka".
+    const match = {
+      sideA: { name: 'Suzuki', number: 'K2' },
+      sideB: { name: 'Tanaka', number: 'K1' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(IndividualScore, { match, showNames: true });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
+    expect(collectText(shiro)).toBe('K1 Tanaka');
+    expect(collectText(aka)).toBe('K2 Suzuki');
+  });
+
+  it('IndividualScore degrades to the bare name when no number is set (non-numbered competition)', () => {
+    const match = {
+      sideA: { name: 'Suzuki' },  // no .number field
+      sideB: { name: 'Tanaka' },
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(IndividualScore, { match, showNames: true });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
+    expect(collectText(shiro)).toBe('Tanaka');
+    expect(collectText(aka)).toBe('Suzuki');
   });
 
   it('TeamScoreboard renders the IV/PW summary + one row per regular bout', () => {

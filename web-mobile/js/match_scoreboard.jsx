@@ -216,6 +216,20 @@ export function teamIVPW(subResults) {
 
 // IndividualScore — §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
+// withNumber — prepend the assigned competitor number (e.g. "K1") to the
+// display name when present. Falls back to the bare name when no number is
+// set, so competitions without `numberPrefix` render identically to before.
+// Honours the zekken `displayName` when `withZekkenName` is true, matching
+// `sideLabel` in display.jsx. Used by every individual-match name-rendering
+// site (TV display, streaming overlay, viewer card, schedule list) so the
+// number prefix appears consistently across all spectator surfaces.
+export function withNumber(side, withZekkenName) {
+  if (!side) return "TBD";
+  if (typeof side === "string") return side;
+  const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
+  return side.number ? `${side.number} ${name}` : name;
+}
+
 export function IndividualScore({ match, variant, showNames }) {
   const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
   const sideId = (v) => (v && v.id != null && v.id !== "") ? String(v.id) : "";
@@ -240,8 +254,10 @@ export function IndividualScore({ match, variant, showNames }) {
   // colour-coded Shiro dark / Aka red — used by the TV pool/round list where
   // each row IS a full match. The card leaves them empty (names render above).
   // Always display the human NAME (never the id key used for comparison).
-  const shiroDisplay = sideName(match.sideB);
-  const akaDisplay = sideName(match.sideA);
+  // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
+  // the competition has a numberPrefix configured; falls back to the bare name.
+  const shiroDisplay = withNumber(match.sideB);
+  const akaDisplay = withNumber(match.sideA);
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
@@ -338,4 +354,5 @@ if (typeof window !== "undefined") {
   window.TeamScoreboard = TeamScoreboard;
   window.IndividualScore = IndividualScore;
   window.BoutSubRow = BoutSubRow;
+  window.withNumber = withNumber;
 }

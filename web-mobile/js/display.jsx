@@ -42,8 +42,11 @@ function TermD(props) {
 // overlay and the TV display agree on what to render.
 function sideLabel(side, withZekkenName) {
     if (!side) return "TBD";
-    if (withZekkenName && side.displayName) return side.displayName;
-    return side.name || "TBD";
+    const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
+    // Prefix the assigned competitor number (e.g. "K1") when present — set by
+    // AssignPlayerNumbers when the competition has a numberPrefix configured.
+    // Empty `.number` (the common case) renders as the bare name unchanged.
+    return side.number ? `${side.number} ${name}` : name;
 }
 
 // Reject a bracket side that is still a placeholder rather than a resolved

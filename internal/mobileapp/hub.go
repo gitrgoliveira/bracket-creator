@@ -62,9 +62,13 @@ const DefaultHistorySize = 100
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
 // Each subscriber allocates one buffered channel (100-element string buffer)
-// plus one streaming goroutine, so the per-connection cost is roughly
-// 100×~100B (string headers) + goroutine stack ≈ 10–16 KB resident per
-// client. At 5000 clients that is ~50–80 MB — comfortably within the RAM
+// plus one streaming goroutine. Per-connection cost breakdown:
+//   - Channel buffer: 100 string headers × 16 B (pointer + length) ≈ 1.6 KB
+//   - Channel struct overhead: ~100 B
+//   - Goroutine stack: 2–8 KB (starts small, grows on demand)
+//   - Total: ~4–10 KB resident per client
+//
+// At 5000 clients that is ~20–50 MB — comfortably within the RAM
 // budget of a single-core VPS or RPi-class hardware used for EKC-scale
 // deployments (~45 teams, 1000+ live spectators).
 //

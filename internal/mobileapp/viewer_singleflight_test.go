@@ -129,12 +129,19 @@ func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
 
 // TestViewerSingleFlight_ErrorPropagatedToAllWaiters checks that when the
 // elected fn returns an error, all concurrent waiters receive the same error.
+// The fn stays in-flight long enough for all other goroutines to attach as
+// waiters, and we assert exactly one build ran — confirming the waiter path
+// is reliably exercised.
 func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	const concurrency = 50
 	g := newViewerSingleFlight()
 
-	var startBarrier sync.WaitGroup
-	startBarrier.Add(1)
+	var buildCount atomic.Int32
+
+	// readyBarrier ensures all goroutines are spawned before they race
+	// into Do together — same pattern as CollatesConcurrentBuilds.
+	var readyBarrier sync.WaitGroup
+	readyBarrier.Add(concurrency)
 
 	errs := make([]error, concurrency)
 	var wg sync.WaitGroup
@@ -144,15 +151,23 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			startBarrier.Wait()
+			readyBarrier.Done()
+			readyBarrier.Wait() // all goroutines race into Do together
 			_, err := g.Do("err-key", func() ([]byte, error) {
+				buildCount.Add(1)
+				// Hold the in-flight slot so all other goroutines enter
+				// Do and become waiters before the error is returned.
+				time.Sleep(200 * time.Millisecond)
 				return nil, fmt.Errorf("build failed")
 			})
 			errs[i] = err
 		}()
 	}
-	startBarrier.Done()
 	wg.Wait()
+
+	// Only one build should have executed — confirms waiters attached.
+	assert.Equal(t, int32(1), buildCount.Load(),
+		"expected exactly 1 build invocation; got %d", buildCount.Load())
 
 	for i, err := range errs {
 		require.Errorf(t, err, "goroutine %d expected an error", i)

@@ -632,15 +632,18 @@ function App() {
                 // this fetch deterministically picks up the transition.
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            // P1 (mp-9afd): only fire a full-list refetch for genuine
-            // list-level transitions (competition_started / competition_completed
-            // change which comps are active or their status badges). A plain
-            // match_updated for a non-display viewer is covered by the
-            // per-comp detail fetch above — the redundant GET
-            // /viewer/competitions on every ippon is the dominant scaling wall.
-            // Display mode is excluded here because it already fires load()
-            // unconditionally in the block above (line 622-623).
-            if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed")) {
+            // P1 (mp-9afd): fire a full-list refetch for list-level
+            // transitions (competition_started / competition_completed change
+            // status badges), AND for match_updated when the viewer is on
+            // the home/schedule screen (viewerCompId is null). Home-screen
+            // widgets (LIVE NOW, progress bars, watchlist, followed-player
+            // matches) derive from tournament.competitions and need the
+            // updated match state. Viewers already inside a specific
+            // competition are covered by the per-comp detail fetch above —
+            // they skip the list refetch, which is the dominant scaling win.
+            // Display mode is excluded because it fires load() in the block
+            // above (line 622-623).
+            if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
                 jitteredTimeout(load, listJitter);
             }
         } else if (event.type === "schedule_updated") {

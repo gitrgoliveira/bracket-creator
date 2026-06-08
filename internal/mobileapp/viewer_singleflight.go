@@ -3,6 +3,8 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 )
 
@@ -68,10 +70,11 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 		if r := recover(); r != nil {
 			c.err = fmt.Errorf("singleflight: fn panicked: %v", r)
 			err = c.err // set named return so the elected caller also gets the error
-			// Log so the panic is visible in production — the error returned
+			// Log with stack trace so production crashes are diagnosable —
+			// mirrors the safeGo pattern in safego.go. The error returned
 			// to handlers becomes a generic 500, which would otherwise mask
 			// the root cause entirely.
-			fmt.Printf("singleflight: recovered panic for key %q: %v\n", key, r)
+			log.Printf("singleflight: recovered panic for key %q: %v\n%s", key, r, debug.Stack())
 		}
 		c.wg.Done()
 		g.mu.Lock()

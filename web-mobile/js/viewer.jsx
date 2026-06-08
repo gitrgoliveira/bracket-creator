@@ -2338,9 +2338,17 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
                 // head-to-head between two same-name/different-dojo players).
                 // Fall back to name for legacy data without a winner id.
                 const wId = winnerId(m);
+                // When both sides share a name and there is no winner id, the
+                // winner NAME is ambiguous — do NOT mark either row as winner
+                // (that would light up BOTH cells green for the one match). The
+                // id branch is the authoritative resolver; the name fallback is
+                // only safe for distinct-name matchups. (Source path now sends
+                // winnerId for same-name matches, so this is defense-in-depth
+                // for legacy data without ids.)
+                const namesAmbiguous = rowPlayer.name === colPlayer.name;
                 const rowWon = (wId && rowPlayer.id)
                   ? wId === rowPlayer.id
-                  : (winnerName && winnerName === rowPlayer.name);
+                  : (!namesAmbiguous && winnerName && winnerName === rowPlayer.name);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;

@@ -52,6 +52,24 @@ function toBackendMatchResult(patch, match) {
         decision: isHikiwake(score.type) ? "hikiwake" : "",
         status: toBackendStatus(patch.status || "scheduled"),
     };
+    // Carry the winner's participant id so a SAME-NAME head-to-head (the winner
+    // NAME matches both sides) is unambiguous on the backend. Without it, when
+    // the scoreline is tied (e.g. a hantei decision — equal ippon counts) the
+    // backend can't infer the winning side and leaves WinnerID empty, and the
+    // league matrix then marks BOTH same-name rows as winners. The scoring modal
+    // sets patch.winner to the winning SIDE object (m.sideA/m.sideB), so its id
+    // is available directly; fall back to deriving it from the match sides by
+    // name only when the names are distinct (unambiguous).
+    let winnerId = "";
+    if (patch.winner && typeof patch.winner === "object" && patch.winner.id) {
+        winnerId = patch.winner.id;
+    } else if (winnerName) {
+        const aId = (typeof match?.sideA === "object" ? match.sideA.id : null);
+        const bId = (typeof match?.sideB === "object" ? match.sideB.id : null);
+        if (winnerName === sideAName && winnerName !== sideBName) winnerId = aId || "";
+        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
+    }
+    if (winnerId) result.winnerId = winnerId;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
@@ -90,8 +108,16 @@ function normalizeMatch(m, playerMap) {
     // playerMap entry before stamping the id so the shared map object isn't
     // mutated across matches.
     const resolveSide = (name, flatId) => {
-        const p = playerMap?.[name];
-        const base = p ? { ...p } : { id: name, name };
+        // Prefer the id-keyed entry: it carries the CORRECT dojo/number even for
+        // same-name participants. The name-keyed entry collapses same-name
+        // players onto one identity, so only trust it when its id matches the
+        // server's flat id — otherwise we'd attach the wrong dojo to this side.
+        let p = flatId ? playerMap?.[flatId] : null;
+        if (!p) {
+            const byName = playerMap?.[name];
+            if (byName && (!flatId || byName.id === flatId)) p = byName;
+        }
+        const base = p ? { ...p } : { id: flatId || name, name };
         if (flatId) base.id = flatId;
         return base;
     };
@@ -157,12 +183,13 @@ function buildPlayerMap(comp) {
     const map = {};
     const add = (p) => {
         const norm = normalizePlayer(p);
+        if (!norm.name) return;
         // Carry the FULL competitor identity so bracket/match sides resolved by
         // name (e.g. a pool finisher seeded into the knockout) show the same
         // details — dojo, zekken display name, and assigned number (e.g. "K1") —
         // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
         // carried, so a qualifier lost their number and zekken in the bracket.
-        if (norm.name) map[norm.name] = {
+        const entry = {
             id: norm.id || norm.name,
             name: norm.name,
             dojo: norm.dojo || "",
@@ -172,6 +199,14 @@ function buildPlayerMap(comp) {
             tag: norm.tag || "",
             danGrade: norm.danGrade || "",
         };
+        map[norm.name] = entry;
+        // ALSO key by participant id. The name key collapses same-name
+        // participants (two "Tanaka Kenji" from different dojos) onto whichever
+        // was added last, so a name-only lookup can attach the WRONG dojo/number
+        // to a side. A distinct id key preserves each one's correct metadata,
+        // letting normalizeMatch resolve by the server's authoritative side id.
+        // (UUID id keys never collide with display-name keys.)
+        if (norm.id) map[norm.id] = entry;
     };
     if (comp?.config?.players) comp.config.players.forEach(add);
     if (comp?.players) comp.players.forEach(add);

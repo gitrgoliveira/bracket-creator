@@ -89,11 +89,17 @@ function ipponLetters(arr) {
   return [real[0] || "", real[1] || ""];
 }
 
+// letters[0] is the OUTER ippon (the first point scored), letters[1] the inner.
+// Ippons fill from the OUTSIDE toward the centre: shiro fills left→right (its
+// outer edge is the left), aka fills right→left (its outer edge is the right),
+// so for aka we reverse the visual cell order. The testid stays on the logical
+// outer cell (letters[0]) regardless of which side renders it.
 function slotCells(letters, side, testid) {
-  return [0, 1].map(i => (
+  const cells = [0, 1].map(i => (
     <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
       data-testid={i === 0 ? testid : undefined}>{letters[i] || ""}</span>
   ));
+  return side === "aka" ? cells.reverse() : cells;
 }
 
 // centreMarks — the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].

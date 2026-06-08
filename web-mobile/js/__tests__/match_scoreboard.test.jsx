@@ -107,6 +107,21 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'foul-mark-a')).toBeNull();
   });
 
+  it('fills ippons from the OUTSIDE inward — aka (right) outer cell first', () => {
+    // First point scored = letters[0] = OUTER cell. Shiro outer = left, aka
+    // outer = right. So for two ippons D (1st) then M (2nd):
+    //   shiro visual L→R = "D","M"  (D outer-left)
+    //   aka   visual L→R = "M","D"  (D outer-right)  ← reversed
+    const sub = { position: 1, ipponsB: ['D', 'M'], ipponsA: ['D', 'M'] };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 5 });
+    const akaSlots = findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka'));
+    const shiroSlots = findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && /\bmsb-slots\b/.test(n.props.className) && !n.props.className.includes('--aka'));
+    expect(collectText(shiroSlots)).toBe('DM'); // outer-left first
+    expect(collectText(akaSlots)).toBe('MD');   // outer-right first (reversed)
+  });
+
   it('IndividualScore renders the ippon-letter slots (§263)', () => {
     const tree = runtime.mount(IndividualScore, { match: { ipponsB: ['M'], ipponsA: ['K', 'M'] } });
     const text = collectText(tree);

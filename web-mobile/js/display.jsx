@@ -1150,33 +1150,41 @@ function StreamingOverlay({ court, position, competitions }) {
 
             {isTeamMatch ? (
                 /* mp-13y: team match lower-third.
-                   Layout: [Shiro team/bout/IV·PW] [QR + bout score] [Aka …]
-                   Each side shows the team name, the current bout competitor,
-                   and a running IV/PW aggregate (mp-13y #10). */
+                   Layout: [Shiro team/bout] [QR] [Aka …]
+                   Per side, TWO rows:
+                     • Team row  — the TEAM NAME + the running IV/PW aggregate
+                       (the team-level result belongs on the team row).
+                     • Bout row  — the current bout's competitor/position + that
+                       competitor's ippon score, so the result lines up with the
+                       individual bout it belongs to. */
                 <>
-                    {/* Shiro bout competitor — left side (white) */}
-                    <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro-bout">
-                        <div style={{ fontSize: '1.4vh', opacity: 0.7, marginBottom: 2, color: '#ffffff' }}>{shiroTeamName}</div>
-                        <div style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutShiroName}</div>
-                        <div data-testid="overlay-shiro-ivpw" style={{ fontSize: '1.5vh', opacity: 0.8, marginTop: '0.4vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)' }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</div>
-                    </div>
-
-                    {/* QR + score centre */}
-                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6vh', padding: '0 2vw' }}>
-                        {qrUrl && <StreamingQR url={qrUrl} label="scan for results" />}
-                        <div
-                            data-testid="overlay-bout-score"
-                            style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: '2.5vh' }}
-                        >
-                            {boutIpponsB} – {boutIpponsA}
+                    {/* Shiro — left side (white) */}
+                    <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro">
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamName}</span>
+                            <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
+                            <span style={{ fontSize: '1.9vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutShiroName}</span>
+                            <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsB}</span>
                         </div>
                     </div>
 
-                    {/* Aka bout competitor — right side (red) */}
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka-bout">
-                        <div style={{ fontSize: '1.4vh', opacity: 0.85, marginBottom: 2, color: '#fda4af' }}>{akaTeamName}</div>
-                        <div style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutAkaName}</div>
-                        <div data-testid="overlay-aka-ivpw" style={{ fontSize: '1.5vh', opacity: 0.85, marginTop: '0.4vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)' }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</div>
+                    {/* QR centre */}
+                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6vh', padding: '0 2vw' }}>
+                        {qrUrl && <StreamingQR url={qrUrl} label="scan for results" />}
+                    </div>
+
+                    {/* Aka — right side (red) */}
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
+                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamName}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
+                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>
+                            <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutAkaName}</span>
+                        </div>
                     </div>
                 </>
             ) : (

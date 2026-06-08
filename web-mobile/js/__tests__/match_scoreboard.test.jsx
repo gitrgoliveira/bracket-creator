@@ -122,6 +122,49 @@ describe('match_scoreboard components', () => {
     expect(collectText(akaSlots)).toBe('MD');   // outer-right first (reversed)
   });
 
+  it('BoutSubRow falls back to sub.sideA / sub.sideB when no lineup is pinned (kachinuki)', () => {
+    // mp-13y: kachinuki bouts carry the per-bout competitor names on the sub.
+    // Without a lineup, the row should show those names — not bare bout numbers.
+    const sub = { position: 3, sideA: 'Aka Player', sideB: 'Shiro Player', ipponsB: ['M'], ipponsA: [] };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 2, lineupA: null, lineupB: null, teamSize: 5 });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    expect(collectText(shiro)).toBe('Shiro Player');
+    expect(collectText(aka)).toBe('Aka Player');
+  });
+
+  it('IndividualScore: same-name head-to-head does NOT mark BOTH sides as winners on an ippon-less decision', () => {
+    // mp-13y: when both sides share a NAME and no ids disambiguate them, a
+    // hantei/fusensho decision must not flag a win on both sides (the
+    // centreMarks logic compares winner === sideA/sideB by key). Without the
+    // guard, both shiro and aka would render a win mark.
+    const match = {
+      sideA: 'Same Name', sideB: 'Same Name',
+      ipponsA: [], ipponsB: [], decidedByHantei: true,
+      winner: 'Same Name',
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    // Neither side wears the win mark; the centre Ht fallback still appears.
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
+  });
+
+  it('IndividualScore: ids resolve a same-name head-to-head correctly (winner side gets Ht)', () => {
+    // With participant ids, the same-name pair is disambiguated and the
+    // winning side's slot gets the Ht mark.
+    const match = {
+      sideA: { id: 'p1', name: 'Same Name' }, sideB: { id: 'p2', name: 'Same Name' },
+      ipponsA: [], ipponsB: [], decidedByHantei: true,
+      winner: { id: 'p1', name: 'Same Name' },
+    };
+    const tree = runtime.mount(IndividualScore, { match });
+    // p1 = sideA = aka → win mark on aka, none on shiro, no centre fallback.
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+  });
+
   it('IndividualScore renders the ippon-letter slots (§263)', () => {
     const tree = runtime.mount(IndividualScore, { match: { ipponsB: ['M'], ipponsA: ['K', 'M'] } });
     const text = collectText(tree);

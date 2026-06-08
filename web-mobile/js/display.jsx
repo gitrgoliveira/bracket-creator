@@ -257,7 +257,8 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
 // fallback when no per-match lineup pins a player name. Mirrors
 // positionLabelFor in admin_scoring_modal.jsx (module-local copy; display.jsx
 // is a separate ES module). Senpo/Jiho/... for 5-person teams, "Daihyosen"
-// for the rep bout (position === -1), else "Match N". NEVER the team name.
+// for the rep bout (position === -1), else the bare bout number ("1", "2", …).
+// NEVER the team name.
 const OVL_POS_LABELS_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
 function overlayPositionLabel(teamSize, index, sub) {
     if (sub && sub.position === -1) return "Daihyosen";
@@ -1209,26 +1210,37 @@ function StreamingOverlay({ court, position, competitions }) {
     const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
     const currentSub = ovlSubResults[currentBoutIdx] || null;
 
-    // Competitor for the current bout: pinned lineup name, else the FIK
-    // POSITION label (Senpo/Jiho/...) — never the team name (that flanks the
-    // QR above). "position or name", per product direction.
-    const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : '';
+    // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
+    // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
+    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+
+    // DH-pending: all regular bouts are scored, the match is tied (equal IV
+    // and PW), but no DH sub-result has been created yet. In that case
+    // findCurrentBoutIndex returns subResults.length and currentSub is null;
+    // the overlay would otherwise read blank. Show "Daihyosen" on both sides
+    // so spectators know the rep bout is about to start.
+    const regularSubsOvl = ovlSubResults.filter(s => s.position !== -1);
+    const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
+        && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
+        && !ovlSubResults.some(s => s.position === -1);
+
+    // Competitor for the current bout: pinned lineup name, else the per-bout
+    // competitor stored on the sub (kachinuki), else the FIK POSITION label
+    // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending — never
+    // the team name (that flanks the QR above).
+    const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
+    const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
     const boutShiroName = isTeamMatch && currentSub
-        ? (pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || boutPosLabel)
-        : '';
+        ? (pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideB) || boutPosLabel)
+        : (dhPending ? boutPosLabel : '');
     const boutAkaName = isTeamMatch && currentSub
-        ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || boutPosLabel)
-        : '';
+        ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel)
+        : (dhPending ? boutPosLabel : '');
 
     // Bout score for the current sub — ippon letters, "—" (not "0") for an
     // empty side so a kendo score never reads "M – 0".
     const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '—') : '—';
     const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
-
-    // mp-13y #10: running IV/PW aggregate per side, so the lower-third shows
-    // the team-match standing (not just the current bout). teamIVPW excludes
-    // the Daihyosen (position -1) row. sideB = shiro, sideA = aka.
-    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
 
     // Team names (outer flanks of QR in team mode).
     const shiroTeamName = hasLive ? sideLabel(live.match.sideB, zekken) : '';

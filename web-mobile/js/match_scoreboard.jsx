@@ -53,16 +53,23 @@ export function useTeamLineups(match, competition, roundIndex) {
     if (!compId || !matchId || !window.API) return undefined;
     let cancelled = false;
     (async () => {
-      let players = [];
-      try {
-        const detail = await window.API.fetchCompetitionDetails(compId);
-        if (cancelled) return;
-        players =
-          (detail && detail.players && detail.players.length ? detail.players : null)
-          || (detail && detail.config && detail.config.players)
-          || [];
-      } catch (_e) {
-        console.warn("useTeamLineups: competition fetch failed", _e);
+      // Prefer the players already on the passed competition (TvDisplay /
+      // StreamingOverlay carry them) and skip the extra fetchCompetitionDetails
+      // round-trip — it delays lineup rendering on every promoted-match change.
+      let players = (competition && competition.players && competition.players.length)
+        ? competition.players
+        : [];
+      if (!players.length) {
+        try {
+          const detail = await window.API.fetchCompetitionDetails(compId);
+          if (cancelled) return;
+          players =
+            (detail && detail.players && detail.players.length ? detail.players : null)
+            || (detail && detail.config && detail.config.players)
+            || [];
+        } catch (_e) {
+          console.warn("useTeamLineups: competition fetch failed", _e);
+        }
       }
       // Prefer the explicit 0-based round index. Only when it is absent do we
       // fall back to match.round — a raw numeric index, or the legacy engine
@@ -161,15 +168,19 @@ function centreMarks(sub) {
 }
 
 // BoutSubRow — one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
-// variant: "card" (default) | "tv" (larger). state: "now" | "queued" | "done"
-// (TV highlight only). Names come from the pinned lineup, else the bout number —
-// never the team name (it would repeat on every row).
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, variant, state }) {
+// variant: "card" (default) | "tv" (larger, via the parent .msb--tv selector).
+// state: "now" | "queued" | "done" (TV highlight only). Names come from the
+// pinned lineup, else the per-bout competitor stored on the sub (kachinuki
+// matches carry sub.sideA/sub.sideB), else the bout number — never the team
+// name (it would repeat on every row).
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state }) {
+  const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
   const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
-  const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || boutNum;
-  const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || boutNum;
+  const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
+  const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
+  // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
+  // per-row --tv modifier is needed here.
   const cls = "msb-row"
-    + (variant === "tv" ? " msb-row--tv" : "")
     + (state === "now" ? " msb-row--now" : "")
     + (state === "queued" ? " msb-row--queued" : "")
     + (isDH ? " msb-row--dh" : "");
@@ -206,25 +217,37 @@ export function teamIVPW(subResults) {
 // IndividualScore — §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
 export function IndividualScore({ match, variant, showNames }) {
-  // Normalise side/winner to names so centreMarks can mark the ippon-less
-  // (hantei/decision) winner. Sides may be {id,name} objects or bare strings.
   const sideName = (v) => v?.name || (typeof v === "string" ? v : "");
+  const sideId = (v) => (v && v.id != null && v.id !== "") ? String(v.id) : "";
+  // centreMarks marks the ippon-less (hantei/decision) winner by comparing the
+  // winner key to each side's key. Prefer the participant id so a same-name
+  // head-to-head (two players sharing a name) isn't flagged a win on BOTH
+  // sides; fall back to the name. When the two sides are indistinguishable
+  // (same name, no ids), blank the winner so neither side is marked — the
+  // centre Ht/○ fallback still conveys the result.
+  const aKey = sideId(match.sideA) || sideName(match.sideA);
+  const bKey = sideId(match.sideB) || sideName(match.sideB);
+  const ambiguous = !!aKey && aKey === bKey;
   const sub = {
     ipponsA: match.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreA) : []),
     ipponsB: match.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(match.scoreB) : []),
     hansokuA: match.hansokuA, hansokuB: match.hansokuB,
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
-    winner: sideName(match.winner), sideA: sideName(match.sideA), sideB: sideName(match.sideB),
+    winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
+    sideA: aKey, sideB: bKey,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
   // colour-coded Shiro dark / Aka red — used by the TV pool/round list where
   // each row IS a full match. The card leaves them empty (names render above).
+  // Always display the human NAME (never the id key used for comparison).
+  const shiroDisplay = sideName(match.sideB);
+  const akaDisplay = sideName(match.sideA);
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? sub.sideB : ""}</span>
+        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? shiroDisplay : ""}</span>
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? sub.sideA : ""}</span>
+        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? akaDisplay : ""}</span>
       </div>
     </div>
   );

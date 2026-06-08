@@ -505,25 +505,12 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
         });
         if (!allDone) return false;
-        // Count IV and PW per side. A hantei-decided 0-0 bout counts as an IV
-        // for the hantei winner (the side flagged by decidedByHantei metadata).
-        // Use the shared teamIVPW for the ippon-based counts, then layer hantei.
+        // The match is tied (→ show DH) when IV and PW are level per side.
+        // teamIVPW already prefers an explicit `sub.winner` (which the server
+        // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
+        // counted as an IV for its winner there — no extra hantei loop needed.
         const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
-        let ivA = ivAka, ivB = ivShiro, pwA = pwAka, pwB = pwShiro;
-        // Hantei bouts with 0-0 ippons: decidedByHantei is truthy, winner is
-        // inferred from the match decision or sub.winner field when available.
-        for (const s of regularSubs) {
-            const aIp = (s.ipponsA || []).filter(x => x && x !== "•").length;
-            const bIp = (s.ipponsB || []).filter(x => x && x !== "•").length;
-            if (s.decidedByHantei && aIp === 0 && bIp === 0) {
-                // Hantei with no ippons — count 1 IV for the winner side.
-                // Without explicit winner metadata, treat hantei as a tie for
-                // DH-gating purposes (conservative: doesn't suppress DH).
-                if (s.winner === "A" || s.winner === "aka") ivA++;
-                else if (s.winner === "B" || s.winner === "shiro") ivB++;
-            }
-        }
-        return ivA === ivB && pwA === pwB;
+        return ivShiro === ivAka && pwShiro === pwAka;
     }, [subResults, isTeamMatch, isKnockoutPhase]);
 
     // White scoreboard for any promoted match — team (bout grid) or individual

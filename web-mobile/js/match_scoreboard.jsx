@@ -67,14 +67,15 @@ export function useTeamLineups(match, competition) {
       }
       const teamAId = resolveLineupTeamId(sideAId, players);
       const teamBId = resolveLineupTeamId(sideBId, players);
-      if (teamAId) {
-        const l = await resolveMatchLineup(compId, teamAId, matchId, round, window.API);
-        if (!cancelled) setLineupA(l);
-      }
-      if (teamBId) {
-        const l = await resolveMatchLineup(compId, teamBId, matchId, round, window.API);
-        if (!cancelled) setLineupB(l);
-      }
+      // Both sides are independent GETs — fetch them in parallel to halve the
+      // time-to-render (the promoted match changes often on TV/overlay).
+      const [la, lb] = await Promise.all([
+        teamAId ? resolveMatchLineup(compId, teamAId, matchId, round, window.API) : null,
+        teamBId ? resolveMatchLineup(compId, teamBId, matchId, round, window.API) : null,
+      ]);
+      if (cancelled) return;
+      if (teamAId) setLineupA(la);
+      if (teamBId) setLineupB(lb);
     })();
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round

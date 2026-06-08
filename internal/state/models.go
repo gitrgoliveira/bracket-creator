@@ -498,10 +498,31 @@ type SubMatchResult struct {
 }
 
 type MatchResult struct {
-	ID             string           `json:"id"`
-	SideA          string           `json:"sideA"` // Player/Team Name
-	SideB          string           `json:"sideB"`
-	Winner         string           `json:"winner"`
+	ID     string `json:"id"`
+	SideA  string `json:"sideA"` // Player/Team Name
+	SideB  string `json:"sideB"`
+	Winner string `json:"winner"`
+	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
+	// the winner when available. Sides are stored by name everywhere else,
+	// but a name is not unique within a competition — two participants from
+	// different dojos may share a name (CheckDuplicateEntriesByNameDojo only
+	// rejects same-name AND same-dojo). These ids let consumers (e.g. the
+	// league matrix) cross-reference a match cell to the right row/column
+	// player AND tell apart the winner when two identical-name players meet.
+	// Purely additive metadata: all Go scoring/standings logic still keys on
+	// name, and these stay empty for legacy data, so behavior is unchanged
+	// when ids are absent. omitempty + append-only CSV columns keep old
+	// files/readers fully compatible.
+	SideAID  string `json:"sideAId,omitempty"`
+	SideBID  string `json:"sideBId,omitempty"`
+	WinnerID string `json:"winnerId,omitempty"`
+	// WinnerSide is a transient hint ("A"/"B") set by scoring handlers that
+	// know the winning SIDE unambiguously (e.g. quick-score, where the
+	// winner is decided by ippon counts, not a name). writeMatchResult uses
+	// it to resolve WinnerID from the stored side ids even when both sides
+	// share a name. Never persisted (json/CSV omit) — it only carries the
+	// side decision from the handler to the id-resolution step.
+	WinnerSide     string           `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // M, K, D, T, H
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`

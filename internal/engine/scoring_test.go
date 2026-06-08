@@ -1201,3 +1201,89 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 	assert.Equal(t, "B", loaded.Rounds[0][0].Court, "court reschedule must have landed")
 	assert.Equal(t, "10:00", loaded.Rounds[0][0].ScheduledAt, "time reschedule must have landed")
 }
+
+// TestBackfillMatchIdentity directly exercises backfillMatchIdentity, in
+// particular the same-name-head-to-head scoreline-inference branch that the
+// admin score editor relies on (it picks a winner by NAME, sending no
+// WinnerSide hint). The two pre-existing PreservesSideIDs tests both set
+// WinnerSide:"A", so this branch — and the equal-count "leave WinnerID empty"
+// tie — were previously uncovered (mp-jvzy tri-review finding).
+func TestBackfillMatchIdentity(t *testing.T) {
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+
+	tests := []struct {
+		name       string
+		result     state.MatchResult
+		wantWinner string
+	}{
+		{
+			name:       "WinnerSide A hint wins over everything",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "A"},
+			wantWinner: idA,
+		},
+		{
+			name:       "WinnerSide B hint",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "B"},
+			wantWinner: idB,
+		},
+		{
+			name:       "unambiguous name match resolves to SideA",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
+			wantWinner: idA,
+		},
+		{
+			name:       "unambiguous name match resolves to SideB",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: SideA has more ippons",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "same-name head-to-head: SideB has more ippons (symmetry)",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"D"}, IpponsB: []string{"M", "K"}},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: equal ippons is undecidable, WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M"}, IpponsB: []string{"D"}},
+			wantWinner: "",
+		},
+		{
+			name:       "scoreline count ignores the • placeholder",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "•"}, IpponsB: []string{"•"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "explicit WinnerID preserved (early return, no inference)",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "explicit-id", IpponsA: []string{"M", "K"}},
+			wantWinner: "explicit-id",
+		},
+		{
+			name:       "draw (empty Winner) leaves WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "", IpponsA: []string{"M"}, IpponsB: []string{"M"}},
+			wantWinner: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.result
+			// `stored` carries the generation-time ids; `result` (the incoming
+			// score) starts without them — mirrors the real write path.
+			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
+			backfillMatchIdentity(&result, stored)
+
+			assert.Equal(t, tc.wantWinner, result.WinnerID, "WinnerID")
+			// Side ids are always backfilled from `stored` (runs before the
+			// WinnerID early-return), even in the explicit-WinnerID case.
+			assert.Equal(t, idA, result.SideAID, "SideAID backfilled")
+			assert.Equal(t, idB, result.SideBID, "SideBID backfilled")
+		})
+	}
+}

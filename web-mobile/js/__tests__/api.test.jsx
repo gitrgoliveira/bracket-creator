@@ -114,6 +114,35 @@ describe('API Utils', () => {
       // No key — server-side omitempty drops it from the persisted record.
       expect('decidedByHantei' in result).toBe(false);
     });
+
+    // mp-jvzy: forward the winner's participant id so a same-name head-to-head
+    // is unambiguous on the backend. Without it, a tied/hantei scoreline leaves
+    // the backend unable to pick a side and the league matrix marks BOTH rows
+    // as winners. The scoring modal sets patch.winner to the winning SIDE object.
+    it('forwards winnerId from the winning side object', () => {
+      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const result = toBackendMatchResult({ winner: { id: 'id-a', name: 'Player A' }, status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.winnerId).toBe('id-a');
+    });
+
+    it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
+      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      // Mumeishi won — even on a tied scoreline the id disambiguates the side.
+      const result = toBackendMatchResult({ winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' }, status: 'complete', ipponsA: ['M'], ipponsB: ['M'], score: { type: 'ippon' }, decidedByHantei: true }, match);
+      expect(result.winnerId).toBe('id-mumeishi');
+    });
+
+    it('omits winnerId when same-name and the winner is a bare name (ambiguous)', () => {
+      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: ['M'] }, match);
+      expect('winnerId' in result).toBe(false); // backend infers from scoreline / name fallback
+    });
+
+    it('derives winnerId from the match sides for a distinct-name bare-name winner', () => {
+      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
+      expect(result.winnerId).toBe('id-b');
+    });
   });
 
   describe('isHikiwake', () => {
@@ -138,6 +167,27 @@ describe('API Utils', () => {
       
       expect(norm.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A' });
       expect(norm.sideB).toEqual({ id: 'Bob', name: 'Bob' }); // Fallback if not in map
+    });
+
+    // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants
+    // (allowed when dojos differ) collapse onto one id. When the server sends
+    // explicit per-side ids (sideAId/sideBId/winnerId from pool-matches.csv),
+    // those are authoritative and must override the collapsed lookup — without
+    // this the league matrix renders the same-name head-to-head inverted.
+    it('overrides name-collapsed ids with server sideAId/sideBId/winnerId', () => {
+      // Both "Tanaka Kenji" — name-keyed map holds only the last-added id.
+      const playerMap = { 'Tanaka Kenji': { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' } };
+      const match = {
+        sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
+        sideAId: 'uuid-kenshikan', sideBId: 'uuid-mumeishi', winnerId: 'uuid-kenshikan',
+        status: 'completed', ipponsA: ['M'], ipponsB: [],
+      };
+      const norm = normalizeMatch(match, playerMap);
+      expect(norm.sideA.id).toBe('uuid-kenshikan'); // flat id wins over collapsed map id
+      expect(norm.sideB.id).toBe('uuid-mumeishi');
+      expect(norm.winner.id).toBe('uuid-kenshikan');
+      // The shared playerMap object must NOT be mutated by the id stamp.
+      expect(playerMap['Tanaka Kenji'].id).toBe('uuid-mumeishi');
     });
 
     it('should build score object from ippons for pool matches', () => {
@@ -253,6 +303,43 @@ describe('API Utils', () => {
       const map = buildPlayerMap(comp);
       expect(map['Alice'].id).toBe('uuid-aaa');
       expect(map['Bob'].id).toBe('uuid-bbb');
+    });
+
+    // mp-jvzy: two same-name participants (different dojos) collapse onto one
+    // NAME key — last-added wins. An additional id key per participant keeps
+    // each one's correct dojo/number, so normalizeMatch can resolve each side
+    // by the server's authoritative id and never show the wrong dojo.
+    it('keys by participant id so same-name players keep distinct dojo/number', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-kenshikan', name: 'Tanaka Kenji', dojo: 'Kenshikan', number: 'K1' },
+          { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi', number: 'K2' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      // Name key collapses to the last-added (Mumeishi).
+      expect(map['Tanaka Kenji'].dojo).toBe('Mumeishi');
+      // But each id key carries the correct, distinct metadata.
+      expect(map['uuid-kenshikan']).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan', number: 'K1' });
+      expect(map['uuid-mumeishi']).toMatchObject({ id: 'uuid-mumeishi', dojo: 'Mumeishi', number: 'K2' });
+    });
+
+    it('normalizeMatch attaches the CORRECT dojo to each same-name side via flat ids', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-kenshikan', name: 'Tanaka Kenji', dojo: 'Kenshikan' },
+          { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      const m = normalizeMatch({
+        sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
+        sideAId: 'uuid-kenshikan', sideBId: 'uuid-mumeishi', winnerId: 'uuid-kenshikan',
+        status: 'completed', ipponsA: ['M'], ipponsB: [],
+      }, map);
+      expect(m.sideA).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
+      expect(m.sideB).toMatchObject({ id: 'uuid-mumeishi', dojo: 'Mumeishi' });
+      expect(m.winner).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
     });
 
     it('falls back to name as id when no id field', () => {

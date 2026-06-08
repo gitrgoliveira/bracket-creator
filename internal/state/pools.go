@@ -90,6 +90,12 @@ func parsePoolsFile(path string) (any, error) {
 		if len(rec) > 6 {
 			player.Number = rec[6]
 		}
+		// Participant UUID (appended after the legacy 7-column layout).
+		// Absent in pre-change files → empty id; the league matrix then
+		// falls back to name-based cell matching.
+		if len(rec) > 7 {
+			player.ID = rec[7]
+		}
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
 
@@ -195,7 +201,7 @@ func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 			if player.Seed > 0 {
 				seedStr = strconv.Itoa(player.Seed)
 			}
-			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr, player.Number}); err != nil {
+			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr, player.Number, player.ID}); err != nil {
 				return err
 			}
 		}
@@ -344,6 +350,18 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		} else {
 			m.Round = -1
 		}
+		// Participant-id columns (appended after Round, after the legacy
+		// 15-column layout). Absent in files written before this was added
+		// → ids stay empty and consumers fall back to name matching.
+		if len(rec) > 16 {
+			m.SideAID = rec[16]
+		}
+		if len(rec) > 17 {
+			m.SideBID = rec[17]
+		}
+		if len(rec) > 18 {
+			m.WinnerID = rec[18]
+		}
 
 		results = append(results, m)
 	}
@@ -380,7 +398,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID"}); err != nil {
 		return err
 	}
 
@@ -415,6 +433,9 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.ScheduledAt,
 			r.ResultSource,
 			strconv.Itoa(r.Round),
+			r.SideAID,
+			r.SideBID,
+			r.WinnerID,
 		}); err != nil {
 			return err
 		}

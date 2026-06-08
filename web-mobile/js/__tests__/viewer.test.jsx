@@ -578,8 +578,8 @@ describe('TournamentInfo', () => {
   });
 });
 
-// mp-f4xo: PoolMatrix — clickable cross-table cells
-describe('PoolMatrix (mp-f4xo)', () => {
+// mp-f4xo: LeagueMatrix — clickable cross-table cells
+describe('LeagueMatrix (mp-f4xo)', () => {
   const realReact = global.React;
   let runtime;
   let PM;
@@ -632,7 +632,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
-    ({ PoolMatrix: PM } = await import('../viewer.jsx'));
+    ({ LeagueMatrix: PM } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -678,8 +678,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('renders W/L cells for a completed match', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
-    const lossCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--loss'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
     expect(winCell).toBeTruthy();
     expect(lossCell).toBeTruthy();
   });
@@ -688,7 +688,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeTypeOf('function');
     winCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -705,7 +705,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [pendingMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const pendingCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--pending'));
+    const pendingCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--pending'));
     expect(pendingCell).toBeTruthy();
     pendingCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -715,7 +715,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const liveCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--live'));
+    const liveCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--live'));
     expect(liveCell).toBeTruthy();
     liveCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -724,8 +724,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('self-diagonal and empty cells have no onClick', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const selfCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--self'));
-    const emptyCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--empty'));
+    const selfCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--self'));
+    const emptyCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--empty'));
     expect(selfCells.length).toBeGreaterThan(0);
     selfCells.forEach(c => expect(c.props.onClick).toBeUndefined());
     emptyCells.forEach(c => expect(c.props.onClick).toBeUndefined());
@@ -734,7 +734,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have role=button and tabIndex=0 for a11y', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.role).toBe('button');
     expect(winCell.props.tabIndex).toBe(0);
   });
@@ -742,7 +742,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have aria-label describing the matchup', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props['aria-label']).toContain('Alice');
     expect(winCell.props['aria-label']).toContain('Bob');
     expect(winCell.props['aria-label']).toContain('Win');
@@ -752,7 +752,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: 'Enter', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -763,7 +763,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: ' ', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -773,7 +773,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('cells are not interactive when onMatchClick is not provided', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeUndefined();
     expect(winCell.props.role).toBeUndefined();
   });
@@ -794,31 +794,96 @@ describe('PoolMatrix (mp-f4xo)', () => {
     };
     const tree = runtime.mount(PM, { pool: numberedPool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
     expect(colHeaders.map(h => textContent(h))).toEqual(['A1', 'A2', 'A3']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
       return textContent(numSpan);
     });
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
   });
 
-  it('omits numbers entirely when player.number is not set', () => {
+  it('falls back to draw-order index when player.number is not set', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
-    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
+    // Column headers always show a visible label — the 1-based draw-order
+    // position index when the player has no assigned number.
+    expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
-      return numSpan;
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
+      return textContent(numSpan);
     });
-    expect(rowNums).toEqual([undefined, undefined, undefined]);
+    // The number span is now always rendered, mirroring the column index so
+    // row N and column N cross-reference the same player.
+    expect(rowNums).toEqual(['1', '2', '3']);
+  });
+
+  // Regression: two participants share a name but have different dojos/ids.
+  // Name-only cell indexing collapses both into one matchMap entry and shows
+  // the wrong result; id-based keys must keep them distinct. (Copilot #261)
+  it('disambiguates same-name participants by id when mapping cells', () => {
+    const samePool = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' }, // same name, different id
+        { id: 'A1', name: 'Alice', dojo: 'Kyoto' },
+      ],
+    };
+    // T1 beat Alice; T2 lost to Alice. With name-only keys both
+    // "Tanaka Kenji vs Alice" cells resolve to the same (last-registered)
+    // match and show identical results.
+    const mWin = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T1', sideBId: 'A1', status: 'completed', winner: { id: 'T1', name: 'Tanaka Kenji' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const mLoss = {
+      id: 'Pool A-1', sideA: { id: 'T2', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T2', sideBId: 'A1', status: 'completed', winner: { id: 'A1', name: 'Alice' },
+      ipponsA: [], ipponsB: ['K'], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: samePool, matches: [mWin, mLoss], tweaks: {} });
+    const labels = allCells(tree).map(c => c.props?.['aria-label']).filter(Boolean);
+    // The id-keyed mapping yields BOTH outcomes for the same name vs Alice —
+    // proof the two Tanakas resolved to different matches. The aria-label also
+    // carries the disambiguating dojo (a11y: screen readers can't rely on the
+    // hover title), so the two Tanakas are distinguishable in the label itself.
+    expect(labels).toContain('Match: Tanaka Kenji (Tokyo) vs Alice (Kyoto) — Win');
+    expect(labels).toContain('Match: Tanaka Kenji (Osaka) vs Alice (Kyoto) — Loss');
+  });
+
+  // Regression: the head-to-head between two same-name participants. The
+  // winner is stored by name (ambiguous), so rowWon must resolve via
+  // winnerId — otherwise BOTH rows show the same result. (browser-found)
+  it('resolves the winner of a same-name head-to-head by id', () => {
+    const twoTanaka = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' },
+      ],
+    };
+    // T1 beat T2. winner name "Tanaka Kenji" is ambiguous; winnerId 'T1' is not.
+    const headToHead = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'T2', name: 'Tanaka Kenji' },
+      sideAId: 'T1', sideBId: 'T2', winnerId: 'T1', status: 'completed',
+      winner: { id: 'T1', name: 'Tanaka Kenji' }, ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: twoTanaka, matches: [headToHead], tweaks: {} });
+    const bodyCells = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__cell--win') || c.props?.className?.includes('league-matrix__cell--loss'));
+    const wins = bodyCells.filter(c => c.props?.className?.includes('--win'));
+    const losses = bodyCells.filter(c => c.props?.className?.includes('--loss'));
+    // Exactly one win (T1's row) and one loss (T2's row) — NOT two wins.
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
   });
 });
 

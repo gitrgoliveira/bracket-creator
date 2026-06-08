@@ -291,6 +291,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if result.SideB == "" {
 			result.SideB = r.SideB
 		}
+		// Preserve generation-time participant ids + resolve winner id across
+		// the whole-struct overwrite below (the /score endpoint scores through
+		// this Tx path). See backfillMatchIdentity.
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
@@ -417,6 +421,10 @@ func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, r
 		if result.SideB == "" {
 			result.SideB = r.SideB
 		}
+		// Preserve generation-time participant ids + resolve winner id across
+		// the whole-struct overwrite below (the /score endpoint scores through
+		// this Tx path). See backfillMatchIdentity.
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}

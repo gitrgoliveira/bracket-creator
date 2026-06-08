@@ -1538,7 +1538,9 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => (
               <tr key={s.player?.id || s.player?.name || i}>
-                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
+                    DRY with the backend tiebreak/override logic, not the row index. */}
+                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                 <td>
                   <div style={{ fontWeight: 500 }}>{s.player?.name || ""}</div>
                   {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
@@ -1555,7 +1557,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           </tbody>
         </table>
         {standings.length > 0 && (
-          <div className="pool-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+          <div className="league-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
             Ranked by: wins → points scored (PW) → head-to-head.
           </div>
         )}
@@ -1707,7 +1709,12 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} showLiveDot format={c.format} />
+          {/* Suppress the "League" badge during pools: the active tab already
+              reads "League", so the badge is pure redundancy. Other statuses
+              (Playoffs / Completed) still carry information, so keep those. */}
+          {!(c.status === "pools" && c.format === "league") && (
+            <StatusBadge status={c.status} showLiveDot format={c.format} />
+          )}
           {authed && onEditCompetition && (
             <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
           )}
@@ -1972,11 +1979,18 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => (
                 <tr key={s.player?.id || s.player?.name || i}>
-                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                  {/* Rank-ordered summary: "#" is the authoritative standing rank
+                      (s.rank), not the row index — DRY with the full standings and
+                      the backend tiebreak/override logic. */}
+                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div style={{ fontWeight: 500 }}>
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
+                      {/* No rank badge here: this summary is rank-sorted, so the
+                          "#" column already IS the rank — a badge would just echo
+                          it. The rank badge only carries information when rows are
+                          in draw order (non-league pools), where rank ≠ position. */}
                     </div>
                     {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
                   </td>
@@ -2193,20 +2207,45 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
 });
 PoolMatchRow.displayName = "PoolMatchRow";
 
-// Round-robin matrix for a single pool. Each off-diagonal cell shows the row
-// player's result (W/L/X) against the column player; diagonal cells are self.
-function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
+// Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
+// row player's result (W/L/X) against the column player; diagonal cells are self.
+function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
   const isHighlighted = (p) => isFollowedPlayer(p, highlightPlayer);
+
+  // Stable participant key. A name is NOT unique within a competition —
+  // two participants from different dojos may share one (the duplicate
+  // check only rejects same-name AND same-dojo), so name-only indexing
+  // collides and can show the wrong cell. Prefer the participant UUID,
+  // falling back to name for legacy data that predates id persistence.
+  const pkey = (x) => (x && x.id != null && x.id !== "" ? String(x.id) : (x && x.name) || "");
+  // Winner id tolerant of BOTH the canonical object shape (`m.winner.id`
+  // from api_serializers.jsx) and the flat `m.winnerId` shape some
+  // fixtures/CSV round-trips use. (Side ids come from the shared
+  // matchParticipantIds helper; names from matchParticipantNames.)
+  const winnerId = (m) => (m.winner && typeof m.winner === "object" ? m.winner.id : null) || m.winnerId || "";
+
+  // Index every match under BOTH its id-pair and its name-pair. The id
+  // entries are collision-free and used first; the name entries are a
+  // fallback for partially-migrated data (players carry ids but an older
+  // pool-matches.csv does not, or vice versa). Same-name collisions only
+  // affect the name fallback, which is the pre-existing behavior.
   const matchMap = {};
   matches.forEach(m => {
-    const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-    const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+    const [aName, bName] = matchParticipantNames(m);
+    const [aId, bId] = matchParticipantIds(m);
+    const aKey = aId || aName;
+    const bKey = bId || bName;
+    if (aKey && bKey) {
+      matchMap[`${aKey}||${bKey}`] = m;
+      matchMap[`${bKey}||${aKey}`] = m;
+    }
     if (aName && bName) {
-      matchMap[`${aName}||${bName}`] = m;
-      matchMap[`${bName}||${aName}`] = m;
+      // Name fallback (does not clobber an existing id entry).
+      if (!matchMap[`${aName}||${bName}`]) matchMap[`${aName}||${bName}`] = m;
+      if (!matchMap[`${bName}||${aName}`]) matchMap[`${bName}||${aName}`] = m;
     }
   });
 
@@ -2222,35 +2261,48 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
 
   const handleCellKeyDown = (e, m) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCellClick(m); } };
 
-  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
+  // Label including the dojo when present so two same-name participants are
+  // distinguishable. Used for BOTH the hover `title` AND the cell/header
+  // `aria-label` — screen readers don't reliably announce `title`, so the
+  // accessible name must carry the disambiguating dojo itself.
+  const playerLabel = (p) => (p && p.dojo ? `${p.name} (${p.dojo})` : (p && p.name) || "");
+  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
+  const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
 
   return (
-    <div className="pool-matrix-wrap">
-      <table className="pool-matrix">
+    <div className="league-matrix-wrap">
+      <table className="league-matrix">
         <thead>
           <tr>
-            <th className="pool-matrix__corner"></th>
-            {players.map((p) => (
-              <th key={p.name} scope="col" aria-label={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{p.number || ""}</th>
+            <th className="league-matrix__corner"></th>
+            {players.map((p, i) => (
+              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "pool-matrix__row--me" : ""}>
-              <td className="pool-matrix__row-head" title={rowPlayer.name}>
-                {rowPlayer.number ? <span className="pool-matrix__num">{rowPlayer.number}</span> : null}
-                <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
+            <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
+              <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
+                <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
+                <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
-                const colMe = isHighlighted(colPlayer) ? " pool-matrix__col--me" : "";
-                if (ri === ci) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--self${colMe}`}>&mdash;</td>;
-                const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--empty${colMe}`}></td>;
+                const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
+                if (ri === ci) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
+                // Look up the match by id-pair first (collision-free),
+                // then by name-pair for legacy/un-migrated data.
+                const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
+                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
-                const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+                const [aName] = matchParticipantNames(m);
+                const [aId] = matchParticipantIds(m);
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-                const rowIsAka = aName === rowPlayer.name;
+                // Which side is the row player? Match on id when both the
+                // match side and the player carry one; else by name.
+                const rowIsAka = (aId && rowPlayer.id)
+                  ? aId === rowPlayer.id
+                  : aName === rowPlayer.name;
 
                 const interactiveProps = onMatchClick ? {
                   role: "button",
@@ -2260,7 +2312,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2268,24 +2320,44 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
-                const rowWon = winnerName && winnerName === rowPlayer.name;
+                // Prefer the winner id: when two participants share a name,
+                // the winner name alone can't tell them apart (e.g. the
+                // head-to-head between two same-name/different-dojo players).
+                // Fall back to name for legacy data without a winner id.
+                const wId = winnerId(m);
+                // When both sides share a name and there is no winner id, the
+                // winner NAME is ambiguous — do NOT mark either row as winner
+                // (that would light up BOTH cells green for the one match). The
+                // id branch is the authoritative resolver; the name fallback is
+                // only safe for distinct-name matchups. (Source path now sends
+                // winnerId for same-name matches, so this is defense-in-depth
+                // for legacy data without ids.)
+                const namesAmbiguous = rowPlayer.name === colPlayer.name;
+                const rowWon = (wId && rowPlayer.id)
+                  ? wId === rowPlayer.id
+                  : (!namesAmbiguous && winnerName && winnerName === rowPlayer.name);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;
                 let resultLabel;
                 if (isDraw) {
-                  cellContent = <span className="pool-matrix__draw">X</span>;
+                  cellContent = <span className="league-matrix__draw">X</span>;
                   resultLabel = "Draw";
                 } else if (rowWon) {
-                  cellContent = <span className="pool-matrix__win">{rowIppons.join("") || "W"}</span>;
+                  // Show the row player's ippon letters (M/K/D/T/H); the green
+                  // cell colour signals the win. No "W" fallback — W is not an
+                  // ippon. A win with no recorded ippons (walkover/hantei)
+                  // shows an empty green cell.
+                  cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
                   resultLabel = "Win";
                 } else {
-                  cellContent = <span className="pool-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                  // The loser's own ippons (red), or empty when they scored none.
+                  cellContent = <span className="league-matrix__loss">{rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );
@@ -2294,10 +2366,11 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
           ))}
         </tbody>
       </table>
-      <div className="pool-matrix__legend">
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
+      <div className="league-matrix__legend">
+        <span className="league-matrix__legend-item league-matrix__legend-item--win">win</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--loss">loss</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--draw">X = draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H)</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
@@ -2385,15 +2458,19 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         }) : [];
 
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
-        // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
-        // without resorting the table (mp-938b: table is draw-order, not rank-order).
+        // Rank is the backend's authoritative PlayerStanding.rank (single source of
+        // truth — it already folds in tiebreakers and manual rank overrides; see
+        // engine/scoring.go). We do NOT re-derive it as index+1 here (DRY), falling
+        // back to index+1 only if a legacy payload omitted the field.
+        // Used to look up each draw-position row's rank without resorting the table
+        // (mp-938b: table is draw-order, not rank-order).
         // Key = player.id when available; falls back to "name||dojo" composite so that
         // duplicate names across different dojos don't collide — mirrors the lookup below.
         const rankByPlayerKey = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
             const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
-            rankByPlayerKey.set(key, { rank: i + 1, standing: s });
+            rankByPlayerKey.set(key, { rank: s.rank || i + 1, standing: s });
           });
         }
 
@@ -2407,7 +2484,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           : (pool.players || []);
 
         return (
-          <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
+          // A lone pool (every league has exactly one) must span the full grid
+          // width. Otherwise the landscape 2-column `.pools-grid` renders it at
+          // half width, mismatching the full-width Overview standings table.
+          <div key={pool.poolName} className="pool" style={{ padding: 14, gridColumn: pools.length === 1 ? "1 / -1" : undefined }}>
             <div className="pool__head">
               <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
@@ -2441,12 +2521,29 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      {/* The "#" column means different things by format, and that is
+                          intentional and explicit:
+                          - League: the table is ordered by rank, so "#" shows the
+                            authoritative standing rank (s.rank). No separate rank
+                            badge — rank is shown exactly once here.
+                          - Pools: the table is in DRAW order (operators read it as a
+                            fight-order chart), so "#" is the draw position and the
+                            rank is surfaced separately by the badge next to the name. */}
+                      {isLeague ? (
+                        <td className="pool-standings__draw-pos" style={{ color: (s && s.isOverridden) ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: (s && s.isOverridden) ? 700 : 400 }}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
+                      ) : (
+                        <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      )}
                       <td>
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
-                          {rank !== null ? (
+                          {/* The rank badge is only informative when rows are in
+                              DRAW order (non-league pools), where rank ≠ the "#"
+                              draw-position column. League standings are rank-sorted,
+                              so "#" already equals the rank and a badge would just
+                              duplicate it — suppress it there. */}
+                          {!isLeague && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>
@@ -2512,7 +2609,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
               </div>
             )}
           </div>
@@ -2652,7 +2749,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

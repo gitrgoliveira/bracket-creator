@@ -638,9 +638,11 @@ function App() {
             // the home/schedule screen (viewerCompId is null). Home-screen
             // widgets (LIVE NOW, progress bars, watchlist, followed-player
             // matches) derive from tournament.competitions and need the
-            // updated match state. Viewers already inside a specific
-            // competition are covered by the per-comp detail fetch above —
-            // they skip the list refetch, which is the dominant scaling win.
+            // updated match state. Viewers inside a specific competition
+            // skip the list refetch for match_updated only (the per-comp
+            // detail fetch above covers it) — that skip is the dominant
+            // scaling win. competition_started/completed still fire a list
+            // refetch for all non-display viewers so status badges update.
             // Display mode is excluded because it fires load() in the block
             // above (line 622-623).
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {

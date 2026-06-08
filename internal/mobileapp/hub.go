@@ -80,7 +80,7 @@ const DefaultHistorySize = 100
 // Override at startup via the SSE_MAX_CLIENTS env var or by passing a
 // positive value to NewHubWithLimits. A non-positive (zero or negative)
 // value disables the cap entirely — used by tests that need to exceed
-// the default and not enforced anywhere production. The cap is mp-663
+// the default and not enforced anywhere in production. The cap is mp-663
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
 // Raised from 1000 → 5000 by mp-9afd to support EKC-scale (1000+ viewers).
 // A real hardware load test (goroutine/fd/memory budget at 5000 clients) is

@@ -111,7 +111,7 @@ describe('TvWhiteBoard', () => {
   });
 
   it('an up-next team match renders the TeamScoreboard (numbered rows), no "Starts soon" / "up next" badge', () => {
-    // mp-ucvb #6/#9: up-next now shows the real scoreboard (TeamScoreboard
+    // mp-13y #6/#9: up-next now shows the real scoreboard (TeamScoreboard
     // renders teamSize numbered rows when subResults is empty), and the
     // "↑ up next" badge was dropped.
     const p = teamPromoted('upnext');

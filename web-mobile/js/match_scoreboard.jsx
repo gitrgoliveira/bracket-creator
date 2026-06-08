@@ -214,7 +214,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts — equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
-  // Daihyosen on an already-decided match (mp-ucvb #12).
+  // Daihyosen on an already-decided match (mp-13y #12).
   const tied = ivShiro === ivAka && pwShiro === pwAka;
   const renderDH = !!showDH && tied;
   const dhSub = renderDH ? (subResults || []).find(s => s.position === -1) : null;
@@ -262,7 +262,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
 
       {/* No bouts recorded yet (lineups not submitted / up-next): show the
           teamSize numbered/roster rows so the board reads as a real scoreboard
-          rather than a lone IV/PW summary (mp-ucvb #4/#6). BoutSubRow shows the
+          rather than a lone IV/PW summary (mp-13y #4/#6). BoutSubRow shows the
           pinned player name when a lineup exists, else the bout number. */}
       {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
         <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}

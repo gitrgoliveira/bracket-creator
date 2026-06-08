@@ -324,7 +324,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
                     <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}</span>
-                    {/* mp-ucvb #9: no "UP NEXT" badge — the promoted match is shown
+                    {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
@@ -352,7 +352,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             {/* Shared FIK scoreboard (match_scoreboard.jsx) — the SAME component
                 the viewer card uses; variant="tv" only scales it up. Up-next
                 matches have no bouts yet: TeamScoreboard renders numbered/roster
-                rows (mp-ucvb #6) so the board reads as a real scoreboard rather
+                rows (mp-13y #6) so the board reads as a real scoreboard rather
                 than an empty grid. */}
             {isTeamMatch ? (
                 <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
@@ -1044,7 +1044,7 @@ function StreamingQR({ url, label }) {
 // mp-13y: team match lower-third — for team matches the centre holds a
 // QR code ("scan for results") flanked by the team names; the current
 // bout's competitor names appear on the outer sides, with a running IV/PW
-// aggregate per side beneath them (mp-ucvb #10).
+// aggregate per side beneath them (mp-13y #10).
 function StreamingOverlay({ court, position, competitions }) {
     const pos = position === 'top' ? 'top' : 'bottom';
 
@@ -1098,7 +1098,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '—') : '—';
     const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
 
-    // mp-ucvb #10: running IV/PW aggregate per side, so the lower-third shows
+    // mp-13y #10: running IV/PW aggregate per side, so the lower-third shows
     // the team-match standing (not just the current bout). teamIVPW excludes
     // the Daihyosen (position -1) row. sideB = shiro, sideA = aka.
     const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
@@ -1153,7 +1153,7 @@ function StreamingOverlay({ court, position, competitions }) {
                 /* mp-13y: team match lower-third.
                    Layout: [Shiro team/bout/IV·PW] [QR + bout score] [Aka …]
                    Each side shows the team name, the current bout competitor,
-                   and a running IV/PW aggregate (mp-ucvb #10). */
+                   and a running IV/PW aggregate (mp-13y #10). */
                 <>
                     {/* Shiro bout competitor — left side (white) */}
                     <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro-bout">

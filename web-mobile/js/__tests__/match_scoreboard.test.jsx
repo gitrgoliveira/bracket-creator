@@ -138,7 +138,7 @@ describe('match_scoreboard components', () => {
     expect(boutRows(tree).some(r => r.isDH)).toBe(true);
   });
 
-  it('TeamScoreboard does NOT render the Daihyosen when the regular bouts are not tied (mp-ucvb #12)', () => {
+  it('TeamScoreboard does NOT render the Daihyosen when the regular bouts are not tied (mp-13y #12)', () => {
     const subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: ['M'] },   // draw
       { position: 2, ipponsB: ['M'], ipponsA: [] },        // shiro wins → IV 1-0 (NOT tied)
@@ -150,13 +150,13 @@ describe('match_scoreboard components', () => {
     expect(boutRows(tree).some(r => r.isDH)).toBe(false);
   });
 
-  it('TeamScoreboard renders teamSize numbered rows when there are no bouts yet (mp-ucvb #4/#6)', () => {
+  it('TeamScoreboard renders teamSize numbered rows when there are no bouts yet (mp-13y #4/#6)', () => {
     const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 3, showDH: false });
     expect(boutRows(tree).length).toBe(3);
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary')).toBeTruthy();
   });
 
-  it('TeamScoreboard shows team names in the summary row when provided (mp-ucvb #2)', () => {
+  it('TeamScoreboard shows team names in the summary row when provided (mp-13y #2)', () => {
     const subResults = [{ position: 1, ipponsB: ['M'], ipponsA: [] }];
     const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, shiroName: 'White Team', akaName: 'Red Team' });
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'summary-shiro-name')).toBeTruthy();
@@ -164,7 +164,7 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('White Team'); expect(text).toContain('Red Team');
   });
 
-  it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-ucvb #3/#7)', () => {
+  it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-13y #3/#7)', () => {
     const sub = { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T', ipponsA: [], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });
     // "Ht" sits in the AKA (winner) slot; the centre cell is empty.

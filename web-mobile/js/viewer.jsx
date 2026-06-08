@@ -1818,7 +1818,7 @@ function MatchDetailCard({ match, onClose }) {
 
       {/* Individual matches keep the SHIRO/AKA player header (there is no
           summary row to carry the names); team matches put the team names in
-          the scoreboard's summary row instead (mp-ucvb #2). */}
+          the scoreboard's summary row instead (mp-13y #2). */}
       {!isTeam && (
         <div className="match-detail-card__players">
           <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>

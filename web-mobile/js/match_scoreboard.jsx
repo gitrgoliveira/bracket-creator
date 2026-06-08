@@ -110,23 +110,28 @@ function centreMarks(sub) {
   const isDraw = !sub.decidedByHantei &&
     typeof window.isHikiwake === "function" &&
     (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
-  // Win indicator only when there are no ippon letters (otherwise the letters
+  // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
   const winShiro = !!(noIppons && sub.winner && sub.winner === sub.sideB);
   const winAka = !!(noIppons && sub.winner && sub.winner === sub.sideA);
+  // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
+  // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
+  // hantei winner is unknown does "Ht" fall back to the centre cell.
+  const winMark = sub.decidedByHantei ? "Ht" : "○";
+  const hasWinSide = winShiro || winAka;
   return (
     <span className="msb-marks" data-testid="sub-marks">
       <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
         {foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}
-        {winShiro ? slotCells(["○", ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
+        {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
         {isDraw ? <span data-testid="sub-row-draw">X</span> : null}
-        {sub.decidedByHantei ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span> : null}
+        {sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span> : null}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
-        {winAka ? slotCells(["○", ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
+        {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
         {foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}
       </span>
     </span>

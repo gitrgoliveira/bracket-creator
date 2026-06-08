@@ -164,12 +164,22 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('White Team'); expect(text).toContain('Red Team');
   });
 
-  it('BoutSubRow marks the hantei winner with ○ on the winning side, no ippons (mp-ucvb #3/#7)', () => {
+  it('BoutSubRow puts the hantei "Ht" mark on the winning side, not the centre (mp-ucvb #3/#7)', () => {
     const sub = { position: -1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Aka T', ipponsA: [], ipponsB: [], decidedByHantei: true };
     const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });
-    // Ht in the centre + the ○ win mark on the AKA (winner) side only.
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeTruthy();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a')).toBeTruthy();
+    // "Ht" sits in the AKA (winner) slot; the centre cell is empty.
+    const winA = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a');
+    expect(winA).toBeTruthy();
+    expect(collectText(winA)).toContain('Ht');
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b')).toBeNull();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+  });
+
+  it('BoutSubRow marks a non-hantei ippon-less win (fusensho/kiken) with ○ on the winner', () => {
+    const sub = { position: 1, sideA: 'Aka T', sideB: 'Shiro T', winner: 'Shiro T', ipponsA: [], ipponsB: [], decision: 'fusensho' };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2 });
+    const winB = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-b');
+    expect(winB).toBeTruthy();
+    expect(collectText(winB)).toContain('○');
   });
 });

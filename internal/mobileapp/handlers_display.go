@@ -82,6 +82,15 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					hasIDsHint = &t
 				}
 				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+				// mp-13y: merge numberPrefix-derived numbers from pools.csv
+				// onto the players slice so buildSide can include "number" in
+				// the polled OBS/vMix overlay payload.
+				if comp.NumberPrefix != "" {
+					pools, _ := store.LoadPools(compID)
+					comp.Players = players
+					mergePoolNumbersIntoPlayers(comp, pools)
+					players = comp.Players
+				}
 
 				sideA := buildSide(m.SideA, players, comp.WithZekkenName)
 				sideB := buildSide(m.SideB, players, comp.WithZekkenName)

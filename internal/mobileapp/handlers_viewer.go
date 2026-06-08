@@ -7,8 +7,48 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// mergePoolNumbersIntoPlayers — copy the assigned competitor Number
+// (e.g. "K1") from pools.csv onto comp.Players. participants.csv does NOT
+// persist Number — it is assigned at draw time by AssignPlayerNumbers and
+// only persisted into pools.csv. Without this merge the viewer API never
+// carries the numberPrefix-derived numbers, so TV/overlay/viewer surfaces
+// can't render them (mp-13y). No-op for competitions without numberPrefix
+// or with no pools loaded. Match by id first (HasParticipantIDs case),
+// fall back to name. Safe to call when either slice is empty.
+func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
+	if comp == nil || comp.NumberPrefix == "" || len(pools) == 0 || len(comp.Players) == 0 {
+		return
+	}
+	byID := make(map[string]string)
+	byName := make(map[string]string)
+	for _, pool := range pools {
+		for _, pp := range pool.Players {
+			if pp.Number == "" {
+				continue
+			}
+			if pp.ID != "" {
+				byID[pp.ID] = pp.Number
+			}
+			byName[pp.Name] = pp.Number
+		}
+	}
+	for i := range comp.Players {
+		if comp.Players[i].Number != "" {
+			continue
+		}
+		if n, ok := byID[comp.Players[i].ID]; ok && n != "" {
+			comp.Players[i].Number = n
+			continue
+		}
+		if n, ok := byName[comp.Players[i].Name]; ok && n != "" {
+			comp.Players[i].Number = n
+		}
+	}
+}
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
 // public viewer goroutines. It is a package-level variable so panic-
@@ -74,6 +114,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				// Global views like Scoring/Schedule need matches and brackets
 				poolMatches, _ := store.LoadPoolMatches(compID)
 				bracket, _ := store.LoadBracket(compID)
+				// mp-13y: merge numberPrefix-derived numbers from pools.csv.
+				pools, _ := store.LoadPools(compID)
+				mergePoolNumbersIntoPlayers(comp, pools)
 
 				// mp-9dz: a preview bracket on a mixed source carries pool-
 				// origin placeholders ("Pool A-1st") with scheduled times
@@ -140,7 +183,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 		// Run all independent I/O concurrently.
 		var (
-			pools       any
+			pools       []helper.Pool
 			poolMatches []state.MatchResult
 			standings   any
 			bracket     *state.Bracket
@@ -199,6 +242,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// see annotateQueuePositions for rationale.
 		annotateQueuePositions(poolMatches)
 		annotateBracketQueuePositions(bracket)
+
+		// mp-13y: merge assigned competitor Number from pools.csv onto
+		// comp.Players so the numberPrefix-derived "K1", "K2", … surface
+		// on the TV display, streaming overlay, and viewer card.
+		mergePoolNumbersIntoPlayers(comp, pools)
 
 		c.JSON(http.StatusOK, gin.H{
 			"config":      comp,

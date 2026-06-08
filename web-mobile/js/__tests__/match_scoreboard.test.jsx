@@ -297,4 +297,41 @@ describe('match_scoreboard components', () => {
     expect(winB).toBeTruthy();
     expect(collectText(winB)).toContain('○');
   });
+
+  it('BoutSubRow matches a winner stored as the TEAM name via sub.teamA/teamB (daihyosen)', () => {
+    // Copilot review batch 5: the backend can persist the daihyosen winner as
+    // the TEAM name, not the rep competitor name. centreMarks must accept
+    // sub.teamB / sub.teamA as fallback winner keys so the ○ / Ht mark still
+    // lands on the winning side instead of falling back to centre Ht.
+    const sub = {
+      position: -1,
+      sideA: 'Aka Rep', sideB: 'Shiro Rep',
+      teamA: 'Red Team', teamB: 'White Team',
+      winner: 'Red Team', // ← stored as team name, not rep name
+      ipponsA: [], ipponsB: [], decidedByHantei: true,
+    };
+    const tree = runtime.mount(BoutSubRow, { sub, index: 0, lineupA: null, lineupB: null, teamSize: 2, isDH: true });
+    const winA = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-win-a');
+    expect(winA).toBeTruthy();
+    expect(collectText(winA)).toContain('Ht');
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei')).toBeNull();
+  });
+
+  it('TeamScoreboard threads shiroName/akaName into the Daihyosen sub as teamB/teamA', () => {
+    // Copilot review batch 5: TeamScoreboard wraps the DH sub with the parent
+    // team names so a backend-persisted team-name winner key still resolves.
+    const subResults = [
+      { position: 1, ipponsB: ['M'], ipponsA: ['M'] },           // 1-1 → tied
+      { position: -1, winner: 'White Team', decidedByHantei: true, ipponsA: [], ipponsB: [] },
+    ];
+    const tree = runtime.mount(TeamScoreboard, {
+      subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true,
+      shiroName: 'White Team', akaName: 'Red Team',
+    });
+    // Find the DH bout row — its sub must carry teamB/teamA.
+    const dhRow = boutRows(tree).find(r => r.isDH);
+    expect(dhRow).toBeTruthy();
+    expect(dhRow.sub.teamB).toBe('White Team');
+    expect(dhRow.sub.teamA).toBe('Red Team');
+  });
 });

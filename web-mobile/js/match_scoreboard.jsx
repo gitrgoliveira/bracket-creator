@@ -141,9 +141,16 @@ function centreMarks(sub) {
     (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
+  // The backend may persist a daihyosen winner as the TEAM name rather than
+  // the rep competitor's name — accept sub.teamB/sub.teamA as fallback keys
+  // (TeamScoreboard threads shiroName/akaName into the DH sub as teamB/teamA)
+  // so the win mark still lands on the winning side instead of falling back
+  // to the centre Ht.
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
-  const winShiro = !!(noIppons && sub.winner && sub.winner === sub.sideB);
-  const winAka = !!(noIppons && sub.winner && sub.winner === sub.sideA);
+  const winShiro = !!(noIppons && sub.winner &&
+    (sub.winner === sub.sideB || sub.winner === sub.teamB));
+  const winAka = !!(noIppons && sub.winner &&
+    (sub.winner === sub.sideA || sub.winner === sub.teamA));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
   // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
   // hantei winner is unknown does "Ht" fall back to the centre cell.
@@ -333,14 +340,18 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           teamSize={teamSize} isDH={false} state="queued" />
       ))}
 
-      {/* Daihyosen banner + rep bout (knockout tie only) */}
+      {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
+          enriched with the parent team names (teamB=shiro, teamA=aka) so
+          centreMarks can resolve a winner key stored as the TEAM name to
+          the correct side — see centreMarks for the fallback chain. */}
       {renderDH && (
         <>
           <div className="msb-row msb-row--dh-banner" data-testid="dh-banner">
             <span className="msb-dh-tag">DAIHYOSEN</span>
           </div>
           {dhSub
-            ? <BoutSubRow sub={dhSub} index={regular.length} lineupA={lineupA} lineupB={lineupB}
+            ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
+                index={regular.length} lineupA={lineupA} lineupB={lineupB}
                 teamSize={teamSize} isDH={true} state="now" />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>

@@ -23,7 +23,7 @@ var errNotFound = errors.New("not found")
 //
 // Scalability goal (P2, mp-9afd): 1000 concurrent GET /viewer/competitions
 // arriving within the same 500ms SSE fan-out window collapse to O(1) builds
-// instead of O(1000). Each extra caller blocks briefly on a channel receive
+// instead of O(1000). Each extra caller blocks briefly on a WaitGroup
 // rather than spinning up a full fan-out goroutine set.
 type viewerSingleFlight struct {
 	mu    sync.Mutex

@@ -548,8 +548,8 @@ function App() {
         //     that target a single competition. Each event targets one comp,
         //     and each viewer does O(1) work when it's viewing that comp.
         //   listJitter — wider (0–2000ms) for full-list fetches (display mode
-        //     and genuine list-level transitions: competition_started/completed,
-        //     draw_generated/discarded, schedule_updated, participants_updated).
+        //     and genuine list-level transitions, e.g. competition_started,
+        //     draw_generated, schedule_updated, participants_updated, etc.).
         //     These are infrequent and the wider window staggers 1000+ display
         //     walls so they don't simultaneously storm GET /viewer/competitions.
         const detailJitter = Math.random() * 500;

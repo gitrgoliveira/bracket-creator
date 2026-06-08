@@ -2275,11 +2275,12 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
 
   const handleCellKeyDown = (e, m) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCellClick(m); } };
 
-  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
-  // Hover-tooltip label. Always include the dojo when present so two
-  // same-name participants are distinguishable on hover (the visible grid
-  // only shows the shared name). Hover-only, so the extra text is free.
+  // Label including the dojo when present so two same-name participants are
+  // distinguishable. Used for BOTH the hover `title` AND the cell/header
+  // `aria-label` — screen readers don't reliably announce `title`, so the
+  // accessible name must carry the disambiguating dojo itself.
   const playerLabel = (p) => (p && p.dojo ? `${p.name} (${p.dojo})` : (p && p.name) || "");
+  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
   const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
 
   return (

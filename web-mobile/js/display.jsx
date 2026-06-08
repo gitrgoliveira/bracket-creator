@@ -247,6 +247,9 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
         if (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) return id.slice(0, cut);
         return "";
     }
+    // Render a numeric round explicitly so a 0-based round index (round === 0)
+    // is not swallowed by the falsy-`||` fallback into an empty label.
+    if (typeof m.round === "number") return String(m.round);
     return m.round || "";
 }
 
@@ -490,7 +493,14 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         const allDone = regularSubs.every(s => {
             const aIp = (s.ipponsA || []).filter(x => x && x !== "•");
             const bIp = (s.ipponsB || []).filter(x => x && x !== "•");
+            // Mirror the shared scoreboard's "scored" test: a bout can also be
+            // decided with no ippon letters — fusensho/kiken (winner + decision),
+            // a hansoku award, or an explicit winner. Without these, a tied
+            // knockout closed by forfeit would never satisfy allDone and the
+            // Daihyosen row would be suppressed forever.
             return aIp.length > 0 || bIp.length > 0 || s.decidedByHantei ||
+                !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
+                s.hansokuA > 0 || s.hansokuB > 0 ||
                 (typeof window.isHikiwake === "function" &&
                     (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
         });

@@ -77,7 +77,9 @@ export function useTeamLineups(match, competition) {
       }
     })();
     return () => { cancelled = true; };
-  }, [compId, matchId, sideAId, sideBId]);
+    // match?.round participates in the fallback-round lineup fetch, so a round
+    // change on a reused match id must re-run the effect.
+  }, [compId, matchId, sideAId, sideBId, match?.round]);
 
   return { lineupA, lineupB };
 }

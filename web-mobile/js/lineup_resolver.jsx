@@ -34,13 +34,14 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
 }
 
 // resolveLineupTeamId maps a match-side key to the participant id that
-// lineups are actually stored under. A match side's `id` is the team NAME
-// (api_serializers.buildPlayerMap sets id = name), but TeamLineups are
-// keyed server-side by the participant's real id (a UUID — the value
-// teamIdOf() returns from comp.players). Passing the name straight through
-// makes the lineup GET 404, so the per-match (and round) lineup never
-// reaches the scoring grid. We look the side up in the competition's
-// participant list by id OR name and return its real id.
+// lineups are stored under. Depending on the API path, a match side's `id`
+// may be EITHER the participant's real id (a UUID) OR the team NAME (some
+// serializers set id = name). TeamLineups are keyed server-side by whatever
+// team key was used when the lineup was saved — in practice the participant's
+// real id — so passing a bare name straight through can make the lineup GET
+// 404 and the per-match (and round) lineup never reaches the scoring grid.
+// We look the side up in the competition's participant list by id OR name and
+// return its real id, falling back to the original key when unmatched.
 export function resolveLineupTeamId(sideKey, players) {
   if (!sideKey) return "";
   const list = Array.isArray(players) ? players : [];

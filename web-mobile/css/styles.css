@@ -4903,7 +4903,10 @@ button.my-match__opp {
 .msb { width: 100%; }
 .msb-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
   border-top: 1px solid var(--line, #eee); font-size: 13px; }
-.msb-row:first-child { border-top: none; }
+/* Drop the leading hairline on the first bout row, but keep the summary row's
+   own thick rule (it renders first, so an unconditional :first-child reset
+   would strip it). */
+.msb-row:first-child:not(.msb-row--summary) { border-top: none; }
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
@@ -4918,10 +4921,11 @@ button.my-match__opp {
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
 .msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
 .msb-ht { font-size: 10px; color: #6b7280; font-weight: 600; }
-/* Win indicator (○) for an ippon-less decision (hantei/fusensho/kiken): the
-   winning side's slot turns green so it's clear who won (mp-13y #3/#7). */
-.msb-slots--win .msb-slot { color: #15803d; border-color: #86efac; background: #f0fdf4; font-weight: 800; }
-.msb--tv .msb-slots--win .msb-slot { color: #15803d; }
+/* Win indicator for an ippon-less decision (hantei "Ht" / fusensho·kiken "○"):
+   the mark sits in the winning side's slot. No special colour — the slot keeps
+   its side colour (Shiro dark, Aka red); only the weight is bumped so the mark
+   reads as the result (mp-13y: green was never part of the FIK spec). */
+.msb-slots--win .msb-slot { font-weight: 800; }
 /* §277 summary row: labelled IV/PW per side */
 .msb-row--summary { border-top: 2px solid #111; }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;

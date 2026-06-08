@@ -621,7 +621,7 @@ function App() {
             // the same venue LAN.
             if (mode === "display") {
                 jitteredTimeout(load, listJitter);
-            } else if (viewerCompId === event.data.competitionId) {
+            } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {

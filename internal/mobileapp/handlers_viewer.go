@@ -105,7 +105,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
 		data, err := sf.Do("competitions", func() ([]byte, error) {
-			ids, _ := store.ListCompetitions()
+			ids, err := store.ListCompetitions()
+			if err != nil {
+				return nil, err
+			}
 
 			// Preserve ordering by pre-allocating a slot per competition ID.
 			// Each goroutine writes to a unique index so no mutex is needed;
@@ -311,7 +314,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	})
 
 	r.GET("/schedule", func(c *gin.Context) {
-		ids, _ := store.ListCompetitions()
+		ids, err := store.ListCompetitions()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
 		// Pre-allocate one slot per competition so goroutines write to unique
 		// indices without a mutex. wg.Wait() provides the happens-before for
 		// the reads below.

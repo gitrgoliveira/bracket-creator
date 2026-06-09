@@ -668,15 +668,15 @@ function App() {
             // generated. The payload carries competitionId + swissCurrentRound
             // (see handlers_swiss.go) but the viewer needs the freshly-saved
             // poolMatches + the updated comp.swissCurrentRound on the
-            // tournament list, so we refetch both. Mirrors the match_updated
-            // path's jittered fetchCompetitionDetails + load pattern.
-            if (mode === "display") {
-                jitteredTimeout(load, listJitter);
-            } else if (viewerCompId === event.data?.competitionId) {
+            // tournament list, so we refetch both. Mirrors the draw_generated
+            // / participants_updated pattern — no separate display-mode branch
+            // needed because the unconditional load() at the end covers it.
+            if (viewerCompId === event.data?.competitionId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            // swiss_round_generated adds new matches to the tournament list
-            // (swissCurrentRound counter): always do a list refresh.
+            // swiss_round_generated updates the tournament list (swissCurrentRound
+            // counter): always do one list refresh — covers display mode, home-
+            // screen viewers, and per-comp viewers alike.
             jitteredTimeout(load, listJitter);
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need

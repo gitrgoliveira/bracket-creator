@@ -94,7 +94,7 @@ func TestDaihyosenAddableOnlyWhenTied(t *testing.T) {
 			sub, err := eng.AddDaihyosen(compID, matchID, tc.sideA, tc.sideB, tc.isPool, tc.sideAEligible, tc.sideBEligible)
 			if tc.wantErr != nil {
 				require.Error(t, err)
-				assert.True(t, errors.Is(err, tc.wantErr), "want errors.Is == %v, got %v", tc.wantErr, err)
+				assert.Truef(t, errors.Is(err, tc.wantErr), "want errors.Is == %v, got %v", tc.wantErr, err)
 				assert.Nil(t, sub, "no placeholder should be returned on error")
 				return
 			}

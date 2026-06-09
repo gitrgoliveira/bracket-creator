@@ -418,7 +418,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-1", res)
-			assert.NoError(t, err, "iter %d: Pool-1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-1 score should succeed", i)
 		}()
 
 		// Operator on Court B scores Pool-2: Dave wins.
@@ -430,7 +430,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-2", res)
-			assert.NoError(t, err, "iter %d: Pool-2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -442,7 +442,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 		// (scheduled, no-winner) state.
 		stored, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
-		require.Len(t, stored, 2, "iter %d: both pool matches must still exist", i)
+		require.Lenf(t, stored, 2, "iter %d: both pool matches must still exist", i)
 
 		var p1, p2 *state.MatchResult
 		for idx := range stored {
@@ -453,12 +453,12 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				p2 = &stored[idx]
 			}
 		}
-		require.NotNil(t, p1, "iter %d: Pool-1 must exist on disk", i)
-		require.NotNil(t, p2, "iter %d: Pool-2 must exist on disk", i)
-		assert.Equal(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
-		assert.Equal(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
+		require.NotNilf(t, p1, "iter %d: Pool-1 must exist on disk", i)
+		require.NotNilf(t, p2, "iter %d: Pool-2 must exist on disk", i)
+		assert.Equalf(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
+		assert.Equalf(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
@@ -500,7 +500,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF1", res)
-			assert.NoError(t, err, "iter %d: QF1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF1 score should succeed", i)
 		}()
 		go func() {
 			defer wg.Done()
@@ -510,7 +510,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF2", res)
-			assert.NoError(t, err, "iter %d: QF2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -528,12 +528,12 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				qf2 = &stored.Rounds[0][idx]
 			}
 		}
-		require.NotNil(t, qf1, "iter %d: QF1 must exist", i)
-		require.NotNil(t, qf2, "iter %d: QF2 must exist", i)
-		assert.Equal(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
-		assert.Equal(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
+		require.NotNilf(t, qf1, "iter %d: QF1 must exist", i)
+		require.NotNilf(t, qf2, "iter %d: QF2 must exist", i)
+		assert.Equalf(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
+		assert.Equalf(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
@@ -630,7 +630,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			outcome, err := eng.MaybeAutoCompletePools(compID)
-			assert.NoError(t, err, "iter %d: MaybeAutoCompletePools error", i)
+			assert.NoErrorf(t, err, "iter %d: MaybeAutoCompletePools error", i)
 			autoCompleted = outcome == AutoCompleteTransitioned
 		}()
 		go func() {
@@ -644,7 +644,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 				current.Status = state.CompStatusInvalid
 				return current, nil
 			})
-			assert.NoError(t, err, "iter %d: invalidate error", i)
+			assert.NoErrorf(t, err, "iter %d: invalidate error", i)
 			invalidated = c
 		}()
 		wg.Wait()
@@ -1200,4 +1200,90 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 	assert.Empty(t, loaded.Rounds[0][0].Winner, "winner must not have been set")
 	assert.Equal(t, "B", loaded.Rounds[0][0].Court, "court reschedule must have landed")
 	assert.Equal(t, "10:00", loaded.Rounds[0][0].ScheduledAt, "time reschedule must have landed")
+}
+
+// TestBackfillMatchIdentity directly exercises backfillMatchIdentity, in
+// particular the same-name-head-to-head scoreline-inference branch that the
+// admin score editor relies on (it picks a winner by NAME, sending no
+// WinnerSide hint). The two pre-existing PreservesSideIDs tests both set
+// WinnerSide:"A", so this branch — and the equal-count "leave WinnerID empty"
+// tie — were previously uncovered (mp-jvzy tri-review finding).
+func TestBackfillMatchIdentity(t *testing.T) {
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+
+	tests := []struct {
+		name       string
+		result     state.MatchResult
+		wantWinner string
+	}{
+		{
+			name:       "WinnerSide A hint wins over everything",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "A"},
+			wantWinner: idA,
+		},
+		{
+			name:       "WinnerSide B hint",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "B"},
+			wantWinner: idB,
+		},
+		{
+			name:       "unambiguous name match resolves to SideA",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
+			wantWinner: idA,
+		},
+		{
+			name:       "unambiguous name match resolves to SideB",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: SideA has more ippons",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "same-name head-to-head: SideB has more ippons (symmetry)",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"D"}, IpponsB: []string{"M", "K"}},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: equal ippons is undecidable, WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M"}, IpponsB: []string{"D"}},
+			wantWinner: "",
+		},
+		{
+			name:       "scoreline count ignores the • placeholder",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "•"}, IpponsB: []string{"•"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "explicit WinnerID preserved (early return, no inference)",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "explicit-id", IpponsA: []string{"M", "K"}},
+			wantWinner: "explicit-id",
+		},
+		{
+			name:       "draw (empty Winner) leaves WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "", IpponsA: []string{"M"}, IpponsB: []string{"M"}},
+			wantWinner: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.result
+			// `stored` carries the generation-time ids; `result` (the incoming
+			// score) starts without them — mirrors the real write path.
+			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
+			backfillMatchIdentity(&result, stored)
+
+			assert.Equal(t, tc.wantWinner, result.WinnerID, "WinnerID")
+			// Side ids are always backfilled from `stored` (runs before the
+			// WinnerID early-return), even in the explicit-WinnerID case.
+			assert.Equal(t, idA, result.SideAID, "SideAID backfilled")
+			assert.Equal(t, idB, result.SideBID, "SideBID backfilled")
+		})
+	}
 }

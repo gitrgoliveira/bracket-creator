@@ -613,7 +613,7 @@ func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *t
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "PUT body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "PUT body=%s", w.Body.String())
 
 	seen := map[string]bool{}
 	for range 4 {
@@ -723,7 +723,7 @@ func TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
 
 	sawPasswordReset := false
 	sawTournamentUpdated := false
@@ -788,7 +788,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 	req.Header.Set("X-Tournament-Password", "alpha")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
 
 	seen := map[string]bool{}
 	for range 6 {
@@ -852,7 +852,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	bootReq.Header.Set("Content-Type", "application/json")
 	bootW := httptest.NewRecorder()
 	fileR.ServeHTTP(bootW, bootReq)
-	require.Equal(t, http.StatusCreated, bootW.Code, "phase 1 bootstrap failed: %s", bootW.Body.String())
+	require.Equalf(t, http.StatusCreated, bootW.Code, "phase 1 bootstrap failed: %s", bootW.Body.String())
 
 	// Confirm "alpha" authenticates in file mode.
 	authReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
@@ -901,7 +901,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	lockedR.ServeHTTP(putW, putReq)
-	require.Equal(t, http.StatusOK, putW.Code, "phase 3 PUT failed: %s", putW.Body.String())
+	require.Equalf(t, http.StatusOK, putW.Code, "phase 3 PUT failed: %s", putW.Body.String())
 
 	// Inspect the on-disk record directly: name should be the new value
 	// AND the original password should still be there (just not visible
@@ -1000,7 +1000,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	r.ServeHTTP(putW, putReq)
-	require.Equal(t, http.StatusOK, putW.Code, "body=%s", putW.Body.String())
+	require.Equalf(t, http.StatusOK, putW.Code, "body=%s", putW.Body.String())
 	var putT state.Tournament
 	require.NoError(t, json.Unmarshal(putW.Body.Bytes(), &putT))
 	assert.Empty(t, putT.Password, "PUT response must not leak stored password in locked mode (regression for handlers_tournament.go:270)")
@@ -1156,7 +1156,7 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyA))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
+			assert.Equalf(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
 		}()
 		go func() {
 			defer wg.Done()
@@ -1164,7 +1164,7 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyB))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
+			assert.Equalf(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
 		}()
 		wg.Wait()
 
@@ -1339,8 +1339,8 @@ func TestCompetitionHandlers_ConcurrentPUTUniqueNameRace(t *testing.T) {
 		// its original name.
 		a, _ := store.LoadCompetition("comp-a")
 		b, _ := store.LoadCompetition("comp-b")
-		require.NotNil(t, a, "iter %d: comp-a must still exist", i)
-		require.NotNil(t, b, "iter %d: comp-b must still exist", i)
+		require.NotNilf(t, a, "iter %d: comp-a must still exist", i)
+		require.NotNilf(t, b, "iter %d: comp-b must still exist", i)
 		cupCount := 0
 		if a.Name == "Cup" {
 			cupCount++
@@ -2264,7 +2264,7 @@ func TestTournamentHandlers_DurationDays_Validation(t *testing.T) {
 			req, _ := http.NewRequest(tc.method, "/api/tournament", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
+			assert.Equalf(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
 			if tc.wantErrFrag != "" {
 				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
 			}
@@ -2337,9 +2337,9 @@ func TestCompetitionHandlers_DateRangeValidation(t *testing.T) {
 			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "case %q: comp date=%q", tc.name, tc.compDate)
+			assert.Equalf(t, tc.wantStatus, w.Code, "case %q: comp date=%q", tc.name, tc.compDate)
 			if tc.wantErrFrag != "" {
-				assert.Contains(t, w.Body.String(), tc.wantErrFrag, "case %q", tc.name)
+				assert.Containsf(t, w.Body.String(), tc.wantErrFrag, "case %q", tc.name)
 			}
 		})
 	}
@@ -2384,7 +2384,7 @@ func TestCompetitionHandlers_DateRangeValidation_PUT(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/competitions/c-put-range", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "case %q: date=%q", tc.name, tc.newDate)
+			assert.Equalf(t, tc.wantStatus, w.Code, "case %q: date=%q", tc.name, tc.newDate)
 			if tc.wantErrFrag != "" {
 				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
 			}

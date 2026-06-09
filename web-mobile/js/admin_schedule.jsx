@@ -456,7 +456,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                       <div className="tw-court__title">SHIAIJO {cc}</div>
                       <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}</div>
                     </div>
-                    {liveOn && <span className="bc-live">● LIVE</span>}
+                    {liveOn && <span className="bc-live">● NOW</span>}
                   </div>
                   <div
                     className="tw-court__list"
@@ -562,7 +562,12 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
             {onTimeChange && <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>✎</span>}
           </button>
         )}
-        <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
+        <div className="tw-match__phase">
+          {m.phase === "pool" ? window.poolLabel(m) : m.round}
+          {m.round != null && typeof m.round === "number" && m.round >= 0 && (
+            <span className="tw-match__round">R{m.round + 1}</span>
+          )}
+        </div>
       </div>
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
@@ -795,7 +800,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     } catch (e) {
       const msg = e?.message || "Failed to save match lineup";
       if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
-        setError("This match is live — lineup is locked and cannot be changed.");
+        setError("This match is in progress — lineup is locked and cannot be changed.");
       } else {
         setError(msg);
       }
@@ -852,7 +857,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     } catch (e) {
       const msg = e?.message || "Failed to copy lineup";
       if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
-        setError("This match is live — lineup is locked and cannot be changed.");
+        setError("This match is in progress — lineup is locked and cannot be changed.");
       } else {
         setError(msg);
       }
@@ -1057,7 +1062,7 @@ function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Score editor</h1>
-            <div className="page-head__sub">Update live scores or correct past matches across the tournament. Changes propagate through the bracket.</div>
+            <div className="page-head__sub">Update scores or correct past matches across the tournament. Changes propagate through the bracket.</div>
           </div>
         </div>
         <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} password={password} />
@@ -1143,7 +1148,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
         )}
         <div className="seg">
           <button className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-          <button className={statusFilter === "live" ? "is-active" : ""} onClick={() => setStatusFilter("live")}>Live</button>
+          <button className={statusFilter === "live" ? "is-active" : ""} onClick={() => setStatusFilter("live")}>Now</button>
           <button className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
           <button className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
         </div>
@@ -1201,7 +1206,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                   </div>
               </div>
               <div>
-                {m.status === "running" && <span className="bc-live">● LIVE</span>}
+                {m.status === "running" && <span className="bc-live">● NOW</span>}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1330,7 +1335,7 @@ function AdminExport({ c, t, password }) {
       </div>
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Public viewer link</div>
-        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results live.</div>
+        <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results.</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="input" value={url} readOnly style={{ flex: 1 }} />
           <button className="btn" onClick={copyUrl}>Copy</button>

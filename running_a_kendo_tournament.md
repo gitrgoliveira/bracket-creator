@@ -17,6 +17,7 @@
 - [Competitor Colours (Aka and Shiro)](#competitor-colours-aka-and-shiro)
 - [Scoreboard Structure](#scoreboard-structure)
 - [How a Match Is Decided](#how-a-match-is-decided)
+- [Pool Match Order](#pool-match-order)
 - [How an Individual Pool Is Decided](#how-an-individual-pool-is-decided)
 - [Team Matches](#team-matches)
 - [Seeding](#seeding)
@@ -156,6 +157,8 @@ Three referees (shinpan) officiate each match. Each holds a red and a white flag
 
 Fouls include stepping out of bounds, dropping the shinai, making illegal contact, or other prohibited acts (FIK Article 17). **Two hansoku result in one ippon awarded to the opponent** (FIK Article 20). Hansoku are **cumulative for the duration of the concerned shiai**, including encho — they do not reset between regulation time and overtime.
 
+Per the FIK *Regulations of Kendo Shiai and Shinpan* (Shinpan Management, p.15, Table 1 — "Recording Matters and Indications"), a hansoku is recorded as a **red upward triangle (▲)** against the offending competitor. **When the second hansoku is committed, the ▲ is deleted** and one ippon is placed on the opponent's side — so the outstanding count is always 0 or 1 and a competitor never displays two triangles. In **sosai** (simultaneous mutual hansoku that cancel out for penalty purposes), the ▲ marks are **left in place**. The running number of hansoku is tracked separately.
+
 ## Match Formats
 
 ### Sanbon-Shobu (Three-Point Match)
@@ -268,7 +271,7 @@ Each match has a 7-column row (plus an 8th spacer column between courts). The op
 
 - **Two scoring slots per side** — in sanbon-shobu, filling both means an outright win (2 ippon). The match winner is determined by who has more total ippon. If one side has 1 ippon and the other has 0 at time-up, the side with 1 wins.
 - **vs** — centre column, normally blank. **X** marks a hikiwake (draw).
-- **Fouls** — hansoku are tracked per side. Every 2 fouls awards 1 ippon to the opponent (recorded as **H** in one of the opponent's slots).
+- **Fouls** — hansoku are tracked per side. A single outstanding hansoku displays as a **red upward triangle (▲)** on the offending competitor's side (FIK Shinpan Management p.15, Table 1). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots), so the outstanding count is always 0 or 1 — a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
 - **Draw** — an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
 - **Hantei** — if a knockout match is decided by judges' decision, an **H** is placed in the winner's scoring slot.
 
@@ -351,6 +354,39 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
 2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
 3. **Draw in knockout**: encho is played. If still tied after encho, **hantei** decides the winner.
+
+## Pool Match Order
+
+Pools are played in a fixed rotation order that ensures even rest between bouts for each competitor.
+
+### 3-person pool
+
+Fighters are numbered 1, 2, 3. The three bouts are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 1 | 3 |
+| 3 | 2 | 3 |
+
+### 4-person pool
+
+Each fighter has 3 bouts. The six matches are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 3 | 2 |
+| 3 | 3 | 4 |
+| 4 | 1 | 4 |
+| 5 | 1 | 3 |
+| 6 | 2 | 4 |
+
+This ordering ensures that no fighter has consecutive bouts — each competitor rests for at least one bout between their matches.
+
+### Larger pools
+
+For pools of 5 or more, the same principle applies: matches are ordered so that each competitor rests between bouts. The exact rotation follows the tournament's published schedule.
 
 ## How an Individual Pool Is Decided
 

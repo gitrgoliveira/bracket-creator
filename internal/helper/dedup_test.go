@@ -40,7 +40,7 @@ func TestNormalizeParticipantName(t *testing.T) {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			got := NormalizeParticipantName(tc.input)
-			assert.Equal(t, tc.want, got, "NormalizeParticipantName(%q)", tc.input)
+			assert.Equalf(t, tc.want, got, "NormalizeParticipantName(%q)", tc.input)
 		})
 	}
 }
@@ -122,7 +122,7 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 		tc := tc
 		t.Run(tc.desc, func(t *testing.T) {
 			got := CheckDuplicateEntriesByNameDojo(tc.entries)
-			assert.Len(t, got, tc.wantLen, "entries=%v", tc.entries)
+			assert.Lenf(t, got, tc.wantLen, "entries=%v", tc.entries)
 		})
 	}
 }
@@ -191,9 +191,9 @@ func TestFindNearDupWarnings_TokenSubset(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			w := FindNearDupWarnings(tc.entries)
 			if tc.wantFire {
-				assert.NotEmpty(t, w, "expected near-dup warning for %v", tc.entries)
+				assert.NotEmptyf(t, w, "expected near-dup warning for %v", tc.entries)
 			} else {
-				assert.Empty(t, w, "expected NO near-dup warning for %v", tc.entries)
+				assert.Emptyf(t, w, "expected NO near-dup warning for %v", tc.entries)
 			}
 		})
 	}
@@ -228,12 +228,12 @@ func TestFindNearDupWarnings_Levenshtein(t *testing.T) {
 			entries := [][2]string{{tc.a, "SameDojo"}, {tc.b, "SameDojo"}}
 			w := FindNearDupWarnings(entries)
 			if tc.wantFire {
-				assert.NotEmpty(t, w, "expected near-dup warning: %q vs %q", tc.a, tc.b)
+				assert.NotEmptyf(t, w, "expected near-dup warning: %q vs %q", tc.a, tc.b)
 				if len(w) > 0 {
 					assert.Equal(t, "near-duplicate", w[0].Kind)
 				}
 			} else {
-				assert.Empty(t, w, "expected NO near-dup warning: %q vs %q", tc.a, tc.b)
+				assert.Emptyf(t, w, "expected NO near-dup warning: %q vs %q", tc.a, tc.b)
 			}
 		})
 	}
@@ -255,7 +255,7 @@ func TestLevenshtein(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := levenshtein(tc.a, tc.b)
-		assert.Equal(t, tc.want, got, "levenshtein(%q, %q)", tc.a, tc.b)
+		assert.Equalf(t, tc.want, got, "levenshtein(%q, %q)", tc.a, tc.b)
 	}
 }
 
@@ -275,6 +275,6 @@ func TestIsSingleTrailingTokenDiff(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := isSingleTrailingTokenDiff(tc.a, tc.b)
-		assert.Equal(t, tc.want, got, "isSingleTrailingTokenDiff(%q, %q)", tc.a, tc.b)
+		assert.Equalf(t, tc.want, got, "isSingleTrailingTokenDiff(%q, %q)", tc.a, tc.b)
 	}
 }

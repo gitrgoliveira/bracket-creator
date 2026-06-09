@@ -36,7 +36,7 @@ func TestNewFileFromScratchHasAllSheets(t *testing.T) {
 
 	sheets := f.GetSheetList()
 	for _, s := range want {
-		assert.Contains(t, sheets, s, "missing sheet: %s", s)
+		assert.Containsf(t, sheets, s, "missing sheet: %s", s)
 	}
 
 	// The "data" sheet should be the active sheet on open so the user lands on

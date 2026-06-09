@@ -42,11 +42,11 @@ func TestGlossaryAllSpecTermsRepresented(t *testing.T) {
 		id := strings.ToLower(raw)
 		t.Run(id, func(t *testing.T) {
 			entry, ok := domain.Glossary[id]
-			assert.True(t, ok, "missing entry in domain.Glossary for %q (heading: %q)", id, raw)
+			assert.Truef(t, ok, "missing entry in domain.Glossary for %q (heading: %q)", id, raw)
 			if ok {
-				assert.Equal(t, id, entry.ID, "Term.ID must equal map key for %q", id)
-				assert.NotEmpty(t, entry.Short, "Term.Short must not be empty for %q", id)
-				assert.NotEmpty(t, entry.Tooltip, "Term.Tooltip must not be empty for %q", id)
+				assert.Equalf(t, id, entry.ID, "Term.ID must equal map key for %q", id)
+				assert.NotEmptyf(t, entry.Short, "Term.Short must not be empty for %q", id)
+				assert.NotEmptyf(t, entry.Tooltip, "Term.Tooltip must not be empty for %q", id)
 			}
 		})
 	}
@@ -61,7 +61,7 @@ func TestGlossarySeeAlsoResolves(t *testing.T) {
 		for _, ref := range term.SeeAlso {
 			refLower := strings.ToLower(ref)
 			_, ok := domain.Glossary[refLower]
-			assert.True(t, ok, "Term %q has unresolved SeeAlso reference %q", id, ref)
+			assert.Truef(t, ok, "Term %q has unresolved SeeAlso reference %q", id, ref)
 		}
 	}
 }
@@ -71,8 +71,8 @@ func TestGlossarySeeAlsoResolves(t *testing.T) {
 // on). A capitalised entry would silently miss every lookup site.
 func TestGlossaryIDsAreLowercase(t *testing.T) {
 	for id := range domain.Glossary {
-		assert.Equal(t, strings.ToLower(id), id, "map key %q must be lowercase", id)
-		assert.Equal(t, id, domain.Glossary[id].ID, "Term.ID must equal map key for %q", id)
+		assert.Equalf(t, strings.ToLower(id), id, "map key %q must be lowercase", id)
+		assert.Equalf(t, id, domain.Glossary[id].ID, "Term.ID must equal map key for %q", id)
 	}
 }
 

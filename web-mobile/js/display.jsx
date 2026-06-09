@@ -18,6 +18,9 @@
 // remain stable when those land — only the layout primitives around them
 // are expected to evolve.
 
+import { pickFromLineup } from './lineup_resolver.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, withNumber } from './match_scoreboard.jsx';
+
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
 // TermD — kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -32,15 +35,13 @@ function TermD(props) {
   return React.createElement('span', null, props.children);
 }
 
-// Resolve a side's rendered label respecting competition.withZekkenName.
-// When the competition has zekken/display-name mode on, players use a short
-// stage name; otherwise we fall back to the canonical full name. Mirrors
-// the same predicate used by buildSide in handlers_display.go so the OBS
-// overlay and the TV display agree on what to render.
+// sideLabel — thin delegate to the shared `withNumber` helper from
+// match_scoreboard.jsx so display.jsx and the OBS overlay agree on what to
+// render with no risk of the two implementations drifting. Kept as a named
+// export for the TV/lobby/overlay call sites and for test imports
+// (display_white_board.test.jsx asserts on `sideLabel`).
 function sideLabel(side, withZekkenName) {
-    if (!side) return "TBD";
-    if (withZekkenName && side.displayName) return side.displayName;
-    return side.name || "TBD";
+    return withNumber(side, withZekkenName);
 }
 
 // Reject a bracket side that is still a placeholder rather than a resolved
@@ -235,7 +236,284 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
     if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
         return window.roundLabel(roundIndex, totalRounds);
     }
+    // Pool matches reach the display feed with round === -1 (a sentinel, not a
+    // real round) and no poolName, but their id is shaped "<PoolName>-<index>".
+    // Derive the pool name from the id rather than rendering the bare "-1".
+    if (typeof m.round === "number" && m.round < 0) {
+        const id = typeof m.id === "string" ? m.id : "";
+        const cut = id.lastIndexOf("-");
+        if (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) return id.slice(0, cut);
+        return "";
+    }
+    // Render a numeric round explicitly so a 0-based round index (round === 0)
+    // is not swallowed by the falsy-`||` fallback into an empty label.
+    if (typeof m.round === "number") return String(m.round);
     return m.round || "";
+}
+
+// overlayPositionLabel — FIK position label for the current bout, used as the
+// fallback when no per-match lineup pins a player name. Mirrors
+// positionLabelFor in admin_scoring_modal.jsx (module-local copy; display.jsx
+// is a separate ES module). Senpo/Jiho/... for 5-person teams, "Daihyosen"
+// for the rep bout (position === -1), else the bare bout number ("1", "2", …).
+// NEVER the team name.
+const OVL_POS_LABELS_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+function overlayPositionLabel(teamSize, index, sub) {
+    if (sub && sub.position === -1) return "Daihyosen";
+    if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
+    // FIK named positions exist ONLY for 5-person teams. For 3/7/11/13/15 and
+    // kachinuki the app uses numeric positions "1".."N" everywhere
+    // (domain.PositionNumbered, admin_lineup positionsForSize) — so the
+    // overlay falls back to the bare bout number, which scales to any size.
+    if (teamSize === 5 && index >= 0 && index < 5) return OVL_POS_LABELS_5[index];
+    return String(index + 1);
+}
+
+// findCurrentBoutIndex — returns the 0-based index of the bout that is
+// currently being fought (the first UNSCORED regular bout, position != -1).
+// Falls back to 0 on an empty subResults. Used by StreamingOverlay to pick
+// which bout names and score to show.
+function findCurrentBoutIndex(subResults) {
+    if (!subResults || !subResults.length) return 0;
+    // A bout is scored if it has real ippons, a hansoku, a hantei decision, an
+    // explicit winner/decision (quick-score and forfeit-style outcomes set
+    // these without ippon letters), or a hikiwake. This aligns with
+    // TeamScoreboard's isScored logic. When all regular bouts are complete,
+    // returns regular.length (= subResults.length excluding any DH row at
+    // position -1) — the caller treats that as the "DH/done" signal.
+    const regular = subResults.filter(s => s.position !== -1);
+    for (let i = 0; i < regular.length; i++) {
+        const s = regular[i];
+        const hasIppon = (s.ipponsA && s.ipponsA.some(x => x && x !== "•")) ||
+            (s.ipponsB && s.ipponsB.some(x => x && x !== "•"));
+        const hasFoul = s.hansokuA || s.hansokuB;
+        const hasHantei = s.decidedByHantei;
+        const hasOutcome = !!s.winner || (typeof s.decision === "string" && s.decision !== "");
+        const isDraw = typeof window.isHikiwake === "function" &&
+            (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision));
+        if (!hasIppon && !hasFoul && !hasHantei && !hasOutcome && !isDraw) return i;
+    }
+    return regular.length;
+}
+
+
+// TvWhiteTeamBoard — mp-13y: white scoreboard for a live TEAM match
+// (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
+// team case with a light board: court header + black rule, team name row
+// (Shiro black left / Aka red right, NO top IV score), then the per-bout
+// grid (done / in-progress amber / queued grey), optional Daihyosen banner,
+// and a single "Next" line. Individual matches, empty states and the lobby
+// keep the existing dark surface (no mockup for those).
+
+function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
+    const shiroTeam = sideLabel(promoted.match.sideB, zekken);
+    const akaTeam = sideLabel(promoted.match.sideA, zekken);
+    const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
+    // The shared scoreboard below carries the score (IV/PW summary for teams,
+    // ippon slots for individuals), so the team-name row centre is just "vs"
+    // (+ any decision suffix).
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "#9ca3af", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
+
+    return (
+        <div className="tvd tvd--white" data-testid="tv-display-root" style={{
+            position: "fixed", inset: 0, background: "#ffffff", color: "#111",
+            display: "flex", flexDirection: "column", padding: "4vh 5vw",
+        }}>
+            {/* Court header + black rule */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh" }}>
+                <div style={{ fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
+                    {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
+                </div>
+                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
+                    <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}</span>
+                    {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
+                        plainly (the NEXT line below still lists what follows). */}
+                    {!connected && (
+                        <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
+                            style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
+                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                            RECONNECTING
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Team name row — Shiro black (left), Aka red (right), no top score */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
+                <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#6b7280" }}><TermD name="shiro">SHIRO</TermD></div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
+                <div style={{ minWidth: 0, textAlign: "right" }}>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>
+                </div>
+            </div>
+
+            {/* Shared FIK scoreboard (match_scoreboard.jsx) — the SAME component
+                the viewer card uses; variant="tv" only scales it up. Up-next
+                matches have no bouts yet: TeamScoreboard renders numbered/roster
+                rows (mp-13y #6) so the board reads as a real scoreboard rather
+                than an empty grid. */}
+            {isTeamMatch ? (
+                <div style={{ flex: 1 }} data-testid="tvd-team-bouts">
+                    {/* tri-review #1: thread the team names so the Daihyosen
+                        win-mark lands on the winning side when the backend
+                        persists the winner as the team name (mirrors viewer
+                        MatchDetailCard). */}
+                    <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
+                        teamSize={teamSize} showDH={showDH} variant="tv"
+                        shiroName={shiroTeam} akaName={akaTeam} />
+                </div>
+            ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
+                    {/* tri-review #2: thread withZekkenName so IndividualScore
+                        renders the zekken display name on zekken-mode comps. */}
+                    <IndividualScore match={promoted.match} variant="tv" withZekkenName={zekken} />
+                </div>
+            )}
+
+            {/* Next line */}
+            {next && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
+                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
+                    <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
+                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName)}</span>
+                        <span style={{ color: "#9ca3af", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName)}</span>
+                    </span>
+                </div>
+            )}
+            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
+        </div>
+    );
+}
+
+// poolNameOf — derive the pool name from a pool-match id shaped "<Pool>-<idx>"
+// (e.g. "Pool A-0" → "Pool A"). Returns "" when the id isn't pool-shaped.
+function poolNameOf(id) {
+    if (typeof id !== "string") return "";
+    const cut = id.lastIndexOf("-");
+    return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
+}
+
+// gatherIndividualGroup — the sibling matches for an individual TV board:
+// every match in the same POOL (pool phase) or the same ROUND (knockout) as
+// the promoted match, **on the same court**. The TV display is per-court, so
+// bracket rounds that span multiple courts must not leak cross-court matches.
+// Returns them ordered completed-first with the CURRENT (running, or the
+// promoted up-next) match LAST, so the feed keeps the active match at the
+// bottom of the visible list and older results scroll off the top.
+// Not-yet-started matches other than the promoted one are omitted (feed model).
+function gatherIndividualGroup(promoted, court) {
+    if (!promoted || !promoted.competition || !promoted.match) return [];
+    const comp = promoted.competition;
+    const cur = promoted.match;
+    const matchCourt = court || cur.court || "";
+    let group;
+    if (promoted.isBracket) {
+        const rounds = (comp.bracket && comp.bracket.rounds) || [];
+        group = rounds[promoted.roundIndex] || [];
+    } else {
+        const pool = poolNameOf(cur.id);
+        group = (comp.poolMatches || []).filter(m => poolNameOf(m.id) === pool);
+    }
+    // Filter to the same court — bracket rounds can span multiple courts.
+    const onCourt = group.filter(m => (m.court || "") === matchCourt);
+    const isCurrent = m => m.id === cur.id || m.status === "running";
+    const shown = onCourt.filter(m => m.status === "completed" || isCurrent(m));
+    return shown.slice().sort((a, b) => {
+        const d = (isCurrent(a) ? 1 : 0) - (isCurrent(b) ? 1 : 0); // current sinks to bottom
+        if (d !== 0) return d;
+        return String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id));
+    });
+}
+
+// At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
+// so ~10 rows fit comfortably. Cap at TV_INDIV_MAX_VISIBLE and take the TAIL
+// of the gathered group so the current match (already sorted to the end by
+// gatherIndividualGroup) is always shown — the oldest completed rows drop off
+// the top first. The visible rows then render top-anchored on the panel so
+// there's no empty space above when the pool is small.
+const TV_INDIV_MAX_VISIBLE = 10;
+
+// TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
+// body lists the whole pool's matches (pool phase) or the whole round's matches
+// (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
+// name, via the shared IndividualScore). Layout: TOP-anchored — the rows fill
+// from the top of the panel; the running match stays at the bottom of the
+// visible list because gatherIndividualGroup sorts current LAST. When the
+// group exceeds TV_INDIV_MAX_VISIBLE, the oldest completed rows drop off the
+// top so the current match stays on screen (no animation). FIK §263.
+function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
+    const all = gatherIndividualGroup(promoted, court);
+    const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
+    const rows = dropped > 0 ? all.slice(dropped) : all;
+    const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);
+    const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    return (
+        <div className="tvd tvd--white" data-testid="tv-display-root" style={{
+            position: "fixed", inset: 0, background: "#ffffff", color: "#111",
+            display: "flex", flexDirection: "column", padding: "4vh 5vw",
+        }}>
+            {/* Court header + black rule */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh" }}>
+                <div style={{ fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
+                    {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
+                </div>
+                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
+                    <span>{promoted.competition?.name}{groupLabel ? " · " + groupLabel : ""}</span>
+                    {!connected && (
+                        <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
+                            style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
+                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                            RECONNECTING
+                        </span>
+                    )}
+                </div>
+            </div>
+
+            {/* Top-anchored match feed: the visible rows fill from the top of
+                the panel; gatherIndividualGroup sorts the current match LAST
+                so it stays at the bottom of the visible list. When the group
+                exceeds TV_INDIV_MAX_VISIBLE, we slice the tail above so the
+                oldest completed rows drop off the top first. */}
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
+                {rows.map(m => {
+                    const isNow = m.id === promoted.match.id || m.status === "running";
+                    return (
+                        <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
+                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "")}
+                            style={{
+                                padding: "1vh 1.5vw", borderRadius: "0.6vw",
+                                background: isNow ? "#fef3c7" : "transparent",
+                                opacity: isNow ? 1 : 0.78,
+                            }}>
+                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                        </div>
+                    );
+                })}
+                {rows.length === 0 && (
+                    <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "3vh", padding: "4vh 0" }}>No matches yet</div>
+                )}
+            </div>
+
+            {/* Next line */}
+            {next && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
+                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
+                    <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
+                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken)}</span>
+                        <span style={{ color: "#9ca3af", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
+                    </span>
+                </div>
+            )}
+            {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
+        </div>
+    );
 }
 
 // <TvDisplay court="A"> — fullscreen per-court board.
@@ -316,188 +594,106 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         ? withZekkenName
         : !!(promoted && promoted.competition && promoted.competition.withZekkenName);
 
+    // mp-13y: team match detection for the live promoted slot.
+    // competition.kind === "team" OR competition.teamSize > 0.
+    const isTeamMatch = !!(promoted && promoted.competition &&
+        (promoted.competition.kind === "team" || (promoted.competition.teamSize || 0) > 0));
+    const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
+
+    // mp-13y: fetch lineups for the live team match. useTeamLineups
+    // degrades gracefully (returns null/null) when the promoted slot is
+    // not a team match or when window.API is unavailable.
+    const { lineupA, lineupB } = useTeamLineups(
+        isTeamMatch && promoted && promoted.match ? promoted.match : null,
+        isTeamMatch && promoted ? promoted.competition : null,
+        promoted ? promoted.roundIndex : undefined
+    );
+
+    // mp-13y: DH (Daihyosen) row gating — shown when:
+    //   1. All regular bouts are complete (every sub has ippons, hantei, or draw).
+    //   2. IV (Individual Victories) are tied.
+    //   3. PW (Points Won) are also tied.
+    //   4. It is a knockout phase (not a pool match).
+    // The DH sub-result (position === -1) may or may not exist yet; when absent,
+    // TeamScoreboard renders a "Daihyosen pending" placeholder.
+    const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
+    const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
+        !!(promoted && promoted.match && promoted.match.phase === "bracket");
+    const showDH = useMD(() => {
+        if (!isTeamMatch || !isKnockoutPhase) return false;
+        const regularSubs = subResults.filter(s => s.position !== -1);
+        if (regularSubs.length === 0) return false;
+        const allDone = regularSubs.every(s => {
+            const aIp = (s.ipponsA || []).filter(x => x && x !== "•");
+            const bIp = (s.ipponsB || []).filter(x => x && x !== "•");
+            // Mirror the shared scoreboard's "scored" test: a bout can also be
+            // decided with no ippon letters — fusensho/kiken (winner + decision),
+            // a hansoku award, or an explicit winner. Without these, a tied
+            // knockout closed by forfeit would never satisfy allDone and the
+            // Daihyosen row would be suppressed forever.
+            return aIp.length > 0 || bIp.length > 0 || s.decidedByHantei ||
+                !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
+                s.hansokuA > 0 || s.hansokuB > 0 ||
+                (typeof window.isHikiwake === "function" &&
+                    (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
+        });
+        if (!allDone) return false;
+        // The match is tied (→ show DH) when IV and PW are level per side.
+        // teamIVPW already prefers an explicit `sub.winner` (which the server
+        // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
+        // counted as an IV for its winner there — no extra hantei loop needed.
+        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+        return ivShiro === ivAka && pwShiro === pwAka;
+    }, [subResults, isTeamMatch, isKnockoutPhase]);
+
+    // White scoreboard for any promoted match.
+    // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped
+    // board listing every match in the same POOL (pool phase) or ROUND
+    // (knockout), bottom-anchored with the current match at the bottom.
+    if (promoted) {
+        if (isTeamMatch) {
+            return <TvWhiteBoard
+                tournament={tournament} court={court} connected={connected}
+                promoted={promoted} promotedKind={promotedKind} isTeamMatch={isTeamMatch}
+                subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
+                showDH={showDH} queueMatches={queueMatches} zekken={zekken}
+            />;
+        }
+        return <TvIndividualBoard
+            tournament={tournament} court={court} connected={connected}
+            promoted={promoted} queueMatches={queueMatches} zekken={zekken}
+        />;
+    }
+
+    // No promoted match → white empty state (matches the white board chrome).
     return (
-        <div className="tvd" data-testid="tv-display-root" style={{
-            position: 'fixed', inset: 0,
-            background: '#0b0d12', color: '#fff',
-            display: 'flex', flexDirection: 'column',
-            padding: '4vh 5vw',
+        <div className="tvd tvd--white" data-testid="tv-display-root" style={{
+            position: "fixed", inset: 0, background: "#ffffff", color: "#111",
+            display: "flex", flexDirection: "column", padding: "4vh 5vw",
         }}>
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                fontSize: '2.5vh', opacity: 0.7, marginBottom: '2vh',
-            }}>
-                <div>{tournament?.name || ''} · SHIAIJO {court}</div>
-                <div style={{ display: 'flex', gap: '1.5vw', alignItems: 'center' }}>
-                    {/* T063: SSE reconnect indicator. Hidden while connected
-                        so the chrome stays calm during normal operation. */}
-                    {!connected && (
-                        <span
-                            data-testid="display-reconnect"
-                            role="status"
-                            aria-label="Reconnecting"
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '0.6vw',
-                                background: 'rgba(255,180,0,0.18)',
-                                color: '#ffb400',
-                                padding: '0.4vh 1vw',
-                                borderRadius: '0.4vw',
-                                fontSize: '1.6vh',
-                                fontWeight: 700,
-                                letterSpacing: '0.04em',
-                            }}
-                        >
-                            <span style={{
-                                width: '1.2vh', height: '1.2vh',
-                                borderRadius: '50%',
-                                background: '#ffb400',
-                                display: 'inline-block',
-                                animation: 'pulse 1.4s ease-in-out infinite',
-                            }} />
-                            RECONNECTING
-                        </span>
-                    )}
-                </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh", fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
+                <div>{tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}</div>
+                {!connected && (
+                    <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
+                        style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
+                        <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                        RECONNECTING
+                    </span>
+                )}
             </div>
-
-            {promoted ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        fontSize: '3vh', opacity: 0.85, marginBottom: '2vh',
-                    }}>
-                        <div>
-                            {promoted.competition?.name}
-                            {' · '}
-                            {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}
-                        </div>
-                        {/* LIVE is the default promoted state — no badge (the board IS
-                            the live match). UP NEXT is the exception, shown as a small
-                            muted note rather than a loud badge. */}
-                        {promotedKind === "upnext" && (
-                            <span className="tvd-upnext-note" data-testid="tvd-upnext">↑ up next</span>
-                        )}
-                    </div>
-                    {/* Aka/Shiro colored half-panels (DESIGN.md §4). SHIRO (sideB)
-                        left, AKA (sideA) right; centre carries the real per-side
-                        waza score (white–red), decision suffix + fouls. */}
-                    <div className="tvd-board">
-                        <div className="tvd-side tvd-side--shiro">
-                            <div className="tvd-side__bar"></div>
-                            <div className="tvd-side__lab"><TermD name="shiro">SHIRO</TermD></div>
-                            <div className="tvd-side__name">{sideLabel(promoted.match.sideB, zekken)}</div>
-                            {promoted.match.sideB?.dojo && (
-                                <div className="tvd-side__dojo">{promoted.match.sideB.dojo}</div>
-                            )}
-                        </div>
-                        <div className="tvd-centre">
-                            {promotedKind === "live" ? (
-                                <>
-                                    <div className="tvd-score">
-                                        <span className="tvd-score__s">{(promoted.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0'}</span>
-                                        <span className="tvd-score__d">–</span>
-                                        <span className="tvd-score__a">{(promoted.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0'}</span>
-                                    </div>
-                                    {/* T097: Kiken/Fus./DH/(E) suffix. Kept separate from the
-                                        per-side digits (which carry the SHIRO/AKA colour split)
-                                        rather than re-using formatIpponsScore. */}
-                                    {window.decisionSuffix && window.decisionSuffix(promoted.match) && (
-                                        <div className="tvd-centre__sfx">{window.decisionSuffix(promoted.match)}</div>
-                                    )}
-                                    {((promoted.match.hansokuA || 0) + (promoted.match.hansokuB || 0)) > 0 && (
-                                        <div className="tvd-centre__fouls">
-                                            Fouls {promoted.match.hansokuB || 0} – {promoted.match.hansokuA || 0}
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <div className="tvd-centre__vs">VS</div>
-                            )}
-                            {promoted.match.scheduledAt && (
-                                <div className="tvd-side__dojo" style={{ opacity: 0.6 }}>{promoted.match.scheduledAt}</div>
-                            )}
-                        </div>
-                        <div className="tvd-side tvd-side--aka">
-                            <div className="tvd-side__bar"></div>
-                            <div className="tvd-side__lab"><TermD name="aka">AKA</TermD></div>
-                            <div className="tvd-side__name">{sideLabel(promoted.match.sideA, zekken)}</div>
-                            {promoted.match.sideA?.dojo && (
-                                <div className="tvd-side__dojo">{promoted.match.sideA.dojo}</div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            ) : (
-                <div data-testid={allCompleted ? 'display-all-completed' : 'display-no-matches'}
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '2vh', fontSize: '5vh', opacity: 0.6, textAlign: 'center', padding: '0 5vw' }}>
-                    {allCompleted ? (
-                        <>
-                            <span style={{ fontSize: '6vh' }}>✓</span>
-                            <span>All matches completed on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
-                        </>
-                    ) : noMatches ? (
-                        <span>No matches scheduled</span>
-                    ) : (
-                        <span>No live match on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
-                    )}
-                </div>
-            )}
-
-            {/* T068: upcoming-match list with queue-position labels.
-                Pulls m.queuePosition (1-indexed, populated by handlers_viewer
-                annotateQueuePositions). Position 1 → "Next up"; position N
-                (>1) → "(N-1) before yours" to match VSchedItem's wording.
-                T061: capped at 2 entries when live, falls back to up to 2
-                additional cards when auto-promoting (so we still show a
-                "next two upcoming" peek beyond the promoted match). */}
-            {queueMatches.length > 0 && (
-                <div className="tvd__upcoming" style={{
-                    display: 'flex', gap: '2vw',
-                    marginTop: '4vh',
-                }}>
-                    {queueMatches.map((m) => {
-                        const compZekken = m._comp?.withZekkenName;
-                        const label = queueLabel(m);
-                        // Coerce to number so the qp===1 highlight matches even if
-                        // server emits a string (consistent with TWMatch/VSchedItem).
-                        const qp = Number(m.queuePosition);
-                        return (
-                            <div key={(m._comp?.id || '') + m.id} className="tvd__upcoming-card" style={{
-                                flex: 1,
-                                background: 'rgba(255,255,255,0.06)',
-                                borderRadius: 8,
-                                padding: '2vh 2vw',
-                            }}>
-                                <div style={{ fontSize: '1.8vh', opacity: 0.7, marginBottom: 6 }}>
-                                    {m._comp?.name} · {phaseLabel(m, m._isBracket, m._roundIndex, m._totalRounds)}
-                                </div>
-                                <div style={{ fontSize: '2.5vh', fontWeight: 600 }}>
-                                    {sideLabel(m.sideB, compZekken)} <span style={{ opacity: 0.4 }}>vs</span> {sideLabel(m.sideA, compZekken)}
-                                </div>
-                                {label && (
-                                    <div style={{
-                                        marginTop: 6,
-                                        fontSize: '1.6vh',
-                                        fontWeight: 700,
-                                        color: qp === 1 ? '#ffd166' : 'rgba(255,255,255,0.7)',
-                                        textTransform: 'uppercase',
-                                        letterSpacing: '0.04em',
-                                    }}>
-                                        {label}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-            {/* mp-c38: sponsor strip — non-interactive on TV display. */}
+            <div data-testid={allCompleted ? "display-all-completed" : "display-no-matches"}
+                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "2vh", fontSize: "5vh", color: "#9ca3af", textAlign: "center", padding: "0 5vw" }}>
+                {allCompleted ? (
+                    <>
+                        <span style={{ fontSize: "6vh", color: "#16a34a" }}>✓</span>
+                        <span>All matches completed on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
+                    </>
+                ) : noMatches ? (
+                    <span>No matches scheduled</span>
+                ) : (
+                    <span>No match in progress on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
+                )}
+            </div>
             {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );
@@ -513,21 +709,23 @@ const LOBBY_CYCLE_MS = 10000;
 // Colour tokens for the cross-court table — defined once so the
 // per-cell renderers stay readable. These mirror the mockup's :root
 // vars but expressed as inline-style strings (display.jsx convention).
+// mp-13y: light palette (white redesign by analogy with the per-court board).
 const LOBBY_COLORS = {
-    bg:         '#080a0f',
-    surface:    'rgba(255,255,255,0.025)',
-    inkDim:     'rgba(255,255,255,0.45)',
-    inkMuted:   'rgba(255,255,255,0.25)',
-    line:       'rgba(255,255,255,0.06)',
-    lineStrong: 'rgba(255,255,255,0.12)',
-    nowBg:      'rgba(255,255,255,0.05)',
-    nowBorder:  'rgba(255,255,255,0.10)',
-    nextBg:     'rgba(255,209,102,0.06)',
-    nextBorder: 'rgba(255,209,102,0.14)',
-    nextAccent: '#ffd166',
-    schedBg:    'rgba(255,255,255,0.02)',
-    akaSoft:    '#ff9a95',
-    akaVivid:   '#ff5b54',
+    bg:         '#ffffff',
+    ink:        '#111111',
+    surface:    'rgba(0,0,0,0.03)',
+    inkDim:     'rgba(0,0,0,0.55)',
+    inkMuted:   'rgba(0,0,0,0.35)',
+    line:       'rgba(0,0,0,0.10)',
+    lineStrong: 'rgba(0,0,0,0.20)',
+    nowBg:      'rgba(0,0,0,0.04)',
+    nowBorder:  'rgba(0,0,0,0.14)',
+    nextBg:     '#fef3c7',
+    nextBorder: 'rgba(180,83,9,0.30)',
+    nextAccent: '#b45309',
+    schedBg:    'rgba(0,0,0,0.02)',
+    akaSoft:    '#c0392b',
+    akaVivid:   '#b91c1c',
 };
 
 // Row descriptor array — drives both the row-label column and the
@@ -629,7 +827,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
         const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
         vsContent = (
-            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: '#e8eaed' }}>
+            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: LOBBY_COLORS.ink }}>
                 {shiroScore}
                 <span style={{ opacity: 0.45 }}> - </span>
                 <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
@@ -736,7 +934,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     return (
         <div className="lobby" data-testid="lobby-root" style={{
             position: 'fixed', inset: 0,
-            background: LOBBY_COLORS.bg, color: '#e8eaed',
+            background: LOBBY_COLORS.bg, color: LOBBY_COLORS.ink,
             display: 'flex', flexDirection: 'column',
             fontFamily: 'var(--font-body, system-ui, sans-serif)',
             WebkitFontSmoothing: 'antialiased',
@@ -767,7 +965,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     aria-current={i === page ? 'page' : undefined}
                                     style={{
                                         width: 7, height: 7, borderRadius: '50%',
-                                        background: i === page ? '#e8eaed' : LOBBY_COLORS.inkMuted,
+                                        background: i === page ? LOBBY_COLORS.ink : LOBBY_COLORS.inkMuted,
                                         transform: i === page ? 'scale(1.4)' : 'scale(1)',
                                         transition: 'background 0.4s, transform 0.4s',
                                         border: 'none', cursor: 'pointer', padding: 0,
@@ -784,10 +982,10 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     {/* T063: SSE reconnect indicator */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting" style={{
-                            color: '#ffb400', fontWeight: 700,
+                            color: '#b45309', fontWeight: 700,
                             display: 'inline-flex', alignItems: 'center', gap: 6,
                         }}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ffb400', display: 'inline-block' }} />
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#b45309', display: 'inline-block' }} />
                             RECONNECTING
                         </span>
                     )}
@@ -796,12 +994,12 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 
             {/* ── Cycle progress bar ─────────────────────────── */}
             {totalPages > 1 && (
-                <div style={{ height: 2, background: 'rgba(255,255,255,0.03)', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ height: 2, background: 'rgba(0,0,0,0.06)', position: 'relative', overflow: 'hidden' }}>
                     <div
                         key={cycleKey}
                         style={{
                             position: 'absolute', top: 0, left: 0, height: '100%',
-                            background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.18))',
+                            background: 'linear-gradient(90deg, transparent, rgba(0,0,0,0.30))',
                             width: '100%',
                             transformOrigin: 'left',
                             animation: `lobby-cycle-fill ${LOBBY_CYCLE_MS}ms linear`,
@@ -938,6 +1136,38 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     );
 }
 
+// StreamingQR — minimal canvas QR code for the streaming overlay.
+// Renders using renderQR from qr.jsx when available via window.renderQR.
+// Falls back gracefully (blank canvas) if QR rendering is unavailable.
+function StreamingQR({ url, label }) {
+    // Use a stable object as the ref container so the useEffect dependency
+    // doesn't change on every render. The canvas element is stored in
+    // canvasHolder.el after the JSX ref callback fires.
+    const canvasHolder = useMD(() => ({ el: null }), []);
+
+    useED(() => {
+        const canvas = canvasHolder.el;
+        if (!canvas || !url) return undefined;
+        // renderQR may be available on window if qr.jsx has been imported
+        // by another module (e.g. admin_shell.jsx exposes it). If not, skip.
+        const fn = window.renderQR || null;
+        if (!fn) return undefined;
+        try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
+        return undefined;
+    }, [url]);
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4vh' }}>
+            <canvas
+                data-testid="overlay-qr"
+                ref={(el) => { canvasHolder.el = el; }}
+                style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
+            />
+            {label && <div style={{ fontSize: '1.2vh', opacity: 0.75, textAlign: 'center' }}>{label}</div>}
+        </div>
+    );
+}
+
 // <StreamingOverlay court="A" position="bottom"> — transparent-background
 // lower-third for OBS / vMix browser sources (T066, T067).
 //
@@ -948,6 +1178,11 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 //
 // T067: keep the overlay DOM mounted regardless of live state so the
 // opacity transition can run. Toggle opacity + pointerEvents only.
+//
+// mp-13y: team match lower-third — for team matches the centre holds a
+// QR code ("scan for results") flanked by the team names; the current
+// bout's competitor names appear on the outer sides, with a running IV/PW
+// aggregate per side beneath them (mp-13y #10).
 function StreamingOverlay({ court, position, competitions }) {
     const pos = position === 'top' ? 'top' : 'bottom';
 
@@ -970,14 +1205,76 @@ function StreamingOverlay({ court, position, competitions }) {
     const comp = live?.competition;
     const zekken = !!(comp && comp.withZekkenName);
 
-    const shiro = hasLive ? sideLabel(live.match.sideB, zekken) : '';
-    const aka = hasLive ? sideLabel(live.match.sideA, zekken) : '';
-    const ipponsB = hasLive ? ((live.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
-    const ipponsA = hasLive ? ((live.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
+    // mp-13y: team match detection.
+    const isTeamMatch = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+    const teamSizeOvl = (comp && comp.teamSize) || 0;
+
+    // mp-13y: per-match lineups for team overlay.
+    const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTeamLineups(
+        isTeamMatch && hasLive ? live.match : null,
+        isTeamMatch && hasLive ? comp : null,
+        hasLive ? live.roundIndex : undefined
+    );
+
+    // Current bout for the overlay (last active sub-result, index 0 fallback).
+    const ovlSubResults = (hasLive && live.match.subResults) || [];
+    const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
+    const currentSub = ovlSubResults[currentBoutIdx] || null;
+
+    // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
+    // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
+    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+
+    // DH-pending: all regular bouts are scored, the match is tied (equal IV
+    // and PW), but no DH sub-result has been created yet. In that case
+    // findCurrentBoutIndex returns subResults.length and currentSub is null;
+    // the overlay would otherwise read blank. Show "Daihyosen" on both sides
+    // so spectators know the rep bout is about to start.
+    const regularSubsOvl = ovlSubResults.filter(s => s.position !== -1);
+    const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
+        && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
+        && !ovlSubResults.some(s => s.position === -1);
+
+    // Competitor for the current bout: pinned lineup name, else the per-bout
+    // competitor stored on the sub (kachinuki), else the FIK POSITION label
+    // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending — never
+    // the team name (that flanks the QR above).
+    const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
+    const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
+    const boutShiroName = isTeamMatch && currentSub
+        ? (pickFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideB) || boutPosLabel)
+        : (dhPending ? boutPosLabel : '');
+    const boutAkaName = isTeamMatch && currentSub
+        ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel)
+        : (dhPending ? boutPosLabel : '');
+
+    // Bout score for the current sub — ippon letters, "—" (not "0") for an
+    // empty side so a kendo score never reads "M – 0".
+    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '—') : '—';
+    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
+
+    // Team names (outer flanks of QR in team mode).
+    const shiroTeamName = hasLive ? sideLabel(live.match.sideB, zekken) : '';
+    const akaTeamName = hasLive ? sideLabel(live.match.sideA, zekken) : '';
+
+    // Individual match data (non-team).
+    const shiro = hasLive && !isTeamMatch ? sideLabel(live.match.sideB, zekken) : '';
+    const aka = hasLive && !isTeamMatch ? sideLabel(live.match.sideA, zekken) : '';
+    const ipponsB = hasLive && !isTeamMatch ? ((live.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
+    const ipponsA = hasLive && !isTeamMatch ? ((live.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
     // T097: Kiken/Fus./DH/(E) suffix on the OBS lower-third. Computed off
     // the live match so it disappears the moment the overlay fades out.
-    const decSfx = hasLive && window.decisionSuffix ? window.decisionSuffix(live.match) : '';
+    const decSfx = hasLive && !isTeamMatch && window.decisionSuffix ? window.decisionSuffix(live.match) : '';
     const compName = comp?.name || '';
+
+    // QR target URL: the tournament viewer home page (NOT a per-match deep
+    // link — viewers land on the schedule and navigate themselves). Only
+    // emitted on team matches so the lower-third doesn't crowd the
+    // individual-match layout. Uses the current page origin so the QR
+    // works on the local network.
+    const qrUrl = hasLive && isTeamMatch
+        ? `${typeof window !== 'undefined' ? window.location.origin : ''}/viewer`
+        : '';
 
     return (
         <div className="streaming-overlay" data-testid="streaming-overlay-root" style={{
@@ -1004,55 +1301,101 @@ function StreamingOverlay({ court, position, competitions }) {
             transitionProperty: 'opacity, visibility',
             transitionDelay: hasLive ? '0s, 0s' : '0s, 300ms',
         }} aria-hidden={!hasLive}>
-            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <span style={{
-                    display: 'inline-block',
-                    // Framed-white Shiro chip (DESIGN.md §4): white fill + navy
-                    // frame + navy text, matching the framed-white badges across
-                    // the app. Kept as a chip (not a flood) so the transparent
-                    // lower-third still lets broadcast video show through.
-                    background: '#fff',
-                    color: 'var(--accent, #1d3557)',
-                    border: '1px solid var(--accent, #1d3557)',
-                    fontSize: '1.4vh',
-                    fontWeight: 800,
-                    letterSpacing: '0.06em',
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    marginRight: 8,
-                    verticalAlign: 'middle',
-                }}><TermD name="shiro">SHIRO</TermD></span>
-                <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{shiro}</span>
-            </div>
-            <div style={{
-                flexShrink: 0,
-                padding: '0 2vw',
-                fontFamily: 'var(--font-mono, monospace)',
-                fontWeight: 700,
-                fontSize: '3.5vh',
-            }}>
-                {ipponsB} - {ipponsA}
-                {decSfx && (
-                    <span style={{ marginLeft: '1vw', fontSize: '2.4vh', opacity: 0.85 }}>{decSfx}</span>
-                )}
-            </div>
-            <div style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{aka}</span>
-                <span style={{
-                    display: 'inline-block',
-                    // Solid-red Aka chip (DESIGN.md §4): --red fill, matching the
-                    // app's Aka badges. e63946 → --red for token consistency.
-                    background: 'var(--red, #c1121f)',
-                    color: '#fff',
-                    fontSize: '1.4vh',
-                    fontWeight: 800,
-                    letterSpacing: '0.06em',
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    marginLeft: 8,
-                    verticalAlign: 'middle',
-                }}><TermD name="aka">AKA</TermD></span>
-            </div>
+
+            {isTeamMatch ? (
+                /* mp-13y: team match lower-third.
+                   Layout: [Shiro team/bout] [QR] [Aka …]
+                   Per side, TWO rows:
+                     • Team row  — the TEAM NAME + the running IV/PW aggregate
+                       (the team-level result belongs on the team row).
+                     • Bout row  — the current bout's competitor/position + that
+                       competitor's ippon score, so the result lines up with the
+                       individual bout it belongs to. */
+                <>
+                    {/* Shiro — left side (white) */}
+                    <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro">
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamName}</span>
+                            <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
+                            <span style={{ fontSize: '1.9vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutShiroName}</span>
+                            <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsB}</span>
+                        </div>
+                    </div>
+
+                    {/* QR centre */}
+                    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6vh', padding: '0 2vw' }}>
+                        {qrUrl && <StreamingQR url={qrUrl} label="scan for results" />}
+                    </div>
+
+                    {/* Aka — right side (red) */}
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
+                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamName}</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
+                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>
+                            <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutAkaName}</span>
+                        </div>
+                    </div>
+                </>
+            ) : (
+                /* Individual match lower-third — unchanged from original. */
+                <>
+                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                            display: 'inline-block',
+                            // Framed-white Shiro chip (DESIGN.md §4): white fill + navy
+                            // frame + navy text, matching the framed-white badges across
+                            // the app. Kept as a chip (not a flood) so the transparent
+                            // lower-third still lets broadcast video show through.
+                            background: '#fff',
+                            color: 'var(--accent, #1d3557)',
+                            border: '1px solid var(--accent, #1d3557)',
+                            fontSize: '1.4vh',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            marginRight: 8,
+                            verticalAlign: 'middle',
+                        }}><TermD name="shiro">SHIRO</TermD></span>
+                        <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{shiro}</span>
+                    </div>
+                    <div style={{
+                        flexShrink: 0,
+                        padding: '0 2vw',
+                        fontFamily: 'var(--font-mono, monospace)',
+                        fontWeight: 700,
+                        fontSize: '3.5vh',
+                    }}>
+                        {ipponsB} - {ipponsA}
+                        {decSfx && (
+                            <span style={{ marginLeft: '1vw', fontSize: '2.4vh', opacity: 0.85 }}>{decSfx}</span>
+                        )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 600, verticalAlign: 'middle' }}>{aka}</span>
+                        <span style={{
+                            display: 'inline-block',
+                            // Solid-red Aka chip (DESIGN.md §4): --red fill, matching the
+                            // app's Aka badges. e63946 → --red for token consistency.
+                            background: 'var(--red, #c1121f)',
+                            color: '#fff',
+                            fontSize: '1.4vh',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            marginLeft: 8,
+                            verticalAlign: 'middle',
+                        }}><TermD name="aka">AKA</TermD></span>
+                    </div>
+                </>
+            )}
+
             {compName && (
                 <div style={{
                     position: 'absolute',
@@ -1132,6 +1475,13 @@ export {
     LOBBY_CYCLE_MS,
     LOBBY_ROWS,
     buildCourtSlots,
+    // mp-13y: helpers exported for vitest.
+    findCurrentBoutIndex,
+    overlayPositionLabel,
+    TvWhiteBoard,
+    TvIndividualBoard,
+    gatherIndividualGroup,
+    poolNameOf,
 };
 
 if (typeof window !== 'undefined') {

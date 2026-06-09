@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Viewer scoring table mockup (per running_a_kendo_tournament.md)</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;background:#f3f4f6;margin:0;padding:24px;color:#111;}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#555;margin:28px 0 8px;}
+  .note{font-size:12px;color:#666;max-width:760px;margin:0 0 12px;}
+  .wrap{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;}
+  .card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;width:430px;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+  .head{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#6b7280;border-bottom:1px solid #eee;padding-bottom:8px;margin-bottom:10px;}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;}
+  .b-now{color:#b91c1c;font-weight:700;}
+  /* scoreboard table */
+  table.sb{width:100%;border-collapse:collapse;}
+  table.sb th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#9ca3af;font-weight:600;padding:2px 4px;}
+  table.sb td{padding:6px 4px;font-size:14px;border-top:1px solid #f1f1f1;}
+  .nm-shiro{font-weight:700;color:#111;text-align:left;width:34%;}
+  .nm-aka{font-weight:700;color:#b91c1c;text-align:right;width:34%;}
+  .slot{width:9%;text-align:center;font-family:var(--mono,ui-monospace,monospace);font-weight:700;font-size:15px;color:#111;}
+  .slot.aka{color:#b91c1c;}
+  .vs{width:6%;text-align:center;color:#9ca3af;font-size:12px;}
+  .hansoku{color:#dc2626;}
+  .summary td{font-weight:800;font-size:16px;border-top:2px solid #111;background:#fafafa;}
+  .summary .lab{font-size:9px;color:#6b7280;font-weight:600;display:block;}
+  .dh td{border-top:2px solid #111;}
+  .dh-tag{display:inline-block;background:#111;color:#fff;font-size:10px;font-weight:700;letter-spacing:.08em;padding:2px 7px;border-radius:3px;}
+  .teamname-shiro{font-weight:800;color:#111;}
+  .teamname-aka{font-weight:800;color:#b91c1c;}
+  .ht{font-size:10px;color:#6b7280;margin-left:4px;}
+</style></head>
+<body>
+<p class="note"><b>Proposed viewer match-detail scoring tables</b>, per <code>running_a_kendo_tournament.md</code> §Scoreboard Structure. White (Shiro)=left/dark, Red (Aka)=right/red. Two ippon slots per side; <span class="hansoku">▲</span>=outstanding hansoku; <b>X</b>=hikiwake; <b>H</b>=hantei/hansoku ippon.</p>
+
+<h2>Individual match (§263 — 7-column row)</h2>
+<div class="wrap">
+  <div class="card">
+    <div class="head"><span>Shiaijo A · Round of 16 · 09:00</span><span class="b-now">● NOW</span></div>
+    <table class="sb">
+      <thead><tr><th class="nm-shiro" style="text-align:left">Shiro</th><th colspan="2"></th><th>vs</th><th colspan="2"></th><th class="nm-aka" style="text-align:right">Aka</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="nm-shiro">Tanaka</td>
+          <td class="slot">M</td><td class="slot">K</td>
+          <td class="vs"></td>
+          <td class="slot aka"></td><td class="slot aka">D</td>
+          <td class="nm-aka">Suzuki</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin:8px 0 0">White won 2–1 (M,K vs D). Outright win = both slots filled.</p>
+  </div>
+
+  <div class="card">
+    <div class="head"><span>Shiaijo B · Pool A · 09:10</span><span>FINAL</span></div>
+    <table class="sb"><tbody>
+      <tr>
+        <td class="nm-shiro">Ito</td>
+        <td class="slot"></td><td class="slot"></td>
+        <td class="vs"><b>X</b></td>
+        <td class="slot aka"></td><td class="slot aka"></td>
+        <td class="nm-aka">Mori</td>
+      </tr>
+    </tbody></table>
+    <p class="note" style="margin:8px 0 0">Hikiwake (draw) — <b>X</b> in the vs column. Pools only.</p>
+  </div>
+</div>
+
+<h2>Individual — hansoku ▲ and hantei H</h2>
+<div class="wrap">
+  <div class="card">
+    <div class="head"><span>Shiaijo A · Final · 09:30</span><span>FINAL</span></div>
+    <table class="sb"><tbody>
+      <tr>
+        <td class="nm-shiro">Sato <span class="hansoku">▲</span></td>
+        <td class="slot">M</td><td class="slot"></td>
+        <td class="vs"></td>
+        <td class="slot aka"></td><td class="slot aka">H</td>
+        <td class="nm-aka">Yamada</td>
+      </tr>
+    </tbody></table>
+    <p class="note" style="margin:8px 0 0">Sato has 1 outstanding hansoku (▲). Aka's <b>H</b> = hantei win or a converted 2nd-hansoku ippon.</p>
+  </div>
+</div>
+
+<h2>Team match (§277 — summary row + per-bout rows)</h2>
+<div class="wrap">
+  <div class="card" style="width:480px">
+    <div class="head"><span>Shiaijo B · Round of 32 · 09:54</span><span class="b-now">● NOW</span></div>
+    <table class="sb">
+      <thead>
+        <tr>
+          <th class="nm-shiro" style="text-align:left">Shiro</th>
+          <th colspan="2"></th><th>vs</th><th colspan="2"></th>
+          <th class="nm-aka" style="text-align:right">Aka</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Summary row: IV / PW per side -->
+        <tr class="summary">
+          <td class="teamname-shiro">Tokyo KR</td>
+          <td class="slot"><span class="lab">IV</span>2</td>
+          <td class="slot"><span class="lab">PW</span>3</td>
+          <td class="vs"></td>
+          <td class="slot aka"><span class="lab">PW</span>2</td>
+          <td class="slot aka"><span class="lab">IV</span>1</td>
+          <td class="teamname-aka" style="text-align:right">Osaka BD</td>
+        </tr>
+        <!-- bout rows -->
+        <tr><td class="nm-shiro">Sato Ken</td><td class="slot">M</td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">Yamada Ryo</td></tr>
+        <tr><td class="nm-shiro">Tanaka Aiko</td><td class="slot"></td><td class="slot"></td><td class="vs"><b>X</b></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">Ito Haruki</td></tr>
+        <tr><td class="nm-shiro">Watanabe Kei</td><td class="slot">K</td><td class="slot">M</td><td class="vs"></td><td class="slot aka"></td><td class="slot aka">D</td><td class="nm-aka">Mori Daichi</td></tr>
+        <tr><td class="nm-shiro" style="color:#9ca3af">4</td><td class="slot"></td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka" style="color:#d4a5a8">4</td></tr>
+        <tr><td class="nm-shiro" style="color:#9ca3af">5</td><td class="slot"></td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka" style="color:#d4a5a8">5</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin:8px 0 0">Summary shows <b>IV</b> (individual victories) then <b>PW</b> (points won) per side — the team result + tiebreak. Unfought bouts show the bout number. Names come from the pinned lineup; fall back to the number.</p>
+  </div>
+
+  <div class="card" style="width:480px">
+    <div class="head"><span>Shiaijo A · Final · 10:20</span><span>FINAL</span></div>
+    <table class="sb">
+      <thead><tr><th class="nm-shiro" style="text-align:left">Shiro</th><th colspan="2"></th><th>vs</th><th colspan="2"></th><th class="nm-aka" style="text-align:right">Aka</th></tr></thead>
+      <tbody>
+        <tr class="summary"><td class="teamname-shiro">Kyoto K</td><td class="slot"><span class="lab">IV</span>2</td><td class="slot"><span class="lab">PW</span>3</td><td class="vs"></td><td class="slot aka"><span class="lab">PW</span>3</td><td class="slot aka"><span class="lab">IV</span>2</td><td class="teamname-aka" style="text-align:right">Nagoya B</td></tr>
+        <tr><td class="nm-shiro">A1</td><td class="slot">M</td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">B1</td></tr>
+        <tr><td class="nm-shiro">A2</td><td class="slot"></td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka">D</td><td class="nm-aka">B2</td></tr>
+        <tr><td class="nm-shiro">A3</td><td class="slot"></td><td class="slot"></td><td class="vs"><b>X</b></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">B3</td></tr>
+        <tr><td class="nm-shiro">A4</td><td class="slot">K</td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">B4</td></tr>
+        <tr><td class="nm-shiro">A5</td><td class="slot"></td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka">M</td><td class="nm-aka">B5</td></tr>
+        <!-- tie 2-2 / 3-3 → daihyosen -->
+        <tr class="dh"><td colspan="7" style="text-align:center;padding:6px 0"><span class="dh-tag">DAIHYOSEN</span></td></tr>
+        <tr><td class="nm-shiro">A3</td><td class="slot">M</td><td class="slot"></td><td class="vs"></td><td class="slot aka"></td><td class="slot aka"></td><td class="nm-aka">B1</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin:8px 0 0">Knockout tie (IV & PW equal) → <b>Daihyosen</b> rep bout appended below, any roster member each side.</p>
+  </div>
+</div>
+</body></html>

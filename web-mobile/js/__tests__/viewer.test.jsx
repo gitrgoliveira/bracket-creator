@@ -352,7 +352,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // `global.window.x = vi.fn()` assignments — without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
-  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -368,21 +368,24 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     subResults: subs,
   });
 
+  let TeamScoreboard;
+  let IndividualScore;
+
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
     global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
-    // Only globals MatchDetailCard executes on the team path. The non-team
-    // ippons block (which calls window.isHikiwake) is gated out for teams.
     global.window.formatIpponsScore = vi.fn(() => '3-2');
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
     ({ MatchDetailCard } = await import('../viewer.jsx'));
+    ({ TeamScoreboard, IndividualScore } = await import('../match_scoreboard.jsx'));
   });
 
   afterEach(() => {
@@ -399,7 +402,22 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     vi.resetModules();
   });
 
-  it('labels the daihyosen row "Daihyosen" and shows "Hantei" when decidedByHantei', () => {
+  // mp-13y: MatchDetailCard now delegates the scoreboard to the shared
+  // match_scoreboard.jsx components — TeamScoreboard (team) / IndividualScore
+  // (individual). These are child component vnodes which the reactive shim does
+  // not expand, so we assert delegation (type + props). The scoreboard's own
+  // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
+  // match_scoreboard.test.jsx.
+  function findVnode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  it('delegates a team match to TeamScoreboard (showDH when a DH sub exists)', () => {
     const tree = runtime.mount(MatchDetailCard, {
       match: mkTeamMatch([
         { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
@@ -407,85 +425,23 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       ]),
       onClose: null,
     });
-    const text = collectText(tree);
-    expect(text).toContain('Match 1');
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Match -1');
-    expect(text).toContain('Hantei');
-    // The marker must carry left spacing so it does not render flush against
-    // the label as "DaihyosenHantei" (Copilot review on #192).
-    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
-    expect(marker).toBeTruthy();
-    expect(marker.props.style?.marginLeft).toBeTruthy();
+    const sb = findVnode(tree, n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.showDH).toBe(true);
+    expect(sb.props.subResults.length).toBe(2);
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeNull();
   });
 
-  it('omits the "Hantei" marker when no sub was decided by hantei', () => {
-    const tree = runtime.mount(MatchDetailCard, {
-      match: mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false },
-      ]),
-      onClose: null,
-    });
-    const text = collectText(tree);
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Hantei');
-  });
-
-  // mp-116: Overview "Recent results" bug — allMatches useMemo was not threading
-  // compKind/teamSize, so isTeam evaluated false and the individual ippons block
-  // rendered instead of the team sub-bout rows.
-  // Verify that a match carrying compKind="team" (as allMatches now produces)
-  // renders match-detail-card__team-subs, NOT match-detail-card__ippons.
-  it('renders team sub-bout block (not individual ippons) when compKind="team" from allMatches', () => {
+  it('delegates an individual match to IndividualScore (not TeamScoreboard)', () => {
     const match = {
-      ...mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: 2, ipponsA: [], ipponsB: ['D'], decidedByHantei: false },
-      ]),
-      // These flags are what allMatches now correctly supplies for team comps.
-      compKind: 'team',
-      teamSize: 3,
+      compKind: 'individual', teamSize: 0, status: 'completed', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'], ipponsB: [], winner: { id: 'pA' },
     };
     const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-    // Team sub-rows container must be present.
-    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-    expect(teamSubs).toBeTruthy();
-    // Individual ippons block must NOT appear.
-    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-    expect(ipponsBlock).toBeNull();
-  });
-
-  // mp-116: Individual match must still render the ippons block (regression guard).
-  it('renders individual ippons block (not team subs) for an individual match', () => {
-    // The individual path calls window.isHikiwake — stub it for this test,
-    // restoring any prior value in finally so a thrown assertion can't leak
-    // the stub into later tests (mirrors the roundLabel pattern above).
-    const savedIsHikiwake = global.window.isHikiwake;
-    global.window.isHikiwake = vi.fn(() => false);
-    try {
-      const match = {
-        compKind: 'individual',
-        teamSize: 0,
-        status: 'completed',
-        court: 'A',
-        phase: 'bracket',
-        round: 'QF',
-        sideA: { id: 'pA', name: 'Alice' },
-        sideB: { id: 'pB', name: 'Bob' },
-        ipponsA: ['M'],
-        ipponsB: [],
-        winner: { id: 'pA' },
-      };
-      const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-      const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-      expect(ipponsBlock).toBeTruthy();
-      const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-      expect(teamSubs).toBeNull();
-    } finally {
-      if (savedIsHikiwake === undefined) delete global.window.isHikiwake;
-      else global.window.isHikiwake = savedIsHikiwake;
-    }
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeTruthy();
+    expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
 });
 
@@ -499,6 +455,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   const realReact = global.React;
   let runtime;
   let MatchViewerModal;
+  let MatchDetailCard;
   const STUBBED = ['useEscapeToClose', 'ipponsFromScore'];
   const savedGlobals = {};
 
@@ -510,7 +467,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     global.window.useEscapeToClose = vi.fn();
     global.window.ipponsFromScore = vi.fn(() => []);
     vi.resetModules();
-    ({ MatchViewerModal } = await import('../viewer.jsx'));
+    ({ MatchViewerModal, MatchDetailCard } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -524,7 +481,11 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     vi.resetModules();
   });
 
-  it('renders the round label in the header for a bracket match', () => {
+  // mp-13y: the modal now reuses the canonical MatchDetailCard for its body
+  // (DRY — same header, colour badges and BoutSubRow grid as the inline card).
+  // The header text rendering itself is covered by the MatchDetailCard suite;
+  // here we assert the modal delegates with the correct match.
+  it('delegates to MatchDetailCard with the round label for a bracket match', () => {
     const match = {
       phase: 'bracket', round: 'Final', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'A',
@@ -532,14 +493,12 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    const text = collectText(tree);
-    // Header must show the round label, not an empty string after "Shiaijo A ·".
-    expect(text).toContain('Final');
-    // Team path renders the SHIRO/Position/AKA sub-bout table.
-    expect(text).toContain('Position');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.round).toBe('Final');
   });
 
-  it('renders the pool name in the header for a pool match', () => {
+  it('delegates to MatchDetailCard with the pool name for a pool match', () => {
     const match = {
       phase: 'pool', poolName: 'Pool A', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'B',
@@ -547,7 +506,9 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    expect(collectText(tree)).toContain('Pool A');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.poolName).toBe('Pool A');
   });
 });
 
@@ -617,8 +578,8 @@ describe('TournamentInfo', () => {
   });
 });
 
-// mp-f4xo: PoolMatrix — clickable cross-table cells
-describe('PoolMatrix (mp-f4xo)', () => {
+// mp-f4xo: LeagueMatrix — clickable cross-table cells
+describe('LeagueMatrix (mp-f4xo)', () => {
   const realReact = global.React;
   let runtime;
   let PM;
@@ -671,7 +632,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     savedIsHikiwake = global.window.isHikiwake;
     global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
-    ({ PoolMatrix: PM } = await import('../viewer.jsx'));
+    ({ LeagueMatrix: PM } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -717,8 +678,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('renders W/L cells for a completed match', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
-    const lossCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--loss'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
     expect(winCell).toBeTruthy();
     expect(lossCell).toBeTruthy();
   });
@@ -727,7 +688,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeTypeOf('function');
     winCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -744,7 +705,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [pendingMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const pendingCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--pending'));
+    const pendingCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--pending'));
     expect(pendingCell).toBeTruthy();
     pendingCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -754,7 +715,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const liveCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--live'));
+    const liveCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--live'));
     expect(liveCell).toBeTruthy();
     liveCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -763,8 +724,8 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('self-diagonal and empty cells have no onClick', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const selfCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--self'));
-    const emptyCells = cells.filter(c => c.props?.className?.includes('pool-matrix__cell--empty'));
+    const selfCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--self'));
+    const emptyCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--empty'));
     expect(selfCells.length).toBeGreaterThan(0);
     selfCells.forEach(c => expect(c.props.onClick).toBeUndefined());
     emptyCells.forEach(c => expect(c.props.onClick).toBeUndefined());
@@ -773,7 +734,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have role=button and tabIndex=0 for a11y', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.role).toBe('button');
     expect(winCell.props.tabIndex).toBe(0);
   });
@@ -781,7 +742,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('interactive cells have aria-label describing the matchup', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: vi.fn() });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props['aria-label']).toContain('Alice');
     expect(winCell.props['aria-label']).toContain('Bob');
     expect(winCell.props['aria-label']).toContain('Win');
@@ -791,7 +752,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: 'Enter', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -802,7 +763,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const preventDefaultSpy = vi.fn();
     winCell.props.onKeyDown({ key: ' ', preventDefault: preventDefaultSpy });
     expect(spy).toHaveBeenCalledTimes(1);
@@ -812,7 +773,7 @@ describe('PoolMatrix (mp-f4xo)', () => {
   it('cells are not interactive when onMatchClick is not provided', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const cells = allCells(tree);
-    const winCell = cells.find(c => c.props?.className?.includes('pool-matrix__cell--win'));
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell.props.onClick).toBeUndefined();
     expect(winCell.props.role).toBeUndefined();
   });
@@ -833,31 +794,96 @@ describe('PoolMatrix (mp-f4xo)', () => {
     };
     const tree = runtime.mount(PM, { pool: numberedPool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
     expect(colHeaders.map(h => textContent(h))).toEqual(['A1', 'A2', 'A3']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
       return textContent(numSpan);
     });
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
   });
 
-  it('omits numbers entirely when player.number is not set', () => {
+  it('falls back to draw-order index when player.number is not set', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
-    const colHeaders = ths.filter(h => h.props?.className?.includes('pool-matrix__col-head'));
-    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
+    const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
+    // Column headers always show a visible label — the 1-based draw-order
+    // position index when the player has no assigned number.
+    expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
 
-    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('pool-matrix__row-head'));
+    const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
       const spans = [].concat(td.children || td.props?.children || []);
-      const numSpan = spans.find(s => s?.props?.className?.includes('pool-matrix__num'));
-      return numSpan;
+      const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
+      return textContent(numSpan);
     });
-    expect(rowNums).toEqual([undefined, undefined, undefined]);
+    // The number span is now always rendered, mirroring the column index so
+    // row N and column N cross-reference the same player.
+    expect(rowNums).toEqual(['1', '2', '3']);
+  });
+
+  // Regression: two participants share a name but have different dojos/ids.
+  // Name-only cell indexing collapses both into one matchMap entry and shows
+  // the wrong result; id-based keys must keep them distinct. (Copilot #261)
+  it('disambiguates same-name participants by id when mapping cells', () => {
+    const samePool = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' }, // same name, different id
+        { id: 'A1', name: 'Alice', dojo: 'Kyoto' },
+      ],
+    };
+    // T1 beat Alice; T2 lost to Alice. With name-only keys both
+    // "Tanaka Kenji vs Alice" cells resolve to the same (last-registered)
+    // match and show identical results.
+    const mWin = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T1', sideBId: 'A1', status: 'completed', winner: { id: 'T1', name: 'Tanaka Kenji' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const mLoss = {
+      id: 'Pool A-1', sideA: { id: 'T2', name: 'Tanaka Kenji' }, sideB: { id: 'A1', name: 'Alice' },
+      sideAId: 'T2', sideBId: 'A1', status: 'completed', winner: { id: 'A1', name: 'Alice' },
+      ipponsA: [], ipponsB: ['K'], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: samePool, matches: [mWin, mLoss], tweaks: {} });
+    const labels = allCells(tree).map(c => c.props?.['aria-label']).filter(Boolean);
+    // The id-keyed mapping yields BOTH outcomes for the same name vs Alice —
+    // proof the two Tanakas resolved to different matches. The aria-label also
+    // carries the disambiguating dojo (a11y: screen readers can't rely on the
+    // hover title), so the two Tanakas are distinguishable in the label itself.
+    expect(labels).toContain('Match: Tanaka Kenji (Tokyo) vs Alice (Kyoto) — Win');
+    expect(labels).toContain('Match: Tanaka Kenji (Osaka) vs Alice (Kyoto) — Loss');
+  });
+
+  // Regression: the head-to-head between two same-name participants. The
+  // winner is stored by name (ambiguous), so rowWon must resolve via
+  // winnerId — otherwise BOTH rows show the same result. (browser-found)
+  it('resolves the winner of a same-name head-to-head by id', () => {
+    const twoTanaka = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'T1', name: 'Tanaka Kenji', dojo: 'Tokyo' },
+        { id: 'T2', name: 'Tanaka Kenji', dojo: 'Osaka' },
+      ],
+    };
+    // T1 beat T2. winner name "Tanaka Kenji" is ambiguous; winnerId 'T1' is not.
+    const headToHead = {
+      id: 'Pool A-0', sideA: { id: 'T1', name: 'Tanaka Kenji' }, sideB: { id: 'T2', name: 'Tanaka Kenji' },
+      sideAId: 'T1', sideBId: 'T2', winnerId: 'T1', status: 'completed',
+      winner: { id: 'T1', name: 'Tanaka Kenji' }, ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: twoTanaka, matches: [headToHead], tweaks: {} });
+    const bodyCells = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__cell--win') || c.props?.className?.includes('league-matrix__cell--loss'));
+    const wins = bodyCells.filter(c => c.props?.className?.includes('--win'));
+    const losses = bodyCells.filter(c => c.props?.className?.includes('--loss'));
+    // Exactly one win (T1's row) and one loss (T2's row) — NOT two wins.
+    expect(wins).toHaveLength(1);
+    expect(losses).toHaveLength(1);
   });
 });
 

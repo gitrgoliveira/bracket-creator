@@ -98,7 +98,7 @@ func TestPostSponsor_HappyPath_PNG(t *testing.T) {
 	body, ct := buildSponsorUpload(t, "Acme Corp", "https://acme.example", "acme.png", tinyPNG)
 	w := postSponsor(t, router, body, ct, "secret")
 
-	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
 	var got state.Sponsor
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, "Acme Corp", got.Name)
@@ -118,7 +118,7 @@ func TestPostSponsor_HappyPath_JPEG(t *testing.T) {
 	body, ct := buildSponsorUpload(t, "BetaCo", "", "beta.jpg", tinyJPEG)
 	w := postSponsor(t, router, body, ct, "secret")
 
-	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
 	var got state.Sponsor
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Regexp(t, `^[a-f0-9]{16}\.jpg$`, got.File)
@@ -162,7 +162,7 @@ func TestPostSponsor_RejectsBadLink(t *testing.T) {
 	} {
 		body, ct := buildSponsorUpload(t, "Bad Link", badLink, "x.png", tinyPNG)
 		w := postSponsor(t, router, body, ct, "secret")
-		assert.Equal(t, http.StatusBadRequest, w.Code, "link %q must be rejected", badLink)
+		assert.Equalf(t, http.StatusBadRequest, w.Code, "link %q must be rejected", badLink)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestPostSponsor_CapEnforced(t *testing.T) {
 	for i := range state.MaxSponsors {
 		body, ct := buildSponsorUpload(t, "Sponsor", "", "s.png", tinyPNG)
 		w := postSponsor(t, router, body, ct, "secret")
-		require.Equal(t, http.StatusCreated, w.Code, "upload %d should succeed", i+1)
+		require.Equalf(t, http.StatusCreated, w.Code, "upload %d should succeed", i+1)
 	}
 	body, ct := buildSponsorUpload(t, "One Too Many", "", "s.png", tinyPNG)
 	w := postSponsor(t, router, body, ct, "secret")
@@ -286,7 +286,7 @@ func TestDeleteSponsor_RemovesEntryAndFile(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
 	req.Header.Set("X-Tournament-Password", "secret")
 	router.ServeHTTP(d, req)
-	require.Equal(t, http.StatusOK, d.Code, "body: %s", d.Body.String())
+	require.Equalf(t, http.StatusOK, d.Code, "body: %s", d.Body.String())
 
 	// File is gone.
 	_, err := os.Stat(filepath.Join(tempDir, "sponsors", s.File))

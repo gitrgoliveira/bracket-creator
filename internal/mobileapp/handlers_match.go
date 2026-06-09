@@ -337,12 +337,18 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		// Determine team winner per kendo rules: most individual wins wins.
+		// winnerSide records the WINNING SIDE (not just the name) so the
+		// engine can stamp WinnerID even when both sides share a name —
+		// the name alone can't tell two same-name participants apart.
 		winner := ""
+		winnerSide := ""
 		switch {
 		case req.TeamAWins > req.TeamBWins:
 			winner = req.SideA
+			winnerSide = "A"
 		case req.TeamBWins > req.TeamAWins:
 			winner = req.SideB
+			winnerSide = "B"
 		}
 
 		// Synthesise SubResults so standings IV/IL/IT counts are correct.
@@ -368,6 +374,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			SideA:      req.SideA,
 			SideB:      req.SideB,
 			Winner:     winner,
+			WinnerSide: winnerSide,
 			Status:     state.MatchStatusCompleted,
 			SubResults: subResults,
 		}

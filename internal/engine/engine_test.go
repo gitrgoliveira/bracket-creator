@@ -35,7 +35,7 @@ func createTestCompetition(t *testing.T, store *state.Store, id string, format s
 		PoolSizeMode: "min",
 		PoolWinners:  2,
 		RoundRobin:   true,
-		Courts:       []string{"A", "B"},
+		Courts:       []string{"A"},
 		StartTime:    "09:00",
 		Status:       "setup",
 	}
@@ -49,6 +49,73 @@ func saveTestParticipants(t *testing.T, store *state.Store, compID string, names
 		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i%5))}
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
+}
+
+// TestStartCompetition_LeagueMatchesCarrySideIDs pins that generated
+// league/pool matches stamp each side's participant UUID (SideAID/SideBID)
+// from the roster. The league matrix relies on these to cross-reference a
+// cell to the right row/column player when two participants share a name.
+func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-ids"
+
+	createTestCompetition(t, store, compID, "league", 4)
+	// Real UUID-v4-shaped ids: the participant loader sniffs the first CSV
+	// field and only treats a row as id-bearing when it matches the UUID
+	// shape (else it parses as the legacy name-first format).
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+		idC = "33333333-3333-4333-8333-333333333333"
+		idD = "44444444-4444-4444-8444-444444444444"
+	)
+	players := []domain.Player{
+		{ID: idA, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: idB, Name: "Tanaka Kenji", Dojo: "Osaka"}, // same name, different dojo
+		{ID: idC, Name: "Suzuki Hiro", Dojo: "Nagoya"},
+		{ID: idD, Name: "Watanabe Ryo", Dojo: "Kyoto"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+
+	validIDs := map[string]bool{idA: true, idB: true, idC: true, idD: true}
+	for _, m := range matches {
+		assert.NotEmptyf(t, m.SideAID, "match %s SideAID should be stamped from the roster", m.ID)
+		assert.NotEmptyf(t, m.SideBID, "match %s SideBID should be stamped from the roster", m.ID)
+		assert.Truef(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
+		assert.Truef(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
+		assert.NotEqual(t, m.SideAID, m.SideBID, "a match must be between two distinct participants")
+	}
+
+	// Scoring a match sends names only (no ids). Verify the backfill in
+	// writeMatchResult preserves the generation-time SideAID/SideBID rather
+	// than wiping them via the whole-struct `*r = *result` overwrite, and
+	// resolves WinnerID from the WinnerSide hint — the only way to tell apart
+	// the winner when both sides share a name (this is exactly the A-0
+	// Tanaka-vs-Tanaka match).
+	first := matches[0]
+	wantA, wantB := first.SideAID, first.SideBID
+	require.NoError(t, eng.RecordMatchResult(compID, first.ID, &state.MatchResult{
+		ID: first.ID, SideA: first.SideA, SideB: first.SideB,
+		Winner: first.SideA, WinnerSide: "A", Status: state.MatchStatusCompleted,
+	}))
+	reloaded, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var got *state.MatchResult
+	for i := range reloaded {
+		if reloaded[i].ID == first.ID {
+			got = &reloaded[i]
+		}
+	}
+	require.NotNil(t, got)
+	assert.Equal(t, wantA, got.SideAID, "scoring must preserve SideAID")
+	assert.Equal(t, wantB, got.SideBID, "scoring must preserve SideBID")
+	assert.Equal(t, wantA, got.WinnerID, "WinnerSide=A must resolve WinnerID to SideAID even when both sides share a name")
 }
 
 // --- Pool Generation Tests ---
@@ -1058,7 +1125,7 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 		// Points = W*100_000_000 - L*1_000_000 + D*10_000 + G*100 - T
 		for _, s := range poolStandings {
 			expected := s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
-			assert.Equal(t, expected, s.Points, "Points should match weighted formula for %s", s.Player.Name)
+			assert.Equalf(t, expected, s.Points, "Points should match weighted formula for %s", s.Player.Name)
 		}
 		// Ranking: Alice (2W) > Bob (1W,1L) > Charlie (0W,2L)
 		assert.Equal(t, "Alice", poolStandings[0].Player.Name)
@@ -1167,7 +1234,7 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 			expected := s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
 				s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
 				s.PointsWon*100 - s.PointsLost
-			assert.Equal(t, expected, s.Points, "Team weighted formula mismatch for %s", s.Player.Name)
+			assert.Equalf(t, expected, s.Points, "Team weighted formula mismatch for %s", s.Player.Name)
 		}
 
 		assert.True(t, poolStandings[0].Points > poolStandings[1].Points)
@@ -1304,7 +1371,7 @@ func TestBracketMatchIDs_AreUnique(t *testing.T) {
 	ids := map[string]bool{}
 	for _, round := range bracket.Rounds {
 		for _, m := range round {
-			assert.False(t, ids[m.ID], "duplicate match ID: %s", m.ID)
+			assert.Falsef(t, ids[m.ID], "duplicate match ID: %s", m.ID)
 			ids[m.ID] = true
 		}
 	}
@@ -1325,7 +1392,7 @@ func TestPoolMatchIDs_AreUnique(t *testing.T) {
 
 	ids := map[string]bool{}
 	for _, m := range matches {
-		assert.False(t, ids[m.ID], "duplicate pool match ID: %s", m.ID)
+		assert.Falsef(t, ids[m.ID], "duplicate pool match ID: %s", m.ID)
 		ids[m.ID] = true
 	}
 }
@@ -1700,9 +1767,9 @@ func TestStartCompetition_NumberPrefix_Pools(t *testing.T) {
 	seen := map[string]bool{}
 	for _, p := range pools {
 		for _, pl := range p.Players {
-			assert.NotEmpty(t, pl.Number, "player %s should have a number", pl.Name)
-			assert.True(t, len(pl.Number) > 1 && pl.Number[0] == 'K', "number %q should start with K", pl.Number)
-			assert.False(t, seen[pl.Number], "duplicate number %q", pl.Number)
+			assert.NotEmptyf(t, pl.Number, "player %s should have a number", pl.Name)
+			assert.Truef(t, len(pl.Number) > 1 && pl.Number[0] == 'K', "number %q should start with K", pl.Number)
+			assert.Falsef(t, seen[pl.Number], "duplicate number %q", pl.Number)
 			seen[pl.Number] = true
 		}
 	}
@@ -1873,9 +1940,15 @@ func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-pools"
 
-	// createTestCompetition uses Courts: []string{"A", "B"}
-	createTestCompetition(t, store, compID, "mixed", 3)
-	// 6 players → 2 pools. AssignPoolsToCourts(2, 2) → [0, 1]
+	// 2 courts with mixed format and 6 players → 2 pools (multi-pool, no
+	// single-pool court validation). AssignPoolsToCourts(2, 2) → [0, 1].
+	comp := &state.Competition{
+		ID: compID, Name: "Court Dist Pools", Kind: "individual",
+		Format: "mixed", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		RoundRobin: true, Courts: []string{"A", "B"},
+		StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
 	})
@@ -1895,10 +1968,10 @@ func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
 
 	for _, m := range matches {
 		if strings.HasPrefix(m.ID, "Pool A-") {
-			assert.Equal(t, "A", m.Court, "Pool A match %s should be on court A", m.ID)
+			assert.Equalf(t, "A", m.Court, "Pool A match %s should be on court A", m.ID)
 		}
 		if strings.HasPrefix(m.ID, "Pool B-") {
-			assert.Equal(t, "B", m.Court, "Pool B match %s should be on court B", m.ID)
+			assert.Equalf(t, "B", m.Court, "Pool B match %s should be on court B", m.ID)
 		}
 	}
 }
@@ -1907,9 +1980,14 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-bracket"
 
-	// createTestCompetition uses Courts: []string{"A", "B"}
-	createTestCompetition(t, store, compID, "playoffs", 3)
-	// 8 players → pow2=8, 4 first-round matches split across 2 courts
+	// 2 courts with playoffs and 8 players — bracket court distribution.
+	comp := &state.Competition{
+		ID: compID, Name: "Court Dist Bracket", Kind: "individual",
+		Format: "playoffs", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		RoundRobin: true, Courts: []string{"A", "B"},
+		StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 	saveTestParticipants(t, store, compID, []string{
 		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
 	})
@@ -1937,7 +2015,7 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	for rIdx, round := range bracket.Rounds {
 		for _, m := range round {
 			if m.Status != state.MatchStatusCompleted {
-				assert.NotEmpty(t, m.Court, "round %d match %s should have a court assigned", rIdx, m.ID)
+				assert.NotEmptyf(t, m.Court, "round %d match %s should have a court assigned", rIdx, m.ID)
 			}
 		}
 	}
@@ -2096,7 +2174,7 @@ func TestStartCompetition_LeagueMultiCourt(t *testing.T) {
 	// Round-robin assignment: match i goes to court i%2
 	for i, m := range matches {
 		expected := []string{"A", "B"}[i%2]
-		assert.Equal(t, expected, m.Court, "match %d should be on court %s", i, expected)
+		assert.Equalf(t, expected, m.Court, "match %d should be on court %s", i, expected)
 	}
 }
 

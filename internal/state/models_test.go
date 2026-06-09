@@ -426,3 +426,19 @@ func TestValidateTournamentMode(t *testing.T) {
 	assert.NoError(t, ValidateTournamentMode(TournamentModeSelfRun))
 	assert.Error(t, ValidateTournamentMode("unknown-mode"))
 }
+
+func TestMatchResult_RoundRoundtrip(t *testing.T) {
+	mr := MatchResult{
+		ID:    "test-match-1",
+		Round: 3,
+	}
+
+	data, err := json.Marshal(mr)
+	assert.NoError(t, err)
+
+	var got MatchResult
+	err = json.Unmarshal(data, &got)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 3, got.Round)
+}

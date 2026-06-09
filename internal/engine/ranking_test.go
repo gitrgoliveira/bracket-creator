@@ -239,7 +239,7 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 
 	// Both teams drew the match, each sub-bout is also a draw.
 	for _, s := range poolStandings {
-		assert.Equal(t, 1, s.Draws, "%s: team match must be a draw", s.Player.Name)
-		assert.Equal(t, 1, s.IndividualDraws, "%s: sub-bout draw must increment IndividualDraws", s.Player.Name)
+		assert.Equalf(t, 1, s.Draws, "%s: team match must be a draw", s.Player.Name)
+		assert.Equalf(t, 1, s.IndividualDraws, "%s: sub-bout draw must increment IndividualDraws", s.Player.Name)
 	}
 }

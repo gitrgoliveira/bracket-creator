@@ -31,7 +31,7 @@ export const GLOSSARY = {
   "sune": {"id":"sune","kanji":"すね","short":"Shin strike","tooltip":"A strike to the shin. Scores a point in Naginata competitions. Not a valid scoring technique in Kendo."},
   "taisho": {"id":"taisho","kanji":"大将","short":"Captain","tooltip":"The team's captain — fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.","seeAlso":["senpo"]},
   "waza": {"id":"waza","kanji":"技","short":"Technique","tooltip":"The specific type of strike scored — for example, men, kote, or do. Recorded with each ippon for the match record.","seeAlso":["ippon"]},
-  "zekken": {"id":"zekken","kanji":"ゼッケン","short":"Back name-tag","tooltip":"The cloth name-tag worn on the competitor's back. The display can show this name (instead of the registered name) so spectators see what's physically visible."}
+  "zekken": {"id":"zekken","kanji":"ゼッケン","short":"Name tag (nafuda)","tooltip":"The name tag affixed to the centre of the tare (waist protector). Also called nafuda. The display can show this name (instead of the registered name) so spectators see what's physically visible."}
 };
 
 // Convenience lookup so callers can normalise case at the call site

@@ -102,7 +102,7 @@ func TestEstimateMatchCounts_BracketMatchCount(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("players=%d", tc.players), func(t *testing.T) {
 			got := bracketMatchCount(tc.players)
-			assert.Equal(t, tc.want, got, "bracketMatchCount(%d)", tc.players)
+			assert.Equalf(t, tc.want, got, "bracketMatchCount(%d)", tc.players)
 		})
 	}
 }

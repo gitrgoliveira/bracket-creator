@@ -1,6 +1,11 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
+import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
+// Re-export the shared scoreboard primitives so existing tests that import them
+// from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
+export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
+
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
@@ -43,17 +48,11 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // dates are ordered.
 const compareDmy = (a, b) => window.compareDmy(a, b);
 
-// Local mirrors of display.jsx::queueLabel / queueLabelCompact.
-// display.js loads before viewer.js (see index.html), so window.queueLabel /
-// window.queueLabelCompact are normally available on first render.  These
-// serve as defense-in-depth if that ever changes.
-function _localQueueLabel(m) {
-  if (!m || m.status !== "scheduled") return "";
-  const qp = Number(m.queuePosition);
-  if (Number.isFinite(qp) && qp > 0) return qp === 1 ? "Next up" : `${qp - 1} before yours`;
-  if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
-  return "";
-}
+// Local mirror of display.jsx::queueLabelCompact ("Next up" / "#N").
+// display.js loads before viewer.js (see index.html), so
+// window.queueLabelCompact is normally available on first render; this
+// serves as defense-in-depth if that ever changes. (The "N before yours"
+// wording lives in mymatchQueueLabel — followed-player context only.)
 function _localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;
   const qp = Number(m.queuePosition);
@@ -70,6 +69,8 @@ function competitionKindLabel(c) {
 
 const pluralize = window.pluralize;
 const isPoolDaihyosenID = id => id.includes('-DH-');
+const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
+window.poolLabel = poolLabel;
 
 function compMatches(c) {
   const out = [];
@@ -91,7 +92,7 @@ function compMatches(c) {
   rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -108,8 +109,13 @@ function compMatches(c) {
     phase: "bracket",
     round: window.roundLabel(ri, rounds.length),
     phaseName: window.roundLabel(ri, rounds.length),
+    // Raw 0-based round index alongside the display label so consumers
+    // (useTeamLineups) need not parse the label — now a bracket-size string
+    // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.
+    roundIndex: ri,
     compId: c.id,
     compName: c.name,
+    compFormat: c.format,
     compKind: c.kind,
     teamSize: c.teamSize
   })));
@@ -457,7 +463,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
-      const titlePrefix = m.status === "running" ? "🔴 LIVE NOW — " : "(1) Your match is next — ";
+      const titlePrefix = m.status === "running" ? "🔴 NOW — " : "(1) Your match is next — ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
 
@@ -494,7 +500,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
-      const notifTitle = m.status === "running" ? "Your match is LIVE" : "Your match is next";
+      const notifTitle = m.status === "running" ? "Your match is on now" : "Your match is next";
       window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
     }
 
@@ -506,7 +512,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
 // Banner component: rendered when the followed match is on-deck.
 function MyMatchAlertBanner({ match, onView, onDismiss }) {
   if (!match) return null;
-  const kind = match.status === "running" ? "LIVE NOW" : "Next up";
+  const kind = match.status === "running" ? "NOW" : "Next up";
   const sideA = matchSideName(match.sideA, match.sideAName);
   const sideB = matchSideName(match.sideB, match.sideBName);
   const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
@@ -703,7 +709,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  // Live-comp set: gates the home LIVE NOW / Up-next strips and the live dot.
+  // Live-comp set: gates the home NOW / Up-next strips and the live dot.
   // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
   // draw but no match has been called, so it is NOT live. (The competition
   // detail view still shows its Pools/Bracket tabs; that is governed separately
@@ -711,7 +717,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
-  // placeholder would appear in the public LIVE NOW strip, even though
+  // placeholder would appear in the public NOW strip, even though
   // the upcoming list / cards / detail view all reject placeholder
   // sides. Mirrors the upNext filter below.
   const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
@@ -805,7 +811,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
           {live.length > 0 && (
             <div className="hero-live">
-              <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
+              <div className="hero-live__lbl"><span className="dot dot--live"></span> NOW · {pluralize(live.length, "match", "matches")}</div>
               <div className="vsched" style={{ marginTop: 8 }}>
                 {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
@@ -847,7 +853,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                 <div className="empty">
                   <div className="icon">⏳</div>
                   <h3>No competitions yet</h3>
-                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and live updates.</div>
+                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and updates.</div>
                 </div>
               </div>
             </>
@@ -880,7 +886,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__progress">
                             <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                             <div className="vlist-item__pct">
-                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>
                           </div>
                         )}
@@ -914,16 +920,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </>
           )}
 
-          {/* T069 / FR-016: "Display modes" — link cards into the public
-              /display routes for TV screens, lobby boards, and OBS browser
-              sources. Each link opens in a new tab so the host page
-              (viewer) keeps its tab and stays interactive. Active courts
-              come from tournament.courts (the full configured list); the
-              "all-courts overview" card is always present. Placed below
-              Up Next so a viewer who has already glanced at their next
-              match can drop into the display mode they need. */}
-          <DisplayModes tournament={t} />
-
           {/* mp-c38: sponsor logos. Hidden when none configured. */}
           {window.SponsorStrip && <window.SponsorStrip sponsors={t && t.sponsors} variant="viewer" />}
 
@@ -949,6 +945,14 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <span className="vlist-item__rowchev">→</span>
             </a>
           </div>
+
+          {/* T069 / FR-016: "Display modes" — links into the public
+              /display routes for TV screens, lobby boards, and OBS browser
+              sources. Each link opens in a new tab so the host page
+              (viewer) keeps its tab and stays interactive. Collapsed by
+              default (mp-mjaq) since most viewers are spectators; only
+              tournament operators need these links. */}
+          <DisplayModes tournament={t} />
           {window.VersionFooter && <window.VersionFooter />}
         </div>
       </div>
@@ -1025,12 +1029,12 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 // Contract:
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
-//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - status==="running"                       → null (round label already shows " · NOW")
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// the my-match__round label already appends " · LIVE NOW" — rendering it
+// the my-match__round label already appends " · NOW" — rendering it
 // again in the Queue chip would be a duplicate. We intentionally do NOT
 // fall back to "Scheduled HH:MM" the way display.jsx does — the
 // MyMatchPanel already has a dedicated Time chip.
@@ -1122,13 +1126,13 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
   const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";
   const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
-  const phaseLabel = nextMatch.phase === "pool" ? nextMatch.poolName : (nextMatch.round || "Bracket");
+  const phaseLabel = nextMatch.phase === "pool" ? poolLabel(nextMatch) : (nextMatch.round || "Bracket");
   // FR-025: queue position is 1-indexed per court for scheduled matches; 0 for
   // running/completed. Treat null/undefined/0 as "don't render" so we stay
   // gracefully empty for non-queued matches and pre-T046 responses. Wording
   // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
   // so all three viewer surfaces agree. Running matches show null here
-  // because the round label already appends " · LIVE NOW".
+  // because the round label already appends " · NOW".
   const queueLabel = mymatchQueueLabel(nextMatch);
   const queueHighlight = queueLabel === "Next up";
 
@@ -1142,7 +1146,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
-        {nextMatch.status === "running" ? " · LIVE NOW" : ""}
+        {nextMatch.status === "running" ? " · NOW" : ""}
       </div>
       <div className="my-match__row">
         <div className="my-match__chip">
@@ -1365,10 +1369,12 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
 }
 
 // DisplayModes — viewer-home section linking to the public /display routes.
-// Renders one card per configured court plus an "all-courts overview" card.
-// Each card opens in a new tab so the operator's viewer session stays open.
-// Lives in viewer.jsx (not display.jsx) because it's a viewer-side surface
-// that consumes the display routes rather than rendering them.
+// Collapsed by default inside a <details> element. Contains one "all-courts
+// overview" link plus two compact inline rows (court displays, streaming
+// overlays) each listing per-court links inline rather than one card per
+// court. Each link opens in a new tab so the operator's viewer session stays
+// open. Lives in viewer.jsx (not display.jsx) because it is a viewer-side
+// surface that consumes the display routes rather than rendering them.
 function DisplayModes({ tournament }) {
   const courts = (tournament && tournament.courts) || [];
   // No court list — render nothing rather than a confusing single "all"
@@ -1377,46 +1383,9 @@ function DisplayModes({ tournament }) {
   // data has loaded fully.
   if (courts.length === 0) return null;
   return (
-    <>
-      <div className="section-title" style={{ marginTop: 20 }}>Display modes</div>
+    <details style={{ marginTop: 20 }}>
+      <summary className="section-title" style={{ cursor: "pointer" }}>Display modes</summary>
       <div className="vlist" data-testid="viewer-home-display-modes">
-        {courts.map((cc) => (
-          <a
-            key={cc}
-            className="vlist-item vlist-item--row"
-            href={`/display?court=${encodeURIComponent(cc)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: "none" }}
-          >
-            <span className="vlist-item__icon">📺</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} display</div>
-              <div className="vlist-item__rowsub">Fullscreen board for a single court · opens in a new tab</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </a>
-        ))}
-        {/* Per-court OBS/vMix overlay entry (previously URL-only). Links to the
-            transparent lower-third streaming overlay so operators can grab the
-            browser-source URL per shiaijo straight from the UI. */}
-        {courts.map((cc) => (
-          <a
-            key={`overlay-${cc}`}
-            className="vlist-item vlist-item--row"
-            href={`/display?court=${encodeURIComponent(cc)}&overlay=1`}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ textDecoration: "none" }}
-          >
-            <span className="vlist-item__icon">🎥</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle"><TermV name="shiaijo">Shiaijo</TermV> {cc} streaming overlay</div>
-              <div className="vlist-item__rowsub">Transparent lower-third for OBS / vMix · opens in a new tab</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </a>
-        ))}
         <a
           className="vlist-item vlist-item--row"
           href="/display?court=all"
@@ -1431,8 +1400,29 @@ function DisplayModes({ tournament }) {
           </div>
           <span className="vlist-item__rowchev">→</span>
         </a>
+        {/* Per-court links consolidated into compact inline rows. */}
+        {[
+          { icon: "📺", title: "Court displays", suffix: "" },
+          { icon: "🎥", title: "Streaming overlays", suffix: "&overlay=1" },
+        ].map((row) => (
+          <div key={row.title} className="vlist-item vlist-item--row" style={{ cursor: "default" }}>
+            <span className="vlist-item__icon">{row.icon}</span>
+            <div className="vlist-item__rowbody">
+              <div className="vlist-item__rowtitle">{row.title}</div>
+              <div className="vlist-item__rowsub" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {courts.map((cc, i) => (
+                  <span key={cc}>
+                    <a href={`/display?court=${encodeURIComponent(cc)}${row.suffix}`} target="_blank" rel="noopener noreferrer"
+                      style={{ color: "var(--text-link, #2563eb)" }}>Shiaijo {cc}</a>
+                    {i < courts.length - 1 && <span aria-hidden="true" style={{ color: "var(--text-3, #999)", marginLeft: 8 }}>·</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
-    </>
+    </details>
   );
 }
 
@@ -1548,7 +1538,9 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => (
               <tr key={s.player?.id || s.player?.name || i}>
-                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
+                    DRY with the backend tiebreak/override logic, not the row index. */}
+                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                 <td>
                   <div style={{ fontWeight: 500 }}>{s.player?.name || ""}</div>
                   {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
@@ -1565,7 +1557,7 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
           </tbody>
         </table>
         {standings.length > 0 && (
-          <div className="pool-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+          <div className="league-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
             Ranked by: wins → points scored (PW) → head-to-head.
           </div>
         )}
@@ -1585,7 +1577,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
             matches.forEach((m) => {
                 const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
             });
         });
     }
@@ -1597,7 +1589,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
@@ -1717,7 +1709,12 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             <div className="viewer__title">{c.name}</div>
             <div className="viewer__sub">{competitionKindLabel(c)}</div>
           </div>
-          <StatusBadge status={c.status} showLiveDot format={c.format} />
+          {/* Suppress the "League" badge during pools: the active tab already
+              reads "League", so the badge is pure redundancy. Other statuses
+              (Playoffs / Completed) still carry information, so keep those. */}
+          {!(c.status === "pools" && c.format === "league") && (
+            <StatusBadge status={c.status} showLiveDot format={c.format} />
+          )}
           {authed && onEditCompetition && (
             <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
           )}
@@ -1799,16 +1796,23 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 function MatchDetailCard({ match, onClose }) {
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
-  const aName = match.sideA?.name || "TBD";
-  const bName = match.sideB?.name || "TBD";
+  const teamSize = match.teamSize || 0;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when the
+  // competition has numberPrefix; team-level sides have no .number so this
+  // degrades to the bare team name.
+  const aName = withNumber(match.sideA);
+  const bName = withNumber(match.sideB);
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
   const isDone = match.status === "completed";
-  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
-  // same fallback used in VSchedItem so the score display is consistent.
-  const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
-  const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
+
+  // mp-13y: fetch per-match lineups for team matches so bout rows show
+  // competitor names instead of bout numbers.
+  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  // Show the Daihyosen row when a rep-bout subResult exists (position -1);
+  // TeamScoreboard additionally gates it on the match actually being tied.
+  const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
 
   return (
     <div className="match-detail-card">
@@ -1816,67 +1820,40 @@ function MatchDetailCard({ match, onClose }) {
         <div className="match-detail-card__meta">
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
-          <span>{match.phase === "pool" ? match.poolName : (match.round || "")}</span>
+          <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLive && <span className="bc-live">● LIVE</span>}
+          {isLive && <span className="bc-live">● NOW</span>}
           {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
           {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
         </div>
       </div>
 
-      <div className="match-detail-card__players">
-        <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
-          <span className="match-detail-card__name">{bName}</span>
-        </div>
-        <div className="match-detail-card__score">
-          {isDone
-            ? <span>{window.matchScoreStr(match, mdcIpponsB, mdcIpponsA) || "—"}</span>
-            : <span className="match-detail-card__vs">vs</span>}
-        </div>
-        <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__name">{aName}</span>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
-        </div>
-      </div>
-
-      {isDone && !isTeam && (
-        <div className="match-detail-card__ippons">
-          <div className="match-detail-card__ippons-side">
-            <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
+      {/* Individual matches show the two player names colour-coded — Shiro
+          dark (left), Aka red (right) — matching the team scoreboard's
+          summary-row name colours, instead of SHIRO/AKA text badges
+          (mp-13y). Team matches carry the names in the summary row. */}
+      {!isTeam && (
+        <div className="match-detail-card__players">
+          <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
           </div>
-          <div className="match-detail-card__ippons-center">
-            {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
-            {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
-          </div>
-          <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
-            <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
+          <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
+          <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
           </div>
         </div>
       )}
 
-      {isDone && isTeam && match.subResults && match.subResults.length > 0 && (
-        <div className="match-detail-card__team-subs">
-          {match.subResults.map((sub, i) => {
-            const sA = (sub.ipponsA || []).filter(x => x && x !== "•").join("") || "—";
-            const sB = (sub.ipponsB || []).filter(x => x && x !== "•").join("") || "—";
-            return (
-              <div key={i} className="match-detail-card__sub-row">
-                <span className="match-detail-card__sub-score">{sB}</span>
-                <span className="match-detail-card__sub-pos">
-                  {subBoutLabel(sub, i)}
-                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
-                </span>
-                <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx) — same
+          component the TV display uses. Team → team-name + IV/PW summary row +
+          per-bout rows (numbered when not yet started) + Daihyosen (tie only);
+          individual → ippon-letter slots. */}
+      {isTeam
+        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName} />
+        : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );
 }
@@ -1955,8 +1932,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="my-match__lbl">Your next match</div>
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
-            {myUpcoming.phase === "pool" ? myUpcoming.poolName : myUpcoming.round}
-            {myUpcoming.status === "running" ? " · LIVE NOW" : ""}
+            {myUpcoming.phase === "pool" ? poolLabel(myUpcoming) : myUpcoming.round}
+            {myUpcoming.status === "running" ? " · NOW" : ""}
           </div>
           <div className="my-match__row">
             <div className="my-match__chip">
@@ -2004,11 +1981,18 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => (
                 <tr key={s.player?.id || s.player?.name || i}>
-                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{i + 1}{s.isOverridden ? "*" : ""}</td>
+                  {/* Rank-ordered summary: "#" is the authoritative standing rank
+                      (s.rank), not the row index — DRY with the full standings and
+                      the backend tiebreak/override logic. */}
+                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div style={{ fontWeight: 500 }}>
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
+                      {/* No rank badge here: this summary is rank-sorted, so the
+                          "#" column already IS the rank — a badge would just echo
+                          it. The rank badge only carries information when rows are
+                          in draw order (non-league pools), where rank ≠ position. */}
                     </div>
                     {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
                   </td>
@@ -2067,7 +2051,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
       {liveMatches.length > 1 && (
         <>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> LIVE NOW · {liveMatches.length}
+            <span className="dot dot--live"></span> NOW · {liveMatches.length}
           </div>
           <div className="vsched">
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
@@ -2137,8 +2121,13 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
   // because this row already renders ●LIVE / Final on the right for
   // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
+  // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
+  // "N before yours" wording — VSchedItem renders on the general schedule and
+  // home lists where no player is selected, so "yours" is meaningless. The
+  // "…before yours" phrasing is reserved for the followed-player next-match
+  // banner (mymatchQueueLabel), which has a real "you" context.
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
-    ? (window.queueLabel ? window.queueLabel(m) : _localQueueLabel(m))
+    ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
@@ -2146,13 +2135,16 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
-        {m.phase === "pool" ? <span>· {m.poolName}</span> : <span>· {m.round || ""}</span>}
+        {m.phase === "pool" ? <span>· {poolLabel(m)}</span> : <span>· {m.round || ""}</span>}
+        {m.round != null && typeof m.round === "number" && m.round >= 0 && (
+          <span className="tw-match__round">R{m.round + 1}</span>
+        )}
         {queueLabel && (
           <span className="vsched-item__queue" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)" }}>
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
+        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● NOW</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
@@ -2162,7 +2154,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
-          <span className="n">{m.sideB?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
           <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
@@ -2175,7 +2167,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         )}
         <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
-          <span className="n">{m.sideA?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideA)}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>
@@ -2185,11 +2177,16 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
 VSchedItem.displayName = "VSchedItem";
 
 const PoolMatchRow = React.memo(({ m, onClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when
+  // present; the winner comparison below still uses the bare name.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : aRawName;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : bRawName;
   const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-  const aWin = winnerName && winnerName === aName;
-  const bWin = winnerName && winnerName === bName;
+  // Winner comparison must use the bare name (numberPrefix not included).
+  const aWin = winnerName && winnerName === aRawName;
+  const bWin = winnerName && winnerName === bRawName;
 
   const scoreStr = m.status === "completed"
     ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
@@ -2217,20 +2214,45 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
 });
 PoolMatchRow.displayName = "PoolMatchRow";
 
-// Round-robin matrix for a single pool. Each off-diagonal cell shows the row
-// player's result (W/L/X) against the column player; diagonal cells are self.
-function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
+// Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
+// row player's result (W/L/X) against the column player; diagonal cells are self.
+function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
   const players = pool.players || [];
   if (players.length < 2) return null;
 
   const isHighlighted = (p) => isFollowedPlayer(p, highlightPlayer);
+
+  // Stable participant key. A name is NOT unique within a competition —
+  // two participants from different dojos may share one (the duplicate
+  // check only rejects same-name AND same-dojo), so name-only indexing
+  // collides and can show the wrong cell. Prefer the participant UUID,
+  // falling back to name for legacy data that predates id persistence.
+  const pkey = (x) => (x && x.id != null && x.id !== "" ? String(x.id) : (x && x.name) || "");
+  // Winner id tolerant of BOTH the canonical object shape (`m.winner.id`
+  // from api_serializers.jsx) and the flat `m.winnerId` shape some
+  // fixtures/CSV round-trips use. (Side ids come from the shared
+  // matchParticipantIds helper; names from matchParticipantNames.)
+  const winnerId = (m) => (m.winner && typeof m.winner === "object" ? m.winner.id : null) || m.winnerId || "";
+
+  // Index every match under BOTH its id-pair and its name-pair. The id
+  // entries are collision-free and used first; the name entries are a
+  // fallback for partially-migrated data (players carry ids but an older
+  // pool-matches.csv does not, or vice versa). Same-name collisions only
+  // affect the name fallback, which is the pre-existing behavior.
   const matchMap = {};
   matches.forEach(m => {
-    const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-    const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+    const [aName, bName] = matchParticipantNames(m);
+    const [aId, bId] = matchParticipantIds(m);
+    const aKey = aId || aName;
+    const bKey = bId || bName;
+    if (aKey && bKey) {
+      matchMap[`${aKey}||${bKey}`] = m;
+      matchMap[`${bKey}||${aKey}`] = m;
+    }
     if (aName && bName) {
-      matchMap[`${aName}||${bName}`] = m;
-      matchMap[`${bName}||${aName}`] = m;
+      // Name fallback (does not clobber an existing id entry).
+      if (!matchMap[`${aName}||${bName}`]) matchMap[`${aName}||${bName}`] = m;
+      if (!matchMap[`${bName}||${aName}`]) matchMap[`${bName}||${aName}`] = m;
     }
   });
 
@@ -2240,41 +2262,54 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
     return parts.length > 1 ? parts[0][0] + ". " + parts.slice(1).join(" ") : n;
   };
 
-  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 });
+  const enrichMatch = (m) => ({ ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: m.compFormat, compName: m.compName, compKind: "", teamSize: 0 });
 
   const handleCellClick = (m) => { if (onMatchClick) onMatchClick(enrichMatch(m)); };
 
   const handleCellKeyDown = (e, m) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCellClick(m); } };
 
-  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${rowPlayer.name} vs ${colPlayer.name} — ${result}`;
+  // Label including the dojo when present so two same-name participants are
+  // distinguishable. Used for BOTH the hover `title` AND the cell/header
+  // `aria-label` — screen readers don't reliably announce `title`, so the
+  // accessible name must carry the disambiguating dojo itself.
+  const playerLabel = (p) => (p && p.dojo ? `${p.name} (${p.dojo})` : (p && p.name) || "");
+  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
+  const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} — ${result}`;
 
   return (
-    <div className="pool-matrix-wrap">
-      <table className="pool-matrix">
+    <div className="league-matrix-wrap">
+      <table className="league-matrix">
         <thead>
           <tr>
-            <th className="pool-matrix__corner"></th>
-            {players.map((p) => (
-              <th key={p.name} scope="col" aria-label={p.name} className={`pool-matrix__col-head${isHighlighted(p) ? " pool-matrix__col--me" : ""}`} title={p.name}>{p.number || ""}</th>
+            <th className="league-matrix__corner"></th>
+            {players.map((p, i) => (
+              <th key={`${pkey(p)}#${i}`} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {players.map((rowPlayer, ri) => (
-            <tr key={rowPlayer.name} className={isHighlighted(rowPlayer) ? "pool-matrix__row--me" : ""}>
-              <td className="pool-matrix__row-head" title={rowPlayer.name}>
-                {rowPlayer.number ? <span className="pool-matrix__num">{rowPlayer.number}</span> : null}
-                <span className="pool-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
+            <tr key={`${pkey(rowPlayer)}#${ri}`} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
+              <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
+                <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
+                <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
-                const colMe = isHighlighted(colPlayer) ? " pool-matrix__col--me" : "";
-                if (ri === ci) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--self${colMe}`}>&mdash;</td>;
-                const m = matchMap[`${rowPlayer.name}||${colPlayer.name}`];
-                if (!m) return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--empty${colMe}`}></td>;
+                const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
+                if (ri === ci) return <td key={`${pkey(colPlayer)}#${ci}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
+                // Look up the match by id-pair first (collision-free),
+                // then by name-pair for legacy/un-migrated data.
+                const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
+                if (!m) return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
-                const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+                const [aName] = matchParticipantNames(m);
+                const [aId] = matchParticipantIds(m);
                 const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-                const rowIsAka = aName === rowPlayer.name;
+                // Which side is the row player? Match on id when both the
+                // match side and the player carry one; else by name.
+                const rowIsAka = (aId && rowPlayer.id)
+                  ? aId === rowPlayer.id
+                  : aName === rowPlayer.name;
 
                 const interactiveProps = onMatchClick ? {
                   role: "button",
@@ -2284,7 +2319,7 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={colPlayer.name} className={`pool-matrix__cell pool-matrix__cell--pending ${m.status === "running" ? "pool-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2292,24 +2327,44 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
                 const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
-                const rowWon = winnerName && winnerName === rowPlayer.name;
+                // Prefer the winner id: when two participants share a name,
+                // the winner name alone can't tell them apart (e.g. the
+                // head-to-head between two same-name/different-dojo players).
+                // Fall back to name for legacy data without a winner id.
+                const wId = winnerId(m);
+                // When both sides share a name and there is no winner id, the
+                // winner NAME is ambiguous — do NOT mark either row as winner
+                // (that would light up BOTH cells green for the one match). The
+                // id branch is the authoritative resolver; the name fallback is
+                // only safe for distinct-name matchups. (Source path now sends
+                // winnerId for same-name matches, so this is defense-in-depth
+                // for legacy data without ids.)
+                const namesAmbiguous = rowPlayer.name === colPlayer.name;
+                const rowWon = (wId && rowPlayer.id)
+                  ? wId === rowPlayer.id
+                  : (!namesAmbiguous && winnerName && winnerName === rowPlayer.name);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
 
                 let cellContent;
                 let resultLabel;
                 if (isDraw) {
-                  cellContent = <span className="pool-matrix__draw">X</span>;
+                  cellContent = <span className="league-matrix__draw">X</span>;
                   resultLabel = "Draw";
                 } else if (rowWon) {
-                  cellContent = <span className="pool-matrix__win">{rowIppons.join("") || "W"}</span>;
+                  // Show the row player's ippon letters (M/K/D/T/H); the green
+                  // cell colour signals the win. No "W" fallback — W is not an
+                  // ippon. A win with no recorded ippons (walkover/hantei)
+                  // shows an empty green cell.
+                  cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
                   resultLabel = "Win";
                 } else {
-                  cellContent = <span className="pool-matrix__loss">{rowIppons.join("") || "L"}</span>;
+                  // The loser's own ippons (red), or empty when they scored none.
+                  cellContent = <span className="league-matrix__loss">{rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={colPlayer.name} className={`pool-matrix__cell ${rowWon ? "pool-matrix__cell--win" : isDraw ? "pool-matrix__cell--draw" : "pool-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );
@@ -2318,10 +2373,11 @@ function PoolMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) {
           ))}
         </tbody>
       </table>
-      <div className="pool-matrix__legend">
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--win">W = win</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--loss">L = loss</span>
-        <span className="pool-matrix__legend-item pool-matrix__legend-item--draw">X = draw</span>
+      <div className="league-matrix__legend">
+        <span className="league-matrix__legend-item league-matrix__legend-item--win">win</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--loss">loss</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--draw">X = draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H)</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
@@ -2344,8 +2400,9 @@ function rankOrdinal(rank) {
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right) — matches PoolMatchRow convention.
 const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when present.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
 
   // scoreStr: non-null only for completed matches; the render span below
   // handles the empty-string/null → "—" fallback in one place.
@@ -2409,15 +2466,19 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
         }) : [];
 
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
-        // Rank is 1-based (index + 1). Used to look up each draw-position row's rank
-        // without resorting the table (mp-938b: table is draw-order, not rank-order).
+        // Rank is the backend's authoritative PlayerStanding.rank (single source of
+        // truth — it already folds in tiebreakers and manual rank overrides; see
+        // engine/scoring.go). We do NOT re-derive it as index+1 here (DRY), falling
+        // back to index+1 only if a legacy payload omitted the field.
+        // Used to look up each draw-position row's rank without resorting the table
+        // (mp-938b: table is draw-order, not rank-order).
         // Key = player.id when available; falls back to "name||dojo" composite so that
         // duplicate names across different dojos don't collide — mirrors the lookup below.
         const rankByPlayerKey = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
             const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
-            rankByPlayerKey.set(key, { rank: i + 1, standing: s });
+            rankByPlayerKey.set(key, { rank: s.rank || i + 1, standing: s });
           });
         }
 
@@ -2431,7 +2492,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           : (pool.players || []);
 
         return (
-          <div key={pool.poolName} className="pool" style={{ padding: 14 }}>
+          // A lone pool (every league has exactly one) must span the full grid
+          // width. Otherwise the landscape 2-column `.pools-grid` renders it at
+          // half width, mismatching the full-width Overview standings table.
+          <div key={pool.poolName} className="pool" style={{ padding: 14, gridColumn: pools.length === 1 ? "1 / -1" : undefined }}>
             <div className="pool__head">
               <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
@@ -2465,12 +2529,29 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      {/* The "#" column means different things by format, and that is
+                          intentional and explicit:
+                          - League: the table is ordered by rank, so "#" shows the
+                            authoritative standing rank (s.rank). No separate rank
+                            badge — rank is shown exactly once here.
+                          - Pools: the table is in DRAW order (operators read it as a
+                            fight-order chart), so "#" is the draw position and the
+                            rank is surfaced separately by the badge next to the name. */}
+                      {isLeague ? (
+                        <td className="pool-standings__draw-pos" style={{ color: (s && s.isOverridden) ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: (s && s.isOverridden) ? 700 : 400 }}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
+                      ) : (
+                        <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                      )}
                       <td>
                         <div style={{ fontWeight: 500 }}>
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
-                          {rank !== null ? (
+                          {/* The rank badge is only informative when rows are in
+                              DRAW order (non-league pools), where rank ≠ the "#"
+                              draw-position column. League standings are rank-sorted,
+                              so "#" already equals the rank and a badge would just
+                              duplicate it — suppress it there. */}
+                          {!isLeague && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>
@@ -2507,7 +2588,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     if (isTeam) {
                       // Team: enrich match the same way as the legacy PoolMatchRow path
                       const isDH = isPoolDaihyosenID(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2518,7 +2599,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                       );
                     } else {
                       // Individual: ippon notation score
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compKind: "", teamSize: 0 };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2536,7 +2617,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             {/* Round-robin matrix — optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
-                <PoolMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
+                <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayer={highlightPlayer} />
               </div>
             )}
           </div>
@@ -2676,7 +2757,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, PoolMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;
@@ -2837,7 +2918,7 @@ function ScheduleViewer({ tournament, tweaks }) {
                   <div className="tw-court__title">SHIAIJO {cc}</div>
                   <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · live now" : ""}</div>
                 </div>
-                {liveOn && <span className="bc-live">● LIVE</span>}
+                {liveOn && <span className="bc-live">● NOW</span>}
               </div>
               <div className="tw-court__list">
                 {list.length === 0 ? (
@@ -2874,7 +2955,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
     <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
-        <div className="tw-match__phase">{m.phase === "pool" ? m.poolName : m.round}</div>
+        <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
           <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
             {queuePill}
@@ -2884,11 +2965,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
-          {m.sideB?.name || "TBD"}
+          {withNumber(m.sideB)}
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {m.sideA?.name || "TBD"}
+          {withNumber(m.sideA)}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
@@ -3386,16 +3467,6 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
   if (!match) return null;
-  const isTeam = match.compKind === "team" || match.teamSize > 0;
-  const aName = match.sideA?.name || "TBD";
-  const bName = match.sideB?.name || "TBD";
-  const aWin = match.winner?.id === match.sideA?.id;
-  const bWin = match.winner?.id === match.sideB?.id;
-  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
-  // same fallback used in MatchDetailCard and VSchedItem.
-  const mvmIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
-  const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
-
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
@@ -3420,83 +3491,13 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card" onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Match Details</h2>
-          <button className="btn btn--ghost btn--sm" onClick={onClose}>Close</button>
-        </div>
-        <div style={{ marginBottom: 16, fontSize: 13, color: "var(--ink-3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span><TermV name="shiaijo">Shiaijo</TermV> {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
-          <window.StatusBadge status={match.status} showLiveDot={match.status === "running"} />
-        </div>
-        
-        <div className="se-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <div className={`se-head__side ${bWin ? "se-head__side--w" : ""}`} style={{ flex: 1 }}>
-             <div className="se-head__name" style={{ fontWeight: 600 }}>{bName}</div>
-             <div className="se-head__badge se-head__badge--shiro" style={{ display: "inline-block", background: "#fff", color: "#000", border: "1px solid #ddd", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>SHIRO</div>
-          </div>
-          <div className="se-head__vs" style={{ padding: "0 16px", color: "var(--ink-3)" }}>vs</div>
-          <div className={`se-head__side ${aWin ? "se-head__side--w" : ""}`} style={{ flex: 1, textAlign: "right" }}>
-             <div className="se-head__name" style={{ fontWeight: 600 }}>{aName}</div>
-             <div className="se-head__badge se-head__badge--aka" style={{ display: "inline-block", background: "var(--red)", color: "#fff", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>AKA</div>
-          </div>
-        </div>
-
-        {isTeam ? (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--ink-3)" }}>
-              <div style={{ width: 80 }}>SHIRO</div>
-              <div style={{ flex: 1, textAlign: "center" }}>Position</div>
-              <div style={{ width: 80, textAlign: "right" }}>AKA</div>
-            </div>
-            {match.subResults && match.subResults.length > 0 ? match.subResults.map((sub, i) => {
-               const sIpponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-               const sIpponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-               const hansokuB = sub.hansokuB || 0;
-               const hansokuA = sub.hansokuA || 0;
-               return (
-                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
-                   <div style={{ width: 80, display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsB || "—"}</span>
-                     {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
-                   </div>
-                   <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
-                     {subBoutLabel(sub, i)}
-                     {sub.decidedByHantei && <span data-testid="sub-pool-hantei" style={{ marginLeft: 6, fontWeight: 600 }}>Hantei</span>}
-                   </div>
-                   <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>
-                     {hansokuA > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuA}</span>}
-                   </div>
-                 </div>
-               );
-            }) : (
-              <div style={{ textAlign: "center", padding: 20, color: "var(--ink-3)" }}>No individual match details available.</div>
-            )}
-          </div>
-        ) : (
-          <div style={{ textAlign: "center", background: "var(--bg-2)", borderRadius: 8, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsB.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
-               </div>
-               <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
-               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsA.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
-               </div>
-            </div>
-            {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
-            {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
-            {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
-          </div>
-        )}
-
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
+        {/* Reuse the canonical MatchDetailCard so the modal and the inline
+            card render identically (DRY): same header, colour badges and
+            BoutSubRow team grid. The modal adds only the self-run scoring. */}
+        <MatchDetailCard match={match} onClose={onClose} />
         {isSelfRun && bothSidesReady && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+          <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>
                 <span style={{ background: "var(--bg-2)", padding: "4px 10px", borderRadius: 4, fontSize: 12 }}>Result reported</span>

@@ -47,7 +47,7 @@ func TestGroupResolveSheets(t *testing.T) {
 	for typ, want := range cases {
 		t.Run(typ, func(t *testing.T) {
 			g, ok := GroupByType(typ)
-			require.True(t, ok, "group %q must exist", typ)
+			require.Truef(t, ok, "group %q must exist", typ)
 			assert.Equal(t, want, g.resolveSheets(present))
 		})
 	}
@@ -70,13 +70,13 @@ func TestPageNumbersOnlyOnBracketGroups(t *testing.T) {
 		"full-bracket": true,
 	}
 	for _, g := range Groups {
-		assert.Equal(t, want[g.Type], g.PageNumbers, "group %q page-number flag", g.Type)
+		assert.Equalf(t, want[g.Type], g.PageNumbers, "group %q page-number flag", g.Type)
 	}
 }
 
 func TestOnlyTagsSkipsTeamWorkbooks(t *testing.T) {
 	for _, g := range Groups {
-		assert.Equal(t, g.Type == "tags", g.SkipTeamWorkbooks, "group %q team-skip flag", g.Type)
+		assert.Equalf(t, g.Type == "tags", g.SkipTeamWorkbooks, "group %q team-skip flag", g.Type)
 	}
 }
 

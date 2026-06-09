@@ -325,7 +325,7 @@ func TestReset_OriginMalformed_Rejected(t *testing.T) {
 			req.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusForbidden, w.Code, "malformed Origin %q must be rejected", origin)
+			assert.Equalf(t, http.StatusForbidden, w.Code, "malformed Origin %q must be rejected", origin)
 		})
 	}
 }

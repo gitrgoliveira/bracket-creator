@@ -84,7 +84,7 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+poolMatchID(idx)+"/score", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "match %d failed: %s", idx, w.Body.String())
+			assert.Equalf(t, http.StatusOK, w.Code, "match %d failed: %s", idx, w.Body.String())
 		}(i)
 	}
 	go func() {
@@ -106,11 +106,11 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 		for _, m := range final {
 			if m.ID == poolMatchID(i) {
 				found = true
-				assert.Equal(t, nameFor("A", i), m.Winner, "match %d had wrong winner", i)
-				assert.Equal(t, state.MatchStatusCompleted, m.Status, "match %d had wrong status", i)
+				assert.Equalf(t, nameFor("A", i), m.Winner, "match %d had wrong winner", i)
+				assert.Equalf(t, state.MatchStatusCompleted, m.Status, "match %d had wrong status", i)
 			}
 		}
-		assert.True(t, found, "match %d missing from final read", i)
+		assert.Truef(t, found, "match %d missing from final read", i)
 	}
 }
 
@@ -199,7 +199,7 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	}
 	require.Len(t, winners, 1, "exactly one decision should succeed; got winners=%+v losers=%+v", winners, losers)
 	require.Len(t, losers, 1, "exactly one decision should be rejected with 409")
-	assert.Contains(t, losers[0].body, "already_ineligible", "loser should see already_ineligible body, got %s", losers[0].body)
+	assert.Containsf(t, losers[0].body, "already_ineligible", "loser should see already_ineligible body, got %s", losers[0].body)
 }
 
 func nameFor(side string, i int) string {

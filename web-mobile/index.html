@@ -57,6 +57,9 @@
     <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
          display.js and viewer.js — both consume window.SponsorStrip (mp-c38). -->
     <script type="module" src="/dist/sponsor_strip.js?v=5"></script>
+    <!-- qr.js exposes window.renderQR; must load before display.js so the
+         StreamingOverlay's QR ("scan for results") can draw. -->
+    <script type="module" src="/dist/qr.js?v=5"></script>
     <!-- display.js exports queueLabel / queueLabelCompact to window for the
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->

@@ -65,7 +65,12 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	g.mu.Unlock()
 
 	// We are the elected caller — execute fn and broadcast to waiters.
-	// Deferred cleanup guarantees wg.Done + key removal even on panic.
+	// Deferred cleanup guarantees key removal + wg.Done even on panic.
+	// ORDERING: delete the key under the mutex BEFORE calling wg.Done.
+	// If wg.Done ran first, a new caller could find the key in the map,
+	// call c.wg.Wait() (which returns immediately since the WaitGroup is
+	// already at zero), and receive the old result — violating the
+	// guarantee that each SSE wave re-executes fn for fresh data.
 	defer func() {
 		if r := recover(); r != nil {
 			c.err = fmt.Errorf("singleflight: fn panicked: %v", r)
@@ -76,10 +81,10 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 			// the root cause entirely.
 			log.Printf("singleflight: recovered panic for key %q: %v\n%s", key, r, debug.Stack())
 		}
-		c.wg.Done()
 		g.mu.Lock()
 		delete(g.calls, key)
 		g.mu.Unlock()
+		c.wg.Done() // unblock waiters only after key is gone
 	}()
 
 	c.val, c.err = fn()

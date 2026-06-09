@@ -2158,6 +2158,12 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+}
+
+.viewer__admin-pill:hover {
+  border-color: var(--ink-4);
+  color: var(--ink);
 }
 
 .viewer__tabs {

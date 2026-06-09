@@ -758,7 +758,13 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
-          <button className="viewer__admin-pill" onClick={onAdminClick}>Admin</button>
+          <button className="viewer__admin-pill" onClick={onAdminClick}>
+            <svg width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden="true">
+              <rect x="1" y="5" width="8" height="7" rx="1.5" fill="currentColor"/>
+              <path d="M3 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Admin
+          </button>
         </div>
 
         <div className="viewer__body">

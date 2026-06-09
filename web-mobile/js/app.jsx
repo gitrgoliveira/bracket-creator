@@ -643,8 +643,8 @@ function App() {
             // detail fetch above covers it) — that skip is the dominant
             // scaling win. competition_started/completed still fire a list
             // refetch for all non-display viewers so status badges update.
-            // Display mode is excluded because it fires load() in the block
-            // above (line 622-623).
+            // Display mode is excluded because it already fires load() in the
+            // swiss_round_generated/match_updated display-mode branch above.
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
                 jitteredTimeout(load, listJitter);
             }

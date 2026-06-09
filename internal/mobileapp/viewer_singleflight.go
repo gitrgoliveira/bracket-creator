@@ -9,12 +9,12 @@ import (
 )
 
 // errNotFound is a sentinel returned by the sf.Do fn inside
-// GET /viewer/competitions/:id when the competition does not exist.
+// GET /api/viewer/competitions/:id when the competition does not exist.
 // The handler maps it to HTTP 404; all other non-nil errors become 500.
 var errNotFound = errors.New("not found")
 
-// viewerSingleFlight collapses concurrent identical GET /viewer/competitions
-// (and /viewer/competitions/:id) builds to a single in-flight execution.
+// viewerSingleFlight collapses concurrent identical GET /api/viewer/competitions
+// (and /api/viewer/competitions/:id) builds to a single in-flight execution.
 //
 // Correctness vs SSE staleness: a key stays in-flight only while the first
 // caller is still executing. The moment it finishes, the result is returned
@@ -23,7 +23,7 @@ var errNotFound = errors.New("not found")
 // is the latency of one build, not a fixed TTL — there is never stale data
 // served across SSE boundaries.
 //
-// Scalability goal (P2, mp-9afd): 1000 concurrent GET /viewer/competitions
+// Scalability goal (P2, mp-9afd): 1000 concurrent GET /api/viewer/competitions
 // arriving within the same 500ms SSE fan-out window collapse to O(1) builds
 // instead of O(1000). Each extra caller blocks briefly on a WaitGroup
 // rather than spinning up a full fan-out goroutine set.

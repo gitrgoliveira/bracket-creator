@@ -62,7 +62,7 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 	wg.Wait()
 
 	// Only one build should have executed.
-	assert.Equal(t, int32(1), buildCount.Load(),
+	assert.Equalf(t, int32(1), buildCount.Load(),
 		"expected exactly 1 build invocation; got %d (thundering-herd not suppressed)",
 		buildCount.Load())
 
@@ -166,7 +166,7 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	wg.Wait()
 
 	// Only one build should have executed — confirms waiters attached.
-	assert.Equal(t, int32(1), buildCount.Load(),
+	assert.Equalf(t, int32(1), buildCount.Load(),
 		"expected exactly 1 build invocation; got %d", buildCount.Load())
 
 	for i, err := range errs {

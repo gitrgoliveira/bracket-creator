@@ -551,7 +551,7 @@ function App() {
         //     and genuine list-level transitions, e.g. competition_started,
         //     draw_generated, schedule_updated, participants_updated, etc.).
         //     These are infrequent and the wider window staggers 1000+ display
-        //     walls so they don't simultaneously storm GET /viewer/competitions.
+        //     walls so they don't simultaneously storm GET /api/viewer/competitions.
         const detailJitter = Math.random() * 500;
         const listJitter = Math.random() * 2000;
         if (event.type === "tournament_updated") {
@@ -644,7 +644,7 @@ function App() {
             // scaling win. competition_started/completed still fire a list
             // refetch for all non-display viewers so status badges update.
             // Display mode is excluded because it already fires load() in the
-            // swiss_round_generated/match_updated display-mode branch above.
+            // `mode === "display"` block earlier in this same event handler.
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
                 jitteredTimeout(load, listJitter);
             }

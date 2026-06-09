@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { buildDisplayModel, computeMetaTops } from '../bracket.jsx';
+import { buildDisplayModel, computeMetaTops, roundLabel } from '../bracket.jsx';
+
+// mp-13y: roundLabel renders "Round N" where N is the round's bracket size
+// (2^(fromEnd+1)), generically — so large brackets read "Round 128"/"Round 256"
+// rather than falling back to "Round 1". total = number of rounds (log2 size);
+// roundIdx is 0-based from the first round, so fromEnd = total-1-roundIdx.
+describe('roundLabel — generic "Round N" for early rounds', () => {
+  it('names the terminal rounds and Round 16', () => {
+    expect(roundLabel(3, 4)).toBe('Final');         // fromEnd 0
+    expect(roundLabel(2, 4)).toBe('Semifinals');    // fromEnd 1
+    expect(roundLabel(1, 4)).toBe('Quarterfinals'); // fromEnd 2
+    expect(roundLabel(0, 4)).toBe('Round 16');      // fromEnd 3 → 2^4
+  });
+  it('computes Round N for 64/128/256-player brackets', () => {
+    expect(roundLabel(0, 6)).toBe('Round 64');   // fromEnd 5 → 2^6
+    expect(roundLabel(0, 7)).toBe('Round 128');  // fromEnd 6 → 2^7
+    expect(roundLabel(0, 8)).toBe('Round 256');  // fromEnd 7 → 2^8
+  });
+});
 
 // mp-7f2w: the engine tags bracket matches with effective-round metadata
 // (displayRound / hidden / feeders) so the viewer renders the same

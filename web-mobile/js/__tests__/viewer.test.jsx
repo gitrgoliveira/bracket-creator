@@ -352,7 +352,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // `global.window.x = vi.fn()` assignments — without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
-  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
 
   const mkTeamMatch = (subs) => ({
     compKind: 'team',
@@ -368,21 +368,24 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     subResults: subs,
   });
 
+  let TeamScoreboard;
+  let IndividualScore;
+
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
     global.window = global.window || {};
     STUBBED.forEach(k => { savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k) ? { had: true, val: global.window[k] } : { had: false }; });
-    // Only globals MatchDetailCard executes on the team path. The non-team
-    // ippons block (which calls window.isHikiwake) is gated out for teams.
     global.window.formatIpponsScore = vi.fn(() => '3-2');
     global.window.teamIVScore = () => null;
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.isHikiwake = vi.fn(() => false);
     vi.resetModules();
     ({ MatchDetailCard } = await import('../viewer.jsx'));
+    ({ TeamScoreboard, IndividualScore } = await import('../match_scoreboard.jsx'));
   });
 
   afterEach(() => {
@@ -399,7 +402,22 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     vi.resetModules();
   });
 
-  it('labels the daihyosen row "Daihyosen" and shows "Hantei" when decidedByHantei', () => {
+  // mp-13y: MatchDetailCard now delegates the scoreboard to the shared
+  // match_scoreboard.jsx components — TeamScoreboard (team) / IndividualScore
+  // (individual). These are child component vnodes which the reactive shim does
+  // not expand, so we assert delegation (type + props). The scoreboard's own
+  // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
+  // match_scoreboard.test.jsx.
+  function findVnode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  it('delegates a team match to TeamScoreboard (showDH when a DH sub exists)', () => {
     const tree = runtime.mount(MatchDetailCard, {
       match: mkTeamMatch([
         { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
@@ -407,85 +425,23 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
       ]),
       onClose: null,
     });
-    const text = collectText(tree);
-    expect(text).toContain('Match 1');
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Match -1');
-    expect(text).toContain('Hantei');
-    // The marker must carry left spacing so it does not render flush against
-    // the label as "DaihyosenHantei" (Copilot review on #192).
-    const marker = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-row-hantei');
-    expect(marker).toBeTruthy();
-    expect(marker.props.style?.marginLeft).toBeTruthy();
+    const sb = findVnode(tree, n => n.type === TeamScoreboard);
+    expect(sb).toBeTruthy();
+    expect(sb.props.showDH).toBe(true);
+    expect(sb.props.subResults.length).toBe(2);
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeNull();
   });
 
-  it('omits the "Hantei" marker when no sub was decided by hantei', () => {
-    const tree = runtime.mount(MatchDetailCard, {
-      match: mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: -1, ipponsA: ['K'], ipponsB: ['K'], decidedByHantei: false },
-      ]),
-      onClose: null,
-    });
-    const text = collectText(tree);
-    expect(text).toContain('Daihyosen');
-    expect(text).not.toContain('Hantei');
-  });
-
-  // mp-116: Overview "Recent results" bug — allMatches useMemo was not threading
-  // compKind/teamSize, so isTeam evaluated false and the individual ippons block
-  // rendered instead of the team sub-bout rows.
-  // Verify that a match carrying compKind="team" (as allMatches now produces)
-  // renders match-detail-card__team-subs, NOT match-detail-card__ippons.
-  it('renders team sub-bout block (not individual ippons) when compKind="team" from allMatches', () => {
+  it('delegates an individual match to IndividualScore (not TeamScoreboard)', () => {
     const match = {
-      ...mkTeamMatch([
-        { position: 1, ipponsA: ['M'], ipponsB: [], decidedByHantei: false },
-        { position: 2, ipponsA: [], ipponsB: ['D'], decidedByHantei: false },
-      ]),
-      // These flags are what allMatches now correctly supplies for team comps.
-      compKind: 'team',
-      teamSize: 3,
+      compKind: 'individual', teamSize: 0, status: 'completed', court: 'A',
+      phase: 'bracket', round: 'QF',
+      sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      ipponsA: ['M'], ipponsB: [], winner: { id: 'pA' },
     };
     const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-    // Team sub-rows container must be present.
-    const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-    expect(teamSubs).toBeTruthy();
-    // Individual ippons block must NOT appear.
-    const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-    expect(ipponsBlock).toBeNull();
-  });
-
-  // mp-116: Individual match must still render the ippons block (regression guard).
-  it('renders individual ippons block (not team subs) for an individual match', () => {
-    // The individual path calls window.isHikiwake — stub it for this test,
-    // restoring any prior value in finally so a thrown assertion can't leak
-    // the stub into later tests (mirrors the roundLabel pattern above).
-    const savedIsHikiwake = global.window.isHikiwake;
-    global.window.isHikiwake = vi.fn(() => false);
-    try {
-      const match = {
-        compKind: 'individual',
-        teamSize: 0,
-        status: 'completed',
-        court: 'A',
-        phase: 'bracket',
-        round: 'QF',
-        sideA: { id: 'pA', name: 'Alice' },
-        sideB: { id: 'pB', name: 'Bob' },
-        ipponsA: ['M'],
-        ipponsB: [],
-        winner: { id: 'pA' },
-      };
-      const tree = runtime.mount(MatchDetailCard, { match, onClose: null });
-      const ipponsBlock = findInTree(tree, n => n?.props?.className === 'match-detail-card__ippons');
-      expect(ipponsBlock).toBeTruthy();
-      const teamSubs = findInTree(tree, n => n?.props?.className === 'match-detail-card__team-subs');
-      expect(teamSubs).toBeNull();
-    } finally {
-      if (savedIsHikiwake === undefined) delete global.window.isHikiwake;
-      else global.window.isHikiwake = savedIsHikiwake;
-    }
+    expect(findVnode(tree, n => n.type === IndividualScore)).toBeTruthy();
+    expect(findVnode(tree, n => n.type === TeamScoreboard)).toBeNull();
   });
 });
 
@@ -499,6 +455,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   const realReact = global.React;
   let runtime;
   let MatchViewerModal;
+  let MatchDetailCard;
   const STUBBED = ['useEscapeToClose', 'ipponsFromScore'];
   const savedGlobals = {};
 
@@ -510,7 +467,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     global.window.useEscapeToClose = vi.fn();
     global.window.ipponsFromScore = vi.fn(() => []);
     vi.resetModules();
-    ({ MatchViewerModal } = await import('../viewer.jsx'));
+    ({ MatchViewerModal, MatchDetailCard } = await import('../viewer.jsx'));
   });
 
   afterEach(() => {
@@ -524,7 +481,11 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
     vi.resetModules();
   });
 
-  it('renders the round label in the header for a bracket match', () => {
+  // mp-13y: the modal now reuses the canonical MatchDetailCard for its body
+  // (DRY — same header, colour badges and BoutSubRow grid as the inline card).
+  // The header text rendering itself is covered by the MatchDetailCard suite;
+  // here we assert the modal delegates with the correct match.
+  it('delegates to MatchDetailCard with the round label for a bracket match', () => {
     const match = {
       phase: 'bracket', round: 'Final', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'A',
@@ -532,14 +493,12 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    const text = collectText(tree);
-    // Header must show the round label, not an empty string after "Shiaijo A ·".
-    expect(text).toContain('Final');
-    // Team path renders the SHIRO/Position/AKA sub-bout table.
-    expect(text).toContain('Position');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.round).toBe('Final');
   });
 
-  it('renders the pool name in the header for a pool match', () => {
+  it('delegates to MatchDetailCard with the pool name for a pool match', () => {
     const match = {
       phase: 'pool', poolName: 'Pool A', compKind: 'team', teamSize: 5,
       status: 'completed', court: 'B',
@@ -547,7 +506,9 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
       subResults: [{ position: 1, ipponsA: ['M'], ipponsB: [] }],
     };
     const tree = runtime.mount(MatchViewerModal, { match, onClose: () => {} });
-    expect(collectText(tree)).toContain('Pool A');
+    const card = findInTree(tree, (n) => n.type === MatchDetailCard);
+    expect(card).toBeTruthy();
+    expect(card.props.match.poolName).toBe('Pool A');
   });
 });
 

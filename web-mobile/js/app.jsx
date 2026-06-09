@@ -979,7 +979,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
         <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
-        <div className="auth__sub">Enter the tournament password to manage brackets, schedules and live results.</div>
+        <div className="auth__sub">Enter the tournament password to manage brackets, schedules and results.</div>
         <form onSubmit={submit}>
           <div className="field">
             <label className="field__label">Password</label>

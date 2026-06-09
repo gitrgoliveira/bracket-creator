@@ -38,6 +38,13 @@
   --line-2: #eef0f4;
   --bg: #f7f8fa;
   --surface: #ffffff;
+  /* Secondary surface — slightly tinted fill for cards/cells that sit on
+     --surface or on a modal backdrop. Referenced as var(--bg-2) by the
+     match-detail card, pool-matrix cells and the shiro foul-counter; was
+     never defined, so those backgrounds resolved to transparent (the
+     match-detail card bled the page through in the modal). mp-13y. */
+  --bg-2: #f1f5f9;
+  --surface-2: #f1f5f9;
 
   --r-sm: 6px;
   --r: 10px;
@@ -4742,6 +4749,10 @@ button.my-match__opp {
   border-radius: 10px;
   padding: 12px 14px;
   margin: 4px 0 8px;
+  /* When expanded inline inside the .vsched 2-column grid (≥1024px), span the
+     full width so the card stacks BELOW the clicked row, not beside it
+     (mp-13y #1). Harmless in the flex/block single-column layout. */
+  grid-column: 1 / -1;
 }
 
 .match-detail-card__head {
@@ -4796,28 +4807,22 @@ button.my-match__opp {
   text-align: right;
 }
 
+/* Winner: bold only — keep the side colour (Shiro dark / Aka red) so the
+   colour coding still reads after a result. */
 .match-detail-card__side--win .match-detail-card__name {
-  font-weight: 700;
-  color: var(--accent);
+  font-weight: 800;
 }
 
 .match-detail-card__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.match-detail-card__color-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  flex-shrink: 0;
 }
-.match-detail-card__color-badge--aka { background: var(--red); color: #fff; }
-.match-detail-card__color-badge--shiro { background: #fff; color: var(--accent); border: 1px solid var(--accent); }
+/* Colour-coded player names (replaces the SHIRO/AKA badges), matching the
+   shared scoreboard's .msb-name / .msb-name--aka. */
+.match-detail-card__name--shiro { color: #111; }
+.match-detail-card__name--aka { color: var(--red, #b91c1c); }
 
 .match-detail-card__score {
   font-size: 18px;
@@ -4884,29 +4889,64 @@ button.my-match__opp {
   gap: 4px;
 }
 
-.match-detail-card__sub-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  padding: 3px 0;
-}
-
-.match-detail-card__sub-pos {
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  flex: 1;
-}
-
-.match-detail-card__sub-score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 14px;
-  min-width: 32px;
-}
-.match-detail-card__sub-score--right { text-align: right; }
+/* ---------- Shared FIK scoreboard (match_scoreboard.jsx) ----------
+   ONE component for the viewer card, the self-run modal and the TV display.
+   §263 individual = ippon-letter slots; §277 team = IV/PW summary + bout rows.
+   `variant="tv"` adds .msb--tv (larger, vh-based) — same markup either way.
+   Shiro = left/dark, Aka = right/red. */
+.msb { width: 100%; }
+.msb-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+  border-top: 1px solid var(--line, #eee); font-size: 13px; }
+/* Remove the leading hairline only when the FIRST row is not a summary row —
+   i.e. the individual scoreboard, whose first (and only) row is a score row.
+   In a team scoreboard the summary row is first and keeps its own thick rule
+   (below); the first bout row sits second, so it keeps its hairline. */
+.msb-row:first-child:not(.msb-row--summary) { border-top: none; }
+.msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+.msb-marks { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  gap: 4px; min-width: 104px; }
+.msb-slots { display: flex; align-items: center; gap: 2px; }
+.msb-slot { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 20px; padding: 0 3px; border: 1px solid var(--line-2, #e5e7eb);
+  border-radius: 3px; font-family: var(--font-mono, monospace); font-weight: 700;
+  font-size: 13px; color: #111; }
+.msb-slot--aka { color: var(--red, #b91c1c); }
+.msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
+.msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
+.msb-ht { font-size: 10px; color: #6b7280; font-weight: 600; }
+/* Win indicator for an ippon-less decision (hantei "Ht" / fusensho·kiken "○"):
+   the mark sits in the winning side's slot. No special colour — the slot keeps
+   its side colour (Shiro dark, Aka red); only the weight is bumped so the mark
+   reads as the result (mp-13y: green was never part of the FIK spec). */
+.msb-slots--win .msb-slot { font-weight: 800; }
+/* §277 summary row: labelled IV/PW per side */
+.msb-row--summary { border-top: 2px solid #111; }
+.msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
+  font-size: 16px; font-weight: 800; height: auto; }
+.msb-lab { display: block; font-size: 8px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
+/* live highlight */
+.msb-row--now { background: #fef3c7; }
+.msb-row--queued .msb-name { color: #9ca3af; }
+.msb-row--queued .msb-name--aka { color: #d4a5a8; }
+.msb-row--queued .msb-slot { color: #9ca3af; }
+/* Daihyosen */
+.msb-row--dh-banner { justify-content: center; border-top: 2px solid #111; padding: 6px 0 2px; }
+.msb-dh-tag { display: inline-block; background: #111; color: #fff; font-size: 10px;
+  font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 3px; }
+.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: #6b7280; }
+/* TV variant — scale up for the fullscreen board */
+.msb--tv .msb-row { font-size: 3vh; padding: 1.2vh 1vw; border-top: 1px solid #e5e7eb; }
+.msb--tv .msb-name { font-size: 3vh; }
+.msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
+.msb--tv .msb-slot { min-width: 4vh; height: 4.6vh; font-size: 2.8vh; border-radius: 0.4vh; }
+.msb--tv .msb-vs { min-width: 3vh; font-size: 2vh; }
+.msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
+.msb--tv .msb-row--summary .msb-slot { min-width: 6vh; font-size: 3.4vh; }
+.msb--tv .msb-lab { font-size: 1.2vh; }
+.msb--tv .msb-hansoku { font-size: 2.6vh; }
+.msb--tv .msb-dh-tag { font-size: 1.8vh; padding: 0.4vh 1.2vh; letter-spacing: .12em; }
 
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {

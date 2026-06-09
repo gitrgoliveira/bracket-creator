@@ -1,6 +1,11 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
+import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
+// Re-export the shared scoreboard primitives so existing tests that import them
+// from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
+export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
+
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
@@ -43,17 +48,11 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // dates are ordered.
 const compareDmy = (a, b) => window.compareDmy(a, b);
 
-// Local mirrors of display.jsx::queueLabel / queueLabelCompact.
-// display.js loads before viewer.js (see index.html), so window.queueLabel /
-// window.queueLabelCompact are normally available on first render.  These
-// serve as defense-in-depth if that ever changes.
-function _localQueueLabel(m) {
-  if (!m || m.status !== "scheduled") return "";
-  const qp = Number(m.queuePosition);
-  if (Number.isFinite(qp) && qp > 0) return qp === 1 ? "Next up" : `${qp - 1} before yours`;
-  if (m.scheduledAt) return `Scheduled ${m.scheduledAt}`;
-  return "";
-}
+// Local mirror of display.jsx::queueLabelCompact ("Next up" / "#N").
+// display.js loads before viewer.js (see index.html), so
+// window.queueLabelCompact is normally available on first render; this
+// serves as defense-in-depth if that ever changes. (The "N before yours"
+// wording lives in mymatchQueueLabel — followed-player context only.)
 function _localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;
   const qp = Number(m.queuePosition);
@@ -110,6 +109,10 @@ function compMatches(c) {
     phase: "bracket",
     round: window.roundLabel(ri, rounds.length),
     phaseName: window.roundLabel(ri, rounds.length),
+    // Raw 0-based round index alongside the display label so consumers
+    // (useTeamLineups) need not parse the label — now a bracket-size string
+    // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.
+    roundIndex: ri,
     compId: c.id,
     compName: c.name,
     compFormat: c.format,
@@ -460,7 +463,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
-      const titlePrefix = m.status === "running" ? "🔴 LIVE NOW — " : "(1) Your match is next — ";
+      const titlePrefix = m.status === "running" ? "🔴 NOW — " : "(1) Your match is next — ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
 
@@ -497,7 +500,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
       const sideB = matchSideName(m.sideB, m.sideBName);
       const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
-      const notifTitle = m.status === "running" ? "Your match is LIVE" : "Your match is next";
+      const notifTitle = m.status === "running" ? "Your match is on now" : "Your match is next";
       window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
     }
 
@@ -509,7 +512,7 @@ function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {}) {
 // Banner component: rendered when the followed match is on-deck.
 function MyMatchAlertBanner({ match, onView, onDismiss }) {
   if (!match) return null;
-  const kind = match.status === "running" ? "LIVE NOW" : "Next up";
+  const kind = match.status === "running" ? "NOW" : "Next up";
   const sideA = matchSideName(match.sideA, match.sideAName);
   const sideB = matchSideName(match.sideB, match.sideBName);
   const vs = (sideA && sideB) ? `${sideA} vs ${sideB}` : "";
@@ -706,7 +709,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
-  // Live-comp set: gates the home LIVE NOW / Up-next strips and the live dot.
+  // Live-comp set: gates the home NOW / Up-next strips and the live dot.
   // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
   // draw but no match has been called, so it is NOT live. (The competition
   // detail view still shows its Pools/Bracket tabs; that is governed separately
@@ -714,7 +717,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
-  // placeholder would appear in the public LIVE NOW strip, even though
+  // placeholder would appear in the public NOW strip, even though
   // the upcoming list / cards / detail view all reject placeholder
   // sides. Mirrors the upNext filter below.
   const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
@@ -808,7 +811,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
           {live.length > 0 && (
             <div className="hero-live">
-              <div className="hero-live__lbl"><span className="dot dot--live"></span> LIVE NOW · {pluralize(live.length, "match", "matches")}</div>
+              <div className="hero-live__lbl"><span className="dot dot--live"></span> NOW · {pluralize(live.length, "match", "matches")}</div>
               <div className="vsched" style={{ marginTop: 8 }}>
                 {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
@@ -850,7 +853,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                 <div className="empty">
                   <div className="icon">⏳</div>
                   <h3>No competitions yet</h3>
-                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and live updates.</div>
+                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and updates.</div>
                 </div>
               </div>
             </>
@@ -883,7 +886,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__progress">
                             <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                             <div className="vlist-item__pct">
-                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} live</span> : pluralize(done, "match", "matches") + " / " + total}
+                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>
                           </div>
                         )}
@@ -1026,12 +1029,12 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
 // Contract:
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
-//   - status==="running"                       → null (round label already shows " · LIVE NOW")
+//   - status==="running"                       → null (round label already shows " · NOW")
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// the my-match__round label already appends " · LIVE NOW" — rendering it
+// the my-match__round label already appends " · NOW" — rendering it
 // again in the Queue chip would be a duplicate. We intentionally do NOT
 // fall back to "Scheduled HH:MM" the way display.jsx does — the
 // MyMatchPanel already has a dedicated Time chip.
@@ -1129,7 +1132,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   // gracefully empty for non-queued matches and pre-T046 responses. Wording
   // ("Next up" / "N before yours") mirrors VSchedItem below and display.jsx
   // so all three viewer surfaces agree. Running matches show null here
-  // because the round label already appends " · LIVE NOW".
+  // because the round label already appends " · NOW".
   const queueLabel = mymatchQueueLabel(nextMatch);
   const queueHighlight = queueLabel === "Next up";
 
@@ -1143,7 +1146,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
       </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
-        {nextMatch.status === "running" ? " · LIVE NOW" : ""}
+        {nextMatch.status === "running" ? " · NOW" : ""}
       </div>
       <div className="my-match__row">
         <div className="my-match__chip">
@@ -1586,7 +1589,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
@@ -1793,16 +1796,23 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 function MatchDetailCard({ match, onClose }) {
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
-  const aName = match.sideA?.name || "TBD";
-  const bName = match.sideB?.name || "TBD";
+  const teamSize = match.teamSize || 0;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when the
+  // competition has numberPrefix; team-level sides have no .number so this
+  // degrades to the bare team name.
+  const aName = withNumber(match.sideA);
+  const bName = withNumber(match.sideB);
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
   const isLive = match.status === "running";
   const isDone = match.status === "completed";
-  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
-  // same fallback used in VSchedItem so the score display is consistent.
-  const mdcIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
-  const mdcIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
+
+  // mp-13y: fetch per-match lineups for team matches so bout rows show
+  // competitor names instead of bout numbers.
+  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  // Show the Daihyosen row when a rep-bout subResult exists (position -1);
+  // TeamScoreboard additionally gates it on the match actually being tied.
+  const showDH = isTeam && (match.subResults || []).some(s => s.position === -1);
 
   return (
     <div className="match-detail-card">
@@ -1814,63 +1824,36 @@ function MatchDetailCard({ match, onClose }) {
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLive && <span className="bc-live">● LIVE</span>}
+          {isLive && <span className="bc-live">● NOW</span>}
           {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
           {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
         </div>
       </div>
 
-      <div className="match-detail-card__players">
-        <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--shiro">SHIRO</span>
-          <span className="match-detail-card__name">{bName}</span>
-        </div>
-        <div className="match-detail-card__score">
-          {isDone
-            ? <span>{window.matchScoreStr(match, mdcIpponsB, mdcIpponsA) || "—"}</span>
-            : <span className="match-detail-card__vs">vs</span>}
-        </div>
-        <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-          <span className="match-detail-card__name">{aName}</span>
-          <span className="match-detail-card__color-badge match-detail-card__color-badge--aka">AKA</span>
-        </div>
-      </div>
-
-      {isDone && !isTeam && (
-        <div className="match-detail-card__ippons">
-          <div className="match-detail-card__ippons-side">
-            <span className="match-detail-card__ippons-val">{mdcIpponsB.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuB > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuB}</span>}
+      {/* Individual matches show the two player names colour-coded — Shiro
+          dark (left), Aka red (right) — matching the team scoreboard's
+          summary-row name colours, instead of SHIRO/AKA text badges
+          (mp-13y). Team matches carry the names in the summary row. */}
+      {!isTeam && (
+        <div className="match-detail-card__players">
+          <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
           </div>
-          <div className="match-detail-card__ippons-center">
-            {match.decidedByHantei && <span className="match-detail-card__decision" data-testid="match-detail-hantei">Hantei</span>}
-            {(window.isHikiwake(match.score?.type) || window.isHikiwake(match.decision)) && <span className="match-detail-card__decision">Draw</span>}
-          </div>
-          <div className="match-detail-card__ippons-side match-detail-card__ippons-side--right">
-            <span className="match-detail-card__ippons-val">{mdcIpponsA.filter(x => x && x !== "•").join("") || "—"}</span>
-            {match.hansokuA > 0 && <span className="match-detail-card__fouls">Fouls: {match.hansokuA}</span>}
+          <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
+          <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
+            <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
           </div>
         </div>
       )}
 
-      {isDone && isTeam && match.subResults && match.subResults.length > 0 && (
-        <div className="match-detail-card__team-subs">
-          {match.subResults.map((sub, i) => {
-            const sA = (sub.ipponsA || []).filter(x => x && x !== "•").join("") || "—";
-            const sB = (sub.ipponsB || []).filter(x => x && x !== "•").join("") || "—";
-            return (
-              <div key={i} className="match-detail-card__sub-row">
-                <span className="match-detail-card__sub-score">{sB}</span>
-                <span className="match-detail-card__sub-pos">
-                  {subBoutLabel(sub, i)}
-                  {sub.decidedByHantei && <span className="match-detail-card__decision" data-testid="sub-row-hantei" style={{ marginLeft: 6 }}>Hantei</span>}
-                </span>
-                <span className="match-detail-card__sub-score match-detail-card__sub-score--right">{sA}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx) — same
+          component the TV display uses. Team → team-name + IV/PW summary row +
+          per-bout rows (numbered when not yet started) + Daihyosen (tie only);
+          individual → ippon-letter slots. */}
+      {isTeam
+        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName} />
+        : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );
 }
@@ -1950,7 +1933,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
           <div className="my-match__name">{myPlayer.name}</div>
           <div className="my-match__round">
             {myUpcoming.phase === "pool" ? poolLabel(myUpcoming) : myUpcoming.round}
-            {myUpcoming.status === "running" ? " · LIVE NOW" : ""}
+            {myUpcoming.status === "running" ? " · NOW" : ""}
           </div>
           <div className="my-match__row">
             <div className="my-match__chip">
@@ -2068,7 +2051,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
       {liveMatches.length > 1 && (
         <>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> LIVE NOW · {liveMatches.length}
+            <span className="dot dot--live"></span> NOW · {liveMatches.length}
           </div>
           <div className="vsched">
             {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
@@ -2138,8 +2121,13 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
   // because this row already renders ●LIVE / Final on the right for
   // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
+  // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
+  // "N before yours" wording — VSchedItem renders on the general schedule and
+  // home lists where no player is selected, so "yours" is meaningless. The
+  // "…before yours" phrasing is reserved for the followed-player next-match
+  // banner (mymatchQueueLabel), which has a real "you" context.
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
-    ? (window.queueLabel ? window.queueLabel(m) : _localQueueLabel(m))
+    ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
@@ -2156,7 +2144,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● LIVE</span>}
+        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● NOW</span>}
         {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
@@ -2166,7 +2154,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
       </div>
       <div className="vsched-item__players">
         <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
-          <span className="n">{m.sideB?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
           <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
@@ -2179,7 +2167,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         )}
         <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
-          <span className="n">{m.sideA?.name || "TBD"}</span>
+          <span className="n">{withNumber(m.sideA)}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>
@@ -2189,11 +2177,16 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
 VSchedItem.displayName = "VSchedItem";
 
 const PoolMatchRow = React.memo(({ m, onClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
+  const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when
+  // present; the winner comparison below still uses the bare name.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : aRawName;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : bRawName;
   const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-  const aWin = winnerName && winnerName === aName;
-  const bWin = winnerName && winnerName === bName;
+  // Winner comparison must use the bare name (numberPrefix not included).
+  const aWin = winnerName && winnerName === aRawName;
+  const bWin = winnerName && winnerName === bRawName;
 
   const scoreStr = m.status === "completed"
     ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
@@ -2326,7 +2319,7 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayer }) 
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Live" : "Pending")} {...interactiveProps}>
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
                     {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
@@ -2407,8 +2400,9 @@ function rankOrdinal(rank) {
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right) — matches PoolMatchRow convention.
 const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
-  const aName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
+  // withNumber prepends the assigned competitor number (e.g. "K1") when present.
+  const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
+  const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
 
   // scoreStr: non-null only for completed matches; the render span below
   // handles the empty-string/null → "—" fallback in one place.
@@ -2924,7 +2918,7 @@ function ScheduleViewer({ tournament, tweaks }) {
                   <div className="tw-court__title">SHIAIJO {cc}</div>
                   <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · live now" : ""}</div>
                 </div>
-                {liveOn && <span className="bc-live">● LIVE</span>}
+                {liveOn && <span className="bc-live">● NOW</span>}
               </div>
               <div className="tw-court__list">
                 {list.length === 0 ? (
@@ -2971,11 +2965,11 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
-          {m.sideB?.name || "TBD"}
+          {withNumber(m.sideB)}
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {m.sideA?.name || "TBD"}
+          {withNumber(m.sideA)}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
@@ -3473,16 +3467,6 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
   if (!match) return null;
-  const isTeam = match.compKind === "team" || match.teamSize > 0;
-  const aName = match.sideA?.name || "TBD";
-  const bName = match.sideB?.name || "TBD";
-  const aWin = match.winner?.id === match.sideA?.id;
-  const bWin = match.winner?.id === match.sideB?.id;
-  // Bracket matches use scoreA/scoreB strings; derive ippons arrays with the
-  // same fallback used in MatchDetailCard and VSchedItem.
-  const mvmIpponsA = match.ipponsA || window.ipponsFromScore(match.scoreA);
-  const mvmIpponsB = match.ipponsB || window.ipponsFromScore(match.scoreB);
-
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
@@ -3507,83 +3491,13 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card" onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Match Details</h2>
-          <button className="btn btn--ghost btn--sm" onClick={onClose}>Close</button>
-        </div>
-        <div style={{ marginBottom: 16, fontSize: 13, color: "var(--ink-3)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span><TermV name="shiaijo">Shiaijo</TermV> {match.court} · {match.phase === "pool" ? match.poolName : match.round}</span>
-          <window.StatusBadge status={match.status} showLiveDot={match.status === "running"} />
-        </div>
-        
-        <div className="se-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <div className={`se-head__side ${bWin ? "se-head__side--w" : ""}`} style={{ flex: 1 }}>
-             <div className="se-head__name" style={{ fontWeight: 600 }}>{bName}</div>
-             <div className="se-head__badge se-head__badge--shiro" style={{ display: "inline-block", background: "#fff", color: "#000", border: "1px solid #ddd", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>SHIRO</div>
-          </div>
-          <div className="se-head__vs" style={{ padding: "0 16px", color: "var(--ink-3)" }}>vs</div>
-          <div className={`se-head__side ${aWin ? "se-head__side--w" : ""}`} style={{ flex: 1, textAlign: "right" }}>
-             <div className="se-head__name" style={{ fontWeight: 600 }}>{aName}</div>
-             <div className="se-head__badge se-head__badge--aka" style={{ display: "inline-block", background: "var(--red)", color: "#fff", padding: "2px 6px", fontSize: 11, borderRadius: 4, marginTop: 4 }}>AKA</div>
-          </div>
-        </div>
-
-        {isTeam ? (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 8, fontSize: 12, fontWeight: 600, color: "var(--ink-3)" }}>
-              <div style={{ width: 80 }}>SHIRO</div>
-              <div style={{ flex: 1, textAlign: "center" }}>Position</div>
-              <div style={{ width: 80, textAlign: "right" }}>AKA</div>
-            </div>
-            {match.subResults && match.subResults.length > 0 ? match.subResults.map((sub, i) => {
-               const sIpponsB = (sub.ipponsB || []).filter(x => x && x !== "•").join("");
-               const sIpponsA = (sub.ipponsA || []).filter(x => x && x !== "•").join("");
-               const hansokuB = sub.hansokuB || 0;
-               const hansokuA = sub.hansokuA || 0;
-               return (
-                 <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid var(--line-light)" }}>
-                   <div style={{ width: 80, display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsB || "—"}</span>
-                     {hansokuB > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuB}</span>}
-                   </div>
-                   <div style={{ flex: 1, textAlign: "center", fontSize: 13, color: "var(--ink-3)" }}>
-                     {subBoutLabel(sub, i)}
-                     {sub.decidedByHantei && <span data-testid="sub-pool-hantei" style={{ marginLeft: 6, fontWeight: 600 }}>Hantei</span>}
-                   </div>
-                   <div style={{ width: 80, textAlign: "right", display: "flex", flexDirection: "column" }}>
-                     <span style={{ fontWeight: 600, fontSize: 14 }}>{sIpponsA || "—"}</span>
-                     {hansokuA > 0 && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Fouls: {hansokuA}</span>}
-                   </div>
-                 </div>
-               );
-            }) : (
-              <div style={{ textAlign: "center", padding: 20, color: "var(--ink-3)" }}>No individual match details available.</div>
-            )}
-          </div>
-        ) : (
-          <div style={{ textAlign: "center", background: "var(--bg-2)", borderRadius: 8, padding: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsB.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuB > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuB}</div>}
-               </div>
-               <div style={{ fontSize: 24, color: "var(--ink-3)", padding: "0 16px" }}>-</div>
-               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>Ippons</div>
-                  <div style={{ fontSize: 24, fontWeight: 700 }}>{mvmIpponsA.filter(x => x && x !== "•").join("") || "—"}</div>
-                  {match.hansokuA > 0 && <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>Fouls: {match.hansokuA}</div>}
-               </div>
-            </div>
-            {match.decidedByHantei && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Decision (Hantei)</div>}
-            {match.score?.type === "hikiwake" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>Draw (<TermV name="hikiwake">Hikiwake</TermV>)</div>}
-            {match.score?.type === "bye" && <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600 }}>BYE</div>}
-          </div>
-        )}
-
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
+        {/* Reuse the canonical MatchDetailCard so the modal and the inline
+            card render identically (DRY): same header, colour badges and
+            BoutSubRow team grid. The modal adds only the self-run scoring. */}
+        <MatchDetailCard match={match} onClose={onClose} />
         {isSelfRun && bothSidesReady && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+          <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-3)" }}>
                 <span style={{ background: "var(--bg-2)", padding: "4px 10px", borderRadius: 4, fontSize: 12 }}>Result reported</span>

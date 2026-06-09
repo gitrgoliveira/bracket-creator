@@ -190,6 +190,12 @@ var Glossary = map[string]Term{
 		Short:   "Rank",
 		Tooltip: "A competitor's grade — shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form.",
 	},
+	"dojo": {
+		ID:      "dojo",
+		Kanji:   "道場",
+		Short:   "Club or school",
+		Tooltip: "The training school or club a competitor represents. The pool generator avoids placing two competitors from the same dojo in the same pool when it can.",
+	},
 	"waza": {
 		ID:      "waza",
 		Kanji:   "技",

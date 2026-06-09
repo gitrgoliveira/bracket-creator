@@ -7,10 +7,98 @@ import (
 	"os"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestMergePoolNumbersIntoPlayers — mp-13y: numbers from pools.csv must be
+// merged onto comp.Players so the viewer API carries the numberPrefix-derived
+// "K1", "K2", … on every player. The merge is the bridge that lets the TV
+// display / streaming overlay / viewer card render the prefix at all
+// (participants.csv does NOT persist Number).
+func TestMergePoolNumbersIntoPlayers(t *testing.T) {
+	t.Run("no-op when numberPrefix is empty", func(t *testing.T) {
+		comp := &state.Competition{
+			Players: []domain.Player{{ID: "p1", Name: "Tanaka"}},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1"}}}}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
+	})
+
+	t.Run("no-op when pools is empty", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka"}},
+		}
+		mergePoolNumbersIntoPlayers(comp, nil)
+		assert.Equal(t, "", comp.Players[0].Number)
+	})
+
+	t.Run("merges by id when HasParticipantIDs", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players: []domain.Player{
+				{ID: "p1", Name: "Tanaka"},
+				{ID: "p2", Name: "Suzuki"},
+				{ID: "p3", Name: "Yamada"},
+			},
+		}
+		pools := []helper.Pool{
+			{PoolName: "Pool A", Players: []domain.Player{
+				{ID: "p1", Name: "Tanaka", Number: "K1"},
+				{ID: "p3", Name: "Yamada", Number: "K2"},
+			}},
+			{PoolName: "Pool B", Players: []domain.Player{
+				{ID: "p2", Name: "Suzuki", Number: "K3"},
+			}},
+		}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "K1", comp.Players[0].Number)
+		assert.Equal(t, "K3", comp.Players[1].Number)
+		assert.Equal(t, "K2", comp.Players[2].Number)
+	})
+
+	t.Run("falls back to name when id is empty (legacy roster)", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players: []domain.Player{
+				{Name: "Tanaka"}, // no ID
+				{Name: "Suzuki"},
+			},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{
+			{Name: "Tanaka", Number: "K1"},
+			{Name: "Suzuki", Number: "K2"},
+		}}}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "K1", comp.Players[0].Number)
+		assert.Equal(t, "K2", comp.Players[1].Number)
+	})
+
+	t.Run("preserves existing non-empty Number (idempotent)", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING"}},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1"}}}}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
+	})
+
+	t.Run("skips pool players with empty Number", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka"}},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: ""}}}}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "", comp.Players[0].Number)
+	})
+}
 
 func TestViewerHandlers_Standalone(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

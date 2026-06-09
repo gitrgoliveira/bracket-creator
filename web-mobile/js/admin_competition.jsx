@@ -282,7 +282,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
         <div className="stat-box"><div className="v">{c.players.length}</div><div className="l">{c.kind === "team" ? "Teams" : "Participants"}</div></div>
         <div className="stat-box"><div className="v">{c.players.filter((p) => p.seed).length}</div><div className="l">Seeded</div></div>
         <div className="stat-box"><div className="v">{done}/{total}</div><div className="l">Matches done</div></div>
-        <div className="stat-box"><div className="v" style={{ color: live > 0 ? "var(--red)" : "inherit" }}>{live}</div><div className="l">Live now</div></div>
+        <div className="stat-box"><div className="v" style={{ color: live > 0 ? "var(--red)" : "inherit" }}>{live}</div><div className="l">Now</div></div>
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card__head"><div className="card__title">Progress</div><div className="card__sub">{pct}%</div></div>
@@ -296,7 +296,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
           <div className="card__sub">Update or correct match results</div>
         </button>
         <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
-          <div className="card__title" style={{ marginBottom: 6 }}>Live results →</div>
+          <div className="card__title" style={{ marginBottom: 6 }}>Results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>
       </div>
@@ -1347,7 +1347,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
                 <td>{m.sideA?.name || "—"}</td>
                 <td style={{ fontFamily: "var(--font-mono)" }}>{m.court || "—"}</td>
                 <td style={{ fontSize: 12, color: m.status === "completed" ? "var(--accent)" : m.status === "running" ? "var(--accent)" : "var(--ink-3)" }}>
-                  {m.status === "completed" ? "Done" : m.status === "running" ? "Live" : "Scheduled"}
+                  {m.status === "completed" ? "Done" : m.status === "running" ? "Now" : "Scheduled"}
                 </td>
               </tr>
             ))}
@@ -1554,11 +1554,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + " — " + (isDrawReady ? "preview" : "live") } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + " — " + (isDrawReady ? "preview" : "now") } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — live" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — now" } : null,
         !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
       ].filter(Boolean)
     },

@@ -23,8 +23,10 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
-  if (fromEnd === 3) return "Round of 16";
-  if (fromEnd === 4) return "Round of 32";
+  // mp-13y #8: "Round N" (drop the "of"), where N is the round's bracket size
+  // = 2^(fromEnd+1). Computed generically so 128/256-player brackets read
+  // "Round 128" / "Round 256" instead of falling back to "Round 1".
+  if (fromEnd >= 3) return `Round ${2 ** (fromEnd + 1)}`;
   return `Round ${roundIdx + 1}`;
 }
 
@@ -212,7 +214,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       <div className="bc-match-meta">
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
-        {live ? <span className="bc-live">● LIVE</span> : null}
+        {live ? <span className="bc-live">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}

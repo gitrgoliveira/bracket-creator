@@ -82,6 +82,15 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					hasIDsHint = &t
 				}
 				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+				// mp-13y: merge numberPrefix-derived numbers from pools.csv
+				// directly onto the slice so buildSide can include "number"
+				// in the polled OBS/vMix overlay payload. Skip the pools.csv
+				// read entirely when no prefix is configured (the common
+				// case).
+				if comp.NumberPrefix != "" {
+					pools, _ := store.LoadPools(compID)
+					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
+				}
 
 				sideA := buildSide(m.SideA, players, comp.WithZekkenName)
 				sideB := buildSide(m.SideB, players, comp.WithZekkenName)
@@ -119,6 +128,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 	displayName := name
 	dojo := ""
 	playerID := ""
+	number := ""
 	for i := range players {
 		if players[i].Name == name {
 			if withZekkenName && players[i].DisplayName != "" {
@@ -126,6 +136,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 			}
 			dojo = players[i].Dojo
 			playerID = players[i].ID
+			number = players[i].Number
 			break
 		}
 	}
@@ -134,6 +145,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 		"name":        name,
 		"displayName": displayName,
 		"dojo":        dojo,
+		"number":      number,
 	}
 }
 

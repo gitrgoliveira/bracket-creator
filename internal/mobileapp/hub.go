@@ -62,15 +62,23 @@ const DefaultHistorySize = 100
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
 // Each subscriber allocates one buffered channel (100-element string buffer)
-// plus one streaming goroutine. Per-connection cost breakdown:
+// plus one streaming goroutine. Base struct/goroutine overhead per client:
 //   - Channel buffer: 100 string headers × 16 B (pointer + length) ≈ 1.6 KB
 //   - Channel struct overhead: ~100 B
 //   - Goroutine stack: 2–8 KB (starts small, grows on demand)
-//   - Total: ~4–10 KB resident per client
+//   - Base total: ~4–10 KB resident per client
 //
-// At 5000 clients that is ~20–50 MB — comfortably within the RAM
-// budget of a single-core VPS or RPi-class hardware used for EKC-scale
-// deployments (~45 teams, 1000+ live spectators).
+// Note: this is the base overhead only. Each queued (buffered) message also
+// keeps its payload bytes alive on the heap until the client drains it. Under
+// bursty broadcasts or slow/stalled clients a fully-backlogged channel could
+// add up to ~100 × (payload size) of additional memory per client — e.g. a
+// 2 KB JSON payload × 100 slots = ~200 KB worst-case. Stalled clients are
+// dropped by the non-blocking send (select/default) before the buffer fills
+// in practice, but the extra allocation is real during the drop window.
+//
+// At 5000 active (draining) clients the base cost is ~20–50 MB — comfortably
+// within the RAM budget of a single-core VPS or RPi-class hardware used for
+// EKC-scale deployments (~45 teams, 1000+ live spectators).
 //
 // Broadcast fan-out is O(N) in the subscriber count and serialises under
 // h.mu.Lock(). At 5000 clients the lock window is bounded by the

@@ -243,7 +243,7 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 		return nil
 	})
 	require.Error(t, engErr)
-	assert.True(t, errors.Is(engErr, ErrDecisionLocked), "expected ErrDecisionLocked, got %v", engErr)
+	assert.Truef(t, errors.Is(engErr, ErrDecisionLocked), "expected ErrDecisionLocked, got %v", engErr)
 }
 
 // TestRecordMatchResultWithIneligibilityTx_Basic verifies the

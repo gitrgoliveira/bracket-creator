@@ -583,11 +583,11 @@ func TestStandardSeeding_NoDuplicates(t *testing.T) {
 			}
 
 			for name, count := range nameCount {
-				assert.Equal(t, 1, count, "Player %s appears %d times (expected 1)", name, count)
+				assert.Equalf(t, 1, count, "Player %s appears %d times (expected 1)", name, count)
 			}
 
 			// Verify all original players are present
-			assert.Len(t, nameCount, tt.playerCount, "Should have exactly %d unique players", tt.playerCount)
+			assert.Lenf(t, nameCount, tt.playerCount, "Should have exactly %d unique players", tt.playerCount)
 
 			// Verify all seeded players are present
 			seededFound := make(map[int]bool)
@@ -596,7 +596,7 @@ func TestStandardSeeding_NoDuplicates(t *testing.T) {
 					seededFound[p.Seed] = true
 				}
 			}
-			assert.Len(t, seededFound, tt.seedCount, "Should have exactly %d seeded players", tt.seedCount)
+			assert.Lenf(t, seededFound, tt.seedCount, "Should have exactly %d seeded players", tt.seedCount)
 
 			// Verify correct number of unseeded players
 			unseededCount := 0
@@ -605,7 +605,7 @@ func TestStandardSeeding_NoDuplicates(t *testing.T) {
 					unseededCount++
 				}
 			}
-			assert.Equal(t, tt.playerCount-tt.seedCount, unseededCount, "Should have %d unseeded players", tt.playerCount-tt.seedCount)
+			assert.Equalf(t, tt.playerCount-tt.seedCount, unseededCount, "Should have %d unseeded players", tt.playerCount-tt.seedCount)
 		})
 	}
 }
@@ -655,7 +655,7 @@ func TestStandardSeeding_24PlayersWithSeeds_NoMissingPlayers(t *testing.T) {
 
 	// Each player should appear exactly once
 	for name, count := range namesSeen {
-		assert.Equal(t, 1, count, "Player '%s' appears %d times but should appear exactly once", name, count)
+		assert.Equalf(t, 1, count, "Player '%s' appears %d times but should appear exactly once", name, count)
 	}
 
 	// Verify all original players are present
@@ -714,7 +714,7 @@ func TestPoolSeeding_WithPools_Integration(t *testing.T) {
 	}
 
 	for name, count := range nameCount {
-		assert.Equal(t, 1, count, "Player %s appears %d times after StandardSeeding", name, count)
+		assert.Equalf(t, 1, count, "Player %s appears %d times after StandardSeeding", name, count)
 	}
 
 	// Create pools (3 players per pool = 8 pools)
@@ -730,7 +730,7 @@ func TestPoolSeeding_WithPools_Integration(t *testing.T) {
 	}
 
 	for name, count := range allPlayersInPools {
-		assert.Equal(t, 1, count, "Player %s appears %d times across all pools", name, count)
+		assert.Equalf(t, 1, count, "Player %s appears %d times across all pools", name, count)
 	}
 
 	// Verify all 24 players ended up in pools
@@ -837,7 +837,7 @@ func TestStandardSeeding_CornerCases(t *testing.T) {
 					names[p.Name]++
 				}
 				for name, count := range names {
-					assert.Equal(t, 1, count, "Player %s should appear exactly once", name)
+					assert.Equalf(t, 1, count, "Player %s should appear exactly once", name)
 				}
 				// All should be seeded
 				for _, p := range result {
@@ -863,7 +863,7 @@ func TestStandardSeeding_CornerCases(t *testing.T) {
 				}
 				assert.Len(t, names, 5)
 				for name, count := range names {
-					assert.Equal(t, 1, count, "Player %s should appear exactly once", name)
+					assert.Equalf(t, 1, count, "Player %s should appear exactly once", name)
 				}
 			},
 		},
@@ -1039,7 +1039,7 @@ func TestStandardSeeding_CornerCases(t *testing.T) {
 				// Even with duplicate seeds, no player should be duplicated
 				assert.Len(t, names, 4, "All players should be unique")
 				for name, count := range names {
-					assert.Equal(t, 1, count, "Player %s should appear exactly once", name)
+					assert.Equalf(t, 1, count, "Player %s should appear exactly once", name)
 				}
 			},
 		},
@@ -1170,7 +1170,7 @@ func TestStandardSeeding_DisplacedSeeds(t *testing.T) {
 		}
 		assert.Len(t, names, 10)
 		for name, count := range names {
-			assert.Equal(t, 1, count, "Player %s should appear exactly once", name)
+			assert.Equalf(t, 1, count, "Player %s should appear exactly once", name)
 		}
 	})
 
@@ -1535,7 +1535,7 @@ func TestPoolSeeding_DistributesSeedsAcrossPools(t *testing.T) {
 			for i, pool := range pools {
 				for _, p := range pool.Players {
 					if p.Seed > 0 {
-						assert.False(t, seedPools[i], "pool %d already has a seed", i)
+						assert.Falsef(t, seedPools[i], "pool %d already has a seed", i)
 						seedPools[i] = true
 					}
 				}
@@ -1564,7 +1564,7 @@ func TestGeneratePoolPriority_Properties(t *testing.T) {
 			for _, v := range p {
 				assert.GreaterOrEqual(t, v, 0)
 				assert.Less(t, v, n)
-				assert.False(t, seen[v], "duplicate value %d", v)
+				assert.Falsef(t, seen[v], "duplicate value %d", v)
 				seen[v] = true
 			}
 			assert.Len(t, seen, n)
@@ -1600,7 +1600,7 @@ func TestStandardSeeding_DisplacedSeeds_NoMissingPlayers(t *testing.T) {
 	}
 	assert.Len(t, names, 16)
 	for n, c := range names {
-		assert.Equal(t, 1, c, "player %s appears %d times", n, c)
+		assert.Equalf(t, 1, c, "player %s appears %d times", n, c)
 	}
 }
 
@@ -1818,7 +1818,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 				counts[p.Dojo]++
 			}
 			for d, c := range counts {
-				assert.Equal(t, 1, c, "dojo %s has %d in %s", d, c, pool.PoolName)
+				assert.Equalf(t, 1, c, "dojo %s has %d in %s", d, c, pool.PoolName)
 			}
 		}
 	})

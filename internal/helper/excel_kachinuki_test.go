@@ -51,7 +51,7 @@ func TestKachinukiDetailSheetExists(t *testing.T) {
 			break
 		}
 	}
-	assert.True(t, found, "expected sheet %q in workbook, got %v", SheetKachinukiDetail, names)
+	assert.Truef(t, found, "expected sheet %q in workbook, got %v", SheetKachinukiDetail, names)
 }
 
 // TestKachinukiDetailSheetSkippedWhenEmpty confirms the renderer is a no-op
@@ -111,7 +111,7 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		cell := h.col + intToString(headerRow)
 		got, err := f.GetCellValue(SheetKachinukiDetail, cell)
 		require.NoError(t, err)
-		assert.Equal(t, h.want, got, "header cell %s mismatch", cell)
+		assert.Equalf(t, h.want, got, "header cell %s mismatch", cell)
 	}
 
 	// Title row should mention the match label and identify it as Kachinuki.
@@ -153,33 +153,33 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		// Bout number (column A)
 		boutVal, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(row))
 		require.NoError(t, err)
-		assert.Equal(t, intToString(b.boutNum), boutVal, "row %d: bout number", row)
+		assert.Equalf(t, intToString(b.boutNum), boutVal, "row %d: bout number", row)
 
 		// Side A name + position (column B) — both must appear together.
 		sideACell, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(row))
 		require.NoError(t, err)
-		assert.Contains(t, sideACell, b.sideAName, "row %d: Side A name", row)
-		assert.Contains(t, sideACell, b.sideAPos, "row %d: Side A position", row)
+		assert.Containsf(t, sideACell, b.sideAName, "row %d: Side A name", row)
+		assert.Containsf(t, sideACell, b.sideAPos, "row %d: Side A position", row)
 
 		// Score A (column C) and Score B (column E)
 		scoreA, err := f.GetCellValue(SheetKachinukiDetail, "C"+intToString(row))
 		require.NoError(t, err)
-		assert.Equal(t, b.scoreA, scoreA, "row %d: Score A", row)
+		assert.Equalf(t, b.scoreA, scoreA, "row %d: Score A", row)
 
 		// vs column (D)
 		vs, err := f.GetCellValue(SheetKachinukiDetail, "D"+intToString(row))
 		require.NoError(t, err)
-		assert.Equal(t, "vs", vs, "row %d: vs literal", row)
+		assert.Equalf(t, "vs", vs, "row %d: vs literal", row)
 
 		scoreB, err := f.GetCellValue(SheetKachinukiDetail, "E"+intToString(row))
 		require.NoError(t, err)
-		assert.Equal(t, b.scoreB, scoreB, "row %d: Score B", row)
+		assert.Equalf(t, b.scoreB, scoreB, "row %d: Score B", row)
 
 		// Side B name + position (column F)
 		sideBCell, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(row))
 		require.NoError(t, err)
-		assert.Contains(t, sideBCell, b.sideBName, "row %d: Side B name", row)
-		assert.Contains(t, sideBCell, b.sideBPos, "row %d: Side B position", row)
+		assert.Containsf(t, sideBCell, b.sideBName, "row %d: Side B name", row)
+		assert.Containsf(t, sideBCell, b.sideBPos, "row %d: Side B position", row)
 
 		// Winner (column G)
 		winner, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(row))
@@ -187,15 +187,15 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		if b.isHikiwake {
 			// Hikiwake rows render an empty or em-dash winner cell — both
 			// acceptable; the decision column carries the result.
-			assert.Contains(t, []string{"", "-"}, winner, "row %d: hikiwake winner should be empty", row)
+			assert.Containsf(t, []string{"", "-"}, winner, "row %d: hikiwake winner should be empty", row)
 		} else {
-			assert.Equal(t, b.winner, winner, "row %d: winner", row)
+			assert.Equalf(t, b.winner, winner, "row %d: winner", row)
 		}
 
 		// Decision (column H)
 		decision, err := f.GetCellValue(SheetKachinukiDetail, "H"+intToString(row))
 		require.NoError(t, err)
-		assert.Equal(t, b.decision, decision, "row %d: decision", row)
+		assert.Equalf(t, b.decision, decision, "row %d: decision", row)
 	}
 
 	// Sanity check: the row immediately after the last bout is the summary,
@@ -322,7 +322,7 @@ func TestKachinukiMainSheetStillSummary(t *testing.T) {
 		present[n] = true
 	}
 	for _, r := range required {
-		assert.True(t, present[r], "expected sheet %q to be present", r)
+		assert.Truef(t, present[r], "expected sheet %q to be present", r)
 	}
 
 	// Pool Matches and Elimination Matches must remain on the 8-column-per-court

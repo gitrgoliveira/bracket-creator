@@ -30,8 +30,8 @@ func noOverlapPerRound(t *testing.T, matches []Match, players []Player) {
 		for _, m := range roundMatches {
 			idxA := playerIndex(players, m.SideA)
 			idxB := playerIndex(players, m.SideB)
-			assert.False(t, seen[idxA], "round %d: player index %d appears more than once", r, idxA)
-			assert.False(t, seen[idxB], "round %d: player index %d appears more than once", r, idxB)
+			assert.Falsef(t, seen[idxA], "round %d: player index %d appears more than once", r, idxA)
+			assert.Falsef(t, seen[idxB], "round %d: player index %d appears more than once", r, idxB)
 			seen[idxA] = true
 			seen[idxB] = true
 		}
@@ -112,7 +112,7 @@ func TestCreatePartialPoolMatches_SetsRound(t *testing.T) {
 			// odd-indexed → round 1.
 			for k, m := range pools[0].Matches {
 				want := k % 2
-				assert.Equal(t, want, m.Round, "match (edge) %d should be round %d", k, want)
+				assert.Equalf(t, want, m.Round, "match (edge) %d should be round %d", k, want)
 			}
 		})
 	}

@@ -71,7 +71,7 @@ func TestSwissGenerateRound_Success(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID))
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
 	var resp struct {
 		Round             int                 `json:"round"`
@@ -125,16 +125,16 @@ func TestSwissGenerateRound_CounterAdvances(t *testing.T) {
 	for wantRound := 1; wantRound <= 3; wantRound++ {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID)))
-		require.Equal(t, http.StatusCreated, w.Code, "round %d body=%s", wantRound, w.Body.String())
+		require.Equalf(t, http.StatusCreated, w.Code, "round %d body=%s", wantRound, w.Body.String())
 
 		var resp roundResp
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, wantRound, resp.Round, "resp.round for iteration %d", wantRound)
-		assert.Equal(t, wantRound, resp.SwissCurrentRound, "resp.swissCurrentRound for iteration %d", wantRound)
+		assert.Equalf(t, wantRound, resp.Round, "resp.round for iteration %d", wantRound)
+		assert.Equalf(t, wantRound, resp.SwissCurrentRound, "resp.swissCurrentRound for iteration %d", wantRound)
 
 		comp, err := store.LoadCompetition(compID)
 		require.NoError(t, err)
-		assert.Equal(t, wantRound, comp.SwissCurrentRound, "persisted SwissCurrentRound after round %d", wantRound)
+		assert.Equalf(t, wantRound, comp.SwissCurrentRound, "persisted SwissCurrentRound after round %d", wantRound)
 
 		if wantRound < 3 {
 			completeCurrentRound(t)
@@ -158,7 +158,7 @@ func TestSwissGenerateRound_IncompleteRound(t *testing.T) {
 	// Attempt to generate round 2 without completing round 1's matches.
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID)))
-	require.Equal(t, http.StatusConflict, w2.Code, "body=%s", w2.Body.String())
+	require.Equalf(t, http.StatusConflict, w2.Code, "body=%s", w2.Body.String())
 
 	var resp struct {
 		Error string `json:"error"`
@@ -177,7 +177,7 @@ func TestSwissGenerateRound_NotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, adminReqSwiss("POST", "/api/competitions/missing-comp/swiss/generate-round"))
-	assert.Equal(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
+	assert.Equalf(t, http.StatusNotFound, w.Code, "body=%s", w.Body.String())
 }
 
 // TestSwissGenerateRound_NonSwissFormat rejects competitions whose
@@ -194,7 +194,7 @@ func TestSwissGenerateRound_NonSwissFormat(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, adminReqSwiss("POST", "/api/competitions/pools-comp/swiss/generate-round"))
-	assert.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	assert.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 }
 
 // TestSwissStandings_Empty returns an empty list for a brand-new
@@ -207,14 +207,14 @@ func TestSwissStandings_Empty(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, adminReqSwiss("GET", fmt.Sprintf("/api/competitions/%s/swiss/standings", compID)))
-	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 	var standings []state.PlayerStanding
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &standings))
 	// 4 participants, no matches: all zeros, ranks 1..4 in stable order.
 	require.Len(t, standings, 4)
 	for i, s := range standings {
-		assert.Equal(t, 0, s.Wins, "standings[%d] wins should be 0", i)
+		assert.Equalf(t, 0, s.Wins, "standings[%d] wins should be 0", i)
 		assert.Equal(t, i+1, s.Rank)
 	}
 }
@@ -274,7 +274,7 @@ func TestSwissCompetitionGetIncludesSwissFields(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, adminReqSwiss("GET", fmt.Sprintf("/api/competitions/%s", compID)))
-	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -295,7 +295,7 @@ func TestPostCompetition_SwissRequiresRounds(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "swissRounds")
 }
 
@@ -312,7 +312,7 @@ func TestPostCompetition_SwissAccepted(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
 
 	saved, err := store.LoadCompetition("swiss-ok")
 	require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	wStart := httptest.NewRecorder()
 	reqStart, _ := http.NewRequest("POST", fmt.Sprintf("/api/competitions/%s/start", compID), nil)
 	r.ServeHTTP(wStart, reqStart)
-	require.Equal(t, http.StatusOK, wStart.Code, "Start competition failed: %s", wStart.Body.String())
+	require.Equalf(t, http.StatusOK, wStart.Code, "Start competition failed: %s", wStart.Body.String())
 
 	// Helper to GET standings and assert player counts.
 	getStandings := func() []state.PlayerStanding {
@@ -399,7 +399,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 		req, _ := http.NewRequest("PUT", fmt.Sprintf("/api/competitions/%s/matches/%s/score", compID, mid), bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "Score PUT failed: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "Score PUT failed: %s", w.Body.String())
 	}
 
 	// Helper to generate Swiss round via API.
@@ -408,7 +408,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := adminReqSwiss("POST", fmt.Sprintf("/api/competitions/%s/swiss/generate-round", compID))
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusCreated, w.Code, "Generate round failed: %s", w.Body.String())
+		require.Equalf(t, http.StatusCreated, w.Code, "Generate round failed: %s", w.Body.String())
 		var resp struct {
 			Round             int                 `json:"round"`
 			Matches           []state.MatchResult `json:"matches"`
@@ -504,7 +504,7 @@ func TestSwissEndToEnd_3Rounds_6Participants(t *testing.T) {
 	wComplete := httptest.NewRecorder()
 	reqComplete, _ := http.NewRequest("POST", fmt.Sprintf("/api/competitions/%s/complete", compID), nil)
 	r.ServeHTTP(wComplete, reqComplete)
-	require.Equal(t, http.StatusOK, wComplete.Code, "Complete competition failed: %s", wComplete.Body.String())
+	require.Equalf(t, http.StatusOK, wComplete.Code, "Complete competition failed: %s", wComplete.Body.String())
 
 	// Verify comp status is "complete".
 	updated, err := store.LoadCompetition(compID)

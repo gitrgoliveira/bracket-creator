@@ -51,7 +51,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 
 	err := eng.StartMatch(compID, "Pool A-0")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want errors.Is == ErrIneligibleCompetitor, got %v", err)
+	assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "want errors.Is == ErrIneligibleCompetitor, got %v", err)
 
 	var ineligErr *IneligibleCompetitorError
 	require.ErrorAs(t, err, &ineligErr)
@@ -128,7 +128,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 
 		_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken", "shiro", "scoring fix", nil, false)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrDecisionLocked), "want ErrDecisionLocked, got %v", err)
+		assert.Truef(t, errors.Is(err, ErrDecisionLocked), "want ErrDecisionLocked, got %v", err)
 	})
 
 	t.Run("force=true bypasses the decision lock", func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	// Now record fusensho on Alice in Pool A-1. This should NOT trip the
 	// concurrent-kiken guard — fusensho doesn't write ineligibility.
 	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "shiro", "default win", nil, false)
-	assert.NoError(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
+	assert.NoErrorf(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
 }
 
 // TestCheckEligibility_AllEligible verifies that CheckEligibility returns
@@ -913,7 +913,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		err := eng.StartMatch(compID, "A-2")
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor, got %v", err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor, got %v", err)
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
@@ -943,7 +943,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		err := eng.StartMatch(compID, "A-1")
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
@@ -1029,7 +1029,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		err := eng.StartMatch(compID, "P-0")
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
 
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)

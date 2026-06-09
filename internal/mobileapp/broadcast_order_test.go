@@ -48,7 +48,7 @@ func TestBroadcastsHaveStrictlyIncreasingSeq(t *testing.T) {
 		case msg := <-ch:
 			var env SSEEvent
 			require.NoError(t, json.Unmarshal([]byte(msg), &env))
-			assert.Equal(t, prev+1, env.Seq, "envelope %d should have seq exactly one greater than the previous", i)
+			assert.Equalf(t, prev+1, env.Seq, "envelope %d should have seq exactly one greater than the previous", i)
 			prev = env.Seq
 		case <-time.After(500 * time.Millisecond):
 			t.Fatalf("timeout waiting for envelope %d/%d (last seq seen: %d)", i, N, prev)
@@ -105,15 +105,15 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 	seen := make(map[int64]bool, Total)
 	prev := int64(0)
 	for i, e := range entries {
-		require.False(t, seen[e.seq], "duplicate seq %d at index %d", e.seq, i)
+		require.Falsef(t, seen[e.seq], "duplicate seq %d at index %d", e.seq, i)
 		seen[e.seq] = true
-		require.Greater(t, e.seq, prev, "seq %d at index %d not strictly greater than previous %d", e.seq, i, prev)
+		require.Greaterf(t, e.seq, prev, "seq %d at index %d not strictly greater than previous %d", e.seq, i, prev)
 		prev = e.seq
 		var env SSEEvent
 		require.NoError(t, json.Unmarshal([]byte(e.payload), &env))
 		require.Equal(t, e.seq, env.Seq, "marshalled JSON seq must match ring entry seq")
 	}
 	for s := int64(1); s <= int64(Total); s++ {
-		assert.True(t, seen[s], "expected to see seq %d but did not", s)
+		assert.Truef(t, seen[s], "expected to see seq %d but did not", s)
 	}
 }

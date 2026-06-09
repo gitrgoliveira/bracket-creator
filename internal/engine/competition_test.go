@@ -398,7 +398,7 @@ func TestGenerateDraw_MixedFormat_WritesPreviewBracket(t *testing.T) {
 	sawPoolLabel := false
 	for _, side := range []string{bracket.Rounds[0][0].SideA, bracket.Rounds[0][0].SideB} {
 		if side != "" {
-			assert.Contains(t, side, "Pool", "preview leaf must reference a pool, got %q", side)
+			assert.Containsf(t, side, "Pool", "preview leaf must reference a pool, got %q", side)
 			sawPoolLabel = true
 		}
 	}
@@ -474,7 +474,7 @@ func TestDiscardDraw_ResetsToSetup(t *testing.T) {
 	compDir := filepath.Join(dir, "competitions", compID)
 	for _, f := range []string{"pools.csv", "pool-matches.csv", "bracket.json"} {
 		_, ferr := os.Stat(filepath.Join(compDir, f))
-		assert.True(t, os.IsNotExist(ferr), "%s must be deleted after DiscardDraw", f)
+		assert.Truef(t, os.IsNotExist(ferr), "%s must be deleted after DiscardDraw", f)
 	}
 }
 

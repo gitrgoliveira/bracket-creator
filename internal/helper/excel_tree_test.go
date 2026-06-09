@@ -60,7 +60,7 @@ func TestAddPoolsToTreeCellContent(t *testing.T) {
 		for i, p := range players {
 			row := startRow + 1 + i
 			got, err := f.GetCellFormula(sheetName, fmt.Sprintf("A%d", row))
-			require.NoError(t, err, "row %d", row)
+			require.NoErrorf(t, err, "row %d", row)
 			want := fmt.Sprintf("\"%d. \" & %s!%s", p.PoolPosition, SheetData, pCoords[playerCoordKey(p)].cell)
 			assert.Equal(t,
 				strings.ReplaceAll(want, "'", ""),

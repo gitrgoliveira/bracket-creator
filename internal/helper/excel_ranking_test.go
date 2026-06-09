@@ -242,7 +242,7 @@ func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
 			for rank := 1; rank <= numWinners; rank++ {
 				key := fmt.Sprintf("Pool A-%s", GetOrdinal(rank))
 				mw, ok := matchWinners[key]
-				require.True(t, ok, "matchWinners[%q] missing", key)
+				require.Truef(t, ok, "matchWinners[%q] missing", key)
 
 				expectedCell := fmt.Sprintf("G%d", rankingHeaderRow+rank)
 				assert.Equal(t, expectedCell, mw.cell,
@@ -253,7 +253,7 @@ func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
 				assert.Contains(t, formula, "INDEX",
 					"matchWinners[%q] cell %s should hold an INDEX formula, got %q",
 					key, mw.cell, formula)
-				assert.Contains(t, formula, fmt.Sprintf("MATCH(%d,", rank),
+				assert.Containsf(t, formula, fmt.Sprintf("MATCH(%d,", rank),
 					"matchWinners[%q] cell %s should MATCH rank %d, got %q",
 					key, mw.cell, rank, formula)
 			}

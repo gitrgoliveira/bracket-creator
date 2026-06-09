@@ -33,8 +33,8 @@ func TestDecisionConstants(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.wire, string(tc.c), "wire value mismatch for %s", tc.name)
-			assert.True(t, tc.c.Valid(), "Valid() must return true for %s", tc.name)
+			assert.Equalf(t, tc.wire, string(tc.c), "wire value mismatch for %s", tc.name)
+			assert.Truef(t, tc.c.Valid(), "Valid() must return true for %s", tc.name)
 		})
 	}
 

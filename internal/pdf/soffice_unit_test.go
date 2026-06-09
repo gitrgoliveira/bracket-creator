@@ -42,7 +42,7 @@ func TestSofficeCandidates_NotEmpty(t *testing.T) {
 	assert.NotEmpty(t, got)
 	// All candidates must be absolute paths.
 	for _, c := range got {
-		assert.True(t, filepath.IsAbs(c), "candidate %q must be an absolute path", c)
+		assert.Truef(t, filepath.IsAbs(c), "candidate %q must be an absolute path", c)
 	}
 }
 

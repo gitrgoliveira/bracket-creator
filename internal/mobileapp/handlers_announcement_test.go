@@ -110,7 +110,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret-password")
 	router.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, "expected 413 for body over %d bytes", AnnouncementMaxBodyBytes)
+	assert.Equalf(t, http.StatusRequestEntityTooLarge, w.Code, "expected 413 for body over %d bytes", AnnouncementMaxBodyBytes)
 
 	// 9. POST first announcement — happy path
 	body, _ = json.Marshal(payload)

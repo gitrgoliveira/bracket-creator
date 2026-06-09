@@ -87,7 +87,7 @@ func TestCircleMethodRounds_EvenN(t *testing.T) {
 	rounds := CircleMethodRounds(4)
 	require.Len(t, rounds, 3, "n=4 should produce 3 rounds")
 	for i, r := range rounds {
-		assert.Len(t, r, 2, "round %d should have 2 matches", i)
+		assert.Lenf(t, r, 2, "round %d should have 2 matches", i)
 	}
 	assertValidRounds(t, rounds, 4, 6)
 	assertAllPairsPresent(t, rounds, 4)
@@ -98,7 +98,7 @@ func TestCircleMethodRounds_OddN(t *testing.T) {
 	rounds := CircleMethodRounds(5)
 	require.Len(t, rounds, 5, "n=5 should produce 5 rounds")
 	for i, r := range rounds {
-		assert.Len(t, r, 2, "round %d should have 2 matches (1 bye)", i)
+		assert.Lenf(t, r, 2, "round %d should have 2 matches (1 bye)", i)
 	}
 	assertValidRounds(t, rounds, 5, 10)
 	assertAllPairsPresent(t, rounds, 5)
@@ -109,7 +109,7 @@ func TestCircleMethodRounds_Six(t *testing.T) {
 	rounds := CircleMethodRounds(6)
 	require.Len(t, rounds, 5, "n=6 should produce 5 rounds")
 	for i, r := range rounds {
-		assert.Len(t, r, 3, "round %d should have 3 matches", i)
+		assert.Lenf(t, r, 3, "round %d should have 3 matches", i)
 	}
 	assertValidRounds(t, rounds, 6, 15)
 	assertAllPairsPresent(t, rounds, 6)
@@ -120,7 +120,7 @@ func TestCircleMethodRounds_Eight(t *testing.T) {
 	rounds := CircleMethodRounds(8)
 	require.Len(t, rounds, 7, "n=8 should produce 7 rounds")
 	for i, r := range rounds {
-		assert.Len(t, r, 4, "round %d should have 4 matches", i)
+		assert.Lenf(t, r, 4, "round %d should have 4 matches", i)
 	}
 	assertValidRounds(t, rounds, 8, 28)
 	assertAllPairsPresent(t, rounds, 8)
@@ -131,7 +131,7 @@ func TestCircleMethodRounds_Three(t *testing.T) {
 	rounds := CircleMethodRounds(3)
 	require.Len(t, rounds, 3, "n=3 should produce 3 rounds")
 	for i, r := range rounds {
-		assert.Len(t, r, 1, "round %d should have 1 match (1 bye)", i)
+		assert.Lenf(t, r, 1, "round %d should have 1 match (1 bye)", i)
 	}
 	assertValidRounds(t, rounds, 3, 3)
 	assertAllPairsPresent(t, rounds, 3)

@@ -647,6 +647,25 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
+// Pure helper: resolve a ?player= / ?name= deep link against the participant
+// roster and the currently-followed player. Returns null when no action is
+// needed, or { player, pending } where pending=true means a confirmation banner
+// should be shown instead of silently overwriting the existing selection.
+export function resolveDeepLink(searchString, roster, followedPlayer) {
+  const params = new URLSearchParams(searchString || "");
+  const qpPlayer = (params.get("player") || "").trim();
+  const qpName = (params.get("name") || "").trim();
+  if (!qpPlayer && !qpName) return null;
+  let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
+  if (!hit) {
+    const needle = (qpName || qpPlayer).toLowerCase();
+    if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
+  }
+  if (!hit) return null;
+  const alreadySet = followedPlayer && followedPlayer.id && followedPlayer.id !== hit.id;
+  return { player: { id: hit.id, name: hit.name }, pending: !!alreadySet };
+}
+
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, connected = true }) {
   const t = tournament;
   const comps = t.competitions || [];
@@ -696,27 +715,14 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     if (deepLinkApplied.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    const params = new URLSearchParams(window.location.search || "");
-    const qpPlayer = (params.get("player") || "").trim();
-    const qpName = (params.get("name") || "").trim();
-    if (!qpPlayer && !qpName) { deepLinkApplied.current = true; return; }
-    // 1) UUID lookup
-    let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
-    // 2) Fall back to name (use ?name= if present, else treat ?player= as a name)
-    if (!hit) {
-      const needle = (qpName || qpPlayer).toLowerCase();
-      if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
-    }
-    if (hit) {
-      const alreadySet = followedPlayer && followedPlayer.id && followedPlayer.id !== hit.id;
-      if (alreadySet) {
-        // Ask before overwriting the existing followed player.
-        setPendingDeepLink({ id: hit.id, name: hit.name });
-      } else {
-        setFollowedPlayer({ id: hit.id, name: hit.name });
-      }
-    }
+    const result = resolveDeepLink(window.location.search, roster, followedPlayer);
     deepLinkApplied.current = true;
+    if (!result) return;
+    if (result.pending) {
+      setPendingDeepLink(result.player);
+    } else {
+      setFollowedPlayer(result.player);
+    }
   }, [roster, followedPlayer, setFollowedPlayer]);
 
   // global "across-all-competitions" lists for the home page
@@ -2156,7 +2162,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
     : null;
   return (
-    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick}>
+    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
@@ -2781,7 +2787,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, addDojoToWatchlist, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, ViewerHome, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

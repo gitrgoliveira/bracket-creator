@@ -2654,9 +2654,9 @@ button.vsched-item:not([data-clickable]) {
   font-weight: 600;
 }
 
-/* PoolMatchRow as button */
+/* PoolMatchRow as button — do NOT set display here; the base .pool-match-row
+   rule (display:grid) has lower specificity and would be overridden. */
 button.pool-match-row {
-  display: block;
   width: 100%;
   text-align: left;
   cursor: pointer;

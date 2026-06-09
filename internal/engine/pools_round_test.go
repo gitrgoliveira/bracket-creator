@@ -75,8 +75,8 @@ func TestPoolGeneration_SinglePoolMultiCourt_RoundAwareCourts(t *testing.T) {
 			for r, roundMatches := range byRound {
 				seen := make(map[string]bool)
 				for _, m := range roundMatches {
-					assert.False(t, seen[m.SideA], "round %d: player %q appears in multiple concurrent matches", r, m.SideA)
-					assert.False(t, seen[m.SideB], "round %d: player %q appears in multiple concurrent matches", r, m.SideB)
+					assert.Falsef(t, seen[m.SideA], "round %d: player %q appears in multiple concurrent matches", r, m.SideA)
+					assert.Falsef(t, seen[m.SideB], "round %d: player %q appears in multiple concurrent matches", r, m.SideB)
 					seen[m.SideA] = true
 					seen[m.SideB] = true
 				}

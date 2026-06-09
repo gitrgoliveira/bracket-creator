@@ -26,7 +26,7 @@ func TestSuggestedMaxCourts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.why, func(t *testing.T) {
 			got := SuggestedMaxCourts(tc.players)
-			assert.Equal(t, tc.expected, got, "players=%d: %s", tc.players, tc.why)
+			assert.Equalf(t, tc.expected, got, "players=%d: %s", tc.players, tc.why)
 		})
 	}
 }
@@ -65,9 +65,9 @@ func TestValidateCourtCount(t *testing.T) {
 		t.Run(tc.desc, func(t *testing.T) {
 			err := ValidateCourtCount(tc.players, tc.courts)
 			if tc.wantErr {
-				require.Error(t, err, "expected error for players=%d courts=%d", tc.players, tc.courts)
+				require.Errorf(t, err, "expected error for players=%d courts=%d", tc.players, tc.courts)
 			} else {
-				require.NoError(t, err, "unexpected error for players=%d courts=%d", tc.players, tc.courts)
+				require.NoErrorf(t, err, "unexpected error for players=%d courts=%d", tc.players, tc.courts)
 			}
 		})
 	}

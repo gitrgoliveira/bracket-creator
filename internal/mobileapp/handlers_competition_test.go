@@ -613,7 +613,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			// Confirm no half-baked record landed on disk under the
 			// invalid ID (the validation must fail before SaveCompetition).
 			stored, _ := store.LoadCompetition(badID)
-			assert.Nil(t, stored, "POST with id=%q must not persist", badID)
+			assert.Nilf(t, stored, "POST with id=%q must not persist", badID)
 		}
 	})
 
@@ -771,7 +771,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clearBody))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "PUT with players=[] must succeed: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "PUT with players=[] must succeed: %s", w.Body.String())
 
 		// Verify the roster on disk is now empty.
 		after, err := store.LoadParticipants(cid, false)
@@ -799,7 +799,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(settingsBody))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "PUT with omitted players must succeed: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "PUT with omitted players must succeed: %s", w.Body.String())
 
 		// Roster on disk MUST be unchanged.
 		after, err := store.LoadParticipants(cid, false)
@@ -966,7 +966,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	// Parse the response — the Players field must be a non-null array
 	// reflecting the on-disk roster.
@@ -1020,7 +1020,7 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(dup))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusConflict, w.Code, "perfect (name,dojo) dup on roster PUT must 409: %s", w.Body.String())
+	require.Equalf(t, http.StatusConflict, w.Code, "perfect (name,dojo) dup on roster PUT must 409: %s", w.Body.String())
 
 	// Near-duplicate (token-subset) → 200 with a warnings entry.
 	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
@@ -1029,7 +1029,7 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(near))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "near-dup roster PUT must succeed: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "near-dup roster PUT must succeed: %s", w.Body.String())
 
 	var resp struct {
 		Warnings []helper.NearDupWarning `json:"warnings"`
@@ -1073,7 +1073,7 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1138,7 +1138,7 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1255,7 +1255,7 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1386,7 +1386,7 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/r1-m0/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	// Re-load bracket and verify the match is RUNNING, not COMPLETED.
 	br, err := store.LoadBracket(cid)
@@ -1450,7 +1450,7 @@ func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	saved, err := store.LoadCompetition(cid)
 	require.NoError(t, err)
@@ -1492,7 +1492,7 @@ func TestGenerateDrawHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
@@ -1657,7 +1657,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 		// Parse response competition and check awards.
 		var resp state.Competition
@@ -1697,7 +1697,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
@@ -1833,7 +1833,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		// Do NOT set X-Admin-Password — should be rejected with 401 (wrong credential).
 		hr.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
+		assert.Equalf(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
 	})
 
 	t.Run("whitespace trimmed from awards before persisting", func(t *testing.T) {
@@ -1846,7 +1846,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
@@ -1909,7 +1909,7 @@ func TestDiscardDrawHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("DELETE", "/api/competitions/"+cid+"/draw", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code, "response: %s", w.Body.String())
+		assert.Equalf(t, http.StatusNoContent, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)

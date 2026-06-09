@@ -62,13 +62,13 @@ func TestConvertAndReadRanges(t *testing.T) {
 	// The example workbook must contain the canonical bracket sheets.
 	for _, want := range []string{"data", "Pool Draw"} {
 		_, ok := byName[want]
-		assert.True(t, ok, "expected sheet %q in %v", want, keysOf(byName))
+		assert.Truef(t, ok, "expected sheet %q in %v", want, keysOf(byName))
 	}
 
 	// The LAST range is the one pdfcpu leaves with PageThru==0; assert it was
 	// patched to reach the final page.
 	last := ranges[len(ranges)-1]
-	assert.Equal(t, total, last.PageThru, "final sheet %q must extend to last page", last.Sheet)
+	assert.Equalf(t, total, last.PageThru, "final sheet %q must extend to last page", last.Sheet)
 }
 
 func TestExtractAndMerge(t *testing.T) {

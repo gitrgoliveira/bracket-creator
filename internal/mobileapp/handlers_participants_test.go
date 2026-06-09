@@ -833,7 +833,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 		}()
 
 		wg.Wait()
-		assert.NoError(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
+		assert.NoErrorf(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
 		assert.True(t, replCode == http.StatusOK || replCode == http.StatusConflict,
 			"iteration %d: replace must return 200 or 409, got %d", i, replCode)
 
@@ -847,7 +847,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 				"iteration %d: returned player name must match request", i)
 
 			reloaded, err := store.LoadParticipants(compID, false)
-			require.NoError(t, err, "iteration %d: must be able to reload participants after 200", i)
+			require.NoErrorf(t, err, "iteration %d: must be able to reload participants after 200", i)
 			found := false
 			for _, p := range reloaded {
 				if p.ID == player.ID {
@@ -857,7 +857,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 					break
 				}
 			}
-			assert.True(t, found, "iteration %d: replaced participant must still exist in roster", i)
+			assert.Truef(t, found, "iteration %d: replaced participant must still exist in roster", i)
 		}
 	}
 }
@@ -981,7 +981,7 @@ func TestPutParticipant_DrawReady_Succeeds(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code, "PUT in draw-ready state must return 200, not 409; body: %s", w.Body.String())
+	assert.Equalf(t, http.StatusOK, w.Code, "PUT in draw-ready state must return 200, not 409; body: %s", w.Body.String())
 
 	// Response must include the updated player.
 	var resp map[string]any
@@ -1080,7 +1080,7 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code, "PUT must succeed even with dojo conflict; body: %s", w.Body.String())
+	assert.Equalf(t, http.StatusOK, w.Code, "PUT must succeed even with dojo conflict; body: %s", w.Body.String())
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))

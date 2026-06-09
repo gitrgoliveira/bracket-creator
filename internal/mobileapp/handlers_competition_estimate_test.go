@@ -51,7 +51,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/competitions/estimate-comp/schedule/estimate", nil)
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
 		var resp engine.ScheduleEstimate
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -91,7 +91,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/competitions/estimate-with-players/schedule/estimate", nil)
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
 		var resp engine.ScheduleEstimate
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))

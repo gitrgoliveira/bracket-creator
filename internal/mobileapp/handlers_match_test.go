@@ -541,7 +541,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 	stored, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -583,7 +583,7 @@ func TestPostScoreKikenInEncho(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 	stored, _ := store.LoadPoolMatches(compID)
 	require.Len(t, stored, 1)
@@ -721,7 +721,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "failed to validate encho limits")
 	})
 
@@ -736,7 +736,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 		var resp struct {
 			Error string `json:"error"`
 			Limit int    `json:"limit"`
@@ -757,7 +757,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 	})
 }
 
@@ -808,7 +808,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 		var resp struct {
 			Error string `json:"error"`
 			Limit int    `json:"limit"`
@@ -834,7 +834,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 	})
 
 	t.Run("bulk-score: sub-bout encho over cap is recorded as per-item error", func(t *testing.T) {
@@ -856,7 +856,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		// Bulk-score always returns 200; cap violations land in the errors array.
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 		var resp struct {
 			Succeeded int `json:"succeeded"`
 			Errors    []struct {
@@ -901,7 +901,7 @@ func TestBulkScore_FailsClosedOnLoadError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+	require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
 	assert.Contains(t, w.Body.String(), "failed to validate encho limits")
 }
 
@@ -1143,7 +1143,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
@@ -1168,7 +1168,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
@@ -1192,7 +1192,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "decision type not allowed")
 	})
 
@@ -1213,7 +1213,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "decision type not allowed")
 	})
 
@@ -1245,7 +1245,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusConflict, w.Code, "body=%s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "result_finalized")
 	})
 
@@ -1265,7 +1265,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tournament-Password", "secret")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
@@ -1306,7 +1306,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Tournament-Password", "secret")
 		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
@@ -1358,7 +1358,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		rr.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))

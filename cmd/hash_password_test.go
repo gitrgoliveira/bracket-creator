@@ -36,7 +36,7 @@ func TestHashPassword_FromArg_ProducesValidBcryptHash(t *testing.T) {
 	require.NoError(t, err)
 	out = strings.TrimSpace(out)
 	require.NotEmpty(t, out)
-	assert.True(t, strings.HasPrefix(out, "$2a$"), "expected bcrypt hash, got %q", out)
+	assert.Truef(t, strings.HasPrefix(out, "$2a$"), "expected bcrypt hash, got %q", out)
 	// Round-trip: the produced hash authenticates the same plaintext.
 	require.NoError(t, bcrypt.CompareHashAndPassword([]byte(out), []byte("mysecret")))
 }

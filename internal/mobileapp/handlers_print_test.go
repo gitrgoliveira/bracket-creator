@@ -159,11 +159,11 @@ func TestPrintHandler_ValidRequest(t *testing.T) {
 
 			// Verify the response is a valid non-empty ZIP.
 			body := w.Body.Bytes()
-			assert.NotEmpty(t, body, "type=%s: ZIP body must not be empty", printType)
+			assert.NotEmptyf(t, body, "type=%s: ZIP body must not be empty", printType)
 
 			zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-			require.NoError(t, err, "type=%s: response must be a valid ZIP archive", printType)
-			assert.NotEmpty(t, zr.File, "type=%s: ZIP must contain at least one file", printType)
+			require.NoErrorf(t, err, "type=%s: response must be a valid ZIP archive", printType)
+			assert.NotEmptyf(t, zr.File, "type=%s: ZIP must contain at least one file", printType)
 			for _, f := range zr.File {
 				assert.True(t, strings.HasSuffix(f.Name, ".pdf"),
 					"type=%s: every ZIP entry must end in .pdf, got %q", printType, f.Name)

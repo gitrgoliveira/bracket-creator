@@ -172,7 +172,7 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 	wg.Wait()
 
 	for i, err := range results {
-		assert.NoError(t, err, "concurrent atomicWriteFile call %d should succeed", i)
+		assert.NoErrorf(t, err, "concurrent atomicWriteFile call %d should succeed", i)
 	}
 
 	got, err := os.ReadFile(target) // #nosec G304 — test path.

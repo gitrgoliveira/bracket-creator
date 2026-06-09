@@ -368,9 +368,9 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 
 	// W/L/D must reflect only the regular draw match, not the TB win
 	for _, s := range poolA {
-		assert.Equal(t, 0, s.Wins, "%s: TB win must not count as a regular win", s.Player.Name)
-		assert.Equal(t, 0, s.Losses, "%s: must have no regular losses", s.Player.Name)
-		assert.Equal(t, 1, s.Draws, "%s: draw from regular match must be counted", s.Player.Name)
+		assert.Equalf(t, 0, s.Wins, "%s: TB win must not count as a regular win", s.Player.Name)
+		assert.Equalf(t, 0, s.Losses, "%s: must have no regular losses", s.Player.Name)
+		assert.Equalf(t, 1, s.Draws, "%s: draw from regular match must be counted", s.Player.Name)
 	}
 }
 

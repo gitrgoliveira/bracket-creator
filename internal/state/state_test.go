@@ -777,7 +777,7 @@ func TestValidateCompetitionID_Valid(t *testing.T) {
 		"abc-123_DEF",
 	}
 	for _, id := range validIDs {
-		assert.NoError(t, ValidateCompetitionID(id), "should accept: %s", id)
+		assert.NoErrorf(t, ValidateCompetitionID(id), "should accept: %s", id)
 	}
 }
 
@@ -804,7 +804,7 @@ func TestValidateCompetitionID_Invalid(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.desc, func(t *testing.T) {
 			err := ValidateCompetitionID(tc.id)
-			assert.Error(t, err, "should reject: %q", tc.id)
+			assert.Errorf(t, err, "should reject: %q", tc.id)
 		})
 	}
 }

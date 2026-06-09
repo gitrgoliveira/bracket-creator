@@ -28,7 +28,7 @@ func TestGenerateAllProducesGroupedPDFs(t *testing.T) {
 	// should produce output.
 	for _, typ := range []string{"registration", "names", "tags", "pools-trees", "full-bracket"} {
 		path, ok := out[typ]
-		require.True(t, ok, "group %q should be produced", typ)
+		require.Truef(t, ok, "group %q should be produced", typ)
 		require.FileExists(t, path)
 		n, err := PageCount(path)
 		require.NoError(t, err)

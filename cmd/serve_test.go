@@ -44,7 +44,7 @@ func loadWebSourceConcat(t *testing.T) string {
 	sb.WriteString("\n")
 	for _, p := range jsPaths {
 		b, err := os.ReadFile(p)
-		require.NoError(t, err, "read %s", p)
+		require.NoErrorf(t, err, "read %s", p)
 		sb.Write(b)
 		sb.WriteString("\n")
 	}

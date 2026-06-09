@@ -98,7 +98,7 @@ func completeSwissMatch(t *testing.T, store *state.Store, compID, matchID, winne
 			break
 		}
 	}
-	require.True(t, found, "match %s not found in pool-matches.csv", matchID)
+	require.Truef(t, found, "match %s not found in pool-matches.csv", matchID)
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 }
 
@@ -129,16 +129,16 @@ func TestSwissRound1FoldPairing(t *testing.T) {
 	// is acceptable — assignment of seat A/B is implementation detail).
 	seen := make(map[string]bool)
 	for i, m := range matches {
-		require.NotEmpty(t, m.SideA, "match %d missing SideA", i)
-		require.NotEmpty(t, m.SideB, "match %d missing SideB", i)
+		require.NotEmptyf(t, m.SideA, "match %d missing SideA", i)
+		require.NotEmptyf(t, m.SideB, "match %d missing SideB", i)
 		require.NotEqual(t, m.SideA, m.SideB, "match %d: SideA and SideB cannot be the same player", i)
-		require.False(t, seen[m.ID], "duplicate match ID %s", m.ID)
+		require.Falsef(t, seen[m.ID], "duplicate match ID %s", m.ID)
 		seen[m.ID] = true
 
 		want := expected[i]
 		got := [2]string{m.SideA, m.SideB}
 		match := (got == want) || (got == [2]string{want[1], want[0]})
-		assert.True(t, match, "match %d: want %v, got %v", i, want, got)
+		assert.Truef(t, match, "match %d: want %v, got %v", i, want, got)
 	}
 }
 
@@ -155,14 +155,14 @@ func TestSwissRound1RandomPairingNoSeeds(t *testing.T) {
 
 	seenPlayer := make(map[string]int)
 	for i, m := range matches {
-		require.NotEmpty(t, m.SideA, "match %d missing SideA", i)
-		require.NotEmpty(t, m.SideB, "match %d missing SideB", i)
+		require.NotEmptyf(t, m.SideA, "match %d missing SideA", i)
+		require.NotEmptyf(t, m.SideB, "match %d missing SideB", i)
 		require.NotEqual(t, m.SideA, m.SideB, "match %d: SideA and SideB cannot be the same player", i)
 		seenPlayer[m.SideA]++
 		seenPlayer[m.SideB]++
 	}
 	for _, n := range names {
-		assert.Equal(t, 1, seenPlayer[n], "player %s should appear exactly once in round 1", n)
+		assert.Equalf(t, 1, seenPlayer[n], "player %s should appear exactly once in round 1", n)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestSwissRound2PairsByWins(t *testing.T) {
 				break
 			}
 		}
-		require.NotEmpty(t, matchID, "could not find match for winner %s", w)
+		require.NotEmptyf(t, matchID, "could not find match for winner %s", w)
 		completeSwissMatch(t, store, compID, matchID, w)
 	}
 
@@ -218,7 +218,7 @@ func TestSwissRound2PairsByWins(t *testing.T) {
 
 	for _, m := range r2 {
 		key := rematch(m.SideA, m.SideB)
-		assert.False(t, prior[key], "round 2 pair %s vs %s is a rematch of round 1", m.SideA, m.SideB)
+		assert.Falsef(t, prior[key], "round 2 pair %s vs %s is a rematch of round 1", m.SideA, m.SideB)
 
 		aWin := winnersSet[m.SideA]
 		bWin := winnersSet[m.SideB]
@@ -272,7 +272,7 @@ func TestSwissOddPlayerBye(t *testing.T) {
 	assert.Equal(t, "P7", bye.SideA, "lowest-ranked seed (P7) should receive the round-1 bye")
 
 	for _, n := range names {
-		assert.Equal(t, 1, playerCount[n], "player %s should appear exactly once across played+bye matches", n)
+		assert.Equalf(t, 1, playerCount[n], "player %s should appear exactly once across played+bye matches", n)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestSwissKikenExclusion(t *testing.T) {
 			assert.Equal(t, 0, playerSeen[n], "P3 should not be paired in round 2 (ineligible)")
 			continue
 		}
-		assert.Equal(t, 1, playerSeen[n], "active player %s should appear exactly once in round 2", n)
+		assert.Equalf(t, 1, playerSeen[n], "active player %s should appear exactly once in round 2", n)
 	}
 }
 
@@ -419,7 +419,7 @@ func TestSwissStandingsRanking(t *testing.T) {
 
 	// Every player has a rank assigned, 1..N.
 	for i, s := range standings {
-		assert.Equal(t, i+1, s.Rank, "standing %d should have Rank=%d", i, i+1)
+		assert.Equalf(t, i+1, s.Rank, "standing %d should have Rank=%d", i, i+1)
 	}
 
 	// Sum of all wins across players equals total wins awarded. Each
@@ -440,7 +440,7 @@ func TestSwissStandingsRanking(t *testing.T) {
 	// drift through the pipeline).
 	for _, n := range names {
 		_, ok := byName[n]
-		assert.True(t, ok, "player %s missing from standings", n)
+		assert.Truef(t, ok, "player %s missing from standings", n)
 	}
 
 	// Sanity: rank ordering respects wins (descending). Within a
@@ -629,9 +629,9 @@ func TestParseSwissMatchRound(t *testing.T) {
 	}
 	for _, tc := range tests {
 		n, ok := parseSwissMatchRound(tc.id)
-		assert.Equal(t, tc.wantOK, ok, "id=%q", tc.id)
+		assert.Equalf(t, tc.wantOK, ok, "id=%q", tc.id)
 		if ok {
-			assert.Equal(t, tc.wantN, n, "id=%q", tc.id)
+			assert.Equalf(t, tc.wantN, n, "id=%q", tc.id)
 		}
 	}
 }
@@ -772,7 +772,7 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 		t.Helper()
 		var h, m int
 		_, err := fmt.Sscanf(s, "%d:%d", &h, &m)
-		require.NoError(t, err, "ScheduledAt %q must be HH:MM", s)
+		require.NoErrorf(t, err, "ScheduledAt %q must be HH:MM", s)
 		return h*60 + m
 	}
 

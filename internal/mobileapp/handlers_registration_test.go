@@ -396,7 +396,7 @@ func TestRegistration_POST_MissingRequiredFields(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
 			w := doRegister(r, compID, tc.body)
-			assert.Equal(t, http.StatusBadRequest, w.Code, "expected 400 for: %s", tc.desc)
+			assert.Equalf(t, http.StatusBadRequest, w.Code, "expected 400 for: %s", tc.desc)
 		})
 	}
 }
@@ -447,7 +447,7 @@ func TestRegistration_POST_FieldLengthValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
 			w := doRegister(r, compID, tc.body)
-			assert.Equal(t, http.StatusBadRequest, w.Code, "expected 400 for: %s", tc.desc)
+			assert.Equalf(t, http.StatusBadRequest, w.Code, "expected 400 for: %s", tc.desc)
 		})
 	}
 }

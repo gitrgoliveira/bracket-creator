@@ -105,7 +105,7 @@ func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.format, func(t *testing.T) {
 			c := Competition{Format: tc.format}
-			assert.Equal(t, tc.want, c.IsPlayoffEnabled(), "format=%q", tc.format)
+			assert.Equalf(t, tc.want, c.IsPlayoffEnabled(), "format=%q", tc.format)
 		})
 	}
 }

@@ -85,10 +85,10 @@ func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
 
 	validIDs := map[string]bool{idA: true, idB: true, idC: true, idD: true}
 	for _, m := range matches {
-		assert.NotEmpty(t, m.SideAID, "match %s SideAID should be stamped from the roster", m.ID)
-		assert.NotEmpty(t, m.SideBID, "match %s SideBID should be stamped from the roster", m.ID)
-		assert.True(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
-		assert.True(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
+		assert.NotEmptyf(t, m.SideAID, "match %s SideAID should be stamped from the roster", m.ID)
+		assert.NotEmptyf(t, m.SideBID, "match %s SideBID should be stamped from the roster", m.ID)
+		assert.Truef(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
+		assert.Truef(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
 		assert.NotEqual(t, m.SideAID, m.SideBID, "a match must be between two distinct participants")
 	}
 
@@ -1125,7 +1125,7 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 		// Points = W*100_000_000 - L*1_000_000 + D*10_000 + G*100 - T
 		for _, s := range poolStandings {
 			expected := s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
-			assert.Equal(t, expected, s.Points, "Points should match weighted formula for %s", s.Player.Name)
+			assert.Equalf(t, expected, s.Points, "Points should match weighted formula for %s", s.Player.Name)
 		}
 		// Ranking: Alice (2W) > Bob (1W,1L) > Charlie (0W,2L)
 		assert.Equal(t, "Alice", poolStandings[0].Player.Name)
@@ -1234,7 +1234,7 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 			expected := s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
 				s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
 				s.PointsWon*100 - s.PointsLost
-			assert.Equal(t, expected, s.Points, "Team weighted formula mismatch for %s", s.Player.Name)
+			assert.Equalf(t, expected, s.Points, "Team weighted formula mismatch for %s", s.Player.Name)
 		}
 
 		assert.True(t, poolStandings[0].Points > poolStandings[1].Points)
@@ -1371,7 +1371,7 @@ func TestBracketMatchIDs_AreUnique(t *testing.T) {
 	ids := map[string]bool{}
 	for _, round := range bracket.Rounds {
 		for _, m := range round {
-			assert.False(t, ids[m.ID], "duplicate match ID: %s", m.ID)
+			assert.Falsef(t, ids[m.ID], "duplicate match ID: %s", m.ID)
 			ids[m.ID] = true
 		}
 	}
@@ -1392,7 +1392,7 @@ func TestPoolMatchIDs_AreUnique(t *testing.T) {
 
 	ids := map[string]bool{}
 	for _, m := range matches {
-		assert.False(t, ids[m.ID], "duplicate pool match ID: %s", m.ID)
+		assert.Falsef(t, ids[m.ID], "duplicate pool match ID: %s", m.ID)
 		ids[m.ID] = true
 	}
 }
@@ -1767,9 +1767,9 @@ func TestStartCompetition_NumberPrefix_Pools(t *testing.T) {
 	seen := map[string]bool{}
 	for _, p := range pools {
 		for _, pl := range p.Players {
-			assert.NotEmpty(t, pl.Number, "player %s should have a number", pl.Name)
-			assert.True(t, len(pl.Number) > 1 && pl.Number[0] == 'K', "number %q should start with K", pl.Number)
-			assert.False(t, seen[pl.Number], "duplicate number %q", pl.Number)
+			assert.NotEmptyf(t, pl.Number, "player %s should have a number", pl.Name)
+			assert.Truef(t, len(pl.Number) > 1 && pl.Number[0] == 'K', "number %q should start with K", pl.Number)
+			assert.Falsef(t, seen[pl.Number], "duplicate number %q", pl.Number)
 			seen[pl.Number] = true
 		}
 	}
@@ -1968,10 +1968,10 @@ func TestStartCompetition_PoolCourtDistribution(t *testing.T) {
 
 	for _, m := range matches {
 		if strings.HasPrefix(m.ID, "Pool A-") {
-			assert.Equal(t, "A", m.Court, "Pool A match %s should be on court A", m.ID)
+			assert.Equalf(t, "A", m.Court, "Pool A match %s should be on court A", m.ID)
 		}
 		if strings.HasPrefix(m.ID, "Pool B-") {
-			assert.Equal(t, "B", m.Court, "Pool B match %s should be on court B", m.ID)
+			assert.Equalf(t, "B", m.Court, "Pool B match %s should be on court B", m.ID)
 		}
 	}
 }
@@ -2015,7 +2015,7 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	for rIdx, round := range bracket.Rounds {
 		for _, m := range round {
 			if m.Status != state.MatchStatusCompleted {
-				assert.NotEmpty(t, m.Court, "round %d match %s should have a court assigned", rIdx, m.ID)
+				assert.NotEmptyf(t, m.Court, "round %d match %s should have a court assigned", rIdx, m.ID)
 			}
 		}
 	}
@@ -2174,7 +2174,7 @@ func TestStartCompetition_LeagueMultiCourt(t *testing.T) {
 	// Round-robin assignment: match i goes to court i%2
 	for i, m := range matches {
 		expected := []string{"A", "B"}[i%2]
-		assert.Equal(t, expected, m.Court, "match %d should be on court %s", i, expected)
+		assert.Equalf(t, expected, m.Court, "match %d should be on court %s", i, expected)
 	}
 }
 

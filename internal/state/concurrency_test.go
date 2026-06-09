@@ -106,7 +106,7 @@ func TestConcurrent_UpdateBracket(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, final.Rounds[0], N)
 	for _, m := range final.Rounds[0] {
-		assert.NotEmpty(t, m.Winner, "match %s must have a winner after concurrent updates", m.ID)
+		assert.NotEmptyf(t, m.Winner, "match %s must have a winner after concurrent updates", m.ID)
 	}
 }
 
@@ -191,7 +191,7 @@ func TestConcurrent_SetCompetitorStatus(t *testing.T) {
 
 	statuses, err := store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)
-	assert.Len(t, statuses, N, "all %d concurrent status writes must be persisted", N)
+	assert.Lenf(t, statuses, N, "all %d concurrent status writes must be persisted", N)
 }
 
 // TestConcurrent_UpdatePoolMatchByID validates that N goroutines each updating
@@ -243,7 +243,7 @@ func TestConcurrent_UpdatePoolMatchByID(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, N)
 	for _, m := range results {
-		assert.Equal(t, MatchStatusCompleted, m.Status, "match %s must be completed", m.ID)
+		assert.Equalf(t, MatchStatusCompleted, m.Status, "match %s must be completed", m.ID)
 	}
 }
 

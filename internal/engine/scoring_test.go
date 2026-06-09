@@ -418,7 +418,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-1", res)
-			assert.NoError(t, err, "iter %d: Pool-1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-1 score should succeed", i)
 		}()
 
 		// Operator on Court B scores Pool-2: Dave wins.
@@ -430,7 +430,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-2", res)
-			assert.NoError(t, err, "iter %d: Pool-2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -442,7 +442,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 		// (scheduled, no-winner) state.
 		stored, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
-		require.Len(t, stored, 2, "iter %d: both pool matches must still exist", i)
+		require.Lenf(t, stored, 2, "iter %d: both pool matches must still exist", i)
 
 		var p1, p2 *state.MatchResult
 		for idx := range stored {
@@ -453,12 +453,12 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				p2 = &stored[idx]
 			}
 		}
-		require.NotNil(t, p1, "iter %d: Pool-1 must exist on disk", i)
-		require.NotNil(t, p2, "iter %d: Pool-2 must exist on disk", i)
-		assert.Equal(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
-		assert.Equal(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
+		require.NotNilf(t, p1, "iter %d: Pool-1 must exist on disk", i)
+		require.NotNilf(t, p2, "iter %d: Pool-2 must exist on disk", i)
+		assert.Equalf(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
+		assert.Equalf(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
@@ -500,7 +500,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF1", res)
-			assert.NoError(t, err, "iter %d: QF1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF1 score should succeed", i)
 		}()
 		go func() {
 			defer wg.Done()
@@ -510,7 +510,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF2", res)
-			assert.NoError(t, err, "iter %d: QF2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -528,12 +528,12 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				qf2 = &stored.Rounds[0][idx]
 			}
 		}
-		require.NotNil(t, qf1, "iter %d: QF1 must exist", i)
-		require.NotNil(t, qf2, "iter %d: QF2 must exist", i)
-		assert.Equal(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
-		assert.Equal(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
+		require.NotNilf(t, qf1, "iter %d: QF1 must exist", i)
+		require.NotNilf(t, qf2, "iter %d: QF2 must exist", i)
+		assert.Equalf(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
+		assert.Equalf(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
@@ -630,7 +630,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			outcome, err := eng.MaybeAutoCompletePools(compID)
-			assert.NoError(t, err, "iter %d: MaybeAutoCompletePools error", i)
+			assert.NoErrorf(t, err, "iter %d: MaybeAutoCompletePools error", i)
 			autoCompleted = outcome == AutoCompleteTransitioned
 		}()
 		go func() {
@@ -644,7 +644,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 				current.Status = state.CompStatusInvalid
 				return current, nil
 			})
-			assert.NoError(t, err, "iter %d: invalidate error", i)
+			assert.NoErrorf(t, err, "iter %d: invalidate error", i)
 			invalidated = c
 		}()
 		wg.Wait()

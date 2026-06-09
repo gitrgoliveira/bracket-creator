@@ -381,8 +381,8 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 						continue
 					}
 					f, ok := byID[fid]
-					require.True(t, ok, "feeder %s must exist", fid)
-					assert.False(t, f.Hidden, "feeder %s must be a real match", fid)
+					require.Truef(t, ok, "feeder %s must exist", fid)
+					assert.Falsef(t, f.Hidden, "feeder %s must be a real match", fid)
 					assert.Equal(t, m.DisplayRound+1, f.DisplayRound,
 						"feeder must be one DisplayRound deeper than its parent")
 					refCount[fid]++

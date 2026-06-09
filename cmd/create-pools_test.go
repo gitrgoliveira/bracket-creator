@@ -317,7 +317,7 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 	// Kevin should be rank 1; the rank-1 ranking lookup must resolve to him.
 	rank1Cell := fmt.Sprintf("G%d", rankingHeaderRow+1)
 	got, err := f.CalcCellValue(sheet, rank1Cell)
-	require.NoError(t, err, "CalcCellValue %s", rank1Cell)
+	require.NoErrorf(t, err, "CalcCellValue %s", rank1Cell)
 	assert.Equal(t, "Kevin Clark", got,
 		"single round-robin pool of 8: rank-1 ranking cell %s should resolve to the player who won all 7 matches",
 		rank1Cell)
@@ -493,10 +493,10 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 
 	// Alpha won 3 ippons per match × 2 matches = 6 PW, 0 PL.
 	// Each of those bouts is also a sub-match victory, so IV = 6 / IL = 0.
-	assert.Equal(t, "6", pw, "Team Alpha PW must total 6 (3 ippons × 2 matches); got %q", pw)
-	assert.Equal(t, "0", pl, "Team Alpha PL must be 0 (Alpha won every sub-bout); got %q", pl)
-	assert.Equal(t, "6", iv, "Team Alpha IV must total 6 (3 sub-match wins × 2 matches); got %q", iv)
-	assert.Equal(t, "0", il, "Team Alpha IL must be 0 (Alpha won every sub-bout); got %q", il)
+	assert.Equalf(t, "6", pw, "Team Alpha PW must total 6 (3 ippons × 2 matches); got %q", pw)
+	assert.Equalf(t, "0", pl, "Team Alpha PL must be 0 (Alpha won every sub-bout); got %q", pl)
+	assert.Equalf(t, "6", iv, "Team Alpha IV must total 6 (3 sub-match wins × 2 matches); got %q", iv)
+	assert.Equalf(t, "0", il, "Team Alpha IL must be 0 (Alpha won every sub-bout); got %q", il)
 }
 
 func TestCreatePools_SingleTree(t *testing.T) {

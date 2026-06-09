@@ -1414,8 +1414,8 @@ func TestBracketSamePoolSeparation(t *testing.T) {
 						bottomCount++
 					}
 				}
-				assert.Equal(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
-				assert.Equal(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
+				assert.Equalf(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
+				assert.Equalf(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
 			}
 		})
 	}
@@ -1491,7 +1491,7 @@ func TestTreeAdjustmentByeAllocation(t *testing.T) {
 			tree := buildAdjustedTree(pools, 2)
 
 			byes := findByeLeaves(tree)
-			require.NotEmpty(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
+			require.NotEmptyf(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
 
 			for _, b := range byes {
 				rank := leafRank(b)

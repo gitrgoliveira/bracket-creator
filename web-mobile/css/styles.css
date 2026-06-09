@@ -506,6 +506,10 @@ a:hover {
   box-shadow: none;
 }
 
+.card--sm {
+  padding: 14px;
+}
+
 .card__head {
   display: flex;
   align-items: center;
@@ -2407,6 +2411,7 @@ button.my-match__opp {
   background: var(--white-side);
   background-image: repeating-linear-gradient(
     -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+  text-align: right;
 }
 .vsched-item__side:has(.vsched-item__color-badge--aka) {
   background: var(--red-soft);
@@ -2443,6 +2448,210 @@ button.my-match__opp {
 .vsched-item__score {
   font-family: var(--font-mono);
   font-weight: 700;
+}
+
+/* Button vsched-item: .vsched-item defines bg + border via CSS; just reset default
+   browser button appearance without clobbering those values. */
+button.vsched-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+button.vsched-item:not([data-clickable]) {
+  cursor: default;
+}
+
+/* Queue position chip — flex-pushed to the right of vsched-item__head */
+.vsched-item__queue {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+.vsched-item__queue--next {
+  color: var(--accent);
+}
+
+/* Final / status label — pushed right when queue chip is absent */
+.vsched-item__status {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+/* Running "● NOW" label inside head row pushed right automatically */
+.vsched-item__head .bc-live {
+  margin-left: auto;
+}
+
+/* HANTEI badge */
+.vsched-item__hantei {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-soft, #eef);
+  color: var(--accent, #36c);
+}
+
+/* Winner badge — flat accent, no gradient */
+.winner-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.winner-badge--lg {
+  padding: 14px 18px;
+  font-size: 18px;
+}
+.winner-badge__icon {
+  font-size: 22px;
+}
+.winner-badge--lg .winner-badge__icon {
+  font-size: 28px;
+}
+
+/* MyMatchPanel: "Following: Name [Clear]" header row */
+.my-match__follow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.my-match__follow-lbl {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.my-match__follow-name {
+  font-weight: 600;
+}
+.my-match__follow-row .tag-badge {
+  font-size: 9px;
+}
+.my-match__follow-row .btn--clear-follow {
+  margin-left: auto;
+}
+
+/* Viewer filter bar — active-player/watchlist indicator */
+.viewer-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-soft, #eef);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.viewer-filter-bar__icon {
+  color: var(--accent, #36c);
+}
+
+/* Section-title with inline live dot */
+.section-title--live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* WatchlistPanel dojo bulk-add row */
+.watchlist-dojo-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.watchlist-dojo-row__label {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row__feedback {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row .input {
+  font-size: 13px;
+  padding: 4px 8px;
+}
+.watchlist-count {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* DisplayModes details/summary */
+.viewer-display-modes {
+  margin-top: 20px;
+}
+.viewer-display-modes > summary {
+  cursor: pointer;
+}
+.viewer-display-modes__row-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.viewer-display-modes__link {
+  color: var(--text-link, #2563eb);
+  text-decoration: none;
+}
+.viewer-display-modes__sep {
+  color: var(--ink-3);
+  margin-left: 8px;
+}
+
+/* Bracket full-bleed container inside viewer body */
+.viewer-bracket-bleed {
+  margin-left: -16px;
+  margin-right: -16px;
+}
+@media (min-width: 768px) {
+  .viewer-bracket-bleed {
+    margin-left: -20px;
+    margin-right: -20px;
+  }
+}
+@media (min-width: 1024px) {
+  .viewer-bracket-bleed {
+    margin-left: -28px;
+    margin-right: -28px;
+  }
+}
+
+/* Competition list item layout */
+.comp-item {
+  position: relative;
+}
+.comp-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.comp-item__body {
+  min-width: 0;
+}
+
+/* Live count indicator in competition progress row */
+.bc-live-count {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* PoolMatchRow as button */
+button.pool-match-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
 }
 
 /* tournament index list */
@@ -2602,9 +2811,24 @@ button.my-match__opp {
   gap: 6px;
 }
 
+.hero-live__vsched {
+  margin-top: 8px;
+}
+
+/* "Up next" section title gets extra top breathing room */
+.viewer__upnext-title {
+  margin-top: 20px;
+}
+
+/* Glossary vlist extra top gap */
+.viewer__glossary-vlist {
+  margin-top: 12px;
+}
+
 /* Competition list cards (viewer home) */
 .vlist-item--comp {
   gap: 10px;
+  width: 100%;
 }
 
 .vlist-item__eyebrow {

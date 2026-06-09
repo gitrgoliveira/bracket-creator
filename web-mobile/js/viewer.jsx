@@ -816,7 +816,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           {live.length > 0 && (
             <div className="hero-live">
               <div className="hero-live__lbl"><span className="dot dot--live"></span> NOW · {pluralize(live.length, "match", "matches")}</div>
-              <div className="vsched" style={{ marginTop: 8 }}>
+              <div className="vsched hero-live__vsched">
                 {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </div>
@@ -874,10 +874,10 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                   const pct = total ? Math.round((done / total) * 100) : 0;
                   const showRegister = shouldShowRegister(t, c, !!onRegister);
                   return (
-                    <div key={c.id} style={{ position: "relative" }}>
-                      <button className="vlist-item vlist-item--comp" style={{ width: "100%" }} onClick={() => onSelectCompetition(c.id)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                          <div style={{ minWidth: 0 }}>
+                    <div key={c.id} className="comp-item">
+                      <button className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
+                        <div className="comp-item__header">
+                          <div className="comp-item__body">
                             <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize > 1 ? ` · ${c.teamSize}-person` : ""}</div>
                             <div className="vlist-item__name">{c.name}</div>
                             <div className="vlist-item__meta">
@@ -890,7 +890,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                           <div className="vlist-item__progress">
                             <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                             <div className="vlist-item__pct">
-                              {liveCount > 0 ? <span style={{ color: "var(--red)", fontWeight: 600 }}>● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
+                              {liveCount > 0 ? <span className="bc-live-count">● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>
                           </div>
                         )}
@@ -917,7 +917,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
           {upNext.length > 0 && (
             <>
-              <div className="section-title" style={{ marginTop: 20 }}>Up next · {upNext.length}</div>
+              <div className="section-title viewer__upnext-title">Up next · {upNext.length}</div>
               <div className="vsched">
                 {upNext.map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
@@ -930,7 +930,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           {/* U1: link to the kendo glossary so volunteers (and
               spectators new to kendo) can browse the term register
               that the inline tooltips draw from. */}
-          <div className="vlist" style={{ marginTop: 12 }}>
+          <div className="vlist viewer__glossary-vlist">
             <a
               className="vlist-item vlist-item--row"
               href="/glossary"
@@ -1081,7 +1081,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   if (!followedPlayer || !followedPlayer.id) {
     return (
-      <div className="card" data-testid="viewer-home-mymatch" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="card card--sm" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
         <div className="section-title" style={{ marginTop: 0 }}>Find my matches</div>
         <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
           Pick a participant — we'll surface their next match and highlight them across the schedule.
@@ -1097,15 +1097,14 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   // Followed-player state: header indicator + next-match details.
   const header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-      <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Following:</span>
-      <span style={{ fontWeight: 600 }}>{followedPlayer.name || "(unknown)"}</span>
-      {pRecord && pRecord.checkedIn && <span className="tag-badge" style={{ fontSize: 9 }}>✓ Checked in</span>}
+    <div className="my-match__follow-row">
+      <span className="my-match__follow-lbl">Following:</span>
+      <span className="my-match__follow-name">{followedPlayer.name || "(unknown)"}</span>
+      {pRecord && pRecord.checkedIn && <span className="tag-badge">✓ Checked in</span>}
       <button
         className="btn btn--ghost btn--sm btn--clear-follow"
         onClick={() => setFollowedPlayer(null)}
         aria-label="Stop following"
-        style={{ marginLeft: 4 }}
       >
         ✕ Clear
       </button>
@@ -1114,7 +1113,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   if (!nextMatch) {
     return (
-      <div className="card" data-testid="viewer-home-mymatch" style={{ marginBottom: 16, padding: 14 }}>
+      <div className="card card--sm" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
         {header}
         <div style={{ fontSize: 13, color: "var(--ink-3)" }}>All your matches are completed.</div>
       </div>
@@ -1285,13 +1284,11 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
   const addDojoDisabled = watchlist.length >= WATCHLIST_MAX || !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
-    <div className="card" data-testid="viewer-home-watchlist" style={{ marginBottom: 16, padding: 14 }}>
+    <div className="card card--sm" data-testid="viewer-home-watchlist" style={{ marginBottom: 16 }}>
       <div className="section-title" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
         <span>Watchlist</span>
         {watchlist.length > 0 && (
-          <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 500 }}>
-            {pluralize(watchlist.length, "player")}
-          </span>
+          <span className="watchlist-count">{pluralize(watchlist.length, "player")}</span>
         )}
       </div>
       {watchlist.length === 0 ? (
@@ -1319,13 +1316,13 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
         excludeIds={watchlist.map((w) => w.id)}
       />
       {dojos.length > 0 && (
-        <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }} data-testid="watchlist-dojo-picker">
-          <label style={{ fontSize: 12, color: "var(--ink-3)" }} htmlFor="watchlist-dojo-select">Watch all from dojo</label>
+        <div className="watchlist-dojo-row" data-testid="watchlist-dojo-picker">
+          <label className="watchlist-dojo-row__label" htmlFor="watchlist-dojo-select">Watch all from dojo</label>
           <select
             id="watchlist-dojo-select"
             value={dojoSel}
             onChange={(e) => setDojoSel(e.target.value)}
-            style={{ fontSize: 13, padding: "4px 8px" }}
+            className="input"
             data-testid="watchlist-dojo-select"
           >
             <option value="">— pick a dojo —</option>
@@ -1346,7 +1343,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
           >
             Add dojo
           </button>
-          {bulkMsg && <span style={{ fontSize: 11, color: "var(--ink-3)" }} role="status">{bulkMsg}</span>}
+          {bulkMsg && <span className="watchlist-dojo-row__feedback" role="status">{bulkMsg}</span>}
         </div>
       )}
 
@@ -1387,8 +1384,8 @@ function DisplayModes({ tournament }) {
   // data has loaded fully.
   if (courts.length === 0) return null;
   return (
-    <details style={{ marginTop: 20 }}>
-      <summary className="section-title" style={{ cursor: "pointer" }}>Display modes</summary>
+    <details className="viewer-display-modes">
+      <summary className="section-title">Display modes</summary>
       <div className="vlist" data-testid="viewer-home-display-modes">
         <a
           className="vlist-item vlist-item--row"
@@ -1413,12 +1410,12 @@ function DisplayModes({ tournament }) {
             <span className="vlist-item__icon">{row.icon}</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">{row.title}</div>
-              <div className="vlist-item__rowsub" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="vlist-item__rowsub viewer-display-modes__row-links">
                 {courts.map((cc, i) => (
                   <span key={cc}>
                     <a href={`/display?court=${encodeURIComponent(cc)}${row.suffix}`} target="_blank" rel="noopener noreferrer"
-                      style={{ color: "var(--text-link, #2563eb)" }}>Shiaijo {cc}</a>
-                    {i < courts.length - 1 && <span aria-hidden="true" style={{ color: "var(--text-3, #999)", marginLeft: 8 }}>·</span>}
+                      className="viewer-display-modes__link">Shiaijo {cc}</a>
+                    {i < courts.length - 1 && <span aria-hidden="true" className="viewer-display-modes__sep">·</span>}
                   </span>
                 ))}
               </div>
@@ -1463,22 +1460,11 @@ function swissStandingsHeading(comp, poolMatches) {
 function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
   return (
     <div
-      className="winner-badge"
+      className={`winner-badge${isFs ? " winner-badge--lg" : ""}`}
       data-testid={testId}
-      style={{
-        padding: isFs ? "14px 18px" : "10px 14px",
-        background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-2, var(--accent)) 100%)",
-        color: "white",
-        borderRadius: 8,
-        fontWeight: 700,
-        fontSize: isFs ? 18 : 14,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginBottom: marginBottom,
-      }}
+      style={marginBottom != null ? { marginBottom } : undefined}
     >
-      <span style={{ fontSize: isFs ? 28 : 18 }}>🏆</span>
+      <span className="winner-badge__icon" aria-hidden="true">🏆</span>
       <span>Winner: {name}</span>
     </div>
   );
@@ -1753,7 +1739,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             />
           )}
           {tab === "bracket" && derivedBracket && (
-            <div style={{ marginLeft: -16, marginRight: -16 }}>
+            <div className="viewer-bracket-bleed">
               <div ref={bracketScrollRef} className="bracket-canvas" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
@@ -1921,13 +1907,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
   return (
     <div>
       {hasActiveFilter && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 12px", marginBottom: 12,
-          background: "var(--accent-soft, #eef)",
-          borderRadius: 8, fontSize: 13
-        }}>
-          <span aria-hidden="true" style={{ color: "var(--accent, #36c)" }}>👤</span>
+        <div className="viewer-filter-bar">
+          <span className="viewer-filter-bar__icon" aria-hidden="true">👤</span>
           <span>Showing matches for <strong>{filterLabel}</strong></span>
         </div>
       )}
@@ -2044,7 +2025,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             }
           } : undefined}
         >
-          <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="section-title section-title--live">
             <span className="dot dot--live"></span> ON NOW
           </div>
           <MatchDetailCard match={currentMatch} />
@@ -2054,7 +2035,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
       {/* Live matches beyond the single current match */}
       {liveMatches.length > 1 && (
         <>
-          <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="section-title section-title--live">
             <span className="dot dot--live"></span> NOW · {liveMatches.length}
           </div>
           <div className="vsched">
@@ -2134,7 +2115,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
     : null;
   return (
-    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
@@ -2144,20 +2125,18 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
           <span className="tw-match__round">R{m.round + 1}</span>
         )}
         {queueLabel && (
-          <span className="vsched-item__queue" style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)" }}>
+          <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-live" style={{ marginLeft: "auto" }}>● NOW</span>}
-        {m.status === "completed" && <span style={{ marginLeft: "auto", color: "var(--ink-3)" }}>Final</span>}
+        {m.status === "running" && <span className="bc-live">● NOW</span>}
+        {m.status === "completed" && <span className="vsched-item__status">Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
-          <span className="vsched-item__hantei" data-testid="vsched-hantei" style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "var(--accent-soft, #eef)", color: "var(--accent, #36c)" }}>
-            HANTEI
-          </span>
+          <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
         )}
       </div>
       <div className="vsched-item__players">
-        <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`} style={{ textAlign: "right" }}>
+        <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
           <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
@@ -2197,7 +2176,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
     : null;
 
   return (
-    <button className="pool-match-row" onClick={onClick} style={{ textAlign: "left", width: "100%", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <button className="pool-match-row" onClick={onClick}>
       <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__name">{bName}</span>
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>

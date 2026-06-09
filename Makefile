@@ -158,7 +158,7 @@ docker/build: ## Build Docker image
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(COMMIT) \
-		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		--build-arg "BUILD_DATE=$(BUILD_DATE)" \
 		-t $(IMAGE_NAME):latest \
 		-t $(IMAGE_NAME):$(VERSION) \
 		.

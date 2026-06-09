@@ -647,7 +647,7 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
-function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults }) {
+function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, connected = true }) {
   const t = tournament;
   const comps = t.competitions || [];
   const compsByDate = useMemo(() => {
@@ -685,7 +685,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // history is later changed in-app via route(). When the UUID hits a
   // participant we set the followed-player; if the UUID misses we fall
   // back to a name match (FR-020 / acceptance scenario 5).
+  // If a player is already followed and the deep link resolves to a
+  // different person, we surface a confirmation banner instead of
+  // silently overwriting the existing selection.
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
+  const [pendingDeepLink, setPendingDeepLink] = useState(null);
 
   const deepLinkApplied = useRefV(false);
   React.useEffect(() => {
@@ -703,9 +707,17 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
       const needle = (qpName || qpPlayer).toLowerCase();
       if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
     }
-    if (hit) setFollowedPlayer({ id: hit.id, name: hit.name });
+    if (hit) {
+      const alreadySet = followedPlayer && followedPlayer.id && followedPlayer.id !== hit.id;
+      if (alreadySet) {
+        // Ask before overwriting the existing followed player.
+        setPendingDeepLink({ id: hit.id, name: hit.name });
+      } else {
+        setFollowedPlayer({ id: hit.id, name: hit.name });
+      }
+    }
     deepLinkApplied.current = true;
-  }, [roster, setFollowedPlayer]);
+  }, [roster, followedPlayer, setFollowedPlayer]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
@@ -768,6 +780,39 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
+          {/* T063: SSE connection indicator — visible only when the live feed drops. */}
+          {!connected && (
+            <div className="sse-offline-banner" role="status" aria-live="polite">
+              <span className="sse-offline-banner__dot" aria-hidden="true" />
+              Live feed reconnecting — scores may be outdated
+            </div>
+          )}
+          {/* Deep-link overwrite confirmation — shown when ?player= targets a
+              different participant than the one currently being followed. */}
+          {pendingDeepLink && (
+            <div className="pending-follow-banner" role="status">
+              <span className="pending-follow-banner__label">
+                This link wants to follow{" "}
+                <span className="pending-follow-banner__name">{pendingDeepLink.name}</span>
+              </span>
+              <button
+                className="btn btn--sm"
+                onClick={() => {
+                  setFollowedPlayer({ id: pendingDeepLink.id, name: pendingDeepLink.name });
+                  setPendingDeepLink(null);
+                }}
+              >
+                Switch
+              </button>
+              <button
+                className="btn btn--ghost btn--sm"
+                onClick={() => setPendingDeepLink(null)}
+                aria-label="Keep current followed player"
+              >
+                Keep current
+              </button>
+            </div>
+          )}
           <TournamentInfo tournament={t} />
           <div className="viewer__court-filter">
              <select className="input" value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
@@ -857,7 +902,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                 <div className="empty">
                   <div className="icon">⏳</div>
                   <h3>No competitions yet</h3>
-                  <div style={{ fontSize: 13 }}>Check back soon for the tournament schedule and updates.</div>
+                  <div className="hint--md">Check back soon for the tournament schedule and updates.</div>
                 </div>
               </div>
             </>
@@ -896,7 +941,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                         )}
                       </button>
                       {showRegister && (
-                        <div style={{ padding: "0 12px 12px" }}>
+                        <div className="vlist-item--row-padded">
                           <button
                             className="btn btn--primary btn--sm btn--full"
                             onClick={(e) => {
@@ -939,7 +984,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                 if (window.AppRouter && window.AppRouter.route) window.AppRouter.route("/glossary");
                 else window.location.href = "/glossary";
               }}
-              style={{ textDecoration: "none" }}
             >
               <span className="vlist-item__icon">📖</span>
               <div className="vlist-item__rowbody">
@@ -991,7 +1035,7 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
   }, []);
 
   return (
-    <div className="pmf" ref={ref} style={{ marginBottom: 8 }}>
+    <div className="pmf" ref={ref}>
       <div className="pmf__bar" onClick={() => setOpen(true)}>
         <input
           className="pmf__input"
@@ -1016,7 +1060,7 @@ function SinglePlayerPicker({ roster, onPick, placeholder, excludeIds }) {
               <span className="pmf__opt-body">
                 <span className="pmf__opt-name">
                   {p.name}
-                  {p.checkedIn && <span className="tag-badge" style={{ marginLeft: 8, fontSize: 9 }}>Checked in</span>}
+                  {p.checkedIn && <span className="tag-badge pmf__checkin-tag">Checked in</span>}
                 </span>
                 <span className="pmf__opt-dojo">{p.dojo || ""}</span>
               </span>
@@ -1081,9 +1125,9 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   if (!followedPlayer || !followedPlayer.id) {
     return (
-      <div className="card card--sm" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
-        <div className="section-title" style={{ marginTop: 0 }}>Find my matches</div>
-        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+      <div className="card card--sm mymatch-card" data-testid="viewer-home-mymatch">
+        <div className="section-title section-title--flush">Find my matches</div>
+        <div className="hint">
           Pick a participant — we'll surface their next match and highlight them across the schedule.
         </div>
         <SinglePlayerPicker
@@ -1113,9 +1157,9 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
 
   if (!nextMatch) {
     return (
-      <div className="card card--sm" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
+      <div className="card card--sm mymatch-card" data-testid="viewer-home-mymatch">
         {header}
-        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>All your matches are completed.</div>
+        <div className="hint--md">All your matches are completed.</div>
       </div>
     );
   }
@@ -1140,7 +1184,7 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
   const queueHighlight = queueLabel === "Next up";
 
   return (
-    <div className="my-match" data-testid="viewer-home-mymatch" style={{ marginBottom: 16 }}>
+    <div className="my-match mymatch-card" data-testid="viewer-home-mymatch">
       {header}
       <div className="my-match__lbl">Your next match</div>
       <div className="my-match__name">
@@ -1189,7 +1233,6 @@ function MyMatchPanel({ roster, followedPlayer, setFollowedPlayer, nextMatch, on
         <button
           className="my-match__opp"
           onClick={() => onMatchClick && onMatchClick(nextMatch)}
-          style={{ color: "inherit" }}
         >
           <div className="l">
             <span className={`bc-color-badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
@@ -1284,25 +1327,25 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
   const addDojoDisabled = watchlist.length >= WATCHLIST_MAX || !dojoSel || !selStats || selStats.watched >= selStats.total;
 
   return (
-    <div className="card card--sm" data-testid="viewer-home-watchlist" style={{ marginBottom: 16 }}>
-      <div className="section-title" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
+    <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
+      <div className="section-title section-title--inrow">
         <span>Watchlist</span>
         {watchlist.length > 0 && (
           <span className="watchlist-count">{pluralize(watchlist.length, "player")}</span>
         )}
       </div>
       {watchlist.length === 0 ? (
-        <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+        <div className="hint">
           Watching a coach's students or a few key competitors? Add up to {WATCHLIST_MAX} participants and we'll surface their upcoming matches.
         </div>
       ) : (
-        <div className="pmf__bar" style={{ marginBottom: 8 }}>
+        <div className="pmf__bar">
           {watchlist.map((w) => {
             const pRecord = rosterById.get(w.id);
             return (
               <span key={w.id} className={`pmf__chip ${pRecord && pRecord.checkedIn ? "is-checked-in" : ""}`} title={pRecord && pRecord.checkedIn ? "Checked in" : undefined}>
                 {w.name}
-                {pRecord && pRecord.checkedIn && <span style={{ marginLeft: 4, fontSize: 10 }}>✓</span>}
+                {pRecord && pRecord.checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
                 <button onClick={() => removeOne(w.id)} aria-label={`Remove ${w.name}`}>×</button>
               </span>
             );
@@ -1349,7 +1392,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
 
       {upcoming.length > 0 && (
         <>
-          <div className="section-title" style={{ marginTop: 14, fontSize: 13 }}>
+          <div className="section-title section-title--sub">
             Watched matches · upcoming {upcoming.length}
           </div>
           <div className="vsched">
@@ -1392,7 +1435,6 @@ function DisplayModes({ tournament }) {
           href="/display?court=all"
           target="_blank"
           rel="noopener noreferrer"
-          style={{ textDecoration: "none" }}
         >
           <span className="vlist-item__icon">🪟</span>
           <div className="vlist-item__rowbody">
@@ -1406,7 +1448,7 @@ function DisplayModes({ tournament }) {
           { icon: "📺", title: "Court displays", suffix: "" },
           { icon: "🎥", title: "Streaming overlays", suffix: "&overlay=1" },
         ].map((row) => (
-          <div key={row.title} className="vlist-item vlist-item--row" style={{ cursor: "default" }}>
+          <div key={row.title} className="vlist-item vlist-item--row vlist-item--static">
             <span className="vlist-item__icon">{row.icon}</span>
             <div className="vlist-item__rowbody">
               <div className="vlist-item__rowtitle">{row.title}</div>
@@ -1510,10 +1552,10 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {isFinal && winner && <WinnerBadge name={winner.player?.name || ""} />}
-      <div className="pool" style={{ padding: 14 }}>
+      <div className="pool">
         <div className="pool__head">
           <div className="pool__name">{heading}</div>
-          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          <div className="pool__match-count">
             Round {c.swissCurrentRound || 0} of {c.swissRounds || 0}
           </div>
         </div>
@@ -1530,10 +1572,10 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
               <tr key={s.player?.id || s.player?.name || i}>
                 {/* Rank-ordered: "#" is the authoritative standing rank (s.rank),
                     DRY with the backend tiebreak/override logic, not the row index. */}
-                <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
+                <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                 <td>
-                  <div style={{ fontWeight: 500 }}>{s.player?.name || ""}</div>
-                  {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
+                  <div className="pool__player-name">{s.player?.name || ""}</div>
+                  {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                 </td>
                 <td className="num">{s.wins || 0}</td>
                 <td className="num">{s.losses || 0}</td>
@@ -1542,12 +1584,12 @@ function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
                 <td className="num">{s.ipponsTaken || 0}</td>
               </tr>
             )) : (
-              <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--ink-3)", fontSize: 13, padding: 16 }}>No matches scored yet.</td></tr>
+              <tr><td colSpan={7} className="pool__table-empty">No matches scored yet.</td></tr>
             )}
           </tbody>
         </table>
         {standings.length > 0 && (
-          <div className="league-matrix__legend" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+          <div className="league-matrix__legend hint--sm" style={{ marginTop: 8 }}>
             Ranked by: wins → points scored (PW) → head-to-head.
           </div>
         )}
@@ -1945,12 +1987,12 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
 
       {/* League standings summary (mp-ldnr) */}
       {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "playoffs" || c.status === "completed") && (
-        <div className="pool" style={{ padding: 14, marginBottom: 12 }} data-testid="league-overview-standings">
+        <div className="pool pool--overview-summary" data-testid="league-overview-standings">
           {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
           <div className="pool__head">
             <div className="pool__name">{allMatchesComplete ? "Final standings" : "Standings"}</div>
             {poolMatches && (
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              <div className="pool__match-count">
                 {poolMatches.filter(m => m.status === "completed").length}/{poolMatches.length} matches
               </div>
             )}
@@ -1969,9 +2011,9 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index — DRY with the full standings and
                       the backend tiebreak/override logic. */}
-                  <td style={{ color: s.isOverridden ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: s.isOverridden ? 700 : 400 }}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
+                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>
+                    <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
                       {/* No rank badge here: this summary is rank-sorted, so the
@@ -1979,7 +2021,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
                           it. The rank badge only carries information when rows are
                           in draw order (non-league pools), where rank ≠ position. */}
                     </div>
-                    {tweaks?.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player?.dojo || ""}</div> : null}
+                    {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
                   <td className="num">{s.wins || 0}</td>
                   <td className="num">{s.losses || 0}</td>
@@ -1993,14 +2035,13 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             </tbody>
           </table>
           {leagueStandings.length > 5 && (
-            <div style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+            <div className="hint--sm pool__overflow-note">
               Showing top 5 of {leagueStandings.length}
             </div>
           )}
           {onSwitchTab && (
             <button
-              className="btn btn--link"
-              style={{ marginTop: 8, fontSize: 13, padding: 0 }}
+              className="btn btn--link pool__view-all-btn"
               onClick={() => onSwitchTab("pools")}
               data-testid="league-overview-view-all"
             >
@@ -2478,10 +2519,10 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           // A lone pool (every league has exactly one) must span the full grid
           // width. Otherwise the landscape 2-column `.pools-grid` renders it at
           // half width, mismatching the full-width Overview standings table.
-          <div key={pool.poolName} className="pool" style={{ padding: 14, gridColumn: pools.length === 1 ? "1 / -1" : undefined }}>
+          <div key={pool.poolName} className="pool" style={pools.length === 1 ? { gridColumn: "1 / -1" } : undefined}>
             <div className="pool__head">
               <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              <div className="pool__match-count">
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
             </div>
@@ -2490,9 +2531,9 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
             <table className="pool__table">
               <thead>
                 {isTeam ? (
-                  <tr><th>#</th><th>Team</th><th className="num" title="Team matches won">W</th><th className="num" title="Team matches lost">L</th><th className="num" title="Team matches tied">T</th><th className="num" title="Individual victories">IV</th><th className="num" title="Individual losses">IL</th><th className="num" title="Individual ties (draws)">IT</th><th className="num" title="Points won">PW</th><th className="num" title="Points lost">PL</th></tr>
+                  <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
                 ) : (
-                  <tr><th>#</th><th>Player</th><th className="num" title="Fights won">W</th><th className="num" title="Fights lost">L</th><th className="num" title="Draws (hikiwake)">D</th><th className="num" title="Points won (ippon)">PW</th><th className="num" title="Points lost">PL</th></tr>
+                  <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
                 )}
               </thead>
               <tbody>
@@ -2521,12 +2562,12 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                             fight-order chart), so "#" is the draw position and the
                             rank is surfaced separately by the badge next to the name. */}
                       {isLeague ? (
-                        <td className="pool-standings__draw-pos" style={{ color: (s && s.isOverridden) ? "var(--accent)" : "var(--ink-3)", fontFamily: "var(--font-mono)", fontWeight: (s && s.isOverridden) ? 700 : 400 }}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
+                        <td className={`pool-standings__draw-pos${s && s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
                       ) : (
-                        <td className="pool-standings__draw-pos" style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{drawPos}</td>
+                        <td className="pool-standings__draw-pos">{drawPos}</td>
                       )}
                       <td>
-                        <div style={{ fontWeight: 500 }}>
+                        <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
                           {/* The rank badge is only informative when rows are in
@@ -2540,7 +2581,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                             </span>
                           ) : null}
                         </div>
-                        {tweaks.showDojo ? <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{p.dojo}</div> : null}
+                        {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>
                       {s ? (
                         <>
@@ -3236,12 +3277,12 @@ function AwardsView({ c, bracket, standings, pools, players }) {
   // Shared header (title + place count + fullscreen toggle) — identical for the
   // league and champion-hero layouts.
   const header = (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+    <div className="awards__header">
       <div>
-        <div className="section-title" style={{ margin: 0, fontSize: isFs ? 28 : 18 }}>
+        <div className={`section-title awards__title${isFs ? " awards__title--fs" : ""}`}>
           {c?.name ? `${c.name} — Awards` : "Awards"}
         </div>
-        <div style={{ fontSize: isFs ? 16 : 12, color: "var(--ink-3)" }}>
+        <div className={isFs ? "awards__subtitle--fs" : "awards__subtitle"}>
           Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
         </div>
       </div>

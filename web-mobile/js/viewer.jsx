@@ -758,15 +758,13 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
-          <button className="viewer__admin-pill" onClick={onAdminClick}>
-            <span>🔒</span> Admin
-          </button>
+          <button className="viewer__admin-pill" onClick={onAdminClick}>Admin</button>
         </div>
 
         <div className="viewer__body">
           <TournamentInfo tournament={t} />
-          <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-             <select className="input" style={{ width: "auto" }} value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
+          <div className="viewer__court-filter">
+             <select className="input" value={courtFilter} onChange={(e) => setCourtFilter(e.target.value)}>
                <option value="all">All Shiaijo</option>
                {(t.courts || ["A"]).map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
              </select>

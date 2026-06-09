@@ -2202,6 +2202,16 @@ a:hover {
   flex: 1;
 }
 
+.viewer__court-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.viewer__court-filter .input {
+  width: auto;
+}
+
 /* My match card (player viewer hero) */
 .my-match {
   background: var(--accent);
@@ -6046,12 +6056,11 @@ button.my-match__opp {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: linear-gradient(135deg, #1a4f8a 0%, #2563eb 100%);
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-fg);
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
   animation: match-alert-slide-in 0.25s ease-out;
 }
 

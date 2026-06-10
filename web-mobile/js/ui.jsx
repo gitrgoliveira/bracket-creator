@@ -229,6 +229,13 @@ function formatLabelShort(format) {
 let _dialogReq = null; // the active request, or null
 const _dialogListeners = new Set();
 function _setDialogReq(req) {
+  // Defensive: if a dialog is somehow still open when a new one is requested
+  // (dialogs are normally sequential/user-driven, but a concurrent trigger
+  // must not hang), resolve the previous promise with its cancel value so its
+  // awaiter unblocks rather than waiting forever.
+  if (_dialogReq && _dialogReq._resolve && req) {
+    _dialogReq._resolve(_dialogReq.kind === "confirm" ? false : null);
+  }
   _dialogReq = req;
   _dialogListeners.forEach((fn) => fn(_dialogReq));
 }

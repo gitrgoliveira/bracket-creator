@@ -276,6 +276,10 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   const { total, done, live } = compMatchStats(statsSource);
   const pct = total ? Math.round((done / total) * 100) : 0;
   const effectiveBracket = bracket ?? c.bracket;
+  // Honour the OS reduced-motion preference for the progress-bar animation.
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
   return (
     <div>
       <div className="stats-strip">
@@ -286,8 +290,20 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card__head"><div className="card__title">Progress</div><div className="card__sub">{pct}%</div></div>
-        <div style={{ height: 8, background: "var(--line-2)", borderRadius: 999, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: pct + "%", background: "var(--accent)", transition: "width 300ms" }}></div>
+        {/* Animate via transform: scaleX (compositor-only) rather than width,
+            which forced a layout/paint each frame. The inner bar is full-width
+            and scaled from the left edge; the rounded track clips it so the
+            visual is equivalent. Transition is dropped under
+            prefers-reduced-motion. */}
+        <div style={{ height: 8, background: "var(--line-2)", borderRadius: 999, overflow: "hidden" }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div style={{
+            height: "100%",
+            width: "100%",
+            background: "var(--accent)",
+            transformOrigin: "left center",
+            transform: `scaleX(${pct / 100})`,
+            transition: prefersReducedMotion ? "none" : "transform 300ms",
+          }}></div>
         </div>
       </div>
       <div className="row">
@@ -1554,12 +1570,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + " — " + (isDrawReady ? "preview" : "now") } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + (isDrawReady ? " (preview)" : "") } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
-        c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — now" } : null,
-        !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
+        c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket (preview)" : "Bracket" } : null,
+        !isDrawReady ? { id: "scores", label: "Scores" } : null,
       ].filter(Boolean)
     },
     {

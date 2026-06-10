@@ -485,6 +485,19 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* Consolidated keyboard focus ring for buttons + court chips. Only a handful
+   of :focus-visible rules existed, so .btn and the court chips fell back to
+   the UA default outline. Use the project's 3px --accent-soft ring language
+   (matches the input focus ring in §6 Accessibility / .lined-textarea). The
+   .ipt-btn focus is owned elsewhere — deliberately not included here. */
+.btn:focus-visible,
+.court-popover button:focus-visible,
+.live-strip__chip:focus-visible,
+.radio-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .score-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -592,7 +605,9 @@ a:hover {
 .lined-textarea__nums {
   padding: 9px 8px;
   background: var(--surface-2);
-  color: var(--ink-3);
+  /* --ink-3 on --surface-2 (#f1f5f9) is only 4.41:1 — just under AA for this
+     gutter. Step to --ink-2 (9.37:1) so the line numbers clear 4.5:1. */
+  color: var(--ink-2);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
@@ -3584,7 +3599,9 @@ button.pool-match-row {
 
 .tw-court__sub {
   font-size: 11px;
-  color: var(--ink-3);
+  /* Sits in .tw-court__head (background: --line-2 #eef0f4). --ink-3 there is
+     only 4.24:1; step to --ink-2 (9.0:1 on --line-2) to clear 4.5:1. */
+  color: var(--ink-2);
 }
 
 .tw-court__list {
@@ -6539,7 +6556,10 @@ button.pool-match-row {
 .app-version-footer {
   text-align: center;
   font-size: 11px;
-  color: var(--ink-4);
+  /* --ink-4 (#6c7480) is only 4.44:1 on --bg — just under AA. Step to the
+     darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
+     mutate --ink-4 itself (it's the shared fine-print floor). */
+  color: var(--ink-2);
   padding: 16px 0;
   margin-top: 32px;
 }

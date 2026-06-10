@@ -2,7 +2,7 @@
 
 ## Register
 
-product
+bracket-creator
 
 ## Users
 Both organizers (admin) managing the tournament and attendees (competitors, coaches, spectators) viewing live results. Context includes noisy, bright tournament halls, often using mobile devices on the go.

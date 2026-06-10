@@ -142,10 +142,11 @@ func validateURLHasHost(field, val string) error {
 
 // validateSubBout enforces FIK sub-bout invariants on a single SubMatchResult.
 // Both encho and hantei are valid ONLY for the daihyosen representative bout
-// (Position == -1): regular numbered bouts have fixed regulation time (no
-// overtime) and are never decided by hantei.
+// (Position == -1): regular numbered bouts have fixed regulation time and are
+// never decided by hantei. Hantei does NOT require encho, though — a tied
+// daihyosen may be decided by judges directly (the encho gate was removed).
 //
-// The winner/encho/tied-scoreline/decision checks here intentionally mirror the
+// The winner/tied-scoreline/decision checks here intentionally mirror the
 // top-level DecidedByHantei block in ScoreRequest.Validate. Keep them in sync:
 // the sub-bout variant adds the Position guards and omits the top-level-only
 // Status/DecisionBy checks (SubMatchResult has no such fields).
@@ -182,9 +183,6 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	if sr.Winner == "" {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
 	}
-	if sr.Encho == nil || sr.Encho.PeriodCount <= 0 {
-		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires encho with at least one period"}
-	}
 	if len(sr.IpponsA) != len(sr.IpponsB) {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
 	}
@@ -194,7 +192,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	default:
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
-			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '', 'fought', or 'daihyosen'", sr.Decision),
+			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
 		}
 	}
 	return nil
@@ -392,13 +390,13 @@ func (r *ScoreRequest) Validate() error {
 			return err
 		}
 	}
-	// DecidedByHantei encodes a rules-level invariant: judges' decision after
-	// tied encho (FIK 7-5 / 29-6). A winner must be present, the status (if
-	// supplied) must be completed, and encho must have been played (PeriodCount
-	// > 0) — rejecting decidedByHantei=true without overtime context prevents
-	// persisting an "HT" suffix outside a real encho-decided match.
-	// The winner/encho/tied/decision checks below mirror validateSubBout;
-	// keep both in sync.
+	// DecidedByHantei records a referee judges' decision that declares a winner
+	// from a tied bout. A winner must be present, the status (if supplied) must
+	// be completed, and the scoreline must be tied (equal ippon counts). Encho
+	// is NOT required: operators may take a tied match straight to hantei
+	// without an overtime period (the encho gate was removed deliberately).
+	// The winner/tied/decision checks below mirror validateSubBout; keep both
+	// in sync.
 	if r.DecidedByHantei != nil && *r.DecidedByHantei {
 		if r.Winner == "" {
 			return &ValidationError{
@@ -412,12 +410,6 @@ func (r *ScoreRequest) Validate() error {
 				Message: "only valid on completed matches",
 			}
 		}
-		if r.Encho == nil || r.Encho.PeriodCount <= 0 {
-			return &ValidationError{
-				Field:   "decidedByHantei",
-				Message: "requires encho with at least one period",
-			}
-		}
 		if len(r.IpponsA) != len(r.IpponsB) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
@@ -425,7 +417,7 @@ func (r *ScoreRequest) Validate() error {
 			}
 		}
 		// Hantei is a referee judges' decision that produces a winner from a
-		// tied encho. Any other special decision (hikiwake=draw, kiken=withdrawal,
+		// tied bout. Any other special decision (hikiwake=draw, kiken=withdrawal,
 		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible —
 		// persisting both would render contradictory suffixes like "Kiken (E) HT".
 		// Only the neutral values ("" and "fought") are allowed alongside hantei.
@@ -435,7 +427,7 @@ func (r *ScoreRequest) Validate() error {
 		default:
 			return &ValidationError{
 				Field:   "decidedByHantei",
-				Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied encho; use '' or 'fought'", r.Decision),
+				Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
 			}
 		}
 		if r.DecisionBy != "" {

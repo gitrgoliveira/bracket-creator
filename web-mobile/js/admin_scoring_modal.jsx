@@ -280,14 +280,14 @@ function initialEnchoPeriodsForMatch(m) {
 // daihyosenEnchoFields — pure builder for the encho/decidedByHantei wire
 // fields on the daihyosen representative bout (position -1). The backend
 // invariant (validation.go validateSubBout) is: encho and hantei are valid
-// ONLY on the daihyosen, and decidedByHantei REQUIRES encho.periodCount > 0.
-// So if the operator arms hantei then reduces the counter back to 0, we must
-// emit NEITHER field — otherwise the save 400s ("requires encho with at least
-// one period"). Returns the fields to merge into the entry (possibly empty).
-// Exported for vitest.
+// ONLY on the daihyosen. Encho is OPTIONAL for hantei — a tied daihyosen may
+// be taken straight to a judges' decision without overtime — so the two
+// fields are emitted independently: encho whenever the counter is > 0, and
+// decidedByHantei whenever it is armed on a tied scoreline. Returns the fields
+// to merge into the entry (possibly empty). Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
-  if (!(enchoPeriodCount > 0)) return {};
-  const fields = { encho: { periodCount: enchoPeriodCount } };
+  const fields = {};
+  if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
   if (daihyosenTied && daihyosenHantei) fields.decidedByHantei = true;
   return fields;
 }
@@ -663,13 +663,6 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return () => { cancelled = true; };
   }, [m.compId]);
 
-  // Auto-clear decidedByHantei when encho (overtime) period count is 0
-  useEffectA(() => {
-    if (enchoPeriodCount === 0 && decidedByHantei) {
-      setDecidedByHantei(false);
-    }
-  }, [enchoPeriodCount, decidedByHantei]);
-
   // T093/T094: shared decision-submit path for kiken & fusenpai.
   // - decisionBy is "shiro" or "aka" per the server contract.
   // - encho rides along when the operator has marked overtime so the server
@@ -807,9 +800,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
   };
 
-  // Hantei submit: tied at end of encho. Operator picks a side; we send a
-  // completed patch with the chosen side as winner, the *entered* ippon
-  // arrays preserved (so a 1–1 encho score stays visible alongside the HT
+  // Hantei submit: tied scoreline (with or without encho). Operator picks a
+  // side; we send a completed patch with the chosen side as winner, the
+  // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the HT
   // marker — clearing them would lose the tied score history that the
   // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
@@ -994,11 +987,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             setEnchoPeriodCount={setEnchoPeriodCount}
             maxEnchoPeriods={maxEnchoPeriods}
           />
-          {/* FIK 7-5 / 29-6: in encho a still-tied match is decided by
-              referee hantei. Surface a dedicated affordance so the
-              winner is recorded with the hantei flag — distinguishable
+          {/* A tied match may be decided by referee hantei. Surface the
+              affordance whenever the scoreline is tied — encho is optional,
+              not required (operators may go straight to a judges' decision).
+              The winner is recorded with the hantei flag, distinguishable
               from an ippon-derived win for stats, audit, and Excel. */}
-          {enchoPeriodCount > 0 && (
+          {aTotal === bTotal && (
             <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
               <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
               <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
@@ -1008,20 +1002,19 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   className="btn btn--sm"
                   data-testid="scoring-modal-hantei-arm"
                   onClick={() => setDecidedByHantei(true)}
-                  // Hantei is only valid when the bout is genuinely tied
-                  // at end of encho (FIK 7-5 / 29-6). Disable the arm
-                  // button when totals are unequal (ippon-derived win already
-                  // decided), when the bout is already decided by ippons
-                  // (boutDecided), or when a draw is already toggled.
-                  // (0-0 is still a valid tied state.)
-                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled || enchoPeriodCount <= 0}
+                  // Hantei declares a winner from a genuinely tied bout. Disable
+                  // the arm button when totals are unequal (an ippon-derived win
+                  // is already decided), when the bout is already decided by
+                  // ippons (boutDecided), or when a draw is already toggled.
+                  // (0-0 is still a valid tied state. Encho is NOT required.)
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
                   title={
                     submitting || decisionSubmitting
                       ? "Saving…"
                       : isDrawToggled
                         ? "Cancel the draw toggle before using hantei"
-                        : aTotal !== bTotal || boutDecided || enchoPeriodCount <= 0
-                          ? "Hantei applies only to tied matches in encho"
+                        : aTotal !== bTotal || boutDecided
+                          ? "Hantei applies only to a tied scoreline"
                           : "Record a judges' decision"
                   }
                   style={{ marginLeft: "auto" }}
@@ -1316,8 +1309,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const [daihyosenErr, setDaihyosenErr] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
-  // by hantei (judges' decision after a tied encho, FIK 7-5 / 29-6).
-  // Mirrors the individual ScoreEditorModal hantei flow but scoped to the
+  // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6 — encho
+  // optional). Mirrors the individual ScoreEditorModal hantei flow but scoped to the
   // position -1 row. "" = score-decided; "a"/"b" = hantei winner side.
   const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
     ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
@@ -1571,7 +1564,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
       const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
       const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
-      // The daihyosen winner may come from hantei (tied encho); fall back
+      // The daihyosen winner may come from hantei (tied bout); fall back
       // to the score-derived winner otherwise.
       const wKey = isDaihyo ? daihyosenWinner : t.winner;
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
@@ -1593,9 +1586,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         decision,
       };
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
-      // (validation.go validateSubBout). daihyosenEnchoFields encodes the
-      // backend invariant (hantei requires encho > 0) so a reduced-to-0
-      // counter doesn't replay a now-invalid decidedByHantei.
+      // (validation.go validateSubBout). daihyosenEnchoFields emits the two
+      // independently — encho is optional for a hantei decision.
       if (isDaihyo) {
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
       }
@@ -1971,12 +1963,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           </div>
 
           {/* mp-4pc: hantei affordance for the daihyosen — the rep bout is
-              the only team sub-bout that may be decided by judges after a
-              tied encho (FIK 7-5 / 29-6). Mounts only when a daihyosen
-              exists and overtime is active; arming requires a tied
-              scoreline. The chosen winner rides onto the position -1 sub
-              (decidedByHantei) when the operator saves. */}
-          {hasDaihyosen && enchoPeriodCount > 0 && (() => {
+              the only team sub-bout that may be decided by judges (FIK 7-5 /
+              29-6). Encho is optional: a tied daihyosen may be taken straight
+              to a judges' decision. Mounts whenever a daihyosen exists;
+              arming requires a tied scoreline. The chosen winner rides onto
+              the position -1 sub (decidedByHantei) when the operator saves. */}
+          {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
             return (
@@ -1990,7 +1982,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                     data-testid="team-daihyosen-hantei-arm"
                     onClick={() => setDaihyosenHanteiArmed(true)}
                     disabled={submitting || decisionSubmitting || !tiedScore}
-                    title={!tiedScore ? "Hantei applies only to a tied daihyosen in encho" : "Record a judges' decision"}
+                    title={!tiedScore ? "Hantei applies only to a tied daihyosen" : "Record a judges' decision"}
                     style={{ marginLeft: "auto" }}
                   >
                     Decide by hantei…

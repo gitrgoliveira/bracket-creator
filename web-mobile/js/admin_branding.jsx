@@ -115,12 +115,14 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   };
 
   return (
-    <div className="branding">
-      <div className="branding__head">
-        <div className="branding__title">Branding</div>
-        <div className="branding__hint">Customize the browser tab title, accent colors, and the tournament logo shown on the viewer, lobby, and admin screens.</div>
+    <div className="card card--pad-lg">
+      <div className="card__head">
+        <div>
+          <div className="card__title">Branding</div>
+          <div className="card__sub">Customize the browser tab title, accent colors, and the tournament logo shown on the viewer, lobby, and admin screens.</div>
+        </div>
       </div>
-      <div className="branding__body">
+      <div>
         <div className="field">
           <label className="field__label">Browser tab / window title</label>
           <input type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"

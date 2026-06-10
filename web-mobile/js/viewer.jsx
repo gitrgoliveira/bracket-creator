@@ -1345,7 +1345,7 @@ function WatchlistPanel({ tournament, watchlist, setWatchlist, upcoming, onMatch
           Watching a coach's students or a few key competitors? Add up to {WATCHLIST_MAX} participants and we'll surface their upcoming matches.
         </div>
       ) : (
-        <div className="pmf__bar">
+        <div className="pmf__bar pmf__bar--standalone">
           {watchlist.map((w) => {
             const pRecord = rosterById.get(w.id);
             return (

@@ -3340,6 +3340,12 @@ button.pool-match-row {
   padding: 6px 8px;
   min-height: 36px;
   cursor: text;
+}
+
+/* Standalone bar (WatchlistPanel) — outside a .pmf wrapper, owns its spacing.
+   Inside .pmf the wrapper's margin-bottom spaces the block; a bar margin there
+   would inflate .pmf and push the absolutely-anchored .pmf__dropdown away. */
+.pmf__bar--standalone {
   margin-bottom: 8px;
 }
 

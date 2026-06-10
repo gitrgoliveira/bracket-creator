@@ -209,8 +209,8 @@ function RankInput({ initial, className, onCommit, style }) {
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const resetOverrides = async () => {
-    if (!confirm("Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?")) return;
-    const admin = window.promptAdminPassword();
+    if (!(await window.confirmDialog({ message: "Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?", confirmLabel: "Reset overrides", danger: true }))) return;
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     try {
       await window.API.resetOverrides(c.id, password, admin);

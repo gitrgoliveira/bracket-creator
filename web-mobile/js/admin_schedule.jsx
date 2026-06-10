@@ -1260,6 +1260,16 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
         const nextActiveMatch = openIdx >= 0
           ? sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null
           : null;
+        // Minimal "start" patch (status → running, empty score). Mirrors the
+        // modal's own buildPatch("running") for an unscored match and works for
+        // both individual and team matches (subResults is omitted, which the
+        // serializer treats as "no bouts scored yet"). The server routes this
+        // through eng.StartMatchTx, so all start-gating (eligibility 409,
+        // ≥players checks) still runs — a 409 throws and is caught below.
+        const startPatch = () => ({
+          status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
+          score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
+        });
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
@@ -1272,7 +1282,19 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
             onSubmit={async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (mountedRef.current) setOpenMatch(null);
+                if (!mountedRef.current) return;
+                // ▶ Start Match: keep the operator IN the scoring surface rather
+                // than dumping them back to the list (which forced a re-find +
+                // reopen per match). A "start" patch is status:running with no
+                // winner — flip the open match's status optimistically so the
+                // modal re-renders as the live scoring board (the background
+                // refresh/SSE then reconciles the canonical state). Any other
+                // submit (finish/correction/draw) closes as before.
+                if (patch.status === "running" && !patch.winner) {
+                  setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
+                } else {
+                  setOpenMatch(null);
+                }
               } catch (_err) {
                 // Error handled by onEditScore/toast, but we catch here to keep modal open
               }
@@ -1280,7 +1302,20 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
             onSubmitAndNext={nextActiveMatch ? async (patch) => {
               try {
                 await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (mountedRef.current) setOpenMatch(nextActiveMatch);
+                if (!mountedRef.current) return;
+                // "Finish + Start Next →": land on the next match on the SAME
+                // shiaijo AND actually start it (honest to the label). If the
+                // next match is already running/completed, just open it. Start
+                // gating runs server-side (StartMatchTx); a 409 throws — we
+                // catch it so the operator still lands on the next match (in
+                // pre-match) to resolve the eligibility issue manually.
+                setOpenMatch(nextActiveMatch);
+                if (nextActiveMatch.status === "scheduled") {
+                  try {
+                    await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
+                    if (mountedRef.current) setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
+                  } catch (_startErr) { /* gate rejected the start; stay on the next match in pre-match */ }
+                }
               } catch (_err) { /* keep modal open on error */ }
             } : null}
             password={password}

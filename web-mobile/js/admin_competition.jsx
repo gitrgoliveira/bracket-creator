@@ -252,13 +252,13 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCo
         </div>
       )}
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
-        <button className="btn btn--sm btn--full" onClick={() => {
-          // prompt() returns "   " for whitespace-only input — which is
-          // truthy under `if (name)` and would persist a whitespace key
-          // as `m.Winner` on the backend (and then mismatch the canonical
-          // SideA / SideB names downstream). Trim defensively and only
-          // override when there's a real value to record.
-          const raw = prompt("Enter the name of the winner to override:", match.winner?.name || match.sideA?.name);
+        <button className="btn btn--sm btn--full" onClick={async () => {
+          // promptDialog returns null on empty/cancel and a string otherwise.
+          // A whitespace-only value would be truthy under `if (name)` and would
+          // persist a whitespace key as `m.Winner` on the backend (and then
+          // mismatch the canonical SideA / SideB names downstream). Trim
+          // defensively and only override when there's a real value to record.
+          const raw = await window.promptDialog({ title: "Override winner", message: "Enter the name of the winner to override:", defaultValue: match.winner?.name || match.sideA?.name });
           const name = raw?.trim();
           if (name) onOverride(name);
         }}>Force winner (manual override)</button>
@@ -276,6 +276,10 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   const { total, done, live } = compMatchStats(statsSource);
   const pct = total ? Math.round((done / total) * 100) : 0;
   const effectiveBracket = bracket ?? c.bracket;
+  // Honour the OS reduced-motion preference for the progress-bar animation.
+  const prefersReducedMotion = typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
   return (
     <div>
       <div className="stats-strip">
@@ -286,8 +290,20 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card__head"><div className="card__title">Progress</div><div className="card__sub">{pct}%</div></div>
-        <div style={{ height: 8, background: "var(--line-2)", borderRadius: 999, overflow: "hidden" }}>
-          <div style={{ height: "100%", width: pct + "%", background: "var(--accent)", transition: "width 300ms" }}></div>
+        {/* Animate via transform: scaleX (compositor-only) rather than width,
+            which forced a layout/paint each frame. The inner bar is full-width
+            and scaled from the left edge; the rounded track clips it so the
+            visual is equivalent. Transition is dropped under
+            prefers-reduced-motion. */}
+        <div style={{ height: 8, background: "var(--line-2)", borderRadius: 999, overflow: "hidden" }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div style={{
+            height: "100%",
+            width: "100%",
+            background: "var(--accent)",
+            transformOrigin: "left center",
+            transform: `scaleX(${pct / 100})`,
+            transition: prefersReducedMotion ? "none" : "transform 300ms",
+          }}></div>
         </div>
       </div>
       <div className="row">
@@ -352,7 +368,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
 
   const save = async () => {
-    const admin = window.promptAdminPassword ? window.promptAdminPassword() : null;
+    const admin = window.promptAdminPassword ? await window.promptAdminPassword() : null;
     if (admin === null) return;
     setSaving(true);
     try {
@@ -1030,8 +1046,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>
             <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
-              if (confirm(`Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`)) {
-                const admin = window.promptAdminPassword();
+              if (await window.confirmDialog({ message: `Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`, confirmLabel: "Mark invalid", danger: true })) {
+                const admin = await window.promptAdminPassword();
                 if (admin === null) return;
                 setInvalidating(true);
                 try {
@@ -1067,8 +1083,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
             : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
-          if (confirm(msg)) {
-            const admin = window.promptAdminPassword();
+          if (await window.confirmDialog({ message: msg, confirmLabel: "Delete competition", danger: true })) {
+            const admin = await window.promptAdminPassword();
             if (admin === null) return;
             setDeleting(true);
             try {
@@ -1423,18 +1439,20 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   // Confirm before a draw/start that would drop non-checked-in participants.
   // Returns false when the operator cancels.
-  const confirmCheckInExclusion = () => {
+  const confirmCheckInExclusion = async () => {
     if (excludedFromDraw === 0) return true;
     const plural = excludedFromDraw === 1 ? "" : "s";
     const verb = excludedFromDraw === 1 ? "is" : "are";
-    return confirm(
-      `${excludedFromDraw} participant${plural} ${verb} not checked in and will be excluded from the draw.\n\n` +
-      `Only checked-in participants will be drawn. Continue?`
-    );
+    return await window.confirmDialog({
+      message:
+        `${excludedFromDraw} participant${plural} ${verb} not checked in and will be excluded from the draw.\n\n` +
+        `Only checked-in participants will be drawn. Continue?`,
+      danger: true,
+    });
   };
 
   const generateDraw = async () => {
-    if (!confirmCheckInExclusion()) return;
+    if (!(await confirmCheckInExclusion())) return;
     setGenerating(true);
     try {
       await window.API.generateDraw(c.id, password);
@@ -1453,8 +1471,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const discardDraw = async () => {
-    if (!confirm(`Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`)) return;
-    const admin = window.promptAdminPassword();
+    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`, confirmLabel: "Discard draw", danger: true }))) return;
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setDiscarding(true);
     try {
@@ -1472,10 +1490,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const regenerateDraw = async () => {
-    if (!confirmCheckInExclusion()) return;
+    if (!(await confirmCheckInExclusion())) return;
     // Regenerate discards the existing draw first (DELETE /draw is gated),
     // so collect the elevated password up front before any work begins.
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setGenerating(true);
     try {
@@ -1503,7 +1521,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const start = async () => {
     // draw-ready → running does not regenerate the draw; skip the confirmation
     // there to avoid showing stale exclusion counts against an already-fixed draw.
-    if (c.status !== "draw-ready" && !confirmCheckInExclusion()) return;
+    if (c.status !== "draw-ready" && !(await confirmCheckInExclusion())) return;
     showToast(`Starting ${c.name}…`);
 
     setStarting(true);
@@ -1554,12 +1572,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + " — " + (isDrawReady ? "preview" : "now") } : null,
+        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + (isDrawReady ? " (preview)" : "") } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
-        c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds — manage" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket — preview" : "Bracket — now" } : null,
-        !isDrawReady ? { id: "scores", label: "Scores — edit" } : null,
+        c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket (preview)" : "Bracket" } : null,
+        !isDrawReady ? { id: "scores", label: "Scores" } : null,
       ].filter(Boolean)
     },
     {

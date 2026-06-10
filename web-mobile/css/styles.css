@@ -339,7 +339,10 @@ a:hover {
 
 .page-head__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+  row-gap: 8px;
   align-items: center;
 }
 
@@ -511,6 +514,19 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* Consolidated keyboard focus ring for buttons + court chips. Only a handful
+   of :focus-visible rules existed, so .btn and the court chips fell back to
+   the UA default outline. Use the project's 3px --accent-soft ring language
+   (matches the input focus ring in §6 Accessibility / .lined-textarea). The
+   .ipt-btn focus is owned elsewhere — deliberately not included here. */
+.btn:focus-visible,
+.court-popover button:focus-visible,
+.live-strip__chip:focus-visible,
+.radio-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .score-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -628,7 +644,9 @@ a:hover {
 .lined-textarea__nums {
   padding: 9px 8px;
   background: var(--surface-2);
-  color: var(--ink-3);
+  /* --ink-3 on --surface-2 (#f1f5f9) is only 4.41:1 — just under AA for this
+     gutter. Step to --ink-2 (9.37:1) so the line numbers clear 4.5:1. */
+  color: var(--ink-2);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
@@ -1740,6 +1758,14 @@ a:hover {
   font-size: 18px;
   color: var(--ink-3);
   padding: 4px 8px;
+  min-width: 36px;
+  min-height: 36px;
+}
+@media (pointer: coarse) {
+  .modal__close {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* ---------- Auth modal ---------- */
@@ -3625,7 +3651,9 @@ button.pool-match-row {
 
 .tw-court__sub {
   font-size: 11px;
-  color: var(--ink-3);
+  /* Sits in .tw-court__head (background: --line-2 #eef0f4). --ink-3 there is
+     only 4.24:1; step to --ink-2 (9.0:1 on --line-2) to clear 4.5:1. */
+  color: var(--ink-2);
 }
 
 .tw-court__list {
@@ -6145,6 +6173,33 @@ button.pool-match-row {
   gap: 6px;
 }
 
+/* --- Touch-target floor for compact ippon buttons --------------------- *
+   The compact rules above (.editor-modal--compact .sb-points-grid .ipt-btn
+   and .editor-modal--compact .team-sub-match__btns .ipt-btn) set a 34px/32px
+   min-height for fine pointers (laptop scoring). On the tablets operators
+   actually score on, those out-specified the generic
+   `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
+   the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
+   Restore the floor at equal-or-greater specificity, placed AFTER the compact
+   blocks so source order also favours it. Fine pointers keep the dense 34px. */
+@media (pointer: coarse) {
+  .editor-modal--compact .sb-points-grid .ipt-btn,
+  .editor-modal--compact .team-sub-match__btns .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Keyboard focus ring for ippon buttons ---------------------------- *
+   Operators tab through the scoring grid; make the focused ippon button
+   obvious with the accent ring language (DESIGN.md §6 / §3). Scoped to the
+   .ipt-btn family this region owns. */
+.ipt-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* --- Decision prompt motion (compact + roomy) -------------------------- */
 .decision-prompt {
   animation: decision-prompt-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
@@ -6580,7 +6635,10 @@ button.pool-match-row {
 .app-version-footer {
   text-align: center;
   font-size: 11px;
-  color: var(--ink-4);
+  /* --ink-4 (#6c7480) is only 4.44:1 on --bg — just under AA. Step to the
+     darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
+     mutate --ink-4 itself (it's the shared fine-print floor). */
+  color: var(--ink-2);
   padding: 16px 0;
   margin-top: 32px;
 }
@@ -6698,6 +6756,86 @@ button.pool-match-row {
 .pool--overview-summary { padding: 14px; margin-bottom: 12px; }
 .pool__overflow-note { margin-top: 8px; }
 .pool__view-all-btn  { margin-top: 8px; font-size: 13px; padding: 0; }
+
+
+/* ---------- Toast internals (mp: ops-console toast contract) ---------- */
+/* Lay out the icon, message, and (error-only) dismiss control on one row.
+   The base .toast keeps its pill shape and single-slot positioning; this just
+   arranges the children inline and gives error toasts a tappable dismiss. */
+.toast { display: flex; align-items: center; gap: 10px; }
+.toast__icon { line-height: 1; flex: 0 0 auto; }
+.toast__msg  { flex: 1 1 auto; }
+.toast__dismiss {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin: -2px -8px -2px 0;
+  cursor: pointer;
+  pointer-events: auto; /* base .toast is pointer-events:none — re-enable so the X is clickable */
+}
+.toast__dismiss:hover { opacity: 1; }
+@media (pointer: coarse) {
+  .toast__dismiss { padding: 8px 10px; margin: -8px -10px -8px 0; }
+}
+
+/* ---------- Competition shell fallback (not-found / loading) ---------- */
+.comp-shell-actions { margin-bottom: 16px; }
+.comp-shell-msg {
+  margin: 8px auto 0;
+  max-width: 42ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ---------- Start-all confirm/progress/result modal ---------- */
+.start-all__lead { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+.start-all__list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.start-all__list--failed { list-style: none; padding-left: 0; }
+.start-all__list--failed li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  border-left: 3px solid var(--red);
+}
+.start-all__failed-name { font-weight: 600; color: var(--ink-1); }
+.start-all__failed-reason { font-size: 12px; color: var(--ink-3); }
+.start-all__running {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+/* confirmDialog()/promptDialog() — shared modal primitive (ui.jsx DialogHost).
+   Reuses .modal-backdrop/.modal/.modal__* ; only the message + prompt input
+   need their own rules. */
+.dialog-msg {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.dialog-prompt-input {
+  width: 100%;
+  margin-top: 12px;
+}
 
 /* ---------- Edit-tournament form stack ----------
    The edit page is a long form split into concern-grouped cards

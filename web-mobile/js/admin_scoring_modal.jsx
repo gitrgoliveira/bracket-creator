@@ -31,6 +31,81 @@ function getValidPointKeys(isNaginata) {
   return isNaginata ? "MKDTSH" : "MKDTH";
 }
 
+// IPPON_LETTER_LEGEND — the M/K/D/T/H (+S for naginata) ippon-type letters
+// and their kendo meaning. The strike-target names mirror the kendo glossary
+// (internal/domain/glossary.go datapoint "datapoint"/"sune"/"hansoku"). H is
+// the hansoku-derived free point ("Two hansoku … give the opponent one free
+// point", glossary "hansoku"). The viewer glossary doesn't define these
+// single letters as terms, so the wording is authored here for the operator.
+const IPPON_LETTER_LEGEND = [
+  ["M", "Men — head strike"],
+  ["K", "Kote — wrist strike"],
+  ["D", "Do — torso strike"],
+  ["T", "Tsuki — throat thrust"],
+  ["S", "Sune — shin strike (naginata)"],
+  ["H", "Hansoku point — opponent's 2nd foul"],
+];
+
+// IpponLegend — compact, always-present key mapping each scoring letter to its
+// kendo meaning, so the admin scoring modal isn't dependent on the viewer-only
+// glossary. The "S" (Sune) row only shows for naginata competitions. Styled
+// inline with DESIGN tokens (this region of styles.css is owned elsewhere).
+function IpponLegend({ isNaginata }) {
+  const rows = IPPON_LETTER_LEGEND.filter(([letter]) => letter !== "S" || isNaginata);
+  return (
+    <details
+      data-testid="scoring-modal-ippon-legend"
+      style={{ marginTop: 10, fontSize: 12, color: "var(--ink-3)" }}
+    >
+      <summary style={{ cursor: "pointer", fontWeight: 600, color: "var(--ink-2)", userSelect: "none" }}>
+        <span aria-hidden="true" style={{
+          display: "inline-block", width: 16, height: 16, lineHeight: "16px",
+          textAlign: "center", borderRadius: 999, border: "1px solid var(--line)",
+          color: "var(--ink-2)", fontWeight: 700, marginRight: 6,
+        }}>?</span>
+        Ippon-type key
+      </summary>
+      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", margin: "8px 0 0", padding: 0 }}>
+        {rows.map(([letter, meaning]) => (
+          <React.Fragment key={letter}>
+            <dt style={{
+              fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--ink-1)",
+              margin: 0, textAlign: "center",
+            }}>{letter}</dt>
+            <dd style={{ margin: 0, color: "var(--ink-2)" }}>{meaning}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+// ScoringShortcutHint — quiet, always-present reminder of the keyboard
+// shortcuts the modal supports. Rendered below the prev/next nav so the
+// affordance sits where operators look for navigation. Clarity over
+// decoration: plain muted text, no animation. Styled inline (this region of
+// styles.css is owned elsewhere).
+function ScoringShortcutHint() {
+  const kbd = {
+    fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
+    border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
+    color: "var(--ink-3)", margin: "0 1px",
+  };
+  return (
+    <div
+      data-testid="scoring-modal-shortcut-hint"
+      aria-hidden="true"
+      style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
+    >
+      <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
+      <span>prev/next</span>
+      <span aria-hidden="true">·</span>
+      <kbd style={kbd}>Esc</kbd>
+      <span>close</span>
+    </div>
+  );
+}
+
 // applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
 // TeamScoreEditorModal. Implements three behaviours on top of the sub
 // state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
@@ -205,14 +280,14 @@ function initialEnchoPeriodsForMatch(m) {
 // daihyosenEnchoFields — pure builder for the encho/decidedByHantei wire
 // fields on the daihyosen representative bout (position -1). The backend
 // invariant (validation.go validateSubBout) is: encho and hantei are valid
-// ONLY on the daihyosen, and decidedByHantei REQUIRES encho.periodCount > 0.
-// So if the operator arms hantei then reduces the counter back to 0, we must
-// emit NEITHER field — otherwise the save 400s ("requires encho with at least
-// one period"). Returns the fields to merge into the entry (possibly empty).
-// Exported for vitest.
+// ONLY on the daihyosen. Encho is OPTIONAL for hantei — a tied daihyosen may
+// be taken straight to a judges' decision without overtime — so the two
+// fields are emitted independently: encho whenever the counter is > 0, and
+// decidedByHantei whenever it is armed on a tied scoreline. Returns the fields
+// to merge into the entry (possibly empty). Exported for vitest.
 function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }) {
-  if (!(enchoPeriodCount > 0)) return {};
-  const fields = { encho: { periodCount: enchoPeriodCount } };
+  const fields = {};
+  if (enchoPeriodCount > 0) fields.encho = { periodCount: enchoPeriodCount };
   if (daihyosenTied && daihyosenHantei) fields.decidedByHantei = true;
   return fields;
 }
@@ -588,13 +663,6 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return () => { cancelled = true; };
   }, [m.compId]);
 
-  // Auto-clear decidedByHantei when encho (overtime) period count is 0
-  useEffectA(() => {
-    if (enchoPeriodCount === 0 && decidedByHantei) {
-      setDecidedByHantei(false);
-    }
-  }, [enchoPeriodCount, decidedByHantei]);
-
   // T093/T094: shared decision-submit path for kiken & fusenpai.
   // - decisionBy is "shiro" or "aka" per the server contract.
   // - encho rides along when the operator has marked overtime so the server
@@ -644,25 +712,35 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       // as the error body when the kiken-undo would invalidate a
       // downstream match. Re-prompt the operator and retry with force.
       if (!opts.force && /decision_locked/i.test(msg)) {
-        if (mountedRef.current && confirm(
-          "A subsequent match for one of these competitors has already started.\n\n" +
-          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "A subsequent match for one of these competitors has already started.\n\n" +
+            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
+          confirmLabel: "Proceed anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
         // T104/CHK029: the server caps encho periods per competition.
         // Same confirm-and-retry-with-force shape as decision_locked.
-        if (mountedRef.current && confirm(
-          "This decision would exceed the configured maximum encho periods.\n\n" +
-          "Record it anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "This decision would exceed the configured maximum encho periods.\n\n" +
+            "Record it anyway?",
+          confirmLabel: "Record anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -722,9 +800,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
   };
 
-  // Hantei submit: tied at end of encho. Operator picks a side; we send a
-  // completed patch with the chosen side as winner, the *entered* ippon
-  // arrays preserved (so a 1–1 encho score stays visible alongside the HT
+  // Hantei submit: tied scoreline (with or without encho). Operator picks a
+  // side; we send a completed patch with the chosen side as winner, the
+  // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the HT
   // marker — clearing them would lose the tied score history that the
   // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
@@ -798,12 +876,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== initialDecidedByHantei;
-  const handleDismiss = () => {
+  const handleDismiss = async () => {
     // Don't close while any save/decision request is in flight — letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
+    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     onClose();
   };
 
@@ -874,9 +952,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []); // listener registered once; reads fresh state via kbRef
 
+  // a11y: label the dialog with the match/court context so screen readers
+  // announce who is fighting and on which shiaijo when the modal opens.
+  const dialogLabel = `Score editor — ${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
+
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal editor-modal--lg editor-modal--compact" onClick={(e) => e.stopPropagation()}>
+      <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -905,11 +987,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             setEnchoPeriodCount={setEnchoPeriodCount}
             maxEnchoPeriods={maxEnchoPeriods}
           />
-          {/* FIK 7-5 / 29-6: in encho a still-tied match is decided by
-              referee hantei. Surface a dedicated affordance so the
-              winner is recorded with the hantei flag — distinguishable
+          {/* A tied match may be decided by referee hantei. Surface the
+              affordance whenever the scoreline is tied — encho is optional,
+              not required (operators may go straight to a judges' decision).
+              The winner is recorded with the hantei flag, distinguishable
               from an ippon-derived win for stats, audit, and Excel. */}
-          {enchoPeriodCount > 0 && (
+          {aTotal === bTotal && (
             <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
               <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
               <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
@@ -919,20 +1002,19 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   className="btn btn--sm"
                   data-testid="scoring-modal-hantei-arm"
                   onClick={() => setDecidedByHantei(true)}
-                  // Hantei is only valid when the bout is genuinely tied
-                  // at end of encho (FIK 7-5 / 29-6). Disable the arm
-                  // button when totals are unequal (ippon-derived win already
-                  // decided), when the bout is already decided by ippons
-                  // (boutDecided), or when a draw is already toggled.
-                  // (0-0 is still a valid tied state.)
-                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled || enchoPeriodCount <= 0}
+                  // Hantei declares a winner from a genuinely tied bout. Disable
+                  // the arm button when totals are unequal (an ippon-derived win
+                  // is already decided), when the bout is already decided by
+                  // ippons (boutDecided), or when a draw is already toggled.
+                  // (0-0 is still a valid tied state. Encho is NOT required.)
+                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
                   title={
                     submitting || decisionSubmitting
                       ? "Saving…"
                       : isDrawToggled
                         ? "Cancel the draw toggle before using hantei"
-                        : aTotal !== bTotal || boutDecided || enchoPeriodCount <= 0
-                          ? "Hantei applies only to tied matches in encho"
+                        : aTotal !== bTotal || boutDecided
+                          ? "Hantei applies only to a tied scoreline"
                           : "Record a judges' decision"
                   }
                   style={{ marginLeft: "auto" }}
@@ -1035,6 +1117,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               </div>
           </div>
 
+          {/* Ippon-type letter legend — discoverable "?" affordance mapping
+              M/K/D/T/H (+S in naginata) to their kendo meaning, so operators
+              don't depend on the viewer-only glossary. */}
+          <IpponLegend isNaginata={isNaginata} />
+
           {/* T093–T098: decision (kiken/fusenpai) controls + remaining-matches
               follow-up. Sits between the scoring board and the footer so the
               flow is: enter score OR record a decision → either way the modal
@@ -1127,6 +1214,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
+          {/* Quiet, always-present keyboard-shortcut reminder. */}
+          <ScoringShortcutHint />
         </div>
       </div>
     </div>
@@ -1220,8 +1309,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const [daihyosenErr, setDaihyosenErr] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
-  // by hantei (judges' decision after a tied encho, FIK 7-5 / 29-6).
-  // Mirrors the individual ScoreEditorModal hantei flow but scoped to the
+  // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6 — encho
+  // optional). Mirrors the individual ScoreEditorModal hantei flow but scoped to the
   // position -1 row. "" = score-decided; "a"/"b" = hantei winner side.
   const initialDaihyosenHantei = existingDaihyosen?.decidedByHantei
     ? (existingDaihyosen.winner === (typeof m.sideA === "object" ? m.sideA?.name : m.sideA) ? "a" : "b")
@@ -1350,24 +1439,34 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     } catch (e) {
       const msg = e?.message || "Failed to record decision";
       if (!opts.force && /decision_locked/i.test(msg)) {
-        if (mountedRef.current && confirm(
-          "A subsequent match for one of these teams has already started.\n\n" +
-          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "A subsequent match for one of these teams has already started.\n\n" +
+            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
+          confirmLabel: "Proceed anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
         // T104/CHK029: encho-cap override, same shape as decision_locked.
-        if (mountedRef.current && confirm(
-          "This decision would exceed the configured maximum encho periods.\n\n" +
-          "Record it anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "This decision would exceed the configured maximum encho periods.\n\n" +
+            "Record it anyway?",
+          confirmLabel: "Record anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -1465,7 +1564,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
       const aAll = s.aPts.slice(0, MAX_IPPONS_PER_SIDE);
       const bAll = s.bPts.slice(0, MAX_IPPONS_PER_SIDE);
-      // The daihyosen winner may come from hantei (tied encho); fall back
+      // The daihyosen winner may come from hantei (tied bout); fall back
       // to the score-derived winner otherwise.
       const wKey = isDaihyo ? daihyosenWinner : t.winner;
       const w = wKey === "a" ? m.sideA : wKey === "b" ? m.sideB : null;
@@ -1487,9 +1586,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         decision,
       };
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
-      // (validation.go validateSubBout). daihyosenEnchoFields encodes the
-      // backend invariant (hantei requires encho > 0) so a reduced-to-0
-      // counter doesn't replay a now-invalid decidedByHantei.
+      // (validation.go validateSubBout). daihyosenEnchoFields emits the two
+      // independently — encho is optional for a hantei decision.
       if (isDaihyo) {
         Object.assign(entry, daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei }));
       }
@@ -1541,11 +1639,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // (setState-after-unmount), AND confirm-then-discard when the user has
   // unsaved sub-match edits. The earlier version only checked submitting,
   // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
-  const handleDismiss = () => {
+  const handleDismiss = async () => {
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || daihyosenBusy) return;
-    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
+    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     onClose();
   };
 
@@ -1575,9 +1673,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     { key: "a", name: m.sideA?.name || m.sideA, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
   ];
 
+  // a11y: label the dialog with the match/court context (mirrors the
+  // individual ScoreEditorModal).
+  const dialogLabel = `Team score editor — ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
+
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -1861,12 +1963,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           </div>
 
           {/* mp-4pc: hantei affordance for the daihyosen — the rep bout is
-              the only team sub-bout that may be decided by judges after a
-              tied encho (FIK 7-5 / 29-6). Mounts only when a daihyosen
-              exists and overtime is active; arming requires a tied
-              scoreline. The chosen winner rides onto the position -1 sub
-              (decidedByHantei) when the operator saves. */}
-          {hasDaihyosen && enchoPeriodCount > 0 && (() => {
+              the only team sub-bout that may be decided by judges (FIK 7-5 /
+              29-6). Encho is optional: a tied daihyosen may be taken straight
+              to a judges' decision. Mounts whenever a daihyosen exists;
+              arming requires a tied scoreline. The chosen winner rides onto
+              the position -1 sub (decidedByHantei) when the operator saves. */}
+          {hasDaihyosen && (() => {
             const dt = subTotals[daihyosenIdx];
             const tiedScore = dt.aTotal === dt.bTotal;
             return (
@@ -1880,7 +1982,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                     data-testid="team-daihyosen-hantei-arm"
                     onClick={() => setDaihyosenHanteiArmed(true)}
                     disabled={submitting || decisionSubmitting || !tiedScore}
-                    title={!tiedScore ? "Hantei applies only to a tied daihyosen in encho" : "Record a judges' decision"}
+                    title={!tiedScore ? "Hantei applies only to a tied daihyosen" : "Record a judges' decision"}
                     style={{ marginLeft: "auto" }}
                   >
                     Decide by hantei…
@@ -1951,6 +2053,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               </div>
             );
           })()}
+
+          {/* Ippon-type letter legend — same affordance as the individual
+              editor; the per-bout buttons use the same M/K/D/T/H letters. */}
+          <IpponLegend isNaginata={isNaginataTeam} />
 
           {/* T093–T098: decision (kiken/fusenpai) controls for the overall
               team match. Per-bout Fusensho lives on each sub-match row
@@ -2032,6 +2138,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
+          {/* Quiet, always-present keyboard-shortcut reminder. */}
+          <ScoringShortcutHint />
         </div>
       </div>
     </div>

@@ -110,6 +110,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // sole screen exposing the Announce button. (Other screens reach the
   // composer via the Edit-details page.)
   const [announceOpen, setAnnounceOpen] = useStateA(false);
+  // mp: "Start all" is a high-blast-radius action (it starts every eligible
+  // setup competition at once), so it runs through an explicit modal instead
+  // of a one-click red button + transient toast. State machine:
+  //   phase: "confirm" → operator sees the affected comps and confirms
+  //          "running" → Promise.allSettled in flight, inline progress
+  //          "result"  → persistent summary; NAMES failures, offers retry
+  // `comps` is the working set for the current phase (the comps we will/did
+  // start); `failed` is the subset whose start rejected (kept so "Retry
+  // failed" can re-run only those). Closed by setting startAll to null.
+  const [startAll, setStartAll] = useStateA(null);
 
   // Expose a navigation helper used by AdminTopbar's live-strip chips,
   // avoiding prop-drilling through every screen. Set once per mount.
@@ -205,7 +215,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // inactive (proceed) and null when cancelled/not-configured (abort).
     let admin = "";
     if (next && next.players != null) {
-      admin = window.promptAdminPassword();
+      admin = await window.promptAdminPassword();
       if (admin === null) return;
     }
     let updated;
@@ -286,46 +296,43 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return created;
   };
 
-  const startAllCompetitions = async () => {
+  // Opens the confirm modal (does NOT start anything). The dashboard's
+  // "Start all" button calls this; confirmation happens inside the modal.
+  const startAllCompetitions = () => {
     const setupComps = (t.competitions || []).filter(c => c.status === "setup" && (c.players || []).length >= 2);
     if (setupComps.length === 0) return;
+    setStartAll({ phase: "confirm", comps: setupComps, failed: [] });
+  };
 
-    showToast(`Starting ${setupComps.length} competitions…`);
+  // Runs the actual start for a given set of competitions. Used both for the
+  // initial confirm and for "Retry failed" (which passes only the failures).
+  // Keeps the tRef/onUpdateRef/mountedRef discipline of the other handlers.
+  const runStartAll = async (comps) => {
+    setStartAll({ phase: "running", comps, failed: [] });
 
-    setAdminLoading(true);
-    const results = await Promise.allSettled(setupComps.map(c => window.API.startCompetition(c.id, password)));
+    const results = await Promise.allSettled(comps.map(c => window.API.startCompetition(c.id, password)));
 
-    let success = 0, fail = 0;
+    const failed = [];
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") success++;
-      else {
-        console.error(`Failed to start ${setupComps[i].name}:`, r.reason);
-        fail++;
+      if (r.status === "rejected") {
+        console.error(`Failed to start ${comps[i].name}:`, r.reason);
+        failed.push({ comp: comps[i], reason: (r.reason && r.reason.message) || String(r.reason) });
       }
     });
 
-    // Wrap the refresh in try/finally so a fetchCompetitions() reject
-    // doesn't leave setAdminLoading=true latched on (the loading spinner
-    // would stay visible indefinitely until the next view change). The
-    // mountedRef gate is preserved — if the user navigated away during
-    // the start, we still skip setState but always clear the loading
-    // flag via finally to avoid stale-state-on-remount surprises.
+    // Best-effort refresh — a refresh failure must not mask which comps
+    // actually started (the result summary below is authoritative).
     try {
-      const comps = await window.API.fetchCompetitions();
-      if (!mountedRef.current) return;
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+      const fresh = await window.API.fetchCompetitions();
+      if (mountedRef.current) onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => fresh));
     } catch (e) {
       console.error("startAllCompetitions: post-start refresh failed", e);
       if (mountedRef.current) showToast("Failed to refresh after start. Try reloading.", "error");
-    } finally {
-      if (mountedRef.current) setAdminLoading(false);
     }
 
-    if (fail > 0) {
-      showToast(`Started ${success} competitions, but ${fail} failed.`, "error");
-    } else if (success > 0) {
-      showToast(`Successfully started all ${success} competitions.`);
-    }
+    if (!mountedRef.current) return;
+    // Persistent result — does NOT auto-dismiss. Operator closes it.
+    setStartAll({ phase: "result", comps, failed, succeeded: comps.length - failed.length });
   };
 
   const startCompetition = async (cid) => {
@@ -540,6 +547,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         showToast={showToast}
         onClose={() => setAnnounceOpen(false)}
       />}
+      {startAll && <StartAllModal
+        state={startAll}
+        onConfirm={() => runStartAll(startAll.comps)}
+        onRetry={() => runStartAll(startAll.failed.map(f => f.comp))}
+        onClose={() => setStartAll(null)}
+      />}
     </>;
   }
 
@@ -564,7 +577,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return <AdminEditTournament
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
-      onSave={async (patch) => { const ok = await updateTournament(patch); if (ok) setView({ kind: "dashboard" }); return ok; }}
+      onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}
@@ -615,10 +628,34 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   if (view.kind === "competition") {
     const c = t.competitions.find((cc) => cc.id === view.id);
-    if (!c) return <div className="page"><div className="empty"><h3>Competition not found</h3></div></div>;
+    if (!c) return (
+      <div className="page">
+        <div className="comp-shell-actions">
+          <button className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+        </div>
+        <div className="empty">
+          <h3>Competition not available</h3>
+          {/* Two indistinguishable causes for the operator: the comp was
+              deleted, OR this view is briefly ahead of the server while SSE
+              catches up. Word it so going back / reloading is clearly safe. */}
+          <p className="comp-shell-msg">
+            This competition may have been removed, or your view is briefly out of
+            sync while live updates catch up. Going back to the dashboard or
+            reloading the page is safe — if it still exists, it will reappear.
+          </p>
+        </div>
+      </div>
+    );
     // Only use adminCompData when it matches the current view; otherwise it's stale.
     const detail = adminCompData && adminCompData.config && adminCompData.config.id === view.id ? adminCompData : null;
-    if (adminLoading && !detail) return <div className="page"><div className="loading">Loading details...</div></div>;
+    if (adminLoading && !detail) return (
+      <div className="page">
+        <div className="comp-shell-actions">
+          <button className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+        </div>
+        <div className="loading">Loading details...</div>
+      </div>
+    );
 
     return <AdminCompetition
       tournament={t}
@@ -651,6 +688,82 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 // Defense-in-depth alongside the server-side fix.
 function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
+}
+
+// StartAllModal — three-phase dialog for the dashboard "Start all" action.
+// Follows the shared .modal-backdrop / .modal pattern (mirrors
+// AnnouncementModal). The confirm and result phases are dismissable (backdrop
+// click + Escape); the running phase is NOT — closing mid-start would orphan
+// in-flight requests with no feedback, so the close affordances are withheld
+// while phase === "running".
+function StartAllModal({ state, onConfirm, onRetry, onClose }) {
+  const dismissable = state.phase !== "running";
+  // Only wire Escape when we're allowed to close. Pass undefined (NOT a no-op)
+  // in the running phase: useEscapeToClose calls preventDefault() for ANY
+  // function callback, so a no-op would swallow Escape while doing nothing.
+  // undefined leaves Escape untouched. Matches the busyType ? undefined
+  // pattern in admin_shell.jsx.
+  window.useEscapeToClose(dismissable ? onClose : undefined);
+
+  const { phase, comps = [], failed = [] } = state;
+
+  let title = "Start all competitions";
+  if (phase === "running") title = "Starting competitions…";
+  else if (phase === "result") title = failed.length === 0 ? "All competitions started" : "Some competitions failed";
+
+  return (
+    <div className="modal-backdrop" onClick={dismissable ? onClose : undefined}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal__head">
+          <div className="modal__title">{title}</div>
+          {dismissable && <button className="modal__close" onClick={onClose} aria-label="Close">&times;</button>}
+        </div>
+        <div className="modal__body">
+          {phase === "confirm" && <>
+            <p className="start-all__lead">
+              This will start {window.pluralize(comps.length, "competition")} now. Once a
+              competition starts, its pools and bracket are generated and scoring opens.
+            </p>
+            <ul className="start-all__list">
+              {comps.map(c => <li key={c.id}>{c.name}</li>)}
+            </ul>
+          </>}
+          {phase === "running" && (
+            <div className="start-all__running">
+              <span className="spinner" aria-hidden="true"></span>
+              <span aria-live="polite">Starting {window.pluralize(comps.length, "competition")}…</span>
+            </div>
+          )}
+          {phase === "result" && <>
+            <p className="start-all__lead" aria-live="polite">
+              Started {state.succeeded} of {comps.length}.
+              {failed.length > 0 && ` ${window.pluralize(failed.length, "competition")} failed to start.`}
+            </p>
+            {failed.length > 0 && (
+              <ul className="start-all__list start-all__list--failed">
+                {failed.map(f => (
+                  <li key={f.comp.id}>
+                    <span className="start-all__failed-name">{f.comp.name}</span>
+                    {f.reason && <span className="start-all__failed-reason">{f.reason}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>}
+        </div>
+        <div className="modal__foot">
+          {phase === "confirm" && <>
+            <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+          </>}
+          {phase === "result" && <>
+            {failed.length > 0 && <button className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
+            <button className="btn" onClick={onClose}>Close</button>
+          </>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 window.AdminApp = AdminApp;

@@ -372,11 +372,15 @@ function getCachedAuthConfig() {
 //     the typed value, or null if the operator cancels or submits empty
 //     (the caller aborts).
 //
-// Caller contract: `const a = promptAdminPassword(); if (a === null) return;`
+// Caller contract (now async): `const a = await promptAdminPassword(); if (a === null) return;`
 // then pass `a` as the trailing adminPassword arg to the API method. A wrong
 // password surfaces as the API's 401 error (caught/toasted by the caller);
 // the operator simply retries the action, which re-prompts.
-function promptAdminPassword(message) {
+//
+// Returns a Promise so the password is collected via the app's themed,
+// accessible promptDialog (masked input) instead of window.prompt, which
+// renders the password in plaintext in some browsers and can't be styled.
+async function promptAdminPassword(message) {
   const cfg = getCachedAuthConfig();
   if (!cfg || !cfg.elevatedRequired) return "";
   if (cfg.elevatedConfigured === false) {
@@ -386,7 +390,12 @@ function promptAdminPassword(message) {
     );
     return null;
   }
-  const pw = window.prompt(message || "This action requires the admin (destructive-ops) password:");
+  const pw = await window.promptDialog({
+    title: "Admin password required",
+    message: message || "This action requires the admin (destructive-ops) password:",
+    password: true,
+    confirmLabel: "Confirm",
+  });
   return pw ? pw : null;
 }
 

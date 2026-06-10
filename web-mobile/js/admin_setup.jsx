@@ -89,6 +89,22 @@ function validateSwissSettings(format, swissRounds) {
   return { ok: true, error: null };
 }
 
+// Normalize a theme object to the canonical {primaryColor, accentSoftColor,
+// windowTitle} shape BrandingManager emits, or null when no colour/title is
+// configured (an empty {} — e.g. a logo-only config — counts as absent). The
+// defaults mirror BrandingManager so the dirty-tracking snapshot compares equal
+// before and after BrandingManager's mount-time onThemeChange sync (mp-sspn).
+// Exported for vitest at __tests__/admin_setup.test.jsx.
+function normTheme(t) {
+  const has = t && (t.primaryColor || t.accentSoftColor || t.windowTitle);
+  if (!has) return null;
+  return {
+    primaryColor: t.primaryColor || "#1d3557",
+    accentSoftColor: t.accentSoftColor || "#e7eaf3",
+    windowTitle: t.windowTitle || "",
+  };
+}
+
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
@@ -165,8 +181,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [publicOpen, setPublicOpen] = useStateA(hasPublicInfo);
 
   // mp-sspn: dirty tracking for the unsaved-changes cue + cancel guard.
-  // Snapshot the editable form fields (theme is excluded — BrandingManager's
-  // mount-time onThemeChange sync would otherwise register a false change).
+  // Branding colours/title ride along on "Save changes" (via onThemeChange ->
+  // theme), so they MUST count toward dirty or a branding-only edit is silently
+  // lost on cancel/navigate. The reason theme was tricky: BrandingManager fires
+  // onThemeChange on mount with a *defaults-filled* object, which differs from
+  // the raw tournament.theme and would false-dirty on load. normTheme mirrors
+  // BrandingManager's own normalization (same defaults; empty/logo-only config
+  // -> null) so the pre- and post-sync snapshots compare equal.
   const initialSnapRef = useRefA(null);
   const [dirty, setDirty] = useStateA(false);
   useEffectA(() => {
@@ -175,12 +196,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
+      theme: normTheme(theme),
     });
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
   }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
-    awardsNote, infoNotes, pass, contacts]);
+    awardsNote, infoNotes, pass, contacts, theme]);
 
   // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
   // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
@@ -1195,4 +1217,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, normTheme };

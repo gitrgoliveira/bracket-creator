@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings, validateSwissSettings } from '../admin_setup.jsx';
+import { deriveCompetitionName, validatePoolSettings, validateSwissSettings, normTheme } from '../admin_setup.jsx';
 
 describe('deriveCompetitionName', () => {
   // Copilot round-8 finding: AdminCreateCompetition.create used
@@ -230,5 +230,33 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
       const r = validateSwissSettings('swiss', -3);
       expect(r.ok).toBe(false);
     });
+  });
+});
+
+describe('normTheme (mp-sspn dirty tracking)', () => {
+  // Copilot PR #266 round 2: branding colours/title ride on "Save changes" via
+  // theme, so they must count toward the dirty cue — but the raw tournament.theme
+  // and BrandingManager's mount-synced (defaults-filled) object differ, which
+  // would false-dirty on load. normTheme normalizes both to the same shape.
+
+  it('returns null for absent / empty configs (logo-only or null)', () => {
+    expect(normTheme(null)).toBe(null);
+    expect(normTheme(undefined)).toBe(null);
+    expect(normTheme({})).toBe(null);
+    expect(normTheme({ logoPath: 'x' })).toBe(null); // unrelated keys don't count
+  });
+
+  it('fills BrandingManager defaults so raw and synced themes compare equal', () => {
+    const raw = { primaryColor: '#aabbcc' };
+    const synced = { primaryColor: '#aabbcc', accentSoftColor: '#e7eaf3', windowTitle: '' };
+    expect(JSON.stringify(normTheme(raw))).toBe(JSON.stringify(normTheme(synced)));
+    expect(normTheme(raw)).toEqual({ primaryColor: '#aabbcc', accentSoftColor: '#e7eaf3', windowTitle: '' });
+  });
+
+  it('preserves a fully-specified theme and treats windowTitle-only as configured', () => {
+    expect(normTheme({ primaryColor: '#111', accentSoftColor: '#222', windowTitle: 'Cup' }))
+      .toEqual({ primaryColor: '#111', accentSoftColor: '#222', windowTitle: 'Cup' });
+    expect(normTheme({ windowTitle: 'Cup' }))
+      .toEqual({ primaryColor: '#1d3557', accentSoftColor: '#e7eaf3', windowTitle: 'Cup' });
   });
 });

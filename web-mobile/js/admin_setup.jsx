@@ -139,6 +139,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // gates the post-await setSaving so a successful save (which unmounts this
   // view via navigation) doesn't setState on a torn-down component.
   const [saving, setSaving] = useStateA(false);
+  // The `saving` STATE drives the button label/disabled; the savingRef LATCH
+  // is the actual re-entry guard. State updates are async, so two rapid
+  // Ctrl+S / clicks could both pass an `if (saving)` check before the
+  // re-render flips it and fire duplicate PUTs. The ref is mutated and read
+  // synchronously within the same tick, so the second call sees it.
+  const savingRef = useRefA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
@@ -224,7 +230,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   };
 
   const handleSave = async () => {
-    if (saving) return; // guard against double-submit while a save is in flight
+    if (savingRef.current) return; // synchronous re-entry guard (see savingRef)
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
     // raw `name` — so " Tournament " on the wire would round-trip to the
@@ -242,6 +248,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     }
     setError("");
     setErrorField(null);
+    savingRef.current = true; // latch set synchronously, before the first await
     setSaving(true);
     try {
       await onSave({
@@ -266,8 +273,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         theme: theme || undefined,
       });
     } finally {
-      // On success onSave navigates away (this view unmounts); the guard
-      // skips the setState. On failure we stay put so the user can retry.
+      // Release the latch so a failed save can be retried. On success onSave
+      // navigates away (this view unmounts); the mountedRef guard skips the
+      // setState, but the ref reset is harmless either way.
+      savingRef.current = false;
       if (mountedRef.current) setSaving(false);
     }
   };

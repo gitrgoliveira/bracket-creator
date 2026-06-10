@@ -144,7 +144,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
             <div className="field__hint">Used for row highlights and badges. Default: #e7eaf3.</div>
           </div>
         </div>
-        <div className="branding__finprint">Save the tournament form below to persist color changes.</div>
+        <div className="branding__fineprint">Save the tournament form below to persist color changes.</div>
         <div className="branding__logo">
           <div className="branding__logo-title">Tournament logo</div>
           <div className="field__hint" style={{ marginBottom: 12 }}>PNG or JPEG, up to 1 MB. Replaces the default kendo logo on all screens. Falls back to the default logo if removed.</div>

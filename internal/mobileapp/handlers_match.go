@@ -379,6 +379,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			SubResults: subResults,
 		}
 		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
+			if errors.Is(err, engine.ErrMatchSideMismatch) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "side_mismatch",
+					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
+				})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -738,6 +745,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "result_finalized",
 					"message": "This match result has already been reported. Contact the tournament organizer to correct it.",
+				})
+				return
+			}
+			if errors.Is(engErr, engine.ErrMatchSideMismatch) {
+				// The payload named competitors that differ from the stored
+				// pairing — refuse rather than rewrite match identity.
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "side_mismatch",
+					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
 				})
 				return
 			}

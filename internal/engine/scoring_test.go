@@ -368,6 +368,89 @@ func TestRecordMatchResult_PreservesCourtAndScheduledAt(t *testing.T) {
 	})
 }
 
+// TestRecordMatchResult_RejectsSideRewrite pins the match-identity guard:
+// a score payload may carry the result but must never rewrite WHO is in the
+// match. A payload naming a different competitor is rejected with
+// ErrMatchSideMismatch and the stored pairing is left untouched. This is the
+// guard against the cross-pool corruption vector (a stored bout overwritten
+// with competitors from another pool).
+func TestRecordMatchResult_RejectsSideRewrite(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-sidemismatch-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "mismatch-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Mismatch"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool E-0", SideA: "Benjamin Evans", SideB: "Sebastian Allen", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	t.Run("payload with foreign competitors is rejected and stored pairing preserved", func(t *testing.T) {
+		bad := &state.MatchResult{
+			SideA:   "Arthur Conan",    // from another pool
+			SideB:   "Herman Melville", // from another pool
+			Winner:  "Arthur Conan",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		}
+		err := eng.RecordMatchResult(compID, "Pool E-0", bad)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMatchSideMismatch)
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		// Identity untouched; the bogus result was not persisted.
+		assert.Equal(t, "Benjamin Evans", stored[0].SideA)
+		assert.Equal(t, "Sebastian Allen", stored[0].SideB)
+		assert.Equal(t, state.MatchStatusScheduled, stored[0].Status)
+		assert.Empty(t, stored[0].Winner)
+	})
+
+	t.Run("payload that omits sides backfills from the stored pairing and scores", func(t *testing.T) {
+		patch := &state.MatchResult{
+			Winner:  "Benjamin Evans",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "Pool E-0", patch))
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Benjamin Evans", stored[0].SideA)
+		assert.Equal(t, "Sebastian Allen", stored[0].SideB)
+		assert.Equal(t, "Benjamin Evans", stored[0].Winner)
+		assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	})
+
+	t.Run("payload echoing the correct sides scores normally", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool E-1", SideA: "Benjamin Evans", SideB: "Kurt Vonnegut", Status: state.MatchStatusScheduled},
+		}))
+		patch := &state.MatchResult{
+			SideA:   "Benjamin Evans",
+			SideB:   "Kurt Vonnegut",
+			Winner:  "Kurt Vonnegut",
+			IpponsB: []string{"K"},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "Pool E-1", patch))
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		var m1 state.MatchResult
+		for _, s := range stored {
+			if s.ID == "Pool E-1" {
+				m1 = s
+			}
+		}
+		assert.Equal(t, "Kurt Vonnegut", m1.Winner)
+		assert.Equal(t, state.MatchStatusCompleted, m1.Status)
+	})
+}
+
 // TestRecordMatchResult_ConcurrentScoresNotLost pins the TOCTOU fix for
 // the live-scoring path. Pre-atomic-primitive, withPoolMatch did
 // LoadPoolMatches → mutate target match → SavePoolMatches sequentially

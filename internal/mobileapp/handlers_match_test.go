@@ -164,6 +164,80 @@ func TestQuickScoreHandler(t *testing.T) {
 	})
 }
 
+// TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the
+// match-identity guard: a score/quick-score payload naming competitors that
+// differ from the stored pairing is rejected, and the stored match is left
+// untouched. Exercises the production TX /score path and the /quick-score
+// path end-to-end.
+func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "c1", Courts: []string{"A"}})
+	store.SavePools("c1", []helper.Pool{
+		{PoolName: "PoolE", Players: []helper.Player{{Name: "Benjamin Evans"}, {Name: "Sebastian Allen"}}},
+	})
+	store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolE-0", SideA: "Benjamin Evans", SideB: "Sebastian Allen", Status: state.MatchStatusScheduled},
+	})
+
+	assertPairingUntouched := func(t *testing.T) {
+		t.Helper()
+		stored, err := store.LoadPoolMatches("c1")
+		assert.NoError(t, err)
+		assert.Len(t, stored, 1)
+		assert.Equal(t, "Benjamin Evans", stored[0].SideA)
+		assert.Equal(t, "Sebastian Allen", stored[0].SideB)
+		assert.Equal(t, state.MatchStatusScheduled, stored[0].Status)
+	}
+
+	t.Run("score endpoint rejects foreign competitors with 409", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id": "PoolE-0", "sideA": "Arthur Conan", "sideB": "Herman Melville",
+			"winner": "Arthur Conan", "ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status": "completed",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolE-0/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Contains(t, w.Body.String(), "side_mismatch")
+		assertPairingUntouched(t)
+	})
+
+	t.Run("quick-score endpoint rejects foreign competitors with 409", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "Arthur Conan", "sideB": "Herman Melville",
+			"teamAWins": 2, "teamBWins": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolE-0/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusConflict, w.Code)
+		assert.Contains(t, w.Body.String(), "side_mismatch")
+		assertPairingUntouched(t)
+	})
+
+	t.Run("score endpoint accepts the correct pairing", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id": "PoolE-0", "sideA": "Benjamin Evans", "sideB": "Sebastian Allen",
+			"winner": "Benjamin Evans", "ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status": "completed",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolE-0/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadPoolMatches("c1")
+		assert.NoError(t, err)
+		assert.Equal(t, "Benjamin Evans", stored[0].Winner)
+		assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	})
+}
+
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

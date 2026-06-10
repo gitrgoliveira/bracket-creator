@@ -18,6 +18,36 @@ import (
 // match with the given ID exists in the respective data store.
 var errMatchNotFound = errors.New("match not found")
 
+// ErrMatchSideMismatch is returned when a score payload names competitors
+// (sideA/sideB) that differ from the match's stored pairing. Match identity
+// is fixed at generation; a score only carries the *result*, never a new
+// pairing. Rejecting prevents a malformed or buggy client from silently
+// rewriting who is in a match — the live path that produced cross-pool pool
+// rows (a stored Pool E bout overwritten with competitors from other pools).
+// Handlers map this to HTTP 409.
+var ErrMatchSideMismatch = errors.New("match side mismatch: score payload competitors differ from the stored pairing")
+
+// reconcileSides folds the stored pairing into a score payload's result.
+// An empty payload side is backfilled from the stored side (e.g. a payload
+// that omits sides, or a not-yet-resolved bracket slot). A non-empty payload
+// side that disagrees with a non-empty stored side is a mismatch — the caller
+// must reject rather than overwrite the stored competitor. Returns true on the
+// first such disagreement; result is left partially filled but is discarded by
+// the caller on mismatch.
+func reconcileSides(result *state.MatchResult, storedA, storedB string) (mismatch bool) {
+	if result.SideA == "" {
+		result.SideA = storedA
+	} else if storedA != "" && result.SideA != storedA {
+		mismatch = true
+	}
+	if result.SideB == "" {
+		result.SideB = storedB
+	} else if storedB != "" && result.SideB != storedB {
+		mismatch = true
+	}
+	return mismatch
+}
+
 // withPoolMatch atomically loads pool matches, calls mutate on the one
 // matching matchId, and saves the updated slice. Returns errMatchNotFound
 // (unwrapped) when the ID is not present so callers can fall through to
@@ -205,12 +235,11 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 // RecordMatchResult calls this after applyHansokuIppons; the K3 rollback
 // path calls it directly to restore the prior result byte-for-byte.
 func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult) error {
+	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
-		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
 		backfillMatchIdentity(result, r)
 		if result.Court == "" {
@@ -229,6 +258,8 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
 			return err
 		}
+	} else if sideMismatch {
+		return ErrMatchSideMismatch
 	}
 	// Side-effect writes are non-fatal: the match score is already on disk,
 	// so propagating would cause a 500 retry that double-records the score.
@@ -260,12 +291,11 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// ineligibility write below fails with AlreadyIneligibleError.
 	prior, _ := e.lookupExistingResult(compId, matchId)
 
+	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
-		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
 		backfillMatchIdentity(result, r)
 		if result.Court == "" {
@@ -284,6 +314,8 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
 			return nil, err
 		}
+	} else if sideMismatch {
+		return nil, ErrMatchSideMismatch
 	}
 	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
 	if err != nil {
@@ -706,12 +738,12 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					// them so that deriveDaihyosenWinner can map a
 					// representative player name back to the canonical team
 					// name. Must happen before deriveDaihyosenWinner and
-					// before writing result.Winner back to the bracket.
-					if result.SideA == "" {
-						result.SideA = m.SideA
-					}
-					if result.SideB == "" {
-						result.SideB = m.SideB
+					// before writing result.Winner back to the bracket. A
+					// non-empty payload side that disagrees with the resolved
+					// bracket side is rejected — a score must not rewrite the
+					// seeded pairing.
+					if reconcileSides(result, m.SideA, m.SideB) {
+						return ErrMatchSideMismatch
 					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner

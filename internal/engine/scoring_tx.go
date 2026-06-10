@@ -65,11 +65,11 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
 						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
 					}
-					if result.SideA == "" {
-						result.SideA = m.SideA
-					}
-					if result.SideB == "" {
-						result.SideB = m.SideB
+					// Match identity is fixed at seeding; a score must not
+					// rewrite it. Backfill omitted sides; reject a non-empty
+					// payload side that disagrees with the resolved pairing.
+					if reconcileSides(result, m.SideA, m.SideB) {
+						return ErrMatchSideMismatch
 					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
@@ -284,12 +284,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
+	var sideMismatch bool
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
-		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
 		// Preserve generation-time participant ids + resolve winner id across
 		// the whole-struct overwrite below (the /score endpoint scores through
@@ -311,6 +310,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
 			return nil, err
 		}
+	} else if sideMismatch {
+		// Match identity is fixed at generation; a score payload naming
+		// different competitors is rejected (HTTP 409) rather than allowed to
+		// overwrite the stored pairing. Returns before any side-effect write.
+		return nil, ErrMatchSideMismatch
 	}
 
 	// mp-e2k1 guard: after the pool-match write, check whether any
@@ -415,12 +419,11 @@ func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string,
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
-		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
-		}
+		// Identity reconciliation only backfills here: this path restores a
+		// trusted prior snapshot (K3 rollback), not a client payload, so the
+		// stored sides always match — the mismatch result is intentionally
+		// ignored rather than turned into a rejection.
+		_ = reconcileSides(result, r.SideA, r.SideB)
 		// Preserve generation-time participant ids + resolve winner id across
 		// the whole-struct overwrite below (the /score endpoint scores through
 		// this Tx path). See backfillMatchIdentity.

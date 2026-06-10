@@ -89,21 +89,10 @@ function validateSwissSettings(format, swissRounds) {
   return { ok: true, error: null };
 }
 
-// Normalize a theme object to the canonical {primaryColor, accentSoftColor,
-// windowTitle} shape BrandingManager emits, or null when no colour/title is
-// configured (an empty {} — e.g. a logo-only config — counts as absent). The
-// defaults mirror BrandingManager so the dirty-tracking snapshot compares equal
-// before and after BrandingManager's mount-time onThemeChange sync (mp-sspn).
-// Exported for vitest at __tests__/admin_setup.test.jsx.
-function normTheme(t) {
-  const has = t && (t.primaryColor || t.accentSoftColor || t.windowTitle);
-  if (!has) return null;
-  return {
-    primaryColor: t.primaryColor || "#1d3557",
-    accentSoftColor: t.accentSoftColor || "#e7eaf3",
-    windowTitle: t.windowTitle || "",
-  };
-}
+// Theme normalization lives next to its canonical user, BrandingManager, so the
+// dirty-tracking snapshot here can't drift from the shape BrandingManager emits
+// (mp-sspn). Importing keeps the defaults in one place.
+import { normalizeTheme } from './admin_branding.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
@@ -185,7 +174,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // theme), so they MUST count toward dirty or a branding-only edit is silently
   // lost on cancel/navigate. The reason theme was tricky: BrandingManager fires
   // onThemeChange on mount with a *defaults-filled* object, which differs from
-  // the raw tournament.theme and would false-dirty on load. normTheme mirrors
+  // the raw tournament.theme and would false-dirty on load. normalizeTheme mirrors
   // BrandingManager's own normalization (same defaults; empty/logo-only config
   // -> null) so the pre- and post-sync snapshots compare equal.
   const initialSnapRef = useRefA(null);
@@ -196,7 +185,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
-      theme: normTheme(theme),
+      theme: normalizeTheme(theme),
     });
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
@@ -303,8 +292,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     }
   };
 
-  // mp-sspn: guard navigation away from unsaved edits.
+  // mp-sspn: guard navigation away from unsaved edits AND while a save is in
+  // flight. The Cancel button is disabled via `saving`, but Esc and the
+  // breadcrumb back-link bypass that — block them too so the user can't
+  // navigate away mid-PUT and contradict the disabled affordance.
   const handleCancel = () => {
+    if (savingRef.current) return;
     if (dirty && !window.confirm("Discard unsaved changes?")) return;
     onCancel();
   };
@@ -318,10 +311,23 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   handleCancelRef.current = handleCancel;
   useEffectA(() => {
     const onKey = (e) => {
+      // Ignore IME composition keys (CJK input, accented chars). Without this
+      // the Escape used to cancel composition would also fire the discard
+      // confirm — silent loss of edits is the failure mode.
+      if (e.isComposing || e.keyCode === 229) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
         handleSaveRef.current();
       } else if (e.key === "Escape") {
+        // Escape is widely used by editable controls to dismiss their own UI
+        // (date picker calendar, native select dropdown, color picker, the
+        // address-bar autocomplete). When focus is in such a control, leave
+        // the key to the control rather than hijacking it to confirm-cancel
+        // the whole form. defaultPrevented also covers controls that have
+        // already handled the key.
+        if (e.defaultPrevented) return;
+        const t = e.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || "") || t.isContentEditable)) return;
         handleCancelRef.current();
       }
     };
@@ -1217,4 +1223,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, normTheme };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };

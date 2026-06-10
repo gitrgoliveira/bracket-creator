@@ -372,7 +372,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     }).not.toThrow();
   });
 
-  it('bracket tab label is "Bracket — now" for a running competition', () => {
+  it('bracket tab label is "Bracket" (live, not preview) for a running competition', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       section: 'overview',
@@ -380,22 +380,22 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       bracket: liveBracket,
     });
     const text = collectText(tree);
-    expect(text).toContain('Bracket — now');
-    expect(text).not.toContain('Bracket — preview');
+    expect(text).toContain('Bracket');
+    expect(text).not.toContain('Bracket (preview)');
   });
 
-  it('bracket tab label is "Bracket — preview" only for draw-ready competitions', () => {
+  it('bracket tab label is "Bracket (preview)" only for draw-ready competitions', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       section: 'overview',
       competition: mkMixedComp({ status: 'draw-ready' }),
       bracket: liveBracket,
     });
-    expect(collectText(tree)).toContain('Bracket — preview');
+    expect(collectText(tree)).toContain('Bracket (preview)');
   });
 
-  it('bracket tab label is NOT "Bracket — preview" for mixed comp with preview=true bracket but status=pools', () => {
-    // Previously bracket.preview=true would force "Bracket — preview" label.
+  it('bracket tab label is NOT "Bracket (preview)" for mixed comp with preview=true bracket but status=pools', () => {
+    // Previously bracket.preview=true would force the preview label.
     // Now only draw-ready status matters.
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
@@ -404,9 +404,9 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       bracket: placeholderBracket, // preview: true
     });
     const text = collectText(tree);
-    // status is 'pools' (not draw-ready), so label should be "Bracket — now"
-    expect(text).toContain('Bracket — now');
-    expect(text).not.toContain('Bracket — preview');
+    // status is 'pools' (not draw-ready), so the live "Bracket" label shows
+    expect(text).toContain('Bracket');
+    expect(text).not.toContain('Bracket (preview)');
   });
 
   it('AdminBracket vnode receives bracket props regardless of bracket.preview', () => {

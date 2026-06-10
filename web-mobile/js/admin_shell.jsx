@@ -250,7 +250,7 @@ function AllWinnersModal({ comps, onClose }) {
             <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2, #f0f0f0)", borderRadius: 4, padding: "1px 6px" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2)", borderRadius: 4, padding: "1px 6px" }}>
                   {window.competitionKindLabel(comp)}
                 </div>
               </div>
@@ -502,7 +502,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
-          <div style={{ width: "100%", background: "var(--surface-2, #f5f5f5)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
+          <div style={{ width: "100%", background: "var(--surface-2)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
             {url}
           </div>
           <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
@@ -583,7 +583,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
             Each download is a ZIP. Generation can take up to a minute.
           </p>
           {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
-            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--surface-2, #eee)" }}>
+            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
               <div>
                 <div style={{ fontWeight: 600 }}>{label}</div>
                 <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{hint}</div>

@@ -329,7 +329,10 @@ a:hover {
 
 .page-head__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+  row-gap: 8px;
   align-items: center;
 }
 
@@ -1719,6 +1722,14 @@ a:hover {
   font-size: 18px;
   color: var(--ink-3);
   padding: 4px 8px;
+  min-width: 36px;
+  min-height: 36px;
+}
+@media (pointer: coarse) {
+  .modal__close {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* ---------- Auth modal ---------- */

@@ -94,7 +94,7 @@ function Toast({ message, type, onClose }) {
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon">{shownIsError ? '⚠️' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
       {shownIsError && (
         <button
@@ -278,6 +278,8 @@ function DialogHost() {
   const [req, setReq] = React.useState(_dialogReq);
   const [value, setValue] = React.useState("");
   const inputRef = React.useRef(null);
+  const triggerRef = React.useRef(null);
+  const trapRef = React.useRef(null);
 
   React.useEffect(() => {
     const fn = (r) => { setReq(r); if (r && r.kind === "prompt") setValue(r.defaultValue || ""); };
@@ -287,14 +289,52 @@ function DialogHost() {
     return () => { _dialogListeners.delete(fn); };
   }, []);
 
-  // Focus + select the prompt input when a prompt opens so a typed default
-  // (e.g. a name to override) can be replaced immediately.
-  React.useEffect(() => {
-    if (req && req.kind === "prompt" && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
+  // Modal focus management (WCAG 2.4.3 / ARIA APG dialog) via a callback ref on
+  // the dialog node — fires synchronously on mount (open) and unmount (close),
+  // which is more reliable here than a [req] effect. On open: remember the
+  // trigger, move focus into the dialog (prompt → input; confirm → the dialog
+  // container, so no button is "armed" for an accidental Enter), trap Tab, and
+  // lock background scroll. On close: tear all that down and restore focus to
+  // the trigger. NB: DialogHost renders *inside* #root, so we must NOT set
+  // `inert` on #root (it would disable the dialog itself) — the focus trap plus
+  // aria-modal carry the background-isolation contract instead.
+  const dialogRefCb = React.useCallback((node) => {
+    if (node) {
+      triggerRef.current = document.activeElement;
+      document.body.style.overflow = "hidden";
+      const onKeyDown = (e) => {
+        if (e.key !== "Tab") return;
+        const f = [...node.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+          .filter((el) => !el.disabled && el.offsetParent !== null);
+        if (f.length === 0) { e.preventDefault(); return; }
+        const first = f[0], last = f[f.length - 1], active = document.activeElement;
+        if (e.shiftKey && (active === first || active === node)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      };
+      document.addEventListener("keydown", onKeyDown, true);
+      // Move focus into the dialog on a 0ms timer: focusing synchronously
+      // during the commit phase gets reset afterwards, and rAF doesn't fire in
+      // non-painting/headless contexts — setTimeout(0) defers past commit and
+      // still fires. Prompt → input (focus+select the default); confirm → the
+      // first real focusable (the close "×", whose Enter is a safe cancel),
+      // since a tabindex=-1 container doesn't reliably take programmatic focus.
+      const focusTimer = setTimeout(() => {
+        if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+        else { (node.querySelector("button") || node).focus(); }
+      }, 0);
+      trapRef.current = { onKeyDown, focusTimer };
+    } else {
+      const t = trapRef.current;
+      if (t) {
+        clearTimeout(t.focusTimer);
+        document.removeEventListener("keydown", t.onKeyDown, true);
+        document.body.style.overflow = "";
+        trapRef.current = null;
+      }
+      const trig = triggerRef.current;
+      if (trig && typeof trig.focus === "function" && document.contains(trig)) trig.focus();
     }
-  }, [req]);
+  }, []);
 
   const close = (result) => {
     const r = req;
@@ -312,7 +352,7 @@ function DialogHost() {
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={req.title} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>
           <button className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>

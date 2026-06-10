@@ -215,7 +215,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     const ref = fieldRefs[field];
     if (ref && ref.current) {
       try { ref.current.focus({ preventScroll: true }); } catch (_e) { ref.current.focus(); }
-      ref.current.scrollIntoView({ block: "center", behavior: "smooth" });
+      // Respect reduced-motion: smooth scroll is motion the user may have opted out of.
+      const reduce = typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      ref.current.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
     }
     return false;
   };
@@ -420,11 +423,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             aria-expanded={publicOpen}
             onClick={() => setPublicOpen((o) => !o)}
           >
-            <span className="disclosure__chevron" aria-hidden="true">▸</span>
             <span className="disclosure__text">
               <span className="card__title">Public information</span>
               <span className="card__sub">Shown to attendees on the public tournament page.{!publicOpen && hasPublicInfo ? " Configured." : ""}</span>
             </span>
+            <span className="disclosure__toggle" aria-hidden="true">{publicOpen ? "−" : "+"}</span>
           </button>
           {publicOpen && (
           <div style={{ marginTop: 16 }}>
@@ -503,14 +506,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div className="card__head"><div className="card__title">Access &amp; security</div></div>
           {locked ? (
             <div className="field">
-              <label className="field__label">Admin Password</label>
+              <label className="field__label">Admin password</label>
               <div className="field__hint" style={{ marginTop: 4 }}>
                 This server is in locked mode. The admin password comes from <code>TOURNAMENT_PASSWORD_HASH</code> and can only be rotated by restarting the server with a new hash.
               </div>
             </div>
           ) : (
             <div className="field">
-              <label className="field__label">Admin Password</label>
+              <label className="field__label">Admin password</label>
               <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
             </div>
@@ -575,8 +578,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           {/* mp-sspn: make the split persistence model explicit so the single */}
           {/* Save button's scope isn't a guess. */}
           <div className="edit-actions__note">
-            Saves tournament details, ceremony blocks, public info, branding colours and the admin password.
-            The logo, sponsors and destructive-ops password save on their own buttons.
+            Saves the tournament details, schedule blocks, public information, branding colors, and admin password.
+            The logo, sponsors, and destructive-ops password save on their own buttons.
           </div>
           <div className="edit-actions__buttons">
             {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}

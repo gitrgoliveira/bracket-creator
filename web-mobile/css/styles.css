@@ -6701,11 +6701,14 @@ button.pool-match-row {
 }
 
 /* Disclosure header (mp-sspn) — a card__head that toggles a collapsible
-   section. Full-width reset button so the whole header row is the hit target. */
+   section. Matches the existing CourtPacePanel convention (card__title flex
+   row with a +/− indicator on the right), but uses a real <button> so
+   keyboard activation and semantics come for free. Full-width hit target. */
 .disclosure {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 12px;
   width: 100%;
   padding: 0;
   background: none;
@@ -6715,21 +6718,19 @@ button.pool-match-row {
   color: inherit;
   font: inherit;
 }
-.disclosure__chevron {
-  flex-shrink: 0;
-  margin-top: 2px;
-  color: var(--ink-3);
-  transition: transform 150ms ease;
-}
-.disclosure[aria-expanded="true"] .disclosure__chevron { transform: rotate(90deg); }
 .disclosure__text { display: flex; flex-direction: column; gap: 2px; }
+.disclosure__toggle {
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink-3);
+}
+.disclosure:hover .disclosure__toggle { color: var(--ink-2); }
 .disclosure:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: var(--r-sm);
-}
-@media (prefers-reduced-motion: reduce) {
-  .disclosure__chevron { transition: none; }
 }
 
 /* ---------- Branding section (mp-scf) — accent header band ----------

@@ -241,6 +241,64 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     expect(text).not.toContain('1st');
     expect(text).not.toContain('2nd');
   });
+
+  // A pool whose standings exist but are all 0-0-0 (no bout decided yet) must
+  // NOT show rank badges or the green "advancing" highlight — the rank is just
+  // the seed/draw fallback and asserting placement/qualification pre-scoring is
+  // misleading. Provisional ranks appear only once a result exists.
+  it('suppresses rank badges + advancing highlight until the pool has a result', () => {
+    const zeroStandings = {
+      'Pool A': [
+        { player: { name: 'P1', dojo: 'Dojo1' }, rank: 1, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P2', dojo: 'Dojo2' }, rank: 2, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P3', dojo: 'Dojo3' }, rank: 3, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P4', dojo: 'Dojo4' }, rank: 4, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings: zeroStandings, poolMatches: [], tweaks, competition: baseComp,
+    });
+    const advancingRows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    const rankBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.split(' ').includes('rank-badge');
+    });
+    expect(advancingRows).toHaveLength(0);
+    expect(rankBadges).toHaveLength(0);
+    // The standings rows themselves still render (with their 0 stats).
+    const text = collectText(tree);
+    expect(text).toContain('P1');
+    expect(text).toContain('P4');
+  });
+
+  // Counterpart: once a single bout is decided (any non-zero W/L/D in
+  // standings), provisional ranks + advancing highlight come back.
+  it('shows rank badges + advancing once any standing has a result', () => {
+    const partialStandings = {
+      'Pool A': [
+        { player: { name: 'P1', dojo: 'Dojo1' }, rank: 1, wins: 1, losses: 0, draws: 0, ipponsGiven: 1, ipponsTaken: 0 },
+        { player: { name: 'P2', dojo: 'Dojo2' }, rank: 2, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P3', dojo: 'Dojo3' }, rank: 3, wins: 0, losses: 1, draws: 0, ipponsGiven: 0, ipponsTaken: 1 },
+        { player: { name: 'P4', dojo: 'Dojo4' }, rank: 4, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings: partialStandings, poolMatches: [], tweaks, competition: baseComp,
+    });
+    const rankBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.split(' ').includes('rank-badge');
+    });
+    const advancingRows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    expect(rankBadges).toHaveLength(4);
+    expect(advancingRows).toHaveLength(2);
+  });
 });
 
 // ------------------------------------------------------------------
@@ -446,5 +504,35 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 3 });
     const text = collectText(tree);
     expect(text).toContain('M–·');
+  });
+
+  // Proposal 1: the visible Shiro/Aka text badge was dropped (the hatched/red
+  // side fill encodes side); the label survives only as an sr-only span so
+  // assistive tech still announces it, and names no longer ellipsis-clip.
+  it('encodes side via sr-only labels, not visible cbadge text badges', () => {
+    const m = {
+      id: 'Pool A-0',
+      sideA: { name: 'Aaron Thompson' },
+      sideB: { name: 'Jane Austen' },
+      status: 'scheduled',
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+
+    const hasClass = (cls) => (n) =>
+      typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls);
+
+    // No visible chip badges remain.
+    expect(findAll(tree, hasClass('cbadge'))).toHaveLength(0);
+
+    // Both side labels survive as sr-only spans, in Shiro/Aka order.
+    const srLabels = findAll(tree, hasClass('sr-only')).map(collectText);
+    expect(srLabels).toEqual(['Shiro: ', 'Aka: ']);
+
+    // Names render in full (no truncation markup couples to the assertion;
+    // both competitor names are present in the tree text).
+    const text = collectText(tree);
+    expect(text).toContain('Jane Austen');
+    expect(text).toContain('Aaron Thompson');
   });
 });

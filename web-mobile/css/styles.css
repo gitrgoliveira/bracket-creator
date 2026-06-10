@@ -506,6 +506,10 @@ a:hover {
   box-shadow: none;
 }
 
+.card--sm {
+  padding: 14px;
+}
+
 .card__head {
   display: flex;
   align-items: center;
@@ -1435,31 +1439,26 @@ a:hover {
 .pool-match-numbered-row__name {
   font-weight: 600;
   font-size: 12px;
-  white-space: nowrap;
+  line-height: 1.2;
+  /* Wrap rather than ellipsis: the side cell is narrow and the Shiro/Aka
+     text badge was dropped (the hatched/red fill already encodes side), so
+     the name now owns the full cell width and may wrap to a second line. */
+  overflow-wrap: anywhere;
+}
+
+/* Screen-reader-only utility: visually hidden, still announced. Used to keep
+   the Shiro/Aka side label for assistive tech after the visible badge was
+   removed from the numbered pool match row. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cbadge {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 2px 5px;
-  border-radius: 3px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.cbadge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
-.cbadge--aka {
-  background: var(--red, #c1121f);
-  color: #fff;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .pool-match-numbered-row__score {
@@ -1649,11 +1648,13 @@ a:hover {
   position: fixed;
   inset: 0;
   background: rgba(15, 20, 35, 0.55);
-  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   z-index: 100;
   padding: 20px;
+}
+@supports (backdrop-filter: blur(2px)) {
+  .modal-backdrop { backdrop-filter: blur(2px); }
 }
 
 .modal {
@@ -2158,6 +2159,12 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+}
+
+.viewer__admin-pill:hover {
+  border-color: var(--ink-4);
+  color: var(--ink);
 }
 
 .viewer__tabs {
@@ -2200,6 +2207,16 @@ a:hover {
 .viewer__body {
   padding: 14px 16px 80px;
   flex: 1;
+}
+
+.viewer__court-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.viewer__court-filter .input {
+  width: auto;
 }
 
 /* My match card (player viewer hero) */
@@ -2280,6 +2297,12 @@ button.my-match__opp {
   border: none;
   text-align: left;
   cursor: pointer;
+  color: inherit;
+}
+
+/* Anchor vlist rows — remove browser default underline */
+a.vlist-item {
+  text-decoration: none;
 }
 
 .my-match__opp .l {
@@ -2391,6 +2414,7 @@ button.my-match__opp {
   background: var(--white-side);
   background-image: repeating-linear-gradient(
     -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+  text-align: right;
 }
 .vsched-item__side:has(.vsched-item__color-badge--aka) {
   background: var(--red-soft);
@@ -2427,6 +2451,216 @@ button.my-match__opp {
 .vsched-item__score {
   font-family: var(--font-mono);
   font-weight: 700;
+}
+
+/* Button vsched-item: .vsched-item defines bg + border via CSS; just reset default
+   browser button appearance without clobbering those values. */
+button.vsched-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+button.vsched-item:not([data-clickable]) {
+  cursor: default;
+}
+
+/* Queue position chip — flex-pushed to the right of vsched-item__head */
+.vsched-item__queue {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+.vsched-item__queue--next {
+  color: var(--accent);
+}
+
+/* Final / status label — pushed right when queue chip is absent */
+.vsched-item__status {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+/* Running "● NOW" label inside head row pushed right automatically */
+.vsched-item__head .bc-live {
+  margin-left: auto;
+}
+
+/* HANTEI badge */
+.vsched-item__hantei {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-soft, #eef);
+  color: var(--accent, #36c);
+}
+
+/* Winner badge — flat accent, no gradient */
+.winner-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.winner-badge--lg {
+  padding: 14px 18px;
+  font-size: 18px;
+}
+.winner-badge__icon {
+  font-size: 22px;
+}
+.winner-badge--lg .winner-badge__icon {
+  font-size: 28px;
+}
+
+/* MyMatchPanel: "Following: Name [Clear]" header row */
+.my-match__follow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.my-match__follow-lbl {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.my-match__follow-name {
+  font-weight: 600;
+}
+.my-match__follow-row .tag-badge {
+  font-size: 9px;
+}
+.my-match__follow-row .btn--clear-follow {
+  margin-left: auto;
+}
+
+/* Viewer filter bar — active-player/watchlist indicator */
+.viewer-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-soft, #eef);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.viewer-filter-bar__icon {
+  color: var(--accent, #36c);
+}
+
+/* Section-title with inline live dot */
+.section-title--live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* WatchlistPanel dojo bulk-add row */
+.watchlist-dojo-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.watchlist-dojo-row__label {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row__feedback {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row .input {
+  font-size: 13px;
+  padding: 4px 8px;
+}
+.watchlist-count {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* DisplayModes details/summary */
+.viewer-display-modes {
+  margin-top: 20px;
+}
+.viewer-display-modes > summary {
+  cursor: pointer;
+}
+.viewer-display-modes__row-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.viewer-display-modes__link {
+  color: var(--text-link, #2563eb);
+  text-decoration: none;
+}
+.viewer-display-modes__sep {
+  color: var(--ink-3);
+  margin-left: 8px;
+}
+
+/* Bracket full-bleed container inside viewer body */
+.viewer-bracket-bleed {
+  margin-left: -16px;
+  margin-right: -16px;
+}
+@media (min-width: 768px) {
+  .viewer-bracket-bleed {
+    margin-left: -20px;
+    margin-right: -20px;
+  }
+}
+@media (min-width: 1024px) {
+  .viewer-bracket-bleed {
+    margin-left: -28px;
+    margin-right: -28px;
+  }
+}
+
+/* Competition list item layout */
+.comp-item {
+  position: relative;
+}
+.comp-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.comp-item__body {
+  min-width: 0;
+}
+
+/* Live count indicator in competition progress row */
+.bc-live-count {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* PoolMatchRow as button — do NOT set display here; the base .pool-match-row
+   rule (display:grid) has lower specificity and would be overridden. Clear UA
+   button chrome per-side so the class's border-bottom still applies. */
+button.pool-match-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  color: inherit;
 }
 
 /* tournament index list */
@@ -2507,7 +2741,8 @@ button.my-match__opp {
 /* Tournament info card (mp-ef3) — public event details */
 .tournament-info {
   background: var(--accent-soft);
-  border-left: 3px solid var(--accent);
+  border: 1px solid rgba(29, 53, 87, 0.22); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
   border-radius: var(--r-lg);
   padding: 14px 16px;
   margin-bottom: 14px;
@@ -2586,9 +2821,24 @@ button.my-match__opp {
   gap: 6px;
 }
 
+.hero-live__vsched {
+  margin-top: 8px;
+}
+
+/* "Up next" section title gets extra top breathing room */
+.viewer__upnext-title {
+  margin-top: 20px;
+}
+
+/* Glossary vlist extra top gap */
+.viewer__glossary-vlist {
+  margin-top: 12px;
+}
+
 /* Competition list cards (viewer home) */
 .vlist-item--comp {
   gap: 10px;
+  width: 100%;
 }
 
 .vlist-item__eyebrow {
@@ -2698,7 +2948,7 @@ button.my-match__opp {
 }
 
 .podium-step--1 {
-  background: linear-gradient(180deg, #fef9c3 0%, #fde68a 100%);
+  background: #fef9c3;
   border-color: #fde68a;
   min-height: 150px;
   min-width: 150px;
@@ -2706,15 +2956,15 @@ button.my-match__opp {
 }
 
 .podium-step--2 {
-  background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
-  border-color: #e2e8f0;
+  background: var(--surface);
+  border-color: var(--line);
   min-height: 130px;
   order: 1;
 }
 
 .podium-step--3 {
-  background: linear-gradient(180deg, #fed7aa 0%, #fdba74 100%);
-  border-color: #fdba74;
+  background: #fff7ed;
+  border-color: #fed7aa;
   min-height: 110px;
   order: 3;
 }
@@ -2739,9 +2989,10 @@ button.my-match__opp {
 }
 
 /* mp-8jbo: champion-hero awards podium layout */
-/* Hero card — 1st place champion, full width gold gradient */
+/* Hero card — 1st place champion, full width gold solid */
 .awards-hero {
-  background: linear-gradient(135deg, #fef0b8, #f3cf5e);
+  background: #fef9c3;
+  border: 2px solid #fcd34d;
   border-radius: 14px;
   padding: 18px 16px;
   text-align: center;
@@ -3070,6 +3321,7 @@ button.my-match__opp {
   position: relative;
   flex: 1;
   min-width: 220px;
+  margin-bottom: 8px;
 }
 
 .pmf__bar {
@@ -3083,6 +3335,13 @@ button.my-match__opp {
   padding: 6px 8px;
   min-height: 36px;
   cursor: text;
+}
+
+/* Standalone bar (WatchlistPanel) — outside a .pmf wrapper, owns its spacing.
+   Inside .pmf the wrapper's margin-bottom spaces the block; a bar margin there
+   would inflate .pmf and push the absolutely-anchored .pmf__dropdown away. */
+.pmf__bar--standalone {
+  margin-bottom: 8px;
 }
 
 .pmf__bar:focus-within {
@@ -6046,12 +6305,11 @@ button.my-match__opp {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: linear-gradient(135deg, #1a4f8a 0%, #2563eb 100%);
-  color: #ffffff;
+  background: var(--accent);
+  color: var(--accent-fg);
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
   animation: match-alert-slide-in 0.25s ease-out;
 }
 
@@ -6285,4 +6543,118 @@ button.my-match__opp {
   padding: 16px 0;
   margin-top: 32px;
 }
+
+/* ---------- Pool standings draw-pos default (replaces inline styles) ---------- */
+.pool-standings__draw-pos {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+.pool-standings__draw-pos--override {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- Pool table empty-state row ---------- */
+.pool__table-empty {
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 13px;
+  padding: 16px;
+}
+
+/* ---------- Section-title modifiers ---------- */
+.section-title--flush { margin-top: 0; }
+.section-title--inrow { margin-top: 0; display: flex; align-items: center; gap: 8px; }
+/* Slightly smaller sub-section label with top spacing */
+.section-title--sub { margin-top: 14px; font-size: 13px; }
+
+/* ---------- Hint text utilities (inline note, muted) ---------- */
+.hint    { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
+.hint--sm { font-size: 11px; color: var(--ink-3); }
+.hint--md { font-size: 13px; color: var(--ink-3); }
+
+/* ---------- Pool table cell classes (replaces inline styles) ---------- */
+.pool__match-count { font-size: 12px; color: var(--ink-3); }
+.pool__player-name { font-weight: 500; }
+.pool__dojo-name   { font-size: 11px; color: var(--ink-3); }
+
+/* ---------- Mymatch / watchlist card spacing ---------- */
+.mymatch-card { margin-bottom: 16px; }
+
+/* ---------- Checked-in tick in watchlist chips ---------- */
+.pmf__chip-tick { margin-left: 4px; font-size: 10px; }
+
+/* ---------- Awards view header (replaces inline styles) ---------- */
+.awards__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.awards__title { margin: 0; font-size: 18px; }
+.awards__title--fs { font-size: 28px; }
+.awards__subtitle { font-size: 12px; color: var(--ink-3); }
+.awards__subtitle--fs { font-size: 16px; }
+
+/* ---------- SSE offline banner ---------- */
+.sse-offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f2e2e4; /* fallback — approximate red-10% over bg */
+  background: color-mix(in oklch, var(--red) 10%, var(--bg));
+  border: 1px solid rgba(193, 18, 31, 0.35); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--red) 35%, transparent);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+.sse-offline-banner__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+}
+
+/* ---------- Pending deep-link follow confirmation banner ---------- */
+.pending-follow-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pending-follow-banner__label {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.pending-follow-banner__name {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Vlist row with inline padding override */
+.vlist-item--row-padded { padding: 0 12px 12px; }
+/* Non-interactive vlist row — no hover cursor */
+.vlist-item--static { cursor: default; }
+
+/* ---------- PMF / player-filter utilities ---------- */
+.pmf__checkin-tag { margin-left: 8px; font-size: 9px; }
+
+/* ---------- Pool overview summary panel ---------- */
+.pool--overview-summary { padding: 14px; margin-bottom: 12px; }
+.pool__overflow-note { margin-top: 8px; }
+.pool__view-all-btn  { margin-top: 8px; font-size: 13px; padding: 0; }
 

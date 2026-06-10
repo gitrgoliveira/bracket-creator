@@ -95,45 +95,49 @@ describe('API elevated-password header (X-Admin-Password)', () => {
 });
 
 describe('promptAdminPassword', () => {
-  beforeEach(() => { setCachedAuthConfig(null); });
-  afterEach(() => { vi.restoreAllMocks(); setCachedAuthConfig(null); });
+  // promptAdminPassword is now async and collects the password via the shared
+  // window.promptDialog primitive (themed, masked input) instead of the native
+  // window.prompt. ui.jsx isn't imported here, so we install a window.promptDialog
+  // mock per test and assert against it.
+  beforeEach(() => { setCachedAuthConfig(null); window.promptDialog = vi.fn(); });
+  afterEach(() => { vi.restoreAllMocks(); setCachedAuthConfig(null); delete window.promptDialog; });
 
-  it('returns "" (no prompt) when the gate is inactive', () => {
+  it('returns "" (no dialog) when the gate is inactive', async () => {
     setCachedAuthConfig({ mode: 'file', elevatedRequired: false });
-    const spy = vi.spyOn(window, 'prompt');
-    expect(promptAdminPassword()).toBe('');
-    expect(spy).not.toHaveBeenCalled();
+    await expect(promptAdminPassword()).resolves.toBe('');
+    expect(window.promptDialog).not.toHaveBeenCalled();
   });
 
-  it('returns "" when authConfig is unset (loading / fail-open)', () => {
-    expect(promptAdminPassword()).toBe('');
+  it('returns "" when authConfig is unset (loading / fail-open)', async () => {
+    await expect(promptAdminPassword()).resolves.toBe('');
+    expect(window.promptDialog).not.toHaveBeenCalled();
   });
 
-  it('alerts and returns null when required but not configured (locked, env unset)', () => {
+  it('alerts and returns null when required but not configured (locked, env unset)', async () => {
     setCachedAuthConfig({ mode: 'locked', elevatedRequired: true, elevatedConfigured: false });
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
-    const promptSpy = vi.spyOn(window, 'prompt');
-    expect(promptAdminPassword()).toBeNull();
+    await expect(promptAdminPassword()).resolves.toBeNull();
     expect(alertSpy).toHaveBeenCalled();
-    expect(promptSpy).not.toHaveBeenCalled();
+    expect(window.promptDialog).not.toHaveBeenCalled();
   });
 
-  it('prompts and returns the typed password when required + configured', () => {
+  it('prompts and returns the typed password when required + configured', async () => {
     setCachedAuthConfig({ mode: 'file', elevatedRequired: true, elevatedConfigured: true });
-    vi.spyOn(window, 'prompt').mockReturnValue('typed-secret');
-    expect(promptAdminPassword()).toBe('typed-secret');
+    window.promptDialog.mockResolvedValue('typed-secret');
+    await expect(promptAdminPassword()).resolves.toBe('typed-secret');
+    expect(window.promptDialog).toHaveBeenCalledWith(expect.objectContaining({ password: true }));
   });
 
-  it('returns null when the operator cancels the prompt', () => {
+  it('returns null when the operator cancels the dialog', async () => {
     setCachedAuthConfig({ mode: 'file', elevatedRequired: true, elevatedConfigured: true });
-    vi.spyOn(window, 'prompt').mockReturnValue(null);
-    expect(promptAdminPassword()).toBeNull();
+    window.promptDialog.mockResolvedValue(null);
+    await expect(promptAdminPassword()).resolves.toBeNull();
   });
 
-  it('returns null on empty submit (empty is never a valid admin password)', () => {
+  it('returns null on empty submit (empty is never a valid admin password)', async () => {
     setCachedAuthConfig({ mode: 'file', elevatedRequired: true, elevatedConfigured: true });
-    vi.spyOn(window, 'prompt').mockReturnValue('');
-    expect(promptAdminPassword()).toBeNull();
+    window.promptDialog.mockResolvedValue('');
+    await expect(promptAdminPassword()).resolves.toBeNull();
   });
 
   it('cache is shared via window across import sites', () => {

@@ -22,6 +22,10 @@
 
 :root {
   --accent: #1d3557;
+  /* Darkened accent for filled-button hover (primary, active score button).
+     applyTheme() recomputes this from a runtime Branding accent so the hover
+     tracks the configured colour instead of a hard-coded navy (mp-nubo). */
+  --accent-strong: #16263f;
   --accent-soft: #e7eaf3;
   --accent-fg: #ffffff;
   --red: #c1121f;
@@ -371,11 +375,27 @@ a:hover {
   color: var(--ink);
   font-weight: 500;
   font-size: 13.5px;
-  transition: all 120ms;
+  /* Enumerate the animated properties — `all` also animated the focus
+     outline (it should snap in) and risks animating layout (mp-nubo P3). */
+  transition: background-color 120ms, border-color 120ms, color 120ms;
 }
 
 .btn:hover {
   border-color: var(--ink-4);
+}
+
+/* Pressed feedback — a 1px nudge reads as a press without color churn, and
+   is instant (transform isn't in the transition list) (mp-nubo P3). */
+.btn:active {
+  transform: translateY(1px);
+}
+
+/* Match the app's focus-visible convention (.score-btn / .input / .disclosure
+   all use a 2px accent ring); without this .btn fell back to the UA default
+   1px ring, which is low-contrast on the navy primary button (mp-nubo). */
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn--primary {
@@ -385,8 +405,8 @@ a:hover {
 }
 
 .btn--primary:hover {
-  background: #16263f;
-  border-color: #16263f;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .btn--danger {
@@ -463,8 +483,8 @@ a:hover {
 }
 
 .score-btn--active:hover {
-  background-color: #16263f;
-  border-color: #16263f;
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: var(--accent-fg);
 }
 
@@ -3297,6 +3317,11 @@ button.pool-match-row {
 }
 
 @media (pointer: coarse) {
+  /* Touch devices: meet the 44px target on every button. Desktop (fine
+     pointer) keeps the denser 34px so admin tables stay compact (mp-nubo). */
+  .btn {
+    min-height: 44px;
+  }
   .btn--icon-sm {
     min-width: 44px;
     min-height: 44px;

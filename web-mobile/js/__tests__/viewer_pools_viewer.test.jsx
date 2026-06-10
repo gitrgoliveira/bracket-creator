@@ -241,6 +241,64 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     expect(text).not.toContain('1st');
     expect(text).not.toContain('2nd');
   });
+
+  // A pool whose standings exist but are all 0-0-0 (no bout decided yet) must
+  // NOT show rank badges or the green "advancing" highlight — the rank is just
+  // the seed/draw fallback and asserting placement/qualification pre-scoring is
+  // misleading. Provisional ranks appear only once a result exists.
+  it('suppresses rank badges + advancing highlight until the pool has a result', () => {
+    const zeroStandings = {
+      'Pool A': [
+        { player: { name: 'P1', dojo: 'Dojo1' }, rank: 1, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P2', dojo: 'Dojo2' }, rank: 2, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P3', dojo: 'Dojo3' }, rank: 3, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P4', dojo: 'Dojo4' }, rank: 4, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings: zeroStandings, poolMatches: [], tweaks, competition: baseComp,
+    });
+    const advancingRows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    const rankBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.split(' ').includes('rank-badge');
+    });
+    expect(advancingRows).toHaveLength(0);
+    expect(rankBadges).toHaveLength(0);
+    // The standings rows themselves still render (with their 0 stats).
+    const text = collectText(tree);
+    expect(text).toContain('P1');
+    expect(text).toContain('P4');
+  });
+
+  // Counterpart: once a single bout is decided (any non-zero W/L/D in
+  // standings), provisional ranks + advancing highlight come back.
+  it('shows rank badges + advancing once any standing has a result', () => {
+    const partialStandings = {
+      'Pool A': [
+        { player: { name: 'P1', dojo: 'Dojo1' }, rank: 1, wins: 1, losses: 0, draws: 0, ipponsGiven: 1, ipponsTaken: 0 },
+        { player: { name: 'P2', dojo: 'Dojo2' }, rank: 2, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+        { player: { name: 'P3', dojo: 'Dojo3' }, rank: 3, wins: 0, losses: 1, draws: 0, ipponsGiven: 0, ipponsTaken: 1 },
+        { player: { name: 'P4', dojo: 'Dojo4' }, rank: 4, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings: partialStandings, poolMatches: [], tweaks, competition: baseComp,
+    });
+    const rankBadges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.split(' ').includes('rank-badge');
+    });
+    const advancingRows = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
+    });
+    expect(rankBadges).toHaveLength(4);
+    expect(advancingRows).toHaveLength(2);
+  });
 });
 
 // ------------------------------------------------------------------

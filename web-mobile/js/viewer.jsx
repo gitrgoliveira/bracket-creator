@@ -2512,6 +2512,18 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
           });
         }
 
+        // A pool has nothing to rank until at least one bout is decided: every
+        // competitor is tied at 0 and the backend rank is merely the seed/draw
+        // fallback. Suppress rank badges + the "advancing" qualification
+        // highlight until a result exists; provisional ranks then appear and
+        // update live as more bouts finish. W/L/D cover both individual and
+        // team standings (any decided encounter bumps one of them). Leagues are
+        // always rank-ordered, so this gate is applied only to the non-league
+        // pool badge/highlight below.
+        const poolHasResults = !!poolStandings && poolStandings.some(
+          (s) => (s.wins || 0) + (s.losses || 0) + (s.draws || 0) > 0
+        );
+
         // Determine which players to iterate.
         // - League: standings already arrive in rank order; use them so the table is
         //   rank-first (pool.players is not meaningful for leagues and may be empty).
@@ -2550,7 +2562,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const isAdvancing = !isLeague && rank !== null && rank <= poolWinners;
+                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolWinners;
 
                   const rowClasses = [
                     isFollowedPlayer(p, highlightPlayer) ? "pool__row--me" : "",
@@ -2581,7 +2593,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                               draw-position column. League standings are rank-sorted,
                               so "#" already equals the rank and a badge would just
                               duplicate it — suppress it there. */}
-                          {!isLeague && rank !== null ? (
+                          {!isLeague && poolHasResults && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

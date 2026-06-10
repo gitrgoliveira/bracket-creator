@@ -312,6 +312,11 @@ function DialogHost() {
   const dialogRefCb = React.useCallback((node) => {
     if (node) {
       triggerRef.current = document.activeElement;
+      // Save the baseline inline overflow so close restores EXACTLY it, rather
+      // than blindly clearing to "" (which would clobber a pre-existing inline
+      // value). DialogHost is the only body-overflow manager, and the callback
+      // ref guarantees a paired open/close, so this can't get stuck-locked.
+      const prevOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       const onKeyDown = (e) => {
         if (e.key !== "Tab") return;
@@ -333,13 +338,13 @@ function DialogHost() {
         if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
         else { (node.querySelector("button") || node).focus(); }
       }, 0);
-      trapRef.current = { onKeyDown, focusTimer };
+      trapRef.current = { onKeyDown, focusTimer, prevOverflow };
     } else {
       const t = trapRef.current;
       if (t) {
         clearTimeout(t.focusTimer);
         document.removeEventListener("keydown", t.onKeyDown, true);
-        document.body.style.overflow = "";
+        document.body.style.overflow = t.prevOverflow;
         trapRef.current = null;
       }
       const trig = triggerRef.current;

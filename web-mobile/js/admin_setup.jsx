@@ -1101,7 +1101,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page">
         <Breadcrumbs items={[{ label: tournament?.name || "Tournament", onClick: onBack }, { label: "Import competitions" }]} />
-        <h2 style={{ margin: "0 0 16px" }}>Import competitions</h2>
+        <div className="page-head"><h1 className="page-head__title">Import competitions</h1></div>
 
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card__title">Select files</div>

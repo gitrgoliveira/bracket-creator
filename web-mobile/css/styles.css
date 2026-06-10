@@ -50,6 +50,12 @@
   --bg-2: #f1f5f9;
   --surface-2: #f1f5f9;
 
+  /* Heading type scale (mp-p1tw) — one size per heading role so components
+     stop inventing their own. page title / card-or-section title / overline. */
+  --fs-title-page: 26px;
+  --fs-title-card: 14px;
+  --fs-overline: 11px;
+
   --r-sm: 6px;
   --r: 10px;
   --r-lg: 14px;
@@ -318,7 +324,7 @@ a:hover {
 }
 
 .page-head__title {
-  font-size: 26px;
+  font-size: var(--fs-title-page);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
@@ -539,8 +545,18 @@ a:hover {
 
 .card__title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-title-card);
   letter-spacing: -0.01em;
+}
+
+/* Overline / eyebrow utility (mp-p1tw) — replaces ~10 hand-rolled inline
+   copies that drifted across 10.5/11/12px and 0.06/0.08/0.1em. */
+.overline {
+  font-size: var(--fs-overline);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
 }
 
 .card__sub {
@@ -6765,7 +6781,9 @@ button.pool-match-row {
    wrapper so the brand-identity section reads as its own surface. */
 .branding { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .branding__head { padding: 20px 28px; background: var(--accent-soft); }
-.branding__title { font-size: 17px; font-weight: 700; margin: 0 0 5px; color: var(--accent); }
+/* Folded into the card-title scale (mp-p1tw); brand emphasis is carried by
+   the accent colour + tinted band, not by an outsized heading. */
+.branding__title { font-size: var(--fs-title-card); font-weight: 600; letter-spacing: -0.01em; margin: 0 0 5px; color: var(--accent); }
 .branding__hint { font-size: 13px; margin: 0; line-height: 1.45; color: var(--ink-2); }
 .branding__body { padding: 20px 28px 24px; }
 .branding__body .field { margin-bottom: 16px; }

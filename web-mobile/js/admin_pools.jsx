@@ -520,7 +520,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               </table>
               {pm.length > 0 && (
                 <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 6 }}>Matches</div>
+                  <div className="overline" style={{ marginBottom: 6 }}>Matches</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {pm.map(m => (
                       // Fixed grid columns keep the names from reflowing when a

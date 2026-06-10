@@ -48,11 +48,13 @@ const TOAST_SUCCESS_DWELL_MS = 2700;
 const TOAST_ERROR_DWELL_MS = 8000;
 
 // Toast renders a single visible slot. The host (app.jsx) keeps one toast in
-// state and re-mounts <Toast> with new props on each showToast call, so the
-// component holds its OWN copy of the message/type and ignores a parent prop
-// change that would overwrite a still-visible ERROR with a later non-error
-// toast. This protects ops-critical failures from being silently replaced by
-// a routine success, without requiring the host to track dwell windows.
+// state and RE-RENDERS the same <Toast> instance with new props on each
+// showToast call (no changing key, so it is not remounted). Toast latches the
+// payload it is currently showing in its OWN `shown` state and ignores a
+// parent prop change that would overwrite a still-visible ERROR with a later
+// non-error toast. This protects ops-critical failures from being silently
+// replaced by a routine success, without requiring the host to track dwell
+// windows.
 //
 //  - success/info: role=status + aria-live=polite, short auto-dismiss.
 //  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual

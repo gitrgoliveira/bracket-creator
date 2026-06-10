@@ -6771,3 +6771,16 @@ button.pool-match-row {
   font-size: 14px;
   color: var(--ink-2);
 }
+
+/* confirmDialog()/promptDialog() — shared modal primitive (ui.jsx DialogHost).
+   Reuses .modal-backdrop/.modal/.modal__* ; only the message + prompt input
+   need their own rules. */
+.dialog-msg {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.dialog-prompt-input {
+  width: 100%;
+  margin-top: 12px;
+}

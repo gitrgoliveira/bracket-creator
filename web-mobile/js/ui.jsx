@@ -213,6 +213,126 @@ function formatLabelShort(format) {
   return "KO";
 }
 
+// --- Imperative dialog primitive ------------------------------------------
+// confirmDialog(opts)/promptDialog(opts) return a Promise resolved by the
+// user's choice, backed by a single <DialogHost/> mounted once at the app
+// root. They replace native window.confirm/window.prompt across the admin
+// SPA so destructive/elevated prompts use the app's themed, accessible modal
+// (Escape to cancel, focus management, consistent styling) instead of browser
+// chrome that can't be styled, labelled, or (for prompt) mask a password.
+//
+// Contract preserved from the natives they replace:
+//   confirmDialog  → resolves true on confirm, false on cancel/Escape/backdrop.
+//   promptDialog   → resolves the typed string on OK, or null on cancel/Escape/
+//                    backdrop (an empty submit resolves null, matching the old
+//                    `pw ? pw : null` callers).
+let _dialogReq = null; // the active request, or null
+const _dialogListeners = new Set();
+function _setDialogReq(req) {
+  _dialogReq = req;
+  _dialogListeners.forEach((fn) => fn(_dialogReq));
+}
+
+function confirmDialog(opts = {}) {
+  const o = typeof opts === "string" ? { message: opts } : (opts || {});
+  return new Promise((resolve) => {
+    _setDialogReq({
+      kind: "confirm",
+      title: o.title || "Please confirm",
+      message: o.message || "",
+      confirmLabel: o.confirmLabel || "Confirm",
+      cancelLabel: o.cancelLabel || "Cancel",
+      danger: !!o.danger,
+      _resolve: resolve,
+    });
+  });
+}
+
+function promptDialog(opts = {}) {
+  const o = typeof opts === "string" ? { message: opts } : (opts || {});
+  return new Promise((resolve) => {
+    _setDialogReq({
+      kind: "prompt",
+      title: o.title || "Enter a value",
+      message: o.message || "",
+      defaultValue: o.defaultValue != null ? String(o.defaultValue) : "",
+      placeholder: o.placeholder || "",
+      password: !!o.password,
+      confirmLabel: o.confirmLabel || "OK",
+      cancelLabel: o.cancelLabel || "Cancel",
+      _resolve: resolve,
+    });
+  });
+}
+
+// Mounted once (app root). Renders the active request and resolves its promise.
+// Idle state renders null so it costs nothing when no dialog is open.
+function DialogHost() {
+  const [req, setReq] = React.useState(_dialogReq);
+  const [value, setValue] = React.useState("");
+  const inputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    const fn = (r) => { setReq(r); if (r && r.kind === "prompt") setValue(r.defaultValue || ""); };
+    _dialogListeners.add(fn);
+    // Pick up a request created before this host finished mounting.
+    if (_dialogReq) fn(_dialogReq);
+    return () => { _dialogListeners.delete(fn); };
+  }, []);
+
+  // Focus + select the prompt input when a prompt opens so a typed default
+  // (e.g. a name to override) can be replaced immediately.
+  React.useEffect(() => {
+    if (req && req.kind === "prompt" && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [req]);
+
+  const close = (result) => {
+    const r = req;
+    setReq(null);
+    if (_dialogReq && _dialogReq._resolve === (r && r._resolve)) _dialogReq = null;
+    if (r && r._resolve) r._resolve(result);
+  };
+
+  const cancelResult = req ? (req.kind === "confirm" ? false : null) : false;
+  useEscapeToClose(req ? () => close(cancelResult) : undefined);
+
+  if (!req) return null;
+  const onCancel = () => close(cancelResult);
+  const onConfirm = () => close(req.kind === "confirm" ? true : (value || null));
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={req.title} onClick={(e) => e.stopPropagation()}>
+        <div className="modal__head">
+          <div className="modal__title">{req.title}</div>
+          <button className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>
+        </div>
+        <div className="modal__body">
+          {req.message && <p className="dialog-msg">{req.message}</p>}
+          {req.kind === "prompt" && (
+            <input
+              ref={inputRef}
+              className="input dialog-prompt-input"
+              type={req.password ? "password" : "text"}
+              value={value}
+              placeholder={req.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onConfirm(); } }}
+            />
+          )}
+        </div>
+        <div className="modal__foot">
+          <button className="btn btn--ghost" onClick={onCancel}>{req.cancelLabel}</button>
+          <button className={`btn ${req.danger ? "btn--danger" : "btn--primary"}`} onClick={onConfirm}>{req.confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Hook: register an Escape key listener that always calls the latest onClose
 // without re-registering on every render (listener registered once, ref kept fresh).
 function useEscapeToClose(onClose) {
@@ -247,7 +367,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -262,5 +382,8 @@ if (typeof window !== "undefined") {
   window.isInteractiveTarget = isInteractiveTarget;
   window.formatAdminHeaderSub = formatAdminHeaderSub;
   window.formatViewerHeaderEyebrow = formatViewerHeaderEyebrow;
+  window.confirmDialog = confirmDialog;
+  window.promptDialog = promptDialog;
+  window.DialogHost = DialogHost;
 }
 

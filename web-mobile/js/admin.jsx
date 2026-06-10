@@ -215,7 +215,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // inactive (proceed) and null when cancelled/not-configured (abort).
     let admin = "";
     if (next && next.players != null) {
-      admin = window.promptAdminPassword();
+      admin = await window.promptAdminPassword();
       if (admin === null) return;
     }
     let updated;

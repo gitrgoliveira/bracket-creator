@@ -352,6 +352,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
 
+  // Derive the tournament-level status from competition activity instead of
+  // trusting t.status, which can read "Pending" (setup) even while competitions
+  // are mid-pools — a contradiction next to the "Currently running" list below.
+  const allCompleted = comps.length > 0 && comps.every((c) => c.status === "completed");
+  const tournamentInProgress = running.length > 0;
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
@@ -360,7 +366,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{t.name}</h1>
-              <StatusBadge status={t.status} />
+              {tournamentInProgress
+                ? <span className="badge badge--pools">In progress</span>
+                : <StatusBadge status={allCompleted ? "completed" : "setup"} />}
             </div>
             <div className="page-head__sub">
               {formatAdminHeaderSub(
@@ -406,7 +414,11 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> Currently running
+            {/* Static dot, not dot--live: these are started competitions, which
+                is not the same as a match being live right now. The pulsing
+                live signal is reserved for actual live matches (topbar
+                live-strip + match rows) per DESIGN.md Principle 3. */}
+            <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
             {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}

@@ -1367,6 +1367,10 @@ window.fireNotification = fireNotification;
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <App />
+    {/* Single host for confirmDialog()/promptDialog() — sibling to App so it
+        is always mounted exactly once, on every screen (incl. the pre-auth
+        login screen's "Forgot password?" confirm). */}
+    <window.DialogHost />
   </ErrorBoundary>
 );
 

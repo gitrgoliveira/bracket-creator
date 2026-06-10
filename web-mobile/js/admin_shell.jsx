@@ -13,6 +13,7 @@ const compMatchStats = window.compMatchStats;
 const pluralize = window.pluralize;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 
@@ -134,7 +135,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           ></span>
           {connected ? "Live" : "Reconnecting…"}
         </span>
-        <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
+        <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {liveMatches.length > 0 && (
@@ -233,7 +234,7 @@ function AllWinnersModal({ comps, onClose }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 640, width: "95%" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="All winners">
         <div className="modal__head">
-          <div className="modal__title">🏅 All winners</div>
+          <div className="modal__title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="trophy" size={18} />All winners</div>
           <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -381,10 +382,10 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             </div>
           </div>
           <div className="page-head__actions">
-            <button className="btn" onClick={onAnnounce}>📣 Announce</button>
-            <button className="btn" onClick={() => setExportPdfOpen(true)}>🖨 Export PDFs</button>
+            <button className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
+            <button className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
             {comps.some(c => c.status === "completed") && (
-              <button className="btn" onClick={() => setAllWinnersOpen(true)}>🏅 All winners</button>
+              <button className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
             <button className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
@@ -403,11 +404,11 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         <div className="row" style={{ marginBottom: 24 }}>
           <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
-            <div className="card__title" style={{ marginBottom: 6 }}>🗓 Tournament schedule →</div>
+            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
             <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
           </button>
           <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
-            <div className="card__title" style={{ marginBottom: 6 }}>✎ Score editor →</div>
+            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
         </div>
@@ -434,7 +435,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
           <button className="tcard tcard--add" onClick={onOpenImport}>
-            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>📂</div>
+            <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Import competitions</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
@@ -723,7 +724,13 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);
-    } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      return;
+    }
+    // Every branch below indexes into `courts`; with no courts there's nothing
+    // to navigate or select, so bail before any `% courts.length` (÷0 → NaN) or
+    // `courts[activeIdx]` (undefined) can run.
+    if (!courts.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
       e.preventDefault();
       setActiveIdx((i) => (i + 1) % courts.length);
     } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {

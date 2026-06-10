@@ -882,7 +882,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const doImport = async () => {
     if (!files.length) return;
     if (!(await window.confirmDialog({ message: "Are you sure you want to import these competitions? This will add new competitions to the tournament.", confirmLabel: "Import competitions" }))) return;
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setLoading(true);
     setError(null);

@@ -519,7 +519,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setAddLoading(true);
     try {
@@ -551,7 +551,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const oldName = replaceTarget.name;
     const targetId = replaceTarget.id;
     const targetTag = replaceTarget.tag || "";
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setReplaceLoading(true);
     try {

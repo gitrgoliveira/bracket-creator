@@ -1615,7 +1615,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
             matches.forEach((m) => {
                 const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
             });
         });
     }
@@ -1627,11 +1627,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
-  }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
+  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize]);
 
   const [followedPlayer] = useFollowedPlayer();
   const [watchlist] = useWatchlist();
@@ -1800,7 +1800,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightPlayer={followedPlayer}
                     onMatchClick={(m, ri) => {
                       const label = window.roundLabel(ri, derivedBracket.rounds.length);
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
                 </div>

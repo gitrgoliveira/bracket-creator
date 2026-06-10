@@ -447,4 +447,34 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     const text = collectText(tree);
     expect(text).toContain('M–·');
   });
+
+  // Proposal 1: the visible Shiro/Aka text badge was dropped (the hatched/red
+  // side fill encodes side); the label survives only as an sr-only span so
+  // assistive tech still announces it, and names no longer ellipsis-clip.
+  it('encodes side via sr-only labels, not visible cbadge text badges', () => {
+    const m = {
+      id: 'Pool A-0',
+      sideA: { name: 'Aaron Thompson' },
+      sideB: { name: 'Jane Austen' },
+      status: 'scheduled',
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+
+    const hasClass = (cls) => (n) =>
+      typeof n.props?.className === 'string' && n.props.className.split(' ').includes(cls);
+
+    // No visible chip badges remain.
+    expect(findAll(tree, hasClass('cbadge'))).toHaveLength(0);
+
+    // Both side labels survive as sr-only spans, in Shiro/Aka order.
+    const srLabels = findAll(tree, hasClass('sr-only')).map(collectText);
+    expect(srLabels).toEqual(['Shiro: ', 'Aka: ']);
+
+    // Names render in full (no truncation markup couples to the assertion;
+    // both competitor names are present in the tree text).
+    const text = collectText(tree);
+    expect(text).toContain('Jane Austen');
+    expect(text).toContain('Aaron Thompson');
+  });
 });

@@ -2449,14 +2449,14 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
     <button type="button" className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} onClick={handleClick}>
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
-        <span className="cbadge cbadge--shiro">Shiro</span>
+        <span className="sr-only">Shiro: </span>
         <span className="pool-match-numbered-row__name">{bName || "—"}</span>
       </div>
       <span className="pool-match-numbered-row__score">
         {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-live" style={{ fontSize: 10 }}>●</span> : "–"}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
-        <span className="cbadge cbadge--aka">Aka</span>
+        <span className="sr-only">Aka: </span>
         <span className="pool-match-numbered-row__name">{aName || "—"}</span>
       </div>
     </button>

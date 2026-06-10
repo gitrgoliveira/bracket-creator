@@ -1439,31 +1439,26 @@ a:hover {
 .pool-match-numbered-row__name {
   font-weight: 600;
   font-size: 12px;
-  white-space: nowrap;
+  line-height: 1.2;
+  /* Wrap rather than ellipsis: the side cell is narrow and the Shiro/Aka
+     text badge was dropped (the hatched/red fill already encodes side), so
+     the name now owns the full cell width and may wrap to a second line. */
+  overflow-wrap: anywhere;
+}
+
+/* Screen-reader-only utility: visually hidden, still announced. Used to keep
+   the Shiro/Aka side label for assistive tech after the visible badge was
+   removed from the numbered pool match row. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cbadge {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 2px 5px;
-  border-radius: 3px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.cbadge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
-.cbadge--aka {
-  background: var(--red, #c1121f);
-  color: #fff;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .pool-match-numbered-row__score {

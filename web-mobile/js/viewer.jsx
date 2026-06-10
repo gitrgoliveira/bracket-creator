@@ -666,7 +666,7 @@ export function resolveDeepLink(searchString, roster, followedPlayer) {
   return { player: { id: hit.id, name: hit.name }, pending: !!alreadySet };
 }
 
-function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, connected = true }) {
+function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
   const t = tournament;
   const comps = t.competitions || [];
   const compsByDate = useMemo(() => {
@@ -787,7 +787,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
         <div className="viewer__body">
           {/* T063: SSE connection indicator — visible only when the live feed drops. */}
-          {!connected && (
+          {!sseConnected && (
             <div className="sse-offline-banner" role="status" aria-live="polite">
               <span className="sse-offline-banner__dot" aria-hidden="true" />
               Live feed reconnecting — scores may be outdated

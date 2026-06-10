@@ -916,7 +916,7 @@ function App() {
             setViewerScreen("register");
           }}
           onOpenResults={() => setViewerScreen("results")}
-          connected={sseConnected}
+          sseConnected={sseConnected}
         />
       )}
       {authPrompt && (

@@ -2655,11 +2655,17 @@ button.vsched-item:not([data-clickable]) {
 }
 
 /* PoolMatchRow as button — do NOT set display here; the base .pool-match-row
-   rule (display:grid) has lower specificity and would be overridden. */
+   rule (display:grid) has lower specificity and would be overridden. Clear UA
+   button chrome per-side so the class's border-bottom still applies. */
 button.pool-match-row {
   width: 100%;
   text-align: left;
   cursor: pointer;
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  color: inherit;
 }
 
 /* tournament index list */
@@ -2740,7 +2746,8 @@ button.pool-match-row {
 /* Tournament info card (mp-ef3) — public event details */
 .tournament-info {
   background: var(--accent-soft);
-  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
+  border: 1px solid rgba(29, 53, 87, 0.22); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
   border-radius: var(--r-lg);
   padding: 14px 16px;
   margin-bottom: 14px;
@@ -6593,8 +6600,10 @@ button.pool-match-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  background: #f2e2e4; /* fallback — approximate red-10% over bg */
   background: color-mix(in oklch, var(--red) 10%, var(--bg));
-  border: 1px solid color-mix(in oklch, var(--red) 35%, transparent);
+  border: 1px solid rgba(193, 18, 31, 0.35); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--red) 35%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;
@@ -6616,7 +6625,8 @@ button.pool-match-row {
   align-items: center;
   gap: 8px;
   background: var(--accent-soft);
-  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border: 1px solid rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;

@@ -1,5 +1,5 @@
-// Tests that ViewerHome renders the SSE offline banner when connected=false
-// and suppresses it when connected=true (default). ViewerHome is tested via
+// Tests that ViewerHome renders the SSE offline banner when sseConnected=false
+// and suppresses it when sseConnected=true (default). ViewerHome is tested via
 // direct function call (same pattern as AnnouncementBanner in app_announcement.test.jsx)
 // with window globals set up before the dynamic import so the module-level
 // `const x = window.x` bindings capture real stubs.
@@ -70,23 +70,23 @@ describe('ViewerHome SSE offline banner', () => {
     vi.resetModules();
   });
 
-  it('renders the SSE offline banner when connected=false', () => {
-    const tree = ViewerHome({ tournament: TOURNAMENT, connected: false,
+  it('renders the SSE offline banner when sseConnected=false', () => {
+    const tree = ViewerHome({ tournament: TOURNAMENT, sseConnected: false,
       onSelectCompetition: NOOP, onAdminClick: NOOP,
       onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP });
     const banners = findByClass(tree, 'sse-offline-banner');
     expect(banners.length).toBeGreaterThan(0);
   });
 
-  it('does NOT render the SSE offline banner when connected=true', () => {
-    const tree = ViewerHome({ tournament: TOURNAMENT, connected: true,
+  it('does NOT render the SSE offline banner when sseConnected=true', () => {
+    const tree = ViewerHome({ tournament: TOURNAMENT, sseConnected: true,
       onSelectCompetition: NOOP, onAdminClick: NOOP,
       onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP });
     const banners = findByClass(tree, 'sse-offline-banner');
     expect(banners).toHaveLength(0);
   });
 
-  it('does NOT render the SSE offline banner when connected is omitted (default true)', () => {
+  it('does NOT render the SSE offline banner when sseConnected is omitted (default true)', () => {
     const tree = ViewerHome({ tournament: TOURNAMENT,
       onSelectCompetition: NOOP, onAdminClick: NOOP,
       onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP });
@@ -95,7 +95,7 @@ describe('ViewerHome SSE offline banner', () => {
   });
 
   it('offline banner carries role=status and aria-live=polite', () => {
-    const tree = ViewerHome({ tournament: TOURNAMENT, connected: false,
+    const tree = ViewerHome({ tournament: TOURNAMENT, sseConnected: false,
       onSelectCompetition: NOOP, onAdminClick: NOOP,
       onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP });
     const [banner] = findByClass(tree, 'sse-offline-banner');

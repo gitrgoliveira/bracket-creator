@@ -348,15 +348,25 @@ function DialogHost() {
   };
 
   const cancelResult = req ? (req.kind === "confirm" ? false : null) : false;
-  useEscapeToClose(req ? () => close(cancelResult) : undefined);
 
   if (!req) return null;
   const onCancel = () => close(cancelResult);
   const onConfirm = () => close(req.kind === "confirm" ? true : (value || null));
 
+  // Escape-to-cancel is handled ON the dialog container (not via the global
+  // useEscapeToClose window listener). The dialog frequently opens on top of a
+  // surface that ALSO has a window-level Escape handler (e.g. the scoring
+  // modal's handleDismiss). A window listener would let one Escape fire BOTH —
+  // cancelling the dialog and re-dismissing the underlying modal. Because focus
+  // is trapped inside the dialog, the keydown bubbles through this container
+  // first; stopPropagation() keeps it from reaching any window listener.
+  const onDialogKeyDown = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>
           <button className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>
@@ -370,6 +380,11 @@ function DialogHost() {
               type={req.password ? "password" : "text"}
               value={value}
               placeholder={req.placeholder}
+              // Accessible name: the field has no visible <label>, so name it
+              // from the dialog's own prompt (message preferred, title as
+              // fallback) — otherwise screen readers announce a bare text field.
+              aria-label={req.message || req.title}
+              autoComplete={req.password ? "current-password" : "off"}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onConfirm(); } }}
             />

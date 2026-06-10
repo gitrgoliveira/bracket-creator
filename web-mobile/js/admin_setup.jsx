@@ -136,7 +136,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // null = no field-scoped error (general errors still use the top banner).
   const [errorField, setErrorField] = useStateA(null);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
-  const [theme, setTheme] = useStateA(tournament.theme || null);
+  // Initialise through normalizeTheme so the very first render holds the same
+  // shape BrandingManager emits — when the server returns theme:{} for a
+  // logo-only tournament, the raw value is a truthy empty object that would
+  // otherwise reach the dirty snapshot and the save payload as `{}` (the
+  // backend tolerates it but it's cleaner not to rely on that).
+  const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
 
   // mp-sspn: in-flight save state — disables the primary button and swaps its
   // label to "Saving…" so the long form's primary action gives feedback

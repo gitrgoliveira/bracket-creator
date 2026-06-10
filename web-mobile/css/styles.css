@@ -6104,6 +6104,33 @@ button.pool-match-row {
   gap: 6px;
 }
 
+/* --- Touch-target floor for compact ippon buttons --------------------- *
+   The compact rules above (.editor-modal--compact .sb-points-grid .ipt-btn
+   and .editor-modal--compact .team-sub-match__btns .ipt-btn) set a 34px/32px
+   min-height for fine pointers (laptop scoring). On the tablets operators
+   actually score on, those out-specified the generic
+   `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
+   the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
+   Restore the floor at equal-or-greater specificity, placed AFTER the compact
+   blocks so source order also favours it. Fine pointers keep the dense 34px. */
+@media (pointer: coarse) {
+  .editor-modal--compact .sb-points-grid .ipt-btn,
+  .editor-modal--compact .team-sub-match__btns .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Keyboard focus ring for ippon buttons ---------------------------- *
+   Operators tab through the scoring grid; make the focused ippon button
+   obvious with the accent ring language (DESIGN.md §6 / §3). Scoped to the
+   .ipt-btn family this region owns. */
+.ipt-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* --- Decision prompt motion (compact + roomy) -------------------------- */
 .decision-prompt {
   animation: decision-prompt-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;

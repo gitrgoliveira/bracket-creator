@@ -126,8 +126,55 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const nextKeyRef = useRefA((tournament.contacts || []).length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
+  // mp-sspn: which field the current validation error belongs to, so the
+  // message renders inline beside its cause instead of only at the page top.
+  // null = no field-scoped error (general errors still use the top banner).
+  const [errorField, setErrorField] = useStateA(null);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
   const [theme, setTheme] = useStateA(tournament.theme || null);
+
+  // mp-sspn: in-flight save state — disables the primary button and swaps its
+  // label to "Saving…" so the long form's primary action gives feedback
+  // (previously it fired-and-navigated with no on-button cue). mountedRef
+  // gates the post-await setSaving so a successful save (which unmounts this
+  // view via navigation) doesn't setState on a torn-down component.
+  const [saving, setSaving] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // mp-sspn: refs for the four validated fields so a failed save can focus +
+  // scroll the offending input into view — on a 4-card form the top banner
+  // alone lands off-screen when Save is clicked from the bottom.
+  const nameRef = useRefA(null);
+  const dateRef = useRefA(null);
+  const daysRef = useRefA(null);
+  const courtsRef = useRefA(null);
+  const fieldRefs = { name: nameRef, date: dateRef, durationDays: daysRef, courts: courtsRef };
+
+  // mp-sspn: progressive disclosure for the long optional public-info block.
+  // Open by default only when the tournament already has public data, so
+  // existing values are never hidden behind a collapsed section.
+  const hasPublicInfo = !!(publicURL || venueAddress || venueMapURL || openingTime ||
+    closingTime || rulesURL || awardsNote || infoNotes || (contacts && contacts.length));
+  const [publicOpen, setPublicOpen] = useStateA(hasPublicInfo);
+
+  // mp-sspn: dirty tracking for the unsaved-changes cue + cancel guard.
+  // Snapshot the editable form fields (theme is excluded — BrandingManager's
+  // mount-time onThemeChange sync would otherwise register a false change).
+  const initialSnapRef = useRefA(null);
+  const [dirty, setDirty] = useStateA(false);
+  useEffectA(() => {
+    const snap = JSON.stringify({
+      name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+      publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+      awardsNote, infoNotes, pass,
+      contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
+    });
+    if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
+    setDirty(snap !== initialSnapRef.current);
+  }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+    publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+    awardsNote, infoNotes, pass, contacts]);
 
   // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
   // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
@@ -158,57 +205,113 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     }
   };
 
-  const handleSave = () => {
+  // mp-sspn: set a field-scoped error, then focus + scroll its input so the
+  // message is visible at its cause. Returns false so callers can `return
+  // failField(...)` in one line. The public-info fields aren't validated
+  // here, so failField only targets the four basics that are.
+  const failField = (field, message) => {
+    setError(message);
+    setErrorField(field);
+    const ref = fieldRefs[field];
+    if (ref && ref.current) {
+      try { ref.current.focus({ preventScroll: true }); } catch (_e) { ref.current.focus(); }
+      ref.current.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    return false;
+  };
+
+  const handleSave = async () => {
+    if (saving) return; // guard against double-submit while a save is in flight
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
     // raw `name` — so " Tournament " on the wire would round-trip to the
     // backend's trim and produce a canonical "Tournament" that diverges
     // from what the user sees in the input until next refresh.
     const trimmedName = name.trim();
-    if (!trimmedName) { setError("Tournament name is required."); return; }
+    if (!trimmedName) return failField("name", "Tournament name is required.");
     const { norm, error: dateError } = validateAndNormalizeDate(date);
-    if (dateError) { setError(dateError); return; }
+    if (dateError) return failField("date", dateError);
     if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > MAX_TOURNAMENT_DURATION_DAYS) {
-      setError(`Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
-      return;
+      return failField("durationDays", `Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
     }
-    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
-    onSave({
-      name: trimmedName,
-      venue: venue.trim(),
-      date: norm,
-      durationDays,
-      password: pass || undefined,
-      courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
-      openingBlock: openingBlock.trim() || undefined,
-      lunchBlock: lunchBlock.trim() || undefined,
-      closingBlock: closingBlock.trim() || undefined,
-      publicURL: publicURL.trim() || undefined,
-      venueAddress: venueAddress.trim() || undefined,
-      venueMapURL: venueMapURL.trim() || undefined,
-      openingTime: openingTime.trim() || undefined,
-      closingTime: closingTime.trim() || undefined,
-      rulesURL: rulesURL.trim() || undefined,
-      awardsNote: awardsNote.trim() || undefined,
-      infoNotes: infoNotes.trim() || undefined,
-      contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
-      theme: theme || undefined,
-    });
+    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) {
+      return failField("courts", `Number of courts must be a whole number between 1 and ${MAX_COURTS}.`);
+    }
+    setError("");
+    setErrorField(null);
+    setSaving(true);
+    try {
+      await onSave({
+        name: trimmedName,
+        venue: venue.trim(),
+        date: norm,
+        durationDays,
+        password: pass || undefined,
+        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
+        openingBlock: openingBlock.trim() || undefined,
+        lunchBlock: lunchBlock.trim() || undefined,
+        closingBlock: closingBlock.trim() || undefined,
+        publicURL: publicURL.trim() || undefined,
+        venueAddress: venueAddress.trim() || undefined,
+        venueMapURL: venueMapURL.trim() || undefined,
+        openingTime: openingTime.trim() || undefined,
+        closingTime: closingTime.trim() || undefined,
+        rulesURL: rulesURL.trim() || undefined,
+        awardsNote: awardsNote.trim() || undefined,
+        infoNotes: infoNotes.trim() || undefined,
+        contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
+        theme: theme || undefined,
+      });
+    } finally {
+      // On success onSave navigates away (this view unmounts); the guard
+      // skips the setState. On failure we stay put so the user can retry.
+      if (mountedRef.current) setSaving(false);
+    }
   };
+
+  // mp-sspn: guard navigation away from unsaved edits.
+  const handleCancel = () => {
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    onCancel();
+  };
+
+  // mp-sspn: keyboard accelerators — Cmd/Ctrl+S saves, Esc cancels. Latest
+  // handlers are read through refs so the once-bound listener never calls a
+  // stale closure (handleSave/handleCancel close over current form state).
+  const handleSaveRef = useRefA(handleSave);
+  handleSaveRef.current = handleSave;
+  const handleCancelRef = useRefA(handleCancel);
+  handleCancelRef.current = handleCancel;
+  useEffectA(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        handleSaveRef.current();
+      } else if (e.key === "Escape") {
+        handleCancelRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page" style={{ maxWidth: 720 }}>
         <Breadcrumbs items={[
-          { label: tournament.name, onClick: onCancel },
+          { label: tournament.name, onClick: handleCancel },
           { label: "Edit details" }
         ]} />
         <div className="page-head"><h1 className="page-head__title">Edit tournament details</h1></div>
-        {error && <div className="auth__error" style={{ marginBottom: 16 }}>{error}</div>}
+        {/* mp-sspn: top banner is only for general (non-field) errors; field- */}
+        {/* scoped validation renders inline beside its input instead. */}
+        {error && !errorField && <div className="auth__error" role="alert" style={{ marginBottom: 16 }}>{error}</div>}
+        <div className="edit-stack">
         <div className="card card--pad-lg">
+          <div className="card__head"><div className="card__title">Tournament details</div></div>
+          <div className="field"><label className="field__label">Name</label><input ref={nameRef} className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />{errorField === "name" && error && <div className="field__error" role="alert">{error}</div>}</div>
           <div className="row">
-            <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
               <label className="field__label">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
@@ -216,14 +319,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {/* that validateAndNormalizeDate enforces at handleSave — */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
+              <input ref={dateRef} className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
               <div className="field__hint">Pick the first day of the tournament.</div>
+              {errorField === "date" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
             <div className="field">
               <label className="field__label">Number of days</label>
               {/* decideNumericUpdate stores NaN for cleared input so render */}
               {/* side can use Number.isFinite check (same pattern as courts). */}
               <input
+                ref={daysRef}
                 className="input"
                 type="number"
                 min="1"
@@ -234,34 +339,39 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 style={{ maxWidth: 100 }}
               />
               <div className="field__hint">{`Duration in days (1–${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
+              {errorField === "durationDays" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
           </div>
-          <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
-          <div className="field">
-            <label className="field__label">Number of Shiaijo (courts)</label>
-            {/* decideNumericUpdate stores NaN for an empty input; render */}
-            {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
-            {/* attribute") and the cleared input stays visually empty. */}
-            {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
-            {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
-            {/* click can't push an invalid value to onSave. MAX_COURTS */}
-            {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
-            <input
-              className="input"
-              type="number"
-              min="1"
-              max={MAX_COURTS}
-              step="1"
-              value={Number.isFinite(courts) ? courts : ""}
-              onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
-            />
-            <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+          <div className="row">
+            <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
+            <div className="field">
+              <label className="field__label">Number of Shiaijo (courts)</label>
+              {/* decideNumericUpdate stores NaN for an empty input; render */}
+              {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
+              {/* attribute") and the cleared input stays visually empty. */}
+              {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
+              {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
+              {/* click can't push an invalid value to onSave. MAX_COURTS */}
+              {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
+              <input
+                ref={courtsRef}
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_COURTS}
+                step="1"
+                value={Number.isFinite(courts) ? courts : ""}
+                onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
+              />
+              <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+              {errorField === "courts" && error && <div className="field__error" role="alert">{error}</div>}
+            </div>
           </div>
           {/* Tournament type (mp-7h7): read-only after creation. Displayed
               for information — it affects the auth boundary (officiated:
               main password gates everything; self-run: only destructive
               actions require a password). Never submitted on PUT. */}
-          <div className="field" style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginBottom: 0 }}>
             <label className="field__label">Tournament type</label>
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
@@ -271,29 +381,53 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
-          {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
-          {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
-          {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
-          <div className="row" style={{ marginTop: 16 }}>
-            <div className="field">
-              <label className="field__label">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h"). Leave blank if none.</div>
-            </div>
-            <div className="field">
-              <label className="field__label">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
-              <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m"). Leave blank if none.</div>
-            </div>
-            <div className="field">
-              <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
-              <div className="field__hint">Duration of the closing ceremony block. Leave blank if none.</div>
+        </div>
+        {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
+        {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
+        {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
+        <div className="card card--pad-lg">
+          <div className="card__head">
+            <div>
+              <div className="card__title">Schedule blocks</div>
+              <div className="card__sub">Durations feed the schedule estimator. Leave blank to omit a block.</div>
             </div>
           </div>
-          {/* mp-ef3: Tournament Information (Public) */}
-          <div style={{ borderTop: "1px solid var(--line)", marginTop: 20, paddingTop: 20 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--ink-3)", marginBottom: 12 }}>Tournament Information (Public)</div>
+          <div className="row-3" style={{ marginBottom: 0 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h").</div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
+              <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m").</div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the closing ceremony block.</div>
+            </div>
+          </div>
+        </div>
+        {/* mp-ef3: Tournament Information (Public) */}
+        {/* mp-sspn: collapsible — all fields here are optional, so the section */}
+        {/* is a disclosure that opens by default only when data already exists. */}
+        <div className="card card--pad-lg">
+          <button
+            type="button"
+            className="disclosure"
+            aria-expanded={publicOpen}
+            onClick={() => setPublicOpen((o) => !o)}
+          >
+            <span className="disclosure__chevron" aria-hidden="true">▸</span>
+            <span className="disclosure__text">
+              <span className="card__title">Public information</span>
+              <span className="card__sub">Shown to attendees on the public tournament page.{!publicOpen && hasPublicInfo ? " Configured." : ""}</span>
+            </span>
+          </button>
+          {publicOpen && (
+          <div style={{ marginTop: 16 }}>
             {/* mp-s1gl: Public URL — single source of truth for externally-shareable links */}
             <div className="field">
               <label className="field__label">Public URL</label>
@@ -363,6 +497,10 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               )}
             </div>
           </div>
+          )}
+        </div>
+        <div className="card card--pad-lg">
+          <div className="card__head"><div className="card__title">Access &amp; security</div></div>
           {locked ? (
             <div className="field">
               <label className="field__label">Admin Password</label>
@@ -379,14 +517,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           )}
           {/* Elevated (destructive-ops) password — spec 004 / mp-e21. */}
           {locked ? (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Destructive-ops password</label>
               <div className="field__hint" style={{ marginTop: 4 }}>
                 This server is in locked mode. The destructive-ops password comes from <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> and can only be changed by restarting the server with a new hash. If unset, destructive actions (delete competition, discard draw, roster changes, import) return 503.
               </div>
             </div>
           ) : (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
               {elevatedConfigured && (
                 <input className="input" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
@@ -402,11 +540,21 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               </div>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
-          </div>
         </div>
+        {/* mp-scf: branding (colors + logo). Appears before sponsors so the
+            brand-identity section leads the page. onThemeChange propagates
+            color changes back to this component's theme state so they are
+            included in the tournament PUT payload when Save is clicked.
+            Sits above the action bar because the colors/title it edits ARE
+            committed by "Save changes"; the logo self-saves on upload. */}
+        {window.BrandingManager && (
+          <window.BrandingManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+            onThemeChange={setTheme}
+          />
+        )}
         {/* mp-c38: sponsor management lives on the same edit page so admins
             don't need to navigate elsewhere. SponsorsManager owns its own
             sponsors list (seeded from the tournament prop, updated locally
@@ -419,17 +567,24 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             showToast={showToast}
           />
         )}
-        {/* mp-scf: branding (colors + logo). onThemeChange propagates color
-            changes back to this component's theme state so they are included
-            in the tournament PUT payload when Save is clicked. */}
-        {window.BrandingManager && (
-          <window.BrandingManager
-            tournament={tournament}
-            password={password}
-            showToast={showToast}
-            onThemeChange={setTheme}
-          />
-        )}
+        {/* Action bar is the page's final commit, sitting below every card it
+            (partly) persists. Branding colors + main password ride along on
+            this Save; logo, sponsors and the destructive-ops password
+            self-save via their own buttons. */}
+        <div className="edit-actions">
+          {/* mp-sspn: make the split persistence model explicit so the single */}
+          {/* Save button's scope isn't a guess. */}
+          <div className="edit-actions__note">
+            Saves tournament details, ceremony blocks, public info, branding colours and the admin password.
+            The logo, sponsors and destructive-ops password save on their own buttons.
+          </div>
+          <div className="edit-actions__buttons">
+            {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}
+            <button className="btn" onClick={handleCancel} disabled={saving}>Cancel</button>
+            <button className="btn btn--primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+          </div>
+        </div>
+        </div>
       </div>
     </div>
   );

@@ -6658,3 +6658,95 @@ button.pool-match-row {
 .pool__overflow-note { margin-top: 8px; }
 .pool__view-all-btn  { margin-top: 8px; font-size: 13px; padding: 0; }
 
+/* ---------- Edit-tournament form stack ----------
+   The edit page is a long form split into concern-grouped cards
+   (basics, schedule, public info, access). A flex stack gives every
+   card a consistent 16px separation; the Branding + Sponsors cards
+   that follow carry their own margin-top:16px to continue the rhythm. */
+.edit-stack { display: flex; flex-direction: column; gap: 16px; }
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.edit-actions__note {
+  flex: 1 1 320px;
+  min-width: 240px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.edit-actions__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.edit-actions__dirty {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* Inline field-level validation error (mp-sspn) — sits directly under the
+   offending input so the message is read at its cause, not just the top banner. */
+.field__error {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--red);
+}
+
+/* Disclosure header (mp-sspn) — a card__head that toggles a collapsible
+   section. Full-width reset button so the whole header row is the hit target. */
+.disclosure {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.disclosure__chevron {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--ink-3);
+  transition: transform 150ms ease;
+}
+.disclosure[aria-expanded="true"] .disclosure__chevron { transform: rotate(90deg); }
+.disclosure__text { display: flex; flex-direction: column; gap: 2px; }
+.disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .disclosure__chevron { transition: none; }
+}
+
+/* ---------- Branding section (mp-scf) — accent header band ----------
+   Committed-color treatment: a tinted accent band leads the card, with
+   the configuration fields below. Replaces the generic card--pad-lg
+   wrapper so the brand-identity section reads as its own surface. */
+.branding { background: var(--surface); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.branding__head { padding: 20px 28px; background: var(--accent-soft); }
+.branding__title { font-size: 17px; font-weight: 700; margin: 0 0 5px; color: var(--accent); }
+.branding__hint { font-size: 13px; margin: 0; line-height: 1.45; color: var(--ink-2); }
+.branding__body { padding: 20px 28px 24px; }
+.branding__body .field { margin-bottom: 16px; }
+.branding__colors { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.branding__colors .field { flex: 1 1 0; min-width: 160px; margin-bottom: 0; }
+.branding__finprint { font-size: 12px; color: var(--ink-3); margin-bottom: 16px; }
+.branding__logo { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 4px; }
+.branding__logo-title { font-weight: 600; margin-bottom: 8px; }
+.branding__logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.branding__logo-actions { display: flex; justify-content: flex-end; }
+

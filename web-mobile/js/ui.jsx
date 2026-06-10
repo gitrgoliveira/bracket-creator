@@ -231,6 +231,7 @@ function formatLabelShort(format) {
 //                    backdrop (an empty submit resolves null, matching the old
 //                    `pw ? pw : null` callers).
 let _dialogReq = null; // the active request, or null
+let _dialogSeq = 0;     // monotonic id, used as the dialog node's React key
 const _dialogListeners = new Set();
 function _setDialogReq(req) {
   // Defensive: if a dialog is somehow still open when a new one is requested
@@ -240,6 +241,12 @@ function _setDialogReq(req) {
   if (_dialogReq && _dialogReq._resolve && req) {
     _dialogReq._resolve(_dialogReq.kind === "confirm" ? false : null);
   }
+  // Stamp a unique id so a request that REPLACES an open one gets a fresh React
+  // key on the dialog node — forcing a remount so the callback ref re-runs and
+  // re-captures the trigger / re-focuses the new input (otherwise the trap and
+  // focus would stay pinned to the first dialog). Cheap insurance for the
+  // defensive replace path above.
+  if (req) req._id = ++_dialogSeq;
   _dialogReq = req;
   _dialogListeners.forEach((fn) => fn(_dialogReq));
 }
@@ -347,9 +354,9 @@ function DialogHost() {
     if (r && r._resolve) r._resolve(result);
   };
 
-  const cancelResult = req ? (req.kind === "confirm" ? false : null) : false;
-
   if (!req) return null;
+  // req is guaranteed truthy past the guard, so no need to handle the null case.
+  const cancelResult = req.kind === "confirm" ? false : null;
   const onCancel = () => close(cancelResult);
   const onConfirm = () => close(req.kind === "confirm" ? true : (value || null));
 
@@ -366,7 +373,7 @@ function DialogHost() {
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
+      <div key={req._id} className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>
           <button className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>

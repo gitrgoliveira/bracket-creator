@@ -100,7 +100,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   };
 
   const handleLogoDelete = async () => {
-    if (!window.confirm("Remove the tournament logo?")) return;
+    if (!(await window.confirmDialog({ message: "Remove the tournament logo?", confirmLabel: "Remove logo", danger: true }))) return;
     setBusy(true);
     try {
       await window.API.deleteBrandingLogo(password);

@@ -57,7 +57,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   };
 
   const handleDelete = async (idx, label) => {
-    if (!window.confirm(`Remove sponsor "${label}"?`)) return;
+    if (!(await window.confirmDialog({ message: `Remove sponsor "${label}"?`, confirmLabel: "Remove sponsor", danger: true }))) return;
     setBusy(true);
     try {
       await window.API.deleteSponsor(idx, password);

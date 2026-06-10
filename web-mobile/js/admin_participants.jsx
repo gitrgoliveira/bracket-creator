@@ -489,7 +489,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const targets = (c.players || []).filter(p => p.dojo === dojo && !p.checkedIn);
     if (targets.length === 0) return;
 
-    if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
+    if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
 
     const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;

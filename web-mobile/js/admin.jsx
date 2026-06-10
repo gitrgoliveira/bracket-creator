@@ -379,7 +379,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // Caught by /deep-review iterative pass after round-11 swept
       // updateTournament to tRef/onUpdateRef but missed the unmount
       // guard the other handlers carry.
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       // Re-read tRef.current AFTER the await — additional SSE events may
       // have landed during the save. The patch we just persisted is
       // applied on top of the freshest snapshot.
@@ -698,9 +698,12 @@ function normalizeCreatedRecord(created) {
 // while phase === "running".
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
-  // Only wire Escape when we're allowed to close; passing a no-op keeps the
-  // running phase non-dismissable without conditionally calling the hook.
-  window.useEscapeToClose(dismissable ? onClose : () => {});
+  // Only wire Escape when we're allowed to close. Pass undefined (NOT a no-op)
+  // in the running phase: useEscapeToClose calls preventDefault() for ANY
+  // function callback, so a no-op would swallow Escape while doing nothing.
+  // undefined leaves Escape untouched. Matches the busyType ? undefined
+  // pattern in admin_shell.jsx.
+  window.useEscapeToClose(dismissable ? onClose : undefined);
 
   const { phase, comps = [], failed = [] } = state;
 

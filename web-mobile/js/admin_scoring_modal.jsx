@@ -644,25 +644,35 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       // as the error body when the kiken-undo would invalidate a
       // downstream match. Re-prompt the operator and retry with force.
       if (!opts.force && /decision_locked/i.test(msg)) {
-        if (mountedRef.current && confirm(
-          "A subsequent match for one of these competitors has already started.\n\n" +
-          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "A subsequent match for one of these competitors has already started.\n\n" +
+            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
+          confirmLabel: "Proceed anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
         // T104/CHK029: the server caps encho periods per competition.
         // Same confirm-and-retry-with-force shape as decision_locked.
-        if (mountedRef.current && confirm(
-          "This decision would exceed the configured maximum encho periods.\n\n" +
-          "Record it anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "This decision would exceed the configured maximum encho periods.\n\n" +
+            "Record it anyway?",
+          confirmLabel: "Record anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -798,12 +808,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== initialDecidedByHantei;
-  const handleDismiss = () => {
+  const handleDismiss = async () => {
     // Don't close while any save/decision request is in flight — letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
+    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     onClose();
   };
 
@@ -1350,24 +1360,34 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     } catch (e) {
       const msg = e?.message || "Failed to record decision";
       if (!opts.force && /decision_locked/i.test(msg)) {
-        if (mountedRef.current && confirm(
-          "A subsequent match for one of these teams has already started.\n\n" +
-          "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "A subsequent match for one of these teams has already started.\n\n" +
+            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
+          confirmLabel: "Proceed anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
         // T104/CHK029: encho-cap override, same shape as decision_locked.
-        if (mountedRef.current && confirm(
-          "This decision would exceed the configured maximum encho periods.\n\n" +
-          "Record it anyway?"
-        )) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            "This decision would exceed the configured maximum encho periods.\n\n" +
+            "Record it anyway?",
+          confirmLabel: "Record anyway",
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) {
           await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
           return;
         }
-        if (mountedRef.current) setDecisionErr("Override cancelled.");
+        setDecisionErr("Override cancelled.");
       } else if (mountedRef.current) {
         setDecisionErr(msg);
       }
@@ -1541,11 +1561,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // (setState-after-unmount), AND confirm-then-discard when the user has
   // unsaved sub-match edits. The earlier version only checked submitting,
   // so an accidental backdrop/Esc silently lost up to 9 sub-match scores.
-  const handleDismiss = () => {
+  const handleDismiss = async () => {
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || daihyosenBusy) return;
-    if (isDirty && !confirm("Discard unsaved scoring changes?")) return;
+    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     onClose();
   };
 

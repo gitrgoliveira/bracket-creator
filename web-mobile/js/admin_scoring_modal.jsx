@@ -31,6 +31,81 @@ function getValidPointKeys(isNaginata) {
   return isNaginata ? "MKDTSH" : "MKDTH";
 }
 
+// IPPON_LETTER_LEGEND — the M/K/D/T/H (+S for naginata) ippon-type letters
+// and their kendo meaning. The strike-target names mirror the kendo glossary
+// (internal/domain/glossary.go datapoint "datapoint"/"sune"/"hansoku"). H is
+// the hansoku-derived free point ("Two hansoku … give the opponent one free
+// point", glossary "hansoku"). The viewer glossary doesn't define these
+// single letters as terms, so the wording is authored here for the operator.
+const IPPON_LETTER_LEGEND = [
+  ["M", "Men — head strike"],
+  ["K", "Kote — wrist strike"],
+  ["D", "Do — torso strike"],
+  ["T", "Tsuki — throat thrust"],
+  ["S", "Sune — shin strike (naginata)"],
+  ["H", "Hansoku point — opponent's 2nd foul"],
+];
+
+// IpponLegend — compact, always-present key mapping each scoring letter to its
+// kendo meaning, so the admin scoring modal isn't dependent on the viewer-only
+// glossary. The "S" (Sune) row only shows for naginata competitions. Styled
+// inline with DESIGN tokens (this region of styles.css is owned elsewhere).
+function IpponLegend({ isNaginata }) {
+  const rows = IPPON_LETTER_LEGEND.filter(([letter]) => letter !== "S" || isNaginata);
+  return (
+    <details
+      data-testid="scoring-modal-ippon-legend"
+      style={{ marginTop: 10, fontSize: 12, color: "var(--ink-3)" }}
+    >
+      <summary style={{ cursor: "pointer", fontWeight: 600, color: "var(--ink-2)", userSelect: "none" }}>
+        <span aria-hidden="true" style={{
+          display: "inline-block", width: 16, height: 16, lineHeight: "16px",
+          textAlign: "center", borderRadius: 999, border: "1px solid var(--line)",
+          color: "var(--ink-2)", fontWeight: 700, marginRight: 6,
+        }}>?</span>
+        Ippon-type key
+      </summary>
+      <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 10px", margin: "8px 0 0", padding: 0 }}>
+        {rows.map(([letter, meaning]) => (
+          <React.Fragment key={letter}>
+            <dt style={{
+              fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--ink-1)",
+              margin: 0, textAlign: "center",
+            }}>{letter}</dt>
+            <dd style={{ margin: 0, color: "var(--ink-2)" }}>{meaning}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+// ScoringShortcutHint — quiet, always-present reminder of the keyboard
+// shortcuts the modal supports. Rendered below the prev/next nav so the
+// affordance sits where operators look for navigation. Clarity over
+// decoration: plain muted text, no animation. Styled inline (this region of
+// styles.css is owned elsewhere).
+function ScoringShortcutHint() {
+  const kbd = {
+    fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
+    border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
+    color: "var(--ink-3)", margin: "0 1px",
+  };
+  return (
+    <div
+      data-testid="scoring-modal-shortcut-hint"
+      aria-hidden="true"
+      style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
+    >
+      <kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd>
+      <span>prev/next</span>
+      <span aria-hidden="true">·</span>
+      <kbd style={kbd}>Esc</kbd>
+      <span>close</span>
+    </div>
+  );
+}
+
 // applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
 // TeamScoreEditorModal. Implements three behaviours on top of the sub
 // state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
@@ -874,9 +949,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []); // listener registered once; reads fresh state via kbRef
 
+  // a11y: label the dialog with the match/court context so screen readers
+  // announce who is fighting and on which shiaijo when the modal opens.
+  const dialogLabel = `Score editor — ${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
+
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal editor-modal--lg editor-modal--compact" onClick={(e) => e.stopPropagation()}>
+      <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -1035,6 +1114,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               </div>
           </div>
 
+          {/* Ippon-type letter legend — discoverable "?" affordance mapping
+              M/K/D/T/H (+S in naginata) to their kendo meaning, so operators
+              don't depend on the viewer-only glossary. */}
+          <IpponLegend isNaginata={isNaginata} />
+
           {/* T093–T098: decision (kiken/fusenpai) controls + remaining-matches
               follow-up. Sits between the scoring board and the footer so the
               flow is: enter score OR record a decision → either way the modal
@@ -1127,6 +1211,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
+          {/* Quiet, always-present keyboard-shortcut reminder. */}
+          <ScoringShortcutHint />
         </div>
       </div>
     </div>
@@ -1575,9 +1661,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     { key: "a", name: m.sideA?.name || m.sideA, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
   ];
 
+  // a11y: label the dialog with the match/court context (mirrors the
+  // individual ScoreEditorModal).
+  const dialogLabel = `Team score editor — ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
+
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -1952,6 +2042,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             );
           })()}
 
+          {/* Ippon-type letter legend — same affordance as the individual
+              editor; the per-bout buttons use the same M/K/D/T/H letters. */}
+          <IpponLegend isNaginata={isNaginataTeam} />
+
           {/* T093–T098: decision (kiken/fusenpai) controls for the overall
               team match. Per-bout Fusensho lives on each sub-match row
               (see the row-level "Fusensho" button per side, T096). */}
@@ -2032,6 +2126,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
+          {/* Quiet, always-present keyboard-shortcut reminder. */}
+          <ScoringShortcutHint />
         </div>
       </div>
     </div>

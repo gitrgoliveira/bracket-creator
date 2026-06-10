@@ -36,18 +36,73 @@ function formatDate(d) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+// Toast — single visible slot. Success toasts auto-dismiss quickly and are
+// polite (announced when the SR is idle). ERROR toasts dwell ≥8s, expose a
+// manual dismiss control, and are assertive (announced immediately) so an
+// operator in a noisy hall doesn't miss a failed action. The host (app.jsx)
+// is responsible for not overwriting a still-visible error with a later
+// non-error toast — see TOAST_ERROR_DWELL_MS, exported for the host's guard.
+const TOAST_SUCCESS_DWELL_MS = 2700;
+const TOAST_ERROR_DWELL_MS = 8000;
+
+// Toast renders a single visible slot. The host (app.jsx) keeps one toast in
+// state and re-mounts <Toast> with new props on each showToast call, so the
+// component holds its OWN copy of the message/type and ignores a parent prop
+// change that would overwrite a still-visible ERROR with a later non-error
+// toast. This protects ops-critical failures from being silently replaced by
+// a routine success, without requiring the host to track dwell windows.
+//
+//  - success/info: role=status + aria-live=polite, short auto-dismiss.
+//  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual
+//    dismiss control; cannot be clobbered by an incoming non-error toast.
 function Toast({ message, type, onClose }) {
+  // Latch the first non-trivial payload this mount sees. The host re-renders
+  // this component (not remounts) when state.toast changes, so without this
+  // latch an incoming success prop would overwrite a live error in place.
+  const [shown, setShown] = React.useState({ message, type });
   const [visible, setVisible] = React.useState(true);
+  const onCloseRef = React.useRef(onClose);
+  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+
+  const shownIsError = shown.type === 'error';
+
+  // Accept an incoming prop change only when it is NOT being suppressed: a
+  // later non-error toast is ignored while an error is still visible; anything
+  // else (error→error, error→after-dismiss, non-error→anything) replaces.
   React.useEffect(() => {
-    const t1 = setTimeout(() => setVisible(false), 2700);
-    const t2 = setTimeout(onClose, 3000);
+    const incomingIsError = type === 'error';
+    if (shownIsError && visible && !incomingIsError) return; // protect the error
+    if (message === shown.message && type === shown.type) return; // no change
+    setShown({ message, type });
+    setVisible(true);
+  }, [message, type]);
+
+  React.useEffect(() => {
+    if (!visible) return undefined;
+    const dwell = shownIsError ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
+    const t1 = setTimeout(() => setVisible(false), dwell);
+    const t2 = setTimeout(() => onCloseRef.current && onCloseRef.current(), dwell + 300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [onClose]);
+  }, [visible, shown.message, shown.type, shownIsError]);
+
+  const role = shownIsError ? 'alert' : 'status';
+  const ariaLive = shownIsError ? 'assertive' : 'polite';
 
   return (
-    <div className={`toast toast--${type || 'info'} ${visible ? 'is-visible' : ''}`}>
-      <div className="toast__icon">{type === 'error' ? '⚠️' : '✅'}</div>
-      <div className="toast__msg">{message}</div>
+    <div
+      className={`toast toast--${shown.type || 'info'} ${visible ? 'is-visible' : ''}`}
+      role={role}
+      aria-live={ariaLive}
+    >
+      <div className="toast__icon">{shownIsError ? '⚠️' : '✅'}</div>
+      <div className="toast__msg">{shown.message}</div>
+      {shownIsError && (
+        <button
+          className="toast__dismiss"
+          aria-label="Dismiss"
+          onClick={() => { setVisible(false); if (onCloseRef.current) onCloseRef.current(); }}
+        >&times;</button>
+      )}
     </div>
   );
 }

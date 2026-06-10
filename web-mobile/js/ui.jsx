@@ -81,13 +81,19 @@ function Toast({ message, type, onClose }) {
     setVisible(true);
   }, [message, type]);
 
+  // Auto-dismiss sequence, keyed on the SHOWN payload identity — NOT on
+  // `visible`. t1 hides at dwell; t2 fires onClose (host setToast(null) →
+  // unmount) 300ms later. `visible` must NOT be a dep: when t1 flips it false
+  // the effect would re-run, and its cleanup would clear the still-pending t2
+  // before it could fire — so onClose never ran and the toast stuck on screen
+  // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
+  // payload restarts the dwell for each new toast, which is the intent.
   React.useEffect(() => {
-    if (!visible) return undefined;
     const dwell = shownIsError ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
     const t1 = setTimeout(() => setVisible(false), dwell);
     const t2 = setTimeout(() => onCloseRef.current && onCloseRef.current(), dwell + 300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [visible, shown.message, shown.type, shownIsError]);
+  }, [shown.message, shown.type, shownIsError]);
 
   const role = shownIsError ? 'alert' : 'status';
   const ariaLive = shownIsError ? 'assertive' : 'polite';

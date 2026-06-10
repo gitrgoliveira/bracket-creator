@@ -20,6 +20,16 @@ const formatAdminHeaderSub = window.formatAdminHeaderSub;
 // "+N more" overflow indicator kicks in.
 const LIVE_STRIP_MAX_CHIPS = 6;
 
+// Plain-language expansions for the insider format codes emitted by
+// formatLabelShort (ui.jsx): "P+KO" / "KO". Used as a tooltip + aria-label at
+// the call site so the abbreviation stays legible to new operators.
+const FORMAT_LABEL_LONG = {
+  mixed: "Pools then knockout",
+  league: "League (round-robin)",
+  swiss: "Swiss rounds",
+  playoffs: "Knockout (direct elimination)",
+};
+
 function Breadcrumbs({ items }) {
   return (
     <div className="crumbs">
@@ -27,7 +37,14 @@ function Breadcrumbs({ items }) {
         <React.Fragment key={i}>
           {i > 0 && <span className="sep">/</span>}
           {item.onClick ? (
-            <button onClick={() => { document.activeElement?.blur(); item.onClick(); }}>
+            // No document.activeElement.blur() here: it dumped keyboard focus
+            // to <body> after every breadcrumb navigation, stranding tab order.
+            // The clicked button keeps focus naturally; the destination view
+            // manages its own focus. (The old blur appeared to target a mobile
+            // keyboard / hover dismissal, but a blanket blur is the wrong tool —
+            // it breaks keyboard users for a problem the browser already handles
+            // when the navigated-away input unmounts.)
+            <button onClick={() => item.onClick()}>
               {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
               {item.label}
             </button>
@@ -53,6 +70,24 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
       .flatMap(cc => window.compMatches(cc))
       .filter(m => m.status === "running" && sideName(m.sideA) && sideName(m.sideB));
   }, [tournament]);
+
+  // Connection-state indicator (PRODUCT.md: "never leave the user guessing
+  // about the tournament state"). The admin chrome previously showed nothing
+  // when the SSE stream dropped, so stale data sat silently. We open our own
+  // lightweight subscription purely to read the connection status exposed by
+  // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
+  // The callback arg is a no-op here: the dashboard already drives data
+  // refreshes off its own subscription; this one only observes liveness.
+  const [connected, setConnected] = useStateA(true);
+  useEffectA(() => {
+    if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
+    const unsub = window.API.subscribeToEvents(
+      () => {},
+      (status) => setConnected(status === "open")
+    );
+    return unsub;
+  }, []);
+
   const onOpenScore = (m) => {
     if (typeof window.__adminNavigateToScore === "function") {
       window.__adminNavigateToScore(m.compId);
@@ -74,6 +109,31 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           </div>
         </div>
         <div className="topbar__spacer"></div>
+        {/* Calm connection indicator: a dot + label that reflects the SSE
+            stream state. Green-tinted "Live" when connected; amber-tinted
+            "Reconnecting…" when the stream has dropped. role=status +
+            aria-live=polite so a screen reader hears the change without it
+            being alarmist. Uses tokens inline (no new CSS classes). */}
+        <span
+          role="status"
+          aria-live="polite"
+          title={connected ? "Live feed connected" : "Live feed disconnected — reconnecting"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            color: connected ? "var(--ink-2)" : "var(--red)",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className={connected ? "dot dot--live" : "dot"}
+            style={connected ? undefined : { background: "var(--red)" }}
+          ></span>
+          {connected ? "Live" : "Reconnecting…"}
+        </span>
         <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
@@ -575,7 +635,11 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         <div className="tcard__stats">
           <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
           <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
-          <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
+          {/* formatLabelShort lives in ui.jsx (not owned here); it emits the
+              insider codes "P+KO" / "KO". Add a plain-language tooltip + a11y
+              label inline so the abbreviation is legible without forking the
+              shared helper. */}
+          <div className="tcard__stat" title={FORMAT_LABEL_LONG[c.format] || "Format"}><div className="v" aria-label={FORMAT_LABEL_LONG[c.format] || undefined}>{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
           {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
@@ -608,27 +672,90 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
 
 function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", align = "left" }) {
   const [open, setOpen] = useStateA(false);
+  // Active option index for arrow-key navigation inside the open popover.
+  const [activeIdx, setActiveIdx] = useStateA(0);
   const ref = useRefA(null);
+  const triggerRef = useRefA(null);
+  const optionRefs = useRefA([]);
+
   useEffectA(() => {
     if (!open) return;
     const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
+
+  // On open, seed the active option to the current court and move focus into
+  // the popover. On close, return focus to the trigger so keyboard users
+  // aren't dropped to <body>.
+  useEffectA(() => {
+    if (open) {
+      const cur = Math.max(0, courts.indexOf(value));
+      setActiveIdx(cur);
+    } else {
+      triggerRef.current && triggerRef.current.focus();
+    }
+  }, [open]);
+
+  // Focus the active option element whenever it changes while open.
+  useEffectA(() => {
+    if (open && optionRefs.current[activeIdx]) {
+      optionRefs.current[activeIdx].focus();
+    }
+  }, [open, activeIdx]);
+
+  const select = (cc) => { setOpen(false); if (cc !== value) onChange(cc); };
+
+  const onPopoverKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      setActiveIdx((i) => (i + 1) % courts.length);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      setActiveIdx((i) => (i - 1 + courts.length) % courts.length);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActiveIdx(courts.length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      select(courts[activeIdx]);
+    }
+  };
+
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         className={btnClassName}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         title="Change shiaijo"
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >{label}{value} ▾</button>
       {open && (
-        <div className="court-popover" style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}>
-          {courts.map((cc) => (
+        <div
+          className="court-popover"
+          role="listbox"
+          aria-label="Choose shiaijo"
+          onKeyDown={onPopoverKeyDown}
+          style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}
+        >
+          {courts.map((cc, idx) => (
             <button
               key={cc}
+              ref={(el) => { optionRefs.current[idx] = el; }}
+              role="option"
+              aria-selected={cc === value}
+              tabIndex={idx === activeIdx ? 0 : -1}
               className={cc === value ? "is-current" : ""}
-              onClick={(e) => { e.stopPropagation(); setOpen(false); if (cc !== value) onChange(cc); }}
+              onClick={(e) => { e.stopPropagation(); select(cc); }}
             >{cc}</button>
           ))}
         </div>

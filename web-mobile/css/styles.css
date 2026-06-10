@@ -22,6 +22,10 @@
 
 :root {
   --accent: #1d3557;
+  /* Darkened accent for filled-button hover (primary, active score button).
+     applyTheme() recomputes this from a runtime Branding accent so the hover
+     tracks the configured colour instead of a hard-coded navy (mp-nubo). */
+  --accent-strong: #16263f;
   --accent-soft: #e7eaf3;
   --accent-fg: #ffffff;
   --red: #c1121f;
@@ -45,6 +49,12 @@
      match-detail card bled the page through in the modal). mp-13y. */
   --bg-2: #f1f5f9;
   --surface-2: #f1f5f9;
+
+  /* Heading type scale (mp-p1tw) — one size per heading role so components
+     stop inventing their own. page title / card-or-section title / overline. */
+  --fs-title-page: 26px;
+  --fs-title-card: 14px;
+  --fs-overline: 11px;
 
   --r-sm: 6px;
   --r: 10px;
@@ -314,7 +324,7 @@ a:hover {
 }
 
 .page-head__title {
-  font-size: 26px;
+  font-size: var(--fs-title-page);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
@@ -371,11 +381,27 @@ a:hover {
   color: var(--ink);
   font-weight: 500;
   font-size: 13.5px;
-  transition: all 120ms;
+  /* Enumerate the animated properties — `all` also animated the focus
+     outline (it should snap in) and risks animating layout (mp-nubo P3). */
+  transition: background-color 120ms, border-color 120ms, color 120ms;
 }
 
 .btn:hover {
   border-color: var(--ink-4);
+}
+
+/* Pressed feedback — a 1px nudge reads as a press without color churn, and
+   is instant (transform isn't in the transition list) (mp-nubo P3). */
+.btn:active {
+  transform: translateY(1px);
+}
+
+/* Match the app's focus-visible convention (.score-btn / .input / .disclosure
+   all use a 2px accent ring); without this .btn fell back to the UA default
+   1px ring, which is low-contrast on the navy primary button (mp-nubo). */
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn--primary {
@@ -385,8 +411,8 @@ a:hover {
 }
 
 .btn--primary:hover {
-  background: #16263f;
-  border-color: #16263f;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .btn--danger {
@@ -463,8 +489,8 @@ a:hover {
 }
 
 .score-btn--active:hover {
-  background-color: #16263f;
-  border-color: #16263f;
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: var(--accent-fg);
 }
 
@@ -519,8 +545,18 @@ a:hover {
 
 .card__title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-title-card);
   letter-spacing: -0.01em;
+}
+
+/* Overline / eyebrow utility (mp-p1tw) — replaces ~10 hand-rolled inline
+   copies that drifted across 10.5/11/12px and 0.06/0.08/0.1em. */
+.overline {
+  font-size: var(--fs-overline);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
 }
 
 .card__sub {
@@ -3297,6 +3333,11 @@ button.pool-match-row {
 }
 
 @media (pointer: coarse) {
+  /* Touch devices: meet the 44px target on every button. Desktop (fine
+     pointer) keeps the denser 34px so admin tables stay compact (mp-nubo). */
+  .btn {
+    min-height: 44px;
+  }
   .btn--icon-sm {
     min-width: 44px;
     min-height: 44px;
@@ -6657,4 +6698,90 @@ button.pool-match-row {
 .pool--overview-summary { padding: 14px; margin-bottom: 12px; }
 .pool__overflow-note { margin-top: 8px; }
 .pool__view-all-btn  { margin-top: 8px; font-size: 13px; padding: 0; }
+
+/* ---------- Edit-tournament form stack ----------
+   The edit page is a long form split into concern-grouped cards
+   (basics, schedule, public info, access). A flex stack gives every
+   card a consistent 16px separation; the Branding + Sponsors cards
+   render inside the same stack, so the gap owns their spacing (neither
+   carries its own margin-top). */
+.edit-stack { display: flex; flex-direction: column; gap: 16px; }
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.edit-actions__note {
+  flex: 1 1 320px;
+  min-width: 240px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.edit-actions__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.edit-actions__dirty {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* Inline field-level validation error (mp-sspn) — sits directly under the
+   offending input so the message is read at its cause, not just the top banner. */
+.field__error {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--red);
+}
+
+/* Disclosure header (mp-sspn) — a card__head that toggles a collapsible
+   section. Matches the existing CourtPacePanel convention (card__title flex
+   row with a +/− indicator on the right), but uses a real <button> so
+   keyboard activation and semantics come for free. Full-width hit target. */
+.disclosure {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.disclosure__text { display: flex; flex-direction: column; gap: 2px; }
+.disclosure__toggle {
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink-3);
+}
+.disclosure:hover .disclosure__toggle { color: var(--ink-2); }
+.disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------- Branding section (mp-scf) ----------
+   Uses the standard .card / .card__head / .card__title chrome like every
+   other settings card (mp-p1tw) — only the field-layout helpers below are
+   branding-specific. */
+.branding__colors { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.branding__colors .field { flex: 1 1 0; min-width: 160px; margin-bottom: 0; }
+.branding__logo { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 4px; }
+.branding__logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.branding__logo-actions { display: flex; justify-content: flex-end; }
 

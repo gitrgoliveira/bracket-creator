@@ -8,6 +8,31 @@
 
 const { useState: useStateBr, useRef: useRefBr, useEffect: useEffectBr } = React;
 
+// Canonical defaults for the branding theme (mp-scf). Single source of truth so
+// admin_setup.jsx's dirty-tracking snapshot stays in lockstep with the values
+// BrandingManager emits — without this, changing a default here would silently
+// false-dirty the form on load until admin_setup was patched in tandem.
+const BRANDING_DEFAULTS = Object.freeze({
+  primaryColor: "#1d3557",
+  accentSoftColor: "#e7eaf3",
+  windowTitle: "",
+});
+
+// Normalize a raw theme to BrandingManager's emitted shape, or null when no
+// colour/title field is set (empty {} — e.g. logo-only — counts as absent so
+// the PUT payload stays clean). Exported and reused by admin_setup.jsx for
+// dirty tracking, ensuring the pre-mount raw theme and the post-mount synced
+// theme compare equal in the dirty snapshot.
+function normalizeTheme(t) {
+  const has = t && (t.primaryColor || t.accentSoftColor || t.windowTitle);
+  if (!has) return null;
+  return {
+    primaryColor: t.primaryColor || BRANDING_DEFAULTS.primaryColor,
+    accentSoftColor: t.accentSoftColor || BRANDING_DEFAULTS.accentSoftColor,
+    windowTitle: t.windowTitle || BRANDING_DEFAULTS.windowTitle,
+  };
+}
+
 function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   const theme = (tournament && tournament.theme) || {};
 
@@ -31,20 +56,14 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   // tournament.theme is explicitly set — passing null when absent keeps
   // the parent PUT payload clean (theme block omitted unless configured).
   useEffectBr(() => {
-    const rawTheme = tournament && tournament.theme;
-    // Treat a theme object that carries no meaningful fields as "absent":
-    // when only a logo is configured, the server returns theme:{} because
-    // LogoPath has json:"-". Propagating defaults in that case would persist
-    // unwanted color values on the next Save.
-    const hasThemeConfig = rawTheme &&
-      (rawTheme.primaryColor || rawTheme.accentSoftColor || rawTheme.windowTitle);
-    const pc = (rawTheme && rawTheme.primaryColor) || "#1d3557";
-    const asc = (rawTheme && rawTheme.accentSoftColor) || "#e7eaf3";
-    const wt = (rawTheme && rawTheme.windowTitle) || "";
-    setPrimaryColor(pc);
-    setAccentSoftColor(asc);
-    setWindowTitle(wt);
-    if (onThemeChange) onThemeChange(hasThemeConfig ? { primaryColor: pc, accentSoftColor: asc, windowTitle: wt } : null);
+    const norm = normalizeTheme(tournament && tournament.theme);
+    // Update the pickers with effective values even when no theme is set, so
+    // they show defaults rather than empty; only propagate to the parent when
+    // a theme is actually configured (norm !== null).
+    setPrimaryColor((norm && norm.primaryColor) || BRANDING_DEFAULTS.primaryColor);
+    setAccentSoftColor((norm && norm.accentSoftColor) || BRANDING_DEFAULTS.accentSoftColor);
+    setWindowTitle((norm && norm.windowTitle) || BRANDING_DEFAULTS.windowTitle);
+    if (onThemeChange) onThemeChange(norm);
   }, [tournament]);
 
   const handleColorChange = (field, value) => {
@@ -115,103 +134,62 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   };
 
   return (
-    <div className="card card--pad-lg" style={{ marginTop: 16 }}>
-      <div className="card__title">Branding</div>
-      <div className="field__hint" style={{ marginBottom: 16 }}>
-        Customize the browser tab title, accent colors, and the tournament logo
-        shown on the viewer, lobby, and admin screens. Colors and title preview
-        instantly; the logo takes effect on next page load.
-      </div>
-
-      <div className="field" style={{ marginBottom: 16 }}>
-        <label className="field__label">Browser tab / window title</label>
-        <input
-          type="text"
-          value={windowTitle}
-          maxLength={100}
-          placeholder="Bracket Creator Mobile"
-          onChange={(e) => handleWindowTitleChange(e.target.value)}
-          style={{ width: "100%", boxSizing: "border-box" }}
-        />
-        <div className="field__hint">
-          Shown in the browser tab and title bar on all pages. Defaults to
-          "Bracket Creator Mobile" when blank.
+    <div className="card card--pad-lg">
+      <div className="card__head">
+        <div>
+          <div className="card__title">Branding</div>
+          <div className="card__sub">Customize the browser tab title, accent colors, and the tournament logo shown on the viewer, lobby, and admin screens.</div>
         </div>
       </div>
-
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 16 }}>
-        <div className="field" style={{ flex: 1, minWidth: 160 }}>
-          <label className="field__label">Primary accent color</label>
-          <input
-            type="color"
-            value={primaryColor}
-            onChange={(e) => handleColorChange("primaryColor", e.target.value)}
-            style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }}
-          />
-          <div className="field__hint">
-            Used for buttons, headers, and highlights. Default: #1d3557.
-          </div>
+      <div>
+        <div className="field">
+          <label className="field__label">Browser tab / window title</label>
+          <input type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"
+            onChange={(e) => handleWindowTitleChange(e.target.value)}
+            style={{ width: "100%", boxSizing: "border-box" }} />
+          <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to "Bracket Creator Mobile" when blank.</div>
         </div>
-        <div className="field" style={{ flex: 1, minWidth: 160 }}>
-          <label className="field__label">Soft accent (background tint)</label>
-          <input
-            type="color"
-            value={accentSoftColor}
-            onChange={(e) => handleColorChange("accentSoftColor", e.target.value)}
-            style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }}
-          />
-          <div className="field__hint">
-            Used for row highlights and badges. Default: #e7eaf3.
-          </div>
-        </div>
-      </div>
-
-      <div className="field__hint" style={{ marginBottom: 16, fontSize: 12, color: "var(--ink-3)" }}>
-        Save the tournament form below to persist color changes.
-      </div>
-
-      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16, marginTop: 4 }}>
-        <div style={{ fontWeight: 600, marginBottom: 8 }}>Tournament logo</div>
-        <div className="field__hint" style={{ marginBottom: 12 }}>
-          PNG or JPEG, up to 1 MB. Replaces the default kendo logo on all screens.
-          Falls back to the default logo if removed.
-        </div>
-
-        {hasLogo && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "8px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
-            <img
-              key={logoKey}
-              src={`/api/branding/logo?v=${logoKey}`}
-              alt="Tournament logo"
-              style={{ height: 48, width: "auto", maxWidth: 120, objectFit: "contain" }}
-            />
-            <div style={{ flex: 1 }}>Current logo</div>
-            <button
-              className="btn btn--danger"
-              disabled={busy}
-              onClick={handleLogoDelete}
-            >
-              Remove
-            </button>
-          </div>
-        )}
-
-        <form onSubmit={handleLogoUpload} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="branding__colors">
           <div className="field">
-            <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
-            <div className="field__hint">Square image recommended — non-square images will be cropped to fit the top bar icon.</div>
+            <label className="field__label">Primary accent color</label>
+            <input type="color" value={primaryColor}
+              onChange={(e) => handleColorChange("primaryColor", e.target.value)}
+              style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }} />
+            <div className="field__hint">Used for buttons, headers, and highlights. Default: #1d3557.</div>
           </div>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="submit" className="btn btn--primary" disabled={busy}>
-              {busy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}
-            </button>
+          <div className="field">
+            <label className="field__label">Soft accent (background tint)</label>
+            <input type="color" value={accentSoftColor}
+              onChange={(e) => handleColorChange("accentSoftColor", e.target.value)}
+              style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }} />
+            <div className="field__hint">Used for row highlights and badges. Default: #e7eaf3.</div>
           </div>
-        </form>
+        </div>
+        <div className="branding__logo">
+          <div className="field__label" style={{ marginBottom: 8 }}>Tournament logo</div>
+          <div className="field__hint" style={{ marginBottom: 12 }}>PNG or JPEG, up to 1 MB. Replaces the default kendo logo on all screens. Falls back to the default logo if removed.</div>
+          {hasLogo && (
+            <div className="branding__logo-preview">
+              <img key={logoKey} src={`/api/branding/logo?v=${logoKey}`} alt="Tournament logo" style={{ height: 48, width: "auto", maxWidth: 120, objectFit: "contain" }} />
+              <div style={{ flex: 1 }}>Current logo</div>
+              <button className="btn btn--danger" disabled={busy} onClick={handleLogoDelete}>Remove</button>
+            </div>
+          )}
+          <form onSubmit={handleLogoUpload} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="field">
+              <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
+              <div className="field__hint">Square image recommended — non-square images will be cropped to fit the top bar icon.</div>
+            </div>
+            <div className="branding__logo-actions">
+              <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}</button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
 }
 
 window.BrandingManager = BrandingManager;
-export { BrandingManager };
+export { BrandingManager, normalizeTheme, BRANDING_DEFAULTS };

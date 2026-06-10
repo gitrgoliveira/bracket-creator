@@ -995,7 +995,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+            <div className="overline">
               {comp?.name} · {m.scheduledAt || m.round || ""}
             </div>
             <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
@@ -1008,7 +1008,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
           <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+            <div className="overline" style={{ marginBottom: 8 }}>
               SHIRO (white)
             </div>
             {teamB ? (
@@ -1026,7 +1026,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
             )}
           </div>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 8 }}>
+            <div className="overline" style={{ marginBottom: 8 }}>
               AKA (red)
             </div>
             {teamA ? (

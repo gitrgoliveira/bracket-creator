@@ -192,7 +192,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     <div className="page" data-testid="lineup-form-root" style={{ padding: 24, maxWidth: 640 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+          <div className="overline">
             {comp?.name} · Round {round + 1}
           </div>
           <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
@@ -302,7 +302,7 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
     <div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, padding: "0 24px", paddingTop: 24 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Team</span>
+          <span className="overline">Team</span>
           <select
             className="input"
             value={teamId}
@@ -315,7 +315,7 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Round</span>
+          <span className="overline">Round</span>
           <input
             className="input"
             type="number"

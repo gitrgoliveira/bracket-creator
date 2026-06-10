@@ -20,6 +20,22 @@ const THEME = {
   "cardVariant": 1
 };
 
+// Darken a #rrggbb hex toward black by `amount` (0..1). Used to derive the
+// filled-button hover shade (--accent-strong) from a runtime Branding accent
+// so the hover tracks the configured colour instead of a hard-coded navy
+// (mp-nubo). Returns null on malformed input so callers fall back to the CSS
+// default token.
+function darkenHex(hex, amount) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const f = 1 - amount;
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
 // mp-scf: apply tournament-configured CSS custom properties. Called once
 // after tournament load and again on tournament_updated. Removes overrides
 // when the theme field is absent so the CSS defaults take over.
@@ -27,8 +43,13 @@ function applyTheme(theme) {
   const root = document.documentElement;
   if (theme && theme.primaryColor) {
     root.style.setProperty("--accent", theme.primaryColor);
+    // mp-nubo: keep the button hover shade in sync with the custom accent.
+    const strong = darkenHex(theme.primaryColor, 0.2);
+    if (strong) root.style.setProperty("--accent-strong", strong);
+    else root.style.removeProperty("--accent-strong");
   } else {
     root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-strong");
   }
   if (theme && theme.accentSoftColor) {
     root.style.setProperty("--accent-soft", theme.accentSoftColor);

@@ -577,7 +577,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return <AdminEditTournament
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
-      onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); }}
+      onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}

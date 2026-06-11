@@ -184,7 +184,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayer }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayers }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const live = match.status === "running";
@@ -199,8 +199,11 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
   const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
 
-  const _isFollowed = (typeof window !== "undefined" && window.isFollowedPlayer) || (() => false);
-  const playerHighlight = highlightPlayer && (_isFollowed(match.sideA, highlightPlayer) || _isFollowed(match.sideB, highlightPlayer));
+  // mp-xhaa: highlight any watched player (Set of ids+names). Lazy window
+  // lookup mirrors the prior pattern so bracket.jsx stays decoupled from
+  // viewer.jsx module load order.
+  const _isWatched = (typeof window !== "undefined" && window.isPlayerWatched) || (() => false);
+  const playerHighlight = !!(highlightPlayers && (_isWatched(match.sideA, highlightPlayers) || _isWatched(match.sideB, highlightPlayers)));
 
   return (
     <button
@@ -464,7 +467,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
 // real match; structural byes are absent. Cards in column 0 plus every card is
 // absolutely positioned at the feeder-graph-derived top so parents sit centred
 // on their feeders (see computeMetaTops).
-function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
+function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -555,7 +558,7 @@ function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, o
                     highlighted={m.id === highlightedMatchId}
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                     onClick={() => onMatchClick && onMatchClick(m, ci, mi)}
-                    highlightPlayer={highlightPlayer}
+                    highlightPlayers={highlightPlayers}
                   />
                 </div>
               );
@@ -580,7 +583,7 @@ function BracketTree(props) {
   return <BracketTreeLegacy {...props} />;
 }
 
-function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayer }) {
+function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -688,7 +691,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
                     highlighted={m.id === highlightedMatchId}
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                     onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
-                    highlightPlayer={highlightPlayer}
+                    highlightPlayers={highlightPlayers}
                   />
                 </div>
                 );

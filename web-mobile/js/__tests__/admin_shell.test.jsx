@@ -25,6 +25,7 @@ const STUBBED_GLOBALS = {
   formatDate: (d) => d,
   formatAdminHeaderSub: () => 'header',
   competitionKindLabel: () => 'Individual',
+  courtCount: () => 1,
   // Stub component: CompCard references <StatusBadge> via the global. The
   // React stub's createElement never invokes it, so a no-op suffices.
   StatusBadge: function StatusBadge() { return null; },

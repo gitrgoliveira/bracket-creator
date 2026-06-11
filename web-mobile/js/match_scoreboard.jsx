@@ -137,7 +137,7 @@ function slotCells(letters, side, testid) {
 // decision (hantei, fusensho, kiken) the winning side is otherwise invisible,
 // so we mark it with ○ (FIK hantei-win symbol) in the winner's first slot.
 // A plain helper (not a component) so it renders inline into the parent's tree.
-function centreMarks(sub) {
+function centreMarks(sub, matchSideA, matchSideB) {
   const lettersB = ipponLetters(sub.ipponsB); // shiro / left
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
@@ -147,16 +147,13 @@ function centreMarks(sub) {
     (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
-  // The backend may persist a daihyosen winner as the TEAM name rather than
-  // the rep competitor's name — accept sub.teamB/sub.teamA as fallback keys
-  // (TeamScoreboard threads shiroName/akaName into the DH sub as teamB/teamA)
-  // so the win mark still lands on the winning side instead of falling back
-  // to the centre Ht.
+  // Fallback chain: sub-level side → daihyosen team alias → match-level side
+  // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
   const winShiro = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideB || sub.winner === sub.teamB));
+    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
   const winAka = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideA || sub.winner === sub.teamA));
+    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
   // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
   // hantei winner is unknown does "Ht" fall back to the centre cell.
@@ -208,7 +205,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name" data-testid="sub-shiro-name">{shiroName}</span>
-      {centreMarks(sub)}
+      {centreMarks(sub, matchSideA, matchSideB)}
       <span className="msb-name msb-name--aka" data-testid="sub-aka-name">{akaName}</span>
     </div>
   );

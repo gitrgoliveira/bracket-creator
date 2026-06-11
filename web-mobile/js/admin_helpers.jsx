@@ -310,7 +310,7 @@ function deriveTournamentDays(startDate, durationDays) {
 // Normalizes a courts array. Fallback to ["A"] if missing or empty,
 // preventing crashes and ensuring a consistent default court selection UI.
 function normalizeCourts(courts) {
-  return (courts && courts.length > 0) ? courts : ["A"];
+  return (Array.isArray(courts) && courts.length > 0) ? courts : ["A"];
 }
 
 // Returns the count of courts, safely falling back to the normalized minimum of 1.

@@ -538,9 +538,10 @@ type MatchResult struct {
 	Encho          *EnchoMetadata   `json:"encho,omitempty" yaml:"encho,omitempty"`
 	QueuePosition  int              `json:"queuePosition,omitempty" yaml:"-"`
 	// DecidedByHantei is true when the winner was declared by referee
-	// hantei after an encho remained tied (FIK Article 7-5 / 29-6).
-	// Distinguishes a judges' decision from an ippon-derived win for
-	// stats, audit, and display. Zero value omitted from the wire.
+	// hantei on a tied bout (FIK Article 7-5 / 29-6). Overtime is not a
+	// precondition: a tied scoreline may be taken straight to a judges'
+	// decision. Distinguishes a judges' decision from an ippon-derived win
+	// for stats, audit, and display. Zero value omitted from the wire.
 	//
 	// Pointer semantics at the API boundary: when a client omits the
 	// field (nil) on a BRACKET-match score request, the engine preserves

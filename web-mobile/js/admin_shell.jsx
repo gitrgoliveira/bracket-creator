@@ -13,12 +13,23 @@ const compMatchStats = window.compMatchStats;
 const pluralize = window.pluralize;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 
 // Maximum live-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
 const LIVE_STRIP_MAX_CHIPS = 6;
+
+// Plain-language expansions for the insider format codes emitted by
+// formatLabelShort (ui.jsx): "P+KO" / "KO". Used as a tooltip + aria-label at
+// the call site so the abbreviation stays legible to new operators.
+const FORMAT_LABEL_LONG = {
+  mixed: "Pools then knockout",
+  league: "League (round-robin)",
+  swiss: "Swiss rounds",
+  playoffs: "Knockout (direct elimination)",
+};
 
 function Breadcrumbs({ items }) {
   return (
@@ -27,7 +38,14 @@ function Breadcrumbs({ items }) {
         <React.Fragment key={i}>
           {i > 0 && <span className="sep">/</span>}
           {item.onClick ? (
-            <button onClick={() => { document.activeElement?.blur(); item.onClick(); }}>
+            // No document.activeElement.blur() here: it dumped keyboard focus
+            // to <body> after every breadcrumb navigation, stranding tab order.
+            // The clicked button keeps focus naturally; the destination view
+            // manages its own focus. (The old blur appeared to target a mobile
+            // keyboard / hover dismissal, but a blanket blur is the wrong tool —
+            // it breaks keyboard users for a problem the browser already handles
+            // when the navigated-away input unmounts.)
+            <button onClick={() => item.onClick()}>
               {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
               {item.label}
             </button>
@@ -53,6 +71,24 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
       .flatMap(cc => window.compMatches(cc))
       .filter(m => m.status === "running" && sideName(m.sideA) && sideName(m.sideB));
   }, [tournament]);
+
+  // Connection-state indicator (PRODUCT.md: "never leave the user guessing
+  // about the tournament state"). The admin chrome previously showed nothing
+  // when the SSE stream dropped, so stale data sat silently. We open our own
+  // lightweight subscription purely to read the connection status exposed by
+  // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
+  // The callback arg is a no-op here: the dashboard already drives data
+  // refreshes off its own subscription; this one only observes liveness.
+  const [connected, setConnected] = useStateA(true);
+  useEffectA(() => {
+    if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
+    const unsub = window.API.subscribeToEvents(
+      () => {},
+      (status) => setConnected(status === "open")
+    );
+    return unsub;
+  }, []);
+
   const onOpenScore = (m) => {
     if (typeof window.__adminNavigateToScore === "function") {
       window.__adminNavigateToScore(m.compId);
@@ -74,7 +110,32 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           </div>
         </div>
         <div className="topbar__spacer"></div>
-        <button className="viewer-toggle" onClick={onViewerMode}>👁 Public viewer</button>
+        {/* Calm connection indicator: a dot + label that reflects the SSE
+            stream state. Green-tinted "Live" when connected; amber-tinted
+            "Reconnecting…" when the stream has dropped. role=status +
+            aria-live=polite so a screen reader hears the change without it
+            being alarmist. Uses tokens inline (no new CSS classes). */}
+        <span
+          role="status"
+          aria-live="polite"
+          title={connected ? "Live feed connected" : "Live feed disconnected — reconnecting"}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            color: connected ? "var(--ink-2)" : "var(--red)",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className={connected ? "dot dot--live" : "dot"}
+            style={connected ? undefined : { background: "var(--red)" }}
+          ></span>
+          {connected ? "Live" : "Reconnecting…"}
+        </span>
+        <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {liveMatches.length > 0 && (
@@ -173,7 +234,7 @@ function AllWinnersModal({ comps, onClose }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 640, width: "95%" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="All winners">
         <div className="modal__head">
-          <div className="modal__title">🏅 All winners</div>
+          <div className="modal__title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="trophy" size={18} />All winners</div>
           <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -190,7 +251,7 @@ function AllWinnersModal({ comps, onClose }) {
             <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2, #f0f0f0)", borderRadius: 4, padding: "1px 6px" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2)", borderRadius: 4, padding: "1px 6px" }}>
                   {window.competitionKindLabel(comp)}
                 </div>
               </div>
@@ -292,6 +353,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
 
+  // Derive the tournament-level status from competition activity instead of
+  // trusting t.status, which can read "Pending" (setup) even while competitions
+  // are mid-pools — a contradiction next to the "Currently running" list below.
+  const allCompleted = comps.length > 0 && comps.every((c) => c.status === "completed");
+  const tournamentInProgress = running.length > 0;
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
@@ -300,7 +367,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <h1 className="page-head__title">{t.name}</h1>
-              <StatusBadge status={t.status} />
+              {tournamentInProgress
+                ? <span className="badge badge--pools">In progress</span>
+                : <StatusBadge status={allCompleted ? "completed" : "setup"} />}
             </div>
             <div className="page-head__sub">
               {formatAdminHeaderSub(
@@ -313,10 +382,10 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             </div>
           </div>
           <div className="page-head__actions">
-            <button className="btn" onClick={onAnnounce}>📣 Announce</button>
-            <button className="btn" onClick={() => setExportPdfOpen(true)}>🖨 Export PDFs</button>
+            <button className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
+            <button className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
             {comps.some(c => c.status === "completed") && (
-              <button className="btn" onClick={() => setAllWinnersOpen(true)}>🏅 All winners</button>
+              <button className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
             <button className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
@@ -335,18 +404,22 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         <div className="row" style={{ marginBottom: 24 }}>
           <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
-            <div className="card__title" style={{ marginBottom: 6 }}>🗓 Tournament schedule →</div>
+            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
             <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
           </button>
           <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
-            <div className="card__title" style={{ marginBottom: 6 }}>✎ Score editor →</div>
+            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
         </div>
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="dot dot--live"></span> Currently running
+            {/* Static dot, not dot--live: these are started competitions, which
+                is not the same as a match being live right now. The pulsing
+                live signal is reserved for actual live matches (topbar
+                live-strip + match rows) per DESIGN.md Principle 3. */}
+            <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
             {running.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, "scores")} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
@@ -362,7 +435,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
           <button className="tcard tcard--add" onClick={onOpenImport}>
-            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>📂</div>
+            <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Import competitions</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
@@ -430,7 +503,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
-          <div style={{ width: "100%", background: "var(--surface-2, #f5f5f5)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
+          <div style={{ width: "100%", background: "var(--surface-2)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
             {url}
           </div>
           <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
@@ -511,7 +584,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
             Each download is a ZIP. Generation can take up to a minute.
           </p>
           {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
-            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--surface-2, #eee)" }}>
+            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
               <div>
                 <div style={{ fontWeight: 600 }}>{label}</div>
                 <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{hint}</div>
@@ -575,7 +648,11 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         <div className="tcard__stats">
           <div className="tcard__stat"><div className="v">{playerCount}</div><div className="l">{pluralize(playerCount, c.kind === "team" ? "Team" : "Player")}</div></div>
           <div className="tcard__stat"><div className="v">{courts.length}</div><div className="l">{pluralize(courts.length, "Shiaijo", "Shiaijo")}</div></div>
-          <div className="tcard__stat"><div className="v">{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
+          {/* formatLabelShort lives in ui.jsx (not owned here); it emits the
+              insider codes "P+KO" / "KO". Add a plain-language tooltip + a11y
+              label inline so the abbreviation is legible without forking the
+              shared helper. */}
+          <div className="tcard__stat" title={FORMAT_LABEL_LONG[c.format] || "Format"}><div className="v" aria-label={FORMAT_LABEL_LONG[c.format] || undefined}>{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
           {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
@@ -608,27 +685,96 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
 
 function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", align = "left" }) {
   const [open, setOpen] = useStateA(false);
+  // Active option index for arrow-key navigation inside the open popover.
+  const [activeIdx, setActiveIdx] = useStateA(0);
   const ref = useRefA(null);
+  const triggerRef = useRefA(null);
+  const optionRefs = useRefA([]);
+
   useEffectA(() => {
     if (!open) return;
     const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
+
+  // On open, seed the active option to the current court and move focus into
+  // the popover. On close, return focus to the trigger so keyboard users
+  // aren't dropped to <body>.
+  useEffectA(() => {
+    if (open) {
+      const cur = Math.max(0, courts.indexOf(value));
+      setActiveIdx(cur);
+    } else {
+      triggerRef.current && triggerRef.current.focus();
+    }
+  }, [open]);
+
+  // Focus the active option element whenever it changes while open.
+  useEffectA(() => {
+    if (open && optionRefs.current[activeIdx]) {
+      optionRefs.current[activeIdx].focus();
+    }
+  }, [open, activeIdx]);
+
+  const select = (cc) => { setOpen(false); if (cc !== value) onChange(cc); };
+
+  const onPopoverKeyDown = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+      return;
+    }
+    // Every branch below indexes into `courts`; with no courts there's nothing
+    // to navigate or select, so bail before any `% courts.length` (÷0 → NaN) or
+    // `courts[activeIdx]` (undefined) can run.
+    if (!courts.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      setActiveIdx((i) => (i + 1) % courts.length);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      setActiveIdx((i) => (i - 1 + courts.length) % courts.length);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActiveIdx(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActiveIdx(courts.length - 1);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      select(courts[activeIdx]);
+    }
+  };
+
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
+        ref={triggerRef}
         className={btnClassName}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         title="Change shiaijo"
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >{label}{value} ▾</button>
       {open && (
-        <div className="court-popover" style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}>
-          {courts.map((cc) => (
+        <div
+          className="court-popover"
+          role="listbox"
+          aria-label="Choose shiaijo"
+          onKeyDown={onPopoverKeyDown}
+          style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}
+        >
+          {courts.map((cc, idx) => (
             <button
               key={cc}
+              ref={(el) => { optionRefs.current[idx] = el; }}
+              role="option"
+              aria-selected={cc === value}
+              tabIndex={idx === activeIdx ? 0 : -1}
               className={cc === value ? "is-current" : ""}
-              onClick={(e) => { e.stopPropagation(); setOpen(false); if (cc !== value) onChange(cc); }}
+              onClick={(e) => { e.stopPropagation(); select(cc); }}
             >{cc}</button>
           ))}
         </div>

@@ -489,7 +489,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const targets = (c.players || []).filter(p => p.dojo === dojo && !p.checkedIn);
     if (targets.length === 0) return;
 
-    if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
+    if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
 
     const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
@@ -519,7 +519,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setAddLoading(true);
     try {
@@ -551,7 +551,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const oldName = replaceTarget.name;
     const targetId = replaceTarget.id;
     const targetTag = replaceTarget.tag || "";
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setReplaceLoading(true);
     try {

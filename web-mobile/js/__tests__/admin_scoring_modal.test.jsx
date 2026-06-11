@@ -254,10 +254,10 @@ describe('prevEnchoPeriod (the − button)', () => {
 });
 
 describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
-  // Regression: a hantei-decided daihyosen persists encho on the rep-bout
-  // sub (wire position -1), NOT the top-level match. On re-open the count
-  // must be restored from the sub — else decidedByHantei replays without
-  // encho and the backend rejects the next save.
+  // Regression: a daihyosen that went to overtime persists encho on the
+  // rep-bout sub (wire position -1), NOT the top-level match. On re-open the
+  // count must be restored from the sub so the overtime history survives a
+  // re-save (encho is independent of the hantei decision).
 
   it('reads encho from the daihyosen sub when one exists', () => {
     const m = {
@@ -290,9 +290,10 @@ describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
 });
 
 describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
-  // Backend invariant (validation.go validateSubBout): hantei is rejected
-  // without encho.periodCount > 0. The builder must mirror that so a
-  // reduced-to-0 counter never replays a now-invalid decidedByHantei.
+  // Encho is decoupled from hantei (validation.go validateSubBout): a tied
+  // daihyosen may be decided by judges with or without overtime. The builder
+  // emits the two fields independently — encho when the counter is > 0,
+  // decidedByHantei when armed on a tied scoreline.
 
   it('emits encho + decidedByHantei when armed and encho > 0', () => {
     expect(daihyosenEnchoFields({ enchoPeriodCount: 2, daihyosenTied: true, daihyosenHantei: 'a' }))
@@ -306,16 +307,22 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ encho: { periodCount: 1 } });
   });
 
-  it('emits NEITHER field when encho is reduced to 0 even with hantei armed', () => {
-    // The regression: operator arms hantei, then drops the counter to 0.
-    // decidedByHantei must NOT survive — the backend would 400 it.
+  it('emits hantei WITHOUT encho when armed on a tied bout and no overtime', () => {
+    // Decoupled: a tied daihyosen taken straight to a judges' decision with
+    // no overtime sends decidedByHantei alone — the backend accepts it.
     expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a' }))
-      .toEqual({});
+      .toEqual({ decidedByHantei: true });
   });
 
-  it('emits nothing for negative/NaN encho (defensive)', () => {
-    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
-    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
+  it('omits encho but keeps hantei for negative/NaN encho (defensive)', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ decidedByHantei: true });
+    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ decidedByHantei: true });
+  });
+
+  it('emits nothing when no encho and hantei not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' })).toEqual({});
   });
 });
 

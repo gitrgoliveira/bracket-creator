@@ -448,7 +448,6 @@ function useEscapeToClose(onClose) {
   const cbRef = useRef(onClose);
   useEffect(() => { cbRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    if (!cbRef.current) return;
     const onKey = (e) => {
       if (e.key === "Escape" && typeof cbRef.current === "function") {
         e.preventDefault();

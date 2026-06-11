@@ -101,7 +101,7 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
         for (const m of poolMatches) {
             if ((m.court || "") !== court) continue;
             if (m.status !== "scheduled") continue;
-            if (!m.sideA || !m.sideB) continue;
+            if (!bracketSidesReady(m)) continue;
             out.push({ ...m, _comp: c });
         }
         const rounds = (c.bracket && c.bracket.rounds) || [];

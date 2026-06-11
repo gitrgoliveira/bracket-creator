@@ -1622,15 +1622,19 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
         </div>
       )}
 
-      <WatchPicker
-        roster={roster}
-        dojos={dojos}
-        watchedPlayerIds={watchedPlayerIds}
-        watchedDojos={watchedDojos}
-        onPickPlayer={addPlayer}
-        onPickDojo={addDojo}
-        placeholder={count === 0 ? "Add a player or dojo to watch…" : "Add another player or dojo…"}
-      />
+      {count >= WATCHLIST_MAX ? (
+        <div className="hint--sm">Watchlist full ({WATCHLIST_MAX}). Remove an entry to add more.</div>
+      ) : (
+        <WatchPicker
+          roster={roster}
+          dojos={dojos}
+          watchedPlayerIds={watchedPlayerIds}
+          watchedDojos={watchedDojos}
+          onPickPlayer={addPlayer}
+          onPickDojo={addDojo}
+          placeholder={count === 0 ? "Add a player or dojo to watch…" : "Add another player or dojo…"}
+        />
+      )}
 
       {/* Hint when ≥2 entities are watched but none is pinned: no hero/chime
           until the user picks a primary. */}

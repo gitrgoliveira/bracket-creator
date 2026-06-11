@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -715,5 +715,43 @@ describe('deriveTournamentDays', () => {
     expect(deriveTournamentDays('05-06-2026', 1.5)).toEqual([]); // non-integer
     expect(deriveTournamentDays('05-06-2026', NaN)).toEqual([]);
     expect(deriveTournamentDays('05-06-2026', '3')).toEqual([]); // non-number
+  });
+});
+
+describe('normalizeCourts', () => {
+  it('returns the array if it is a non-empty array', () => {
+    expect(normalizeCourts(["A", "B"])).toEqual(["A", "B"]);
+  });
+
+  it('returns ["A"] for null or undefined', () => {
+    expect(normalizeCourts(null)).toEqual(["A"]);
+    expect(normalizeCourts(undefined)).toEqual(["A"]);
+  });
+
+  it('returns ["A"] for an empty array', () => {
+    expect(normalizeCourts([])).toEqual(["A"]);
+  });
+
+  it('returns ["A"] for a truthy non-array like a string', () => {
+    expect(normalizeCourts("AB")).toEqual(["A"]);
+  });
+});
+
+describe('courtCount', () => {
+  it('returns the length of the array', () => {
+    expect(courtCount(["A", "B"])).toBe(2);
+  });
+
+  it('returns 1 for null or undefined', () => {
+    expect(courtCount(null)).toBe(1);
+    expect(courtCount(undefined)).toBe(1);
+  });
+
+  it('returns 1 for an empty array', () => {
+    expect(courtCount([])).toBe(1);
+  });
+
+  it('returns 1 for a truthy non-array like a string', () => {
+    expect(courtCount("AB")).toBe(1);
   });
 });

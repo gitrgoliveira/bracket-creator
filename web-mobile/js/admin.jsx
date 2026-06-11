@@ -618,6 +618,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       court={view.court}
       onBack={() => setView({ kind: "dashboard" })}
       onEditScore={editMatchScore}
+      onMoveCourt={moveMatchCourt}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}

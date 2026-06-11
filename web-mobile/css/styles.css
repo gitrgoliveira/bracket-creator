@@ -7059,3 +7059,77 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .branding__logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .branding__logo-actions { display: flex; justify-content: flex-end; }
 
+
+/* ── Shiaijo operator console (Direction C, mp-c2yr) ──────────────────────
+   Two-column: queue (left ~40%) + inline scoring & context (right). Stacks
+   below 900px so tablet-portrait gets scoring-on-top, queue-below. */
+.shiaijo {
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+.linklike {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+}
+
+/* Up Next — elevated call-to-court card */
+.shiaijo-upnext__card {
+  border: 1px solid var(--accent-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.06));
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.shiaijo-upnext__card.is-called {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.shiaijo-upnext__time { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+.shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; }
+.shiaijo-called { color: var(--accent); font-weight: 700; font-size: 12px; }
+
+/* Big sides block for the Up Next card */
+.shiaijo-sides { display: flex; align-items: center; gap: 12px; }
+.shiaijo-sides__side { flex: 1; min-width: 0; }
+.shiaijo-sides__side .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-3); }
+.shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
+.shiaijo-sides--lg .name { font-size: 18px; }
+
+/* Queue rows: 4-column variant of score-edit-row (no standalone court cell). */
+.shiaijo-row { grid-template-columns: 52px 1fr auto auto; cursor: pointer; }
+.shiaijo-row.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.shiaijo-row__comp { font-size: 10px; color: var(--ink-3); margin-top: 2px; }
+.shiaijo-row__status { display: flex; align-items: center; }
+
+.shiaijo-completed__toggle,
+.shiaijo-context__toggle {
+  background: none; border: 0; cursor: pointer; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 6px;
+}
+.shiaijo-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
+}
+
+/* Context panel (collapsible) */
+.shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.shiaijo-context__toggle { padding: 12px 14px; }
+.shiaijo-context__body { padding: 0 14px 14px; }
+.shiaijo-context__bracket { overflow: auto; max-height: 360px; }
+
+.shiaijo__placeholder { margin: 0; }
+
+@media (max-width: 900px) {
+  .shiaijo { grid-template-columns: 1fr; }
+  /* Scoring on top, queue below (brief: tablet portrait = stacked). */
+  .shiaijo__main { order: 0; }
+  .shiaijo__queue { order: 1; }
+}

@@ -375,7 +375,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
               {formatAdminHeaderSub(
                 formatDate(t.date),
                 t.venue,
-                t.courts.length,
+                (t.courts || []).length,
                 comps.length,
                 totalParticipants
               )}

@@ -1099,11 +1099,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
-          {/* T063: SSE connection indicator — visible only when the live feed drops. */}
+          {/* T063: SSE connection indicator, visible only when the connection drops. */}
           {!sseConnected && (
             <div className="sse-offline-banner" role="status" aria-live="polite">
               <span className="sse-offline-banner__dot" aria-hidden="true" />
-              Live feed reconnecting — scores may be outdated
+              Connection interrupted. Reconnecting… Scores may be out of date.
             </div>
           )}
           <TournamentInfo tournament={t} />
@@ -1495,8 +1495,12 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
             aria-atomic="true"
           >
             <span className="l">Queue</span>
-            {/* .my-match bg is --accent (navy), so text inherits white from
-                --accent-fg; emphasise up-next with a bullet, not colour. */}
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the in-progress/up-next
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
             <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
               {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
               {queueLabel}
@@ -3248,7 +3252,7 @@ function ScheduleViewer({ tournament, tweaks }) {
               <div className="tw-court__head">
                 <div>
                   <div className="tw-court__title">SHIAIJO {cc}</div>
-                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · live now" : ""}</div>
+                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · in progress" : ""}</div>
                 </div>
                 {liveOn && <span className="bc-live">● NOW</span>}
               </div>

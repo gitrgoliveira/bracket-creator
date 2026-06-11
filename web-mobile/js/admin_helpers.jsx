@@ -4,7 +4,7 @@
 // sideA/sideB can be a string (raw backend shape), an object with .name
 // (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
 // or null. Return the participant's display name, or "" when no real side is
-// present. Used by compMatchStats and AdminTopbar's live-strip filter, so the
+// present. Used by compMatchStats and AdminTopbar's running-strip filter, so the
 // two stay in lockstep about what "has a real side" means.
 function sideName(side) {
   if (!side) return "";
@@ -59,16 +59,16 @@ function hasPoolOriginPlaceholder(m) {
   return POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b);
 }
 
-// Returns { total, done, live } match counts for a single competition object.
+// Returns { total, done, running } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
 //   - structured `pools[].matches` from GET /api/viewer/competitions/:id (detail endpoint)
 // The admin-side GET /api/competitions/:id returns only config; use the viewer
 // endpoints when match counts are needed.
 function compMatchStats(c) {
-  let total = 0, done = 0, live = 0;
+  let total = 0, done = 0, running = 0;
   // Use hasBothSides() — the canonical cross-file predicate — so admin
-  // dashboard / overview / live-strip stats can't drift from viewer-side
+  // dashboard / overview / running-strip stats can't drift from viewer-side
   // filtering. Inline `sideName(m.sideA) && sideName(m.sideB)` was almost
   // right (skips byes / normalizeMatch's empty-side substitute) but missed
   // bracket placeholders like "Winner of r0-m1" — those have truthy
@@ -78,7 +78,7 @@ function compMatchStats(c) {
     if (!hasBothSides(m)) return;
     total++;
     if (m.status === "completed") done++;
-    if (m.status === "running") live++;
+    if (m.status === "running") running++;
   };
   if (Array.isArray(c.poolMatches)) {
     c.poolMatches.forEach(count);
@@ -88,7 +88,7 @@ function compMatchStats(c) {
   if (c.bracket && c.bracket.rounds) {
     c.bracket.rounds.forEach((r) => (r || []).forEach(count));
   }
-  return { total, done, live };
+  return { total, done, running };
 }
 
 // Canonical numeric bounds. The year range is shared by every date

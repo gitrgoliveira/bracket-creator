@@ -4,7 +4,7 @@
 //
 // GET returns the lineup for a (team, round) tuple, PUT sets/replaces
 // it, DELETE removes it. The lineup is mutable up until the round's
-// first match goes live — once frozen, subsequent PUTs return 409 with
+// first match starts — once frozen, subsequent PUTs return 409 with
 // ErrLineupLocked (FR-040, FR-041, R4 / CHK012).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
@@ -28,7 +28,7 @@ import (
 // LineupRequest is the body for PUT /lineups/:round. We accept the
 // positions map as the only required field — teamID/round/compID are
 // pinned by the URL path, and LockedAt is server-managed (the engine
-// stamps it when the round's first match goes live).
+// stamps it when the round's first match starts).
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
 }

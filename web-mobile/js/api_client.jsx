@@ -674,7 +674,7 @@ const API = {
     // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
     // the lineup; the server rejects with 409 (ErrLineupLocked) once the
-    // round's first match has gone live. DELETE clears the lineup so an
+    // round's first match has gone running. DELETE clears the lineup so an
     // operator can revise pre-lock.
     async fetchTeamLineup(compID, teamId, round) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
@@ -715,7 +715,7 @@ const API = {
     // place of the round key — successive encounters between the same
     // two teams each carry an independent, lockable lineup entry.
     // 404 → null (no lineup saved yet; form treats as blank/editable).
-    // 409 ErrLineupLocked on PUT → the match is already live; surface
+    // 409 ErrLineupLocked on PUT → the match is already running; surface
     // as a clear error (same pattern as round-scoped PUT).
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);

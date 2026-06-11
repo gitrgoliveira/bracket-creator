@@ -27,7 +27,7 @@
 // by competitionId, but defensive identity-preservation here is cheap).
 //
 // FR-025 hook (queue-position recompute): listeners that need to react
-// to status transitions (live/scheduled → completed) can compose with
+// to status transitions (running/scheduled → completed) can compose with
 // applyPatch by reading the merged result and recomputing derived
 // fields. Slice 1's T049 will add a queue-position invalidator that
 // runs on the same event before applyPatch returns.

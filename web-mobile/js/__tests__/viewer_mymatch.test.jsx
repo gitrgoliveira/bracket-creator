@@ -133,8 +133,8 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 99 })).toBe('98 before yours');
   });
 
-  it('returns null when status === "running" (round label already shows LIVE NOW)', () => {
-    // The my-match__round element appends " · LIVE NOW" for running matches, so
+  it('returns null when status === "running" (round label already shows NOW)', () => {
+    // The my-match__round element appends " · NOW" for running matches, so
     // the Queue chip must not duplicate it.
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running' })).toBeNull();

@@ -63,8 +63,8 @@ function bracketSidesReady(m) {
 }
 
 // Find the running match on a court from a tournament + competitions blob.
-// Returns null when no live match. Used by TvDisplay and StreamingOverlay.
-function findLiveOnCourt(competitions, court) {
+// Returns null when no running match. Used by TvDisplay and StreamingOverlay.
+function findRunningOnCourt(competitions, court) {
     if (!competitions || !court) return null;
     for (const c of competitions) {
         if (!c) continue;
@@ -91,7 +91,7 @@ function findLiveOnCourt(competitions, court) {
 
 // Collect upcoming (scheduled) matches on a court, sorted by queue position
 // (asc), then scheduledAt. Caps at `limit`. Used by T068 to render
-// "2 before yours" labels under the live match in TvDisplay.
+// "2 before yours" labels under the running match in TvDisplay.
 function findUpcomingOnCourt(competitions, court, limit = 2) {
     const out = [];
     if (!competitions || !court) return out;
@@ -122,14 +122,14 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
 }
 
 // Counts of matches on a court grouped by status. Drives T062/T063 empty
-// states: "All matches completed" requires completed > 0 + no live and
+// states: "All matches completed" requires completed > 0 + no running and
 // no scheduled; "No matches scheduled" requires zero matches in total.
 // Counts only the matches that have two real sides (not bye / TBD /
 // "Winner of rX-mY" placeholders) so a half-resolved bracket doesn't
 // flip the empty-state heuristic prematurely.
 function countCourtMatches(competitions, court) {
-    let live = 0, scheduled = 0, completed = 0;
-    if (!competitions || !court) return { live, scheduled, completed };
+    let running = 0, scheduled = 0, completed = 0;
+    if (!competitions || !court) return { running, scheduled, completed };
     // Count only matches with two real sides — reject "Winner of rX-mY" feeders
     // AND "Pool A-1st" pool-origin leaves — so a half-resolved bracket doesn't
     // inflate the "scheduled" count and prevent the "All matches completed"
@@ -138,7 +138,7 @@ function countCourtMatches(competitions, court) {
     const hasBoth = bracketSidesReady;
     const bump = (m) => {
         if (!hasBoth(m)) return;
-        if (m.status === "running") live++;
+        if (m.status === "running") running++;
         else if (m.status === "scheduled") scheduled++;
         else if (m.status === "completed") completed++;
     };
@@ -155,10 +155,10 @@ function countCourtMatches(competitions, court) {
             }
         }
     }
-    return { live, scheduled, completed };
+    return { running, scheduled, completed };
 }
 
-// Active courts = courts with at least one live or scheduled match.
+// Active courts = courts with at least one running or scheduled match.
 // Filters out idle courts so LobbyDisplay doesn't waste real estate on
 // "Shiaijo D — no matches" cards. Preserves the tournament's declared
 // court order (A, B, C, …) instead of an arbitrary iteration order.
@@ -297,7 +297,7 @@ function findCurrentBoutIndex(subResults) {
 }
 
 
-// TvWhiteTeamBoard — mp-13y: white scoreboard for a live TEAM match
+// TvWhiteTeamBoard — mp-13y: white scoreboard for a running TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
 // team case with a light board: court header + black rule, team name row
 // (Shiro black left / Aka red right, NO top IV score), then the per-bout
@@ -522,22 +522,22 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
 // <TvDisplay court="A"> — fullscreen per-court board.
 //
 // Implements T061 (visual treatment), T062 (auto-promote first scheduled
-// when no live match + "all completed" / "no matches" empty states), and
+// when no running match + "all completed" / "no matches" empty states), and
 // T063 (SSE reconnect indicator). Reads the data model that lives on the
 // `competitions` prop (an array of normalised competitions; each carries
 // poolMatches / bracket / withZekkenName) and the `tournament` prop (for
 // venue branding / court labels).
 //
-// Auto-promote semantics (T062 / FR-011 scenario 3): if there's no live
+// Auto-promote semantics (T062 / FR-011 scenario 3): if there's no running
 // match on the court, the first scheduled match takes over the "current"
-// slot, labelled UP NEXT instead of LIVE so spectators understand it
+// slot, labelled UP NEXT instead of NOW so spectators understand it
 // hasn't actually started. The queue beneath shifts up by one so we
 // don't double-render the promoted match.
 //
 // Empty states (T062 / FR-011 scenarios 4–5):
 //   - All matches completed → "All matches completed on Shiaijo {court}"
 //   - Nothing has ever been scheduled here → "No matches scheduled"
-// These are mutually exclusive: completed > 0 AND no live/scheduled →
+// These are mutually exclusive: completed > 0 AND no running/scheduled →
 // "completed"; otherwise zero matches at all → "nothing".
 //
 // Reconnect indicator (T063 / FR-011 scenario 4): the `connected` prop
@@ -546,8 +546,8 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
 // venue knows the screen has gone stale; the rest of the layout stays
 // put so reconnect doesn't flash the layout.
 function TvDisplay({ court, tournament, competitions, withZekkenName, connected = true }) {
-    const live = useMD(() => findLiveOnCourt(competitions, court), [competitions, court]);
-    const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, live ? 2 : 3), [competitions, court, live]);
+    const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
+    const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
     const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
 
     if (!competitions || competitions.length === 0) {
@@ -559,17 +559,17 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         }}>Loading…</div>;
     }
 
-    // Auto-promote the first scheduled match when no live match (T062).
+    // Auto-promote the first scheduled match when no running match (T062).
     // promoted = the match we'll show in the "current" slot.
     // queueMatches = matches we'll show in the queue list beneath.
     // When promoting, drop the first scheduled from the queue to avoid
     // double-rendering the same card.
     let promoted = null;
     let queueMatches = upcoming;
-    let promotedKind = null; // "live" | "upnext" | null
-    if (live) {
-        promoted = { kind: "live", match: live.match, competition: live.competition, isBracket: live.isBracket, roundIndex: live.roundIndex, totalRounds: live.totalRounds };
-        promotedKind = "live";
+    let promotedKind = null; // "running" | "upnext" | null
+    if (running) {
+        promoted = { kind: "running", match: running.match, competition: running.competition, isBracket: running.isBracket, roundIndex: running.roundIndex, totalRounds: running.totalRounds };
+        promotedKind = "running";
     } else if (upcoming.length > 0) {
         const first = upcoming[0];
         promoted = {
@@ -587,23 +587,23 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     }
 
     // Empty-state decisions (T062). "all completed" takes precedence over
-    // "no matches" so a finished court reads clearly. counts.live === 0
+    // "no matches" so a finished court reads clearly. counts.running === 0
     // is already guaranteed when promoted is null, but check it
     // explicitly for symmetry.
-    const allCompleted = !promoted && counts.live === 0 && counts.scheduled === 0 && counts.completed > 0;
+    const allCompleted = !promoted && counts.running === 0 && counts.scheduled === 0 && counts.completed > 0;
     const noMatches = !promoted && counts.completed === 0;
 
     const zekken = withZekkenName !== undefined
         ? withZekkenName
         : !!(promoted && promoted.competition && promoted.competition.withZekkenName);
 
-    // mp-13y: team match detection for the live promoted slot.
+    // mp-13y: team match detection for the running promoted slot.
     // competition.kind === "team" OR competition.teamSize > 0.
     const isTeamMatch = !!(promoted && promoted.competition &&
         (promoted.competition.kind === "team" || (promoted.competition.teamSize || 0) > 0));
     const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
 
-    // mp-13y: fetch lineups for the live team match. useTeamLineups
+    // mp-13y: fetch lineups for the running team match. useTeamLineups
     // degrades gracefully (returns null/null) when the promoted slot is
     // not a team match or when window.API is unavailable.
     const { lineupA, lineupB } = useTeamLineups(
@@ -749,7 +749,7 @@ const LOBBY_ROWS = [
 
 // Build the display slots for a single court — one per LOBBY_ROWS entry.
 //
-// Auto-promote semantics (T062): when there is no live match the first
+// Auto-promote semantics (T062): when there is no running match the first
 // scheduled match is promoted to slot 0 ("Now") with a slight style
 // difference (no score shown in the vs column). The remaining
 // upcoming matches fill slots 1 – (LOBBY_ROWS.length - 1).
@@ -758,17 +758,17 @@ const LOBBY_ROWS = [
 // slots are null (rendered as an empty "—" cell).
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
-    const live = findLiveOnCourt(competitions, court);
+    const running = findRunningOnCourt(competitions, court);
     // Request enough upcoming matches to fill the queue rows. When there
-    // is no live match we need one extra (it will promote to slot 0).
-    const upcoming = findUpcomingOnCourt(competitions, court, live ? totalSlots - 1 : totalSlots);
+    // is no running match we need one extra (it will promote to slot 0).
+    const upcoming = findUpcomingOnCourt(competitions, court, running ? totalSlots - 1 : totalSlots);
 
     const slots = new Array(totalSlots).fill(null);
 
-    if (live) {
-        slots[0] = { kind: 'live', match: live.match, competition: live.competition,
-                     isBracket: live.isBracket, roundIndex: live.roundIndex,
-                     totalRounds: live.totalRounds };
+    if (running) {
+        slots[0] = { kind: 'running', match: running.match, competition: running.competition,
+                     isBracket: running.isBracket, roundIndex: running.roundIndex,
+                     totalRounds: running.totalRounds };
         for (let i = 0; i < upcoming.length && i + 1 < totalSlots; i++) {
             const m = upcoming[i];
             slots[i + 1] = { kind: 'scheduled', match: m, competition: m._comp,
@@ -788,7 +788,7 @@ function buildCourtSlots(competitions, court) {
                          totalRounds: m._totalRounds };
         }
     }
-    // If no live and no upcoming, slots stay null → empty cells.
+    // If no running and no upcoming, slots stay null → empty cells.
     return slots;
 }
 
@@ -828,9 +828,9 @@ function LobbyMatchCell({ slot, rowKind }) {
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
 
-    // Score column: live → actual scores; upnext/scheduled → "vs"
+    // Score column: running → actual scores; upnext/scheduled → "vs"
     let vsContent;
-    if (kind === 'live') {
+    if (kind === 'running') {
         const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('') || '0';
         const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
         const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
@@ -882,10 +882,10 @@ function LobbyMatchCell({ slot, rowKind }) {
 
 // <LobbyDisplay> — multi-court cross-court table for venue lobby screens.
 //
-// T064: shows all *active* courts (courts with at least one live or
+// T064: shows all *active* courts (courts with at least one running or
 // scheduled match) in a 2-column table. Each column is one court;
 // rows are queue positions (Now, Next, #3–#6). Auto-promote semantics
-// from TvDisplay/LobbyCard (T062) are preserved: when no live match
+// from TvDisplay/LobbyCard (T062) are preserved: when no running match
 // exists the first scheduled promotes to "Now".
 //
 // T065: 2 courts per page; auto-cycles every 10 s when there are more
@@ -1045,7 +1045,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     // the header and the table body always agree on which
                                     // match is "current" (same auto-promote logic, no rescan).
                                     const cts = countCourtMatches(competitions, cc);
-                                    const remaining = cts.live + cts.scheduled;
+                                    const remaining = cts.running + cts.scheduled;
                                     const firstSlot = courtSlots[ci] && courtSlots[ci][0];
                                     const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
                                     return (
@@ -1184,7 +1184,7 @@ function StreamingQR({ url, label }) {
 // unmount so navigating back to a normal view doesn't leave the body
 // transparent.
 //
-// T067: keep the overlay DOM mounted regardless of live state so the
+// T067: keep the overlay DOM mounted regardless of running state so the
 // opacity transition can run. Toggle opacity + pointerEvents only.
 //
 // mp-13y: team match lower-third — for team matches the centre holds a
@@ -1208,9 +1208,9 @@ function StreamingOverlay({ court, position, competitions }) {
         };
     }, []);
 
-    const live = useMD(() => findLiveOnCourt(competitions, court), [competitions, court]);
-    const hasLive = !!live;
-    const comp = live?.competition;
+    const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
+    const hasRunning = !!running;
+    const comp = running?.competition;
     const zekken = !!(comp && comp.withZekkenName);
 
     // mp-13y: team match detection.
@@ -1219,13 +1219,13 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // mp-13y: per-match lineups for team overlay.
     const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTeamLineups(
-        isTeamMatch && hasLive ? live.match : null,
-        isTeamMatch && hasLive ? comp : null,
-        hasLive ? live.roundIndex : undefined
+        isTeamMatch && hasRunning ? running.match : null,
+        isTeamMatch && hasRunning ? comp : null,
+        hasRunning ? running.roundIndex : undefined
     );
 
     // Current bout for the overlay (last active sub-result, index 0 fallback).
-    const ovlSubResults = (hasLive && live.match.subResults) || [];
+    const ovlSubResults = (hasRunning && running.match.subResults) || [];
     const currentBoutIdx = useMD(() => findCurrentBoutIndex(ovlSubResults), [ovlSubResults]);
     const currentSub = ovlSubResults[currentBoutIdx] || null;
 
@@ -1264,17 +1264,17 @@ function StreamingOverlay({ court, position, competitions }) {
     const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
 
     // Team names (outer flanks of QR in team mode).
-    const shiroTeamName = hasLive ? sideLabel(live.match.sideB, zekken) : '';
-    const akaTeamName = hasLive ? sideLabel(live.match.sideA, zekken) : '';
+    const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken) : '';
+    const akaTeamName = hasRunning ? sideLabel(running.match.sideA, zekken) : '';
 
     // Individual match data (non-team).
-    const shiro = hasLive && !isTeamMatch ? sideLabel(live.match.sideB, zekken) : '';
-    const aka = hasLive && !isTeamMatch ? sideLabel(live.match.sideA, zekken) : '';
-    const ipponsB = hasLive && !isTeamMatch ? ((live.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
-    const ipponsA = hasLive && !isTeamMatch ? ((live.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
+    const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken) : '';
+    const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken) : '';
+    const ipponsB = hasRunning && !isTeamMatch ? ((running.match.ipponsB || []).filter(x => x && x !== "•").join('') || '0') : '';
+    const ipponsA = hasRunning && !isTeamMatch ? ((running.match.ipponsA || []).filter(x => x && x !== "•").join('') || '0') : '';
     // T097: Kiken/Fus./DH/(E) suffix on the OBS lower-third. Computed off
-    // the live match so it disappears the moment the overlay fades out.
-    const decSfx = hasLive && !isTeamMatch && window.decisionSuffix ? window.decisionSuffix(live.match) : '';
+    // the running match so it disappears the moment the overlay fades out.
+    const decSfx = hasRunning && !isTeamMatch && window.decisionSuffix ? window.decisionSuffix(running.match) : '';
     const compName = comp?.name || '';
 
     // QR target URL: the tournament viewer home page (NOT a per-match deep
@@ -1282,7 +1282,7 @@ function StreamingOverlay({ court, position, competitions }) {
     // emitted on team matches so the lower-third doesn't crowd the
     // individual-match layout. Uses the current page origin so the QR
     // works on the local network.
-    const qrUrl = hasLive && isTeamMatch
+    const qrUrl = hasRunning && isTeamMatch
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/viewer`
         : '';
 
@@ -1302,15 +1302,15 @@ function StreamingOverlay({ court, position, competitions }) {
             alignItems: 'center',
             // T067: fade in/out — keep the DOM mounted so the transition runs.
             // 300ms sits in the middle of the A-6 200–400ms band.
-            opacity: hasLive ? 1 : 0,
+            opacity: hasRunning ? 1 : 0,
             transition: 'opacity 300ms ease-in-out',
-            pointerEvents: hasLive ? 'auto' : 'none',
+            pointerEvents: hasRunning ? 'auto' : 'none',
             // The overlay can be aria-hidden when not visible so screen
             // readers don't announce stale match data during the fade.
-            visibility: hasLive ? 'visible' : 'hidden',
+            visibility: hasRunning ? 'visible' : 'hidden',
             transitionProperty: 'opacity, visibility',
-            transitionDelay: hasLive ? '0s, 0s' : '0s, 300ms',
-        }} aria-hidden={!hasLive}>
+            transitionDelay: hasRunning ? '0s, 0s' : '0s, 300ms',
+        }} aria-hidden={!hasRunning}>
 
             {isTeamMatch ? (
                 /* mp-13y: team match lower-third.
@@ -1475,7 +1475,7 @@ export {
     StreamingOverlay,
     DisplayRoute,
     sideLabel,
-    findLiveOnCourt,
+    findRunningOnCourt,
     findUpcomingOnCourt,
     findActiveCourts,
     countCourtMatches,

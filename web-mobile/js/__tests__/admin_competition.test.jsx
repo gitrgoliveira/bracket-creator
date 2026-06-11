@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLiveIpponResult,
+  buildRunningIpponResult,
   loadScoreboardPoints,
   swissRoundIDPrefix,
   filterSwissRoundMatches,
@@ -10,11 +10,11 @@ import {
   formatCompMinutes,
 } from '../admin_competition.jsx';
 
-// Copilot finding on PR #103: LiveMatchPanel's scoreboard mode supports
+// Copilot finding on PR #103: RunningMatchPanel's scoreboard mode supports
 // 2-ippon wins (and 2-1 with loser points), but the old recordWinner
 // only ever recorded a 1-ippon result (winnerPts=1, single-letter
 // array). The fix lifts the result-building logic into the pure
-// buildLiveIpponResult helper and consumes the full points arrays.
+// buildRunningIpponResult helper, which consumes the full points arrays.
 //
 // Kendo win conditions covered:
 //   - 2 ippons (sansoo)             — automatic win
@@ -29,10 +29,10 @@ import {
 const SIDE_A = { id: "a1", name: "Akira", dojo: "Tora" };
 const SIDE_B = { id: "b1", name: "Hiroshi", dojo: "Tora" };
 
-describe('buildLiveIpponResult', () => {
+describe('buildRunningIpponResult', () => {
   describe('1-ippon win (tap / card mode contract)', () => {
     it('side A win, no letters passed → defaults to ["M"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B);
       expect(r.winner).toBe(SIDE_A);
       expect(r.status).toBe("completed");
       expect(r.ipponsA).toEqual(["M"]);
@@ -47,7 +47,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B win, no letters passed → defaults to ["M"]', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["M"]);
@@ -56,7 +56,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side A win with explicit single letter ["K"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["K"]);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["K"]);
       expect(r.ipponsA).toEqual(["K"]);
       expect(r.ipponsB).toEqual([]);
       expect(r.score.winnerPts).toBe(1);
@@ -67,13 +67,13 @@ describe('buildLiveIpponResult', () => {
       // [] is empty/falsy-by-length so the helper substitutes ["M"].
       // Keeps the tap-mode "no letter at all" path working when a
       // caller accidentally hands in [] instead of undefined.
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, []);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.score.winnerPts).toBe(1);
     });
 
     it('null winnerIppons → falls back to ["M"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, null);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, null);
       expect(r.ipponsA).toEqual(["M"]);
     });
 
@@ -85,7 +85,7 @@ describe('buildLiveIpponResult', () => {
     // pins it explicitly so a future refactor that changes the default
     // doesn't silently break the most common scoreboard flow.
     it('side A scoreboard 1-0 (time-up): explicit empty loser array', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M"], []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M"], []);
       expect(r.winner).toBe(SIDE_A);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.ipponsB).toEqual([]);
@@ -94,7 +94,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B scoreboard 1-0 (time-up): symmetric to side A', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["D"], []);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["D"], []);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["D"]);
@@ -105,7 +105,7 @@ describe('buildLiveIpponResult', () => {
 
   describe('2-ippon win (the Copilot finding)', () => {
     it('side A 2-0 win: ipponsA has both letters, ipponsB is empty', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], []);
       expect(r.winner).toBe(SIDE_A);
       expect(r.ipponsA).toEqual(["M", "K"]);
       expect(r.ipponsB).toEqual([]);
@@ -115,7 +115,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B 2-0 win: ipponsB has both letters', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["D", "T"], []);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["D", "T"], []);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["D", "T"]);
@@ -128,7 +128,7 @@ describe('buildLiveIpponResult', () => {
       // winner's first letter survived. The 2-1 case is the most likely
       // place where the truncation matters: the user entered detail for
       // both sides, but only the winner's first letter persisted.
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], ["D"]);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], ["D"]);
       expect(r.ipponsA).toEqual(["M", "K"]);
       expect(r.ipponsB).toEqual(["D"]);
       expect(r.score.winnerPts).toBe(2);
@@ -136,7 +136,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B 2-1 win: symmetric — loser letters land in ipponsA', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["K", "T"], ["M"]);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["K", "T"], ["M"]);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.ipponsB).toEqual(["K", "T"]);
       expect(r.score.winnerPts).toBe(2);
@@ -145,9 +145,9 @@ describe('buildLiveIpponResult', () => {
   });
 
   describe('schema invariants', () => {
-    it('always sets status="completed" (live panel never schedules)', () => {
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).status).toBe("completed");
-      expect(buildLiveIpponResult("b", SIDE_A, SIDE_B, ["M", "K"]).status).toBe("completed");
+    it('always sets status="completed" (running panel never schedules)', () => {
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).status).toBe("completed");
+      expect(buildRunningIpponResult("b", SIDE_A, SIDE_B, ["M", "K"]).status).toBe("completed");
     });
 
     it('always sets type="ippon" (hikiwake/hantei not supported here)', () => {
@@ -155,27 +155,27 @@ describe('buildLiveIpponResult', () => {
       // hikiwake toggle. Hantei wins go through the card-mode hantei
       // button → onRecord("a"|"b", "hantei") path which doesn't hit
       // recordWinner's ippon builder at all.
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).score.type).toBe("ippon");
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).score.type).toBe("ippon");
     });
 
-    it('fouls always zero (live panel doesn\'t expose hansoku)', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"]);
+    it('fouls always zero (running panel doesn\'t expose hansoku)', () => {
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"]);
       expect(r.score.fouls).toEqual({ a: 0, b: 0 });
     });
 
     it('winner field is the correct side object', () => {
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).winner).toBe(SIDE_A);
-      expect(buildLiveIpponResult("b", SIDE_A, SIDE_B).winner).toBe(SIDE_B);
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).winner).toBe(SIDE_A);
+      expect(buildRunningIpponResult("b", SIDE_A, SIDE_B).winner).toBe(SIDE_B);
     });
   });
 });
 
 describe('loadScoreboardPoints', () => {
   // Companion bug to the 2-ippon truncation Copilot found. The previous
-  // LiveMatchPanel useEffect loaded aPoints/bPoints from
+  // RunningMatchPanel useEffect loaded aPoints/bPoints from
   // `match.score.ippons` (winner-only) gated by `winner.id === sideX.id`,
   // which silently dropped the LOSER's letters on every render. Once
-  // buildLiveIpponResult started writing 2-1 wins correctly (loser's
+  // buildRunningIpponResult started writing 2-1 wins correctly (loser's
   // single ippon preserved), the loader's truncation surfaced — a 2-1
   // win came back as 2-0 and re-submission re-truncated it.
   //
@@ -201,9 +201,9 @@ describe('loadScoreboardPoints', () => {
     });
   });
 
-  describe('ippon-mode reads (the read side of buildLiveIpponResult writes)', () => {
+  describe('ippon-mode reads (the read side of buildRunningIpponResult writes)', () => {
     it('1-0 side A win round-trip: aPoints=["M"], bPoints=[]', () => {
-      // buildLiveIpponResult("a", A, B, ["M"], []) wrote ipponsA=["M"], ipponsB=[].
+      // buildRunningIpponResult("a", A, B, ["M"], []) wrote ipponsA=["M"], ipponsB=[].
       // loadScoreboardPoints should read it back identically.
       const r = loadScoreboardPoints({
         ipponsA: ["M"],
@@ -276,7 +276,7 @@ describe('loadScoreboardPoints', () => {
   describe('placeholder filtering', () => {
     it('filters out "•" empty-slot placeholders (matches scoring modal pattern)', () => {
       // The full editor uses "•" to mark empty slots in its 2-element
-      // ippon arrays. Live panel never writes "•" but data may round-trip
+      // ippon arrays. Running panel never writes "•" but data may round-trip
       // through the full editor — filtering defensively keeps the
       // scoreboard display clean.
       const r = loadScoreboardPoints({
@@ -690,7 +690,7 @@ describe('isSwissRoundComplete', () => {
     ])).toBe(false);
   });
 
-  it('false when any match is running (live)', () => {
+  it('false when any match is running', () => {
     expect(isSwissRoundComplete([
       { status: 'completed' },
       { status: 'running' },

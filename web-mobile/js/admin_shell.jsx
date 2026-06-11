@@ -17,9 +17,9 @@ const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 
-// Maximum live-match chips rendered in the topbar status strip before the
+// Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
-const LIVE_STRIP_MAX_CHIPS = 6;
+const RUNNING_STRIP_MAX_CHIPS = 6;
 
 // Plain-language expansions for the insider format codes emitted by
 // formatLabelShort (ui.jsx): "P+KO" / "KO". Used as a tooltip + aria-label at
@@ -95,7 +95,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // navigator helper set up by AdminApp. sideName (hoisted to module
   // scope) handles the three possible side shapes; chips with no real
   // name on either side are filtered out.
-  const liveMatches = useMemoA(() => {
+  const runningMatches = useMemoA(() => {
     if (!tournament || !window.compMatches) return [];
     return (tournament.competitions || [])
       .flatMap(cc => window.compMatches(cc))
@@ -108,7 +108,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // lightweight subscription purely to read the connection status exposed by
   // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
   // The callback arg is a no-op here: the dashboard already drives data
-  // refreshes off its own subscription; this one only observes liveness.
+  // refreshes off its own subscription; this one only observes the connection state.
   // Two-tier signal. A brief drop is normal — the SSE stream auto-retries
   // every 5s — so a transient blip only flips the calm topbar pill to
   // "Reconnecting…". A *sustained* outage (still down after the first retry
@@ -140,10 +140,10 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   };
 
   return (
-    // Wrap topbar + live-strip in a single sticky container so they scroll
+    // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
     // fixed height) — robust to font scaling / browser zoom — while still
-    // keeping the live-strip visually anchored beneath it.
+    // keeping the running-strip visually anchored beneath it.
     <div className="topbar-stack">
       <div className="topbar">
         <div className="topbar__brand">
@@ -157,7 +157,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         {/* Connection-status indicator for the SSE stream. Labelled "Connected"
             so it reads as the data-connection state, not on-court match
             activity, and styled as a calm STATIC dot, deliberately not the
-            pulsing `.dot--live` signal that flags a match in progress (the
+            pulsing `.dot--running` signal that flags a match in progress (the
             strip below). Only the disconnected state pulses, so motion flags
             the moment that actually needs attention. role=status + aria-live
             announce the change to assistive tech without alarming. */}
@@ -179,11 +179,11 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           Connection interrupted. Reconnecting… Scores on screen may be out of date.
         </div>
       )}
-      {liveMatches.length > 0 && (
-        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} in progress`}>
-          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} in progress</span>
-          <div className="live-strip__chips">
-            {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
+      {runningMatches.length > 0 && (
+        <div className="running-strip" role="region" aria-label={`${pluralize(runningMatches.length, "match", "matches")} in progress`}>
+          <span className="running-strip__lbl"><span className="dot dot--running"></span> {pluralize(runningMatches.length, "match", "matches")} in progress</span>
+          <div className="running-strip__chips">
+            {runningMatches.slice(0, RUNNING_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
               const b = sideName(m.sideB);
               const courtLabel = m.court ? `Shiaijo ${m.court}` : "Unassigned";
@@ -191,16 +191,16 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
               return (
                 <button
                   key={`${m.compId}:${m.id}`}
-                  className="live-strip__chip"
+                  className="running-strip__chip"
                   onClick={() => onOpenScore && onOpenScore(m)}
                   aria-label={`Open score editor for ${b} versus ${a} ${courtPhrase}`}
                 >
-                  <span className="live-strip__court">{courtLabel}</span>
-                  <span className="live-strip__names">{b} – {a}</span>
+                  <span className="running-strip__court">{courtLabel}</span>
+                  <span className="running-strip__names">{b} – {a}</span>
                 </button>
               );
             })}
-            {liveMatches.length > LIVE_STRIP_MAX_CHIPS && <span className="live-strip__more">+{liveMatches.length - LIVE_STRIP_MAX_CHIPS} more</span>}
+            {runningMatches.length > RUNNING_STRIP_MAX_CHIPS && <span className="running-strip__more">+{runningMatches.length - RUNNING_STRIP_MAX_CHIPS} more</span>}
           </div>
         </div>
       )}
@@ -382,14 +382,14 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
     };
   }, []);
 
-  const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {
-    let totalMatches = 0, doneMatches = 0, liveMatches = 0, totalParticipants = 0;
+  const { totalMatches, doneMatches, runningMatches, totalParticipants } = useMemoA(() => {
+    let totalMatches = 0, doneMatches = 0, runningMatches = 0, totalParticipants = 0;
     comps.forEach((c) => {
       totalParticipants += (c.players || []).length;
       const s = compMatchStats(c);
-      totalMatches += s.total; doneMatches += s.done; liveMatches += s.live;
+      totalMatches += s.total; doneMatches += s.done; runningMatches += s.running;
     });
-    return { totalMatches, doneMatches, liveMatches, totalParticipants };
+    return { totalMatches, doneMatches, runningMatches, totalParticipants };
   }, [comps]);
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
@@ -440,7 +440,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div className="stat-box"><div className="v">{comps.length}</div><div className="l">Competitions</div></div>
           <div className="stat-box"><div className="v">{totalParticipants}</div><div className="l">Participants</div></div>
           <div className="stat-box"><div className="v">{doneMatches}/{totalMatches}</div><div className="l">Matches done</div></div>
-          <div className="stat-box"><div className="v" style={{ color: liveMatches > 0 ? "var(--red)" : "inherit" }}>{liveMatches}</div><div className="l">Now</div></div>
+          <div className="stat-box"><div className="v" style={{ color: runningMatches > 0 ? "var(--red)" : "inherit" }}>{runningMatches}</div><div className="l">Now</div></div>
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
@@ -456,7 +456,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {/* Static dot, not dot--live: these are started competitions, which
+            {/* Static dot, not dot--running: these are started competitions, which
                 is not the same as a match in progress right now. The pulsing
                 signal is reserved for matches actually under way (topbar strip
                 + match rows) per DESIGN.md Principle 3. */}
@@ -649,7 +649,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
 }
 
 function CompCard({ c, onOpen, onStart, tournament, showToast }) {
-  const { live: liveCount } = compMatchStats(c);
+  const { running: runningCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
   const [shareOpen, setShareOpen] = useStateA(false);
@@ -694,7 +694,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               label inline so the abbreviation is legible without forking the
               shared helper. */}
           <div className="tcard__stat" title={FORMAT_LABEL_LONG[c.format] || "Format"}><div className="v" aria-label={FORMAT_LABEL_LONG[c.format] || undefined}>{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
-          {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Now</div></div>}
+          {runningCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{runningCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
           {c.status === "setup" && playerCount >= 2 && (

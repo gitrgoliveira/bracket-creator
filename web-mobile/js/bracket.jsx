@@ -187,7 +187,7 @@ PlayerLine.displayName = "PlayerLine";
 const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayers }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
-  const live = match.status === "running";
+  const running = match.status === "running";
   const isBye = match.score?.type === "bye";
 
   const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
@@ -210,14 +210,14 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       ref={matchRef}
       type="button"
       data-match-id={match.id}
-      className={`bc-match bc-match--v${variant} ${live ? "bc-match--live" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
+      className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
       aria-label={`Match ${match.id}`}
     >
       <div className="bc-match-meta">
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
-        {live ? <span className="bc-live">● NOW</span> : null}
+        {running ? <span className="bc-running">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
@@ -477,7 +477,7 @@ function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, o
   // `columns` reference. Match ids and the feeder graph are frozen at generation
   // time, so a score update (which only mutates sideA/sideB/status/score) yields
   // the same signature and the measured tops are preserved — avoiding a reset-to-
-  // null reflow flash on every live-court update. Genuine height changes on
+  // null reflow flash on every in-progress-court update. Genuine height changes on
   // resolution are still caught by the measure effect's ResizeObserver below.
   const topoSig = React.useMemo(
     () => columns.map((c) => c.map((m) => m.id).join(",")).join("|"),

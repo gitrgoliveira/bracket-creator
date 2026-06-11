@@ -543,7 +543,7 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		// In-tx writers have already passed the round-live check
 		// upstream (handlers do that BEFORE entering the tx body
 		// in the live-tournament flows). Skipping
-		// roundHasLiveOrCompletedMatchLocked here mirrors the
+		// roundHasRunningOrCompletedMatchLocked here mirrors the
 		// non-tx fast-path: the per-comp lock + the staged
 		// in-tx state are the consistency guarantees.
 		l.CompetitionID = compID

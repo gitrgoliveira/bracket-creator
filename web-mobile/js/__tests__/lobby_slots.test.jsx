@@ -5,8 +5,8 @@ import { buildCourtSlots, LOBBY_ROWS } from '../display.jsx';
 // cross-court table in LobbyDisplay (mp-1nf).
 //
 // Three scenarios:
-//   1. Live match present → slot[0] = live, rest = upcoming queue
-//   2. No live match → auto-promote first scheduled to slot[0] (kind: 'upnext')
+//   1. Running match present → slot[0] = running, rest = upcoming queue
+//   2. No running match → auto-promote first scheduled to slot[0] (kind: 'upnext')
 //   3. Fewer than LOBBY_ROWS.length scheduled matches → tail slots are null
 
 // Helper: build a minimal competition with poolMatches on a given court.
@@ -38,7 +38,7 @@ describe('buildCourtSlots', () => {
         expect(slots).toHaveLength(TOTAL);
     });
 
-    it('live match present: slot[0] is live, remaining are scheduled', () => {
+    it('running match present: slot[0] is running, remaining are scheduled', () => {
         const matches = [
             { status: 'running' },
             { status: 'scheduled' },
@@ -49,7 +49,7 @@ describe('buildCourtSlots', () => {
         const slots = buildCourtSlots(comps, 'A');
 
         expect(slots[0]).not.toBeNull();
-        expect(slots[0].kind).toBe('live');
+        expect(slots[0].kind).toBe('running');
         expect(slots[1]).not.toBeNull();
         expect(slots[1].kind).toBe('scheduled');
         expect(slots[2]).not.toBeNull();
@@ -62,7 +62,7 @@ describe('buildCourtSlots', () => {
         }
     });
 
-    it('no live match: auto-promotes first scheduled to slot[0] as upnext', () => {
+    it('no running match: auto-promotes first scheduled to slot[0] as upnext', () => {
         const matches = [
             { status: 'scheduled', sideA: { name: 'First A' }, sideB: { name: 'First B' } },
             { status: 'scheduled' },
@@ -83,7 +83,7 @@ describe('buildCourtSlots', () => {
         }
     });
 
-    it('no live and no upcoming: all slots are null', () => {
+    it('no running and no upcoming: all slots are null', () => {
         const comps = [makeComp('Empty', 'C', [])];
         const slots = buildCourtSlots(comps, 'C');
 
@@ -100,7 +100,7 @@ describe('buildCourtSlots', () => {
         const comps = [makeComp('Small', 'A', matches)];
         const slots = buildCourtSlots(comps, 'A');
 
-        expect(slots[0].kind).toBe('live');
+        expect(slots[0].kind).toBe('running');
         expect(slots[1].kind).toBe('scheduled');
         for (let i = 2; i < TOTAL; i++) {
             expect(slots[i]).toBeNull();
@@ -125,7 +125,7 @@ describe('buildCourtSlots', () => {
         const comps = [makeComp('Done', 'A', matches)];
         const slots = buildCourtSlots(comps, 'A');
 
-        // No live → auto-promote. Only 1 scheduled match available.
+        // No running → auto-promote. Only 1 scheduled match available.
         expect(slots[0]).not.toBeNull();
         expect(slots[0].kind).toBe('upnext');
         for (let i = 1; i < TOTAL; i++) {

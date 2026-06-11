@@ -386,7 +386,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 //
 // Once team-pool-rotation or per-round elimination lineups land, this
 // helper grows the bracket-scan lookup. The store-side
-// roundHasLiveOrCompletedMatchLocked in state/team_lineup.go already
+// roundHasRunningOrCompletedMatchLocked in state/team_lineup.go already
 // handles per-round bracket inspection — the gap is just the
 // matchId→round mapping here.
 //

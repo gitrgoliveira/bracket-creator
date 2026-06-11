@@ -448,7 +448,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
           <div className="tw-courts" data-testid="admin-schedule-list">
             {courts.map((cc) => {
               const list = byCourt[cc] || [];
-              const liveOn = list.find((m) => m.status === "running");
+              const runningOn = list.find((m) => m.status === "running");
               return (
                 <div key={cc} className="tw-court">
                   <div className="tw-court__head">
@@ -456,7 +456,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                       <div className="tw-court__title">SHIAIJO {cc}</div>
                       <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}</div>
                     </div>
-                    {liveOn && <span className="bc-live">● NOW</span>}
+                    {runningOn && <span className="bc-running">● NOW</span>}
                   </div>
                   <div
                     className="tw-court__list"
@@ -530,7 +530,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   };
   return (
     <div
-      className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}
+      className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("application/json", JSON.stringify({ compId: m.compId, matchId: m.id }));
@@ -599,7 +599,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
         })()}
-        {m.status === "running" && <span className="bc-live">●</span>}
+        {m.status === "running" && <span className="bc-running">●</span>}
         <CourtPicker
           value={m.court}
           courts={courts}
@@ -779,7 +779,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   }, [compId, teamId, matchId]);
 
   // Locked when this side's lineup carries a lockedAt OR the match itself is
-  // already live/finished — the backend locks the whole match once it starts
+  // already running/finished — the backend locks the whole match once it starts
   // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
   // read as locked rather than show an editable form that 409s on save.
   const matchStarted = match?.status === "running" || match?.status === "completed";
@@ -1111,14 +1111,14 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
   const filtered = allMatches.filter((m) => {
     if (restrictToCompId && m.compId !== restrictToCompId) return false;
     if (compFilter !== "all" && m.compId !== compFilter) return false;
-    if (statusFilter === "live" && m.status !== "running") return false;
+    if (statusFilter === "running" && m.status !== "running") return false;
     if (statusFilter === "scheduled" && m.status !== "scheduled") return false;
     if (statusFilter === "complete" && m.status !== "completed") return false;
     if (!f) return true;
     return [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(f));
   });
 
-  // Status keys must match backend values; sort live first, then upcoming,
+  // Status keys must match backend values; sort running first, then upcoming,
   // then completed. Anything unrecognized goes to the end.
   const order = { running: 0, scheduled: 1, completed: 2 };
   filtered.sort((a, b) => {
@@ -1148,7 +1148,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
         )}
         <div className="seg">
           <button className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-          <button className={statusFilter === "live" ? "is-active" : ""} onClick={() => setStatusFilter("live")}>Now</button>
+          <button className={statusFilter === "running" ? "is-active" : ""} onClick={() => setStatusFilter("running")}>Now</button>
           <button className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
           <button className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
         </div>
@@ -1182,7 +1182,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
           const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
           const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return (
-            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--live" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
+            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -1196,7 +1196,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                   </div>
                   <div className="score-edit-row__score">
                     {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {m.status === "running" && <span className="bc-live">●</span>}
+                    {m.status === "running" && <span className="bc-running">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
@@ -1206,7 +1206,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                   </div>
               </div>
               <div>
-                {m.status === "running" && <span className="bc-live">● NOW</span>}
+                {m.status === "running" && <span className="bc-running">● NOW</span>}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -32,7 +32,7 @@ function findAllByType(node, typeRef, acc = []) {
 // mp-rrd Phase 1: the public viewer must expose Pools + Bracket tabs at
 // draw-ready (the draw is published but no match has been called), keep
 // "not started" for setup, keep Swiss excluded from pools/bracket, and
-// never treat draw-ready as live. (Phase 2 split-comp cross-links removed
+// never treat draw-ready as running. (Phase 2 split-comp cross-links removed
 // in mp-turx — mixed comps are now a single competition.)
 describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   const realReact = global.React;
@@ -218,7 +218,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     vi.resetModules();
   });
 
-  const baseProps = { myPlayer: null, myUpcoming: null, currentMatch: null, liveMatches: [], upcomingMatches: [], recentMatches: [], tweaks: {} };
+  const baseProps = { myPlayer: null, myUpcoming: null, currentMatch: null, runningMatches: [], upcomingMatches: [], recentMatches: [], tweaks: {} };
 
   it('draw-ready shows "Draw is ready" and points to the tabs, not "Not started yet"', () => {
     const tree = runtime.mount(ViewerOverview, { c: { status: 'draw-ready', startTime: '09:00' }, ...baseProps });
@@ -246,12 +246,12 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   });
 });
 
-// mp-rrd: the home page must NOT treat a draw-ready comp as live. liveCompIds
-// (the set gating LIVE NOW / Up-next / live dot) is derived purely from
+// mp-rrd: the home page must NOT treat a draw-ready comp as running. runningCompIds
+// (the set gating NOW / Up-next / running dot) is derived purely from
 // competition status, so we can pin the exclusion behaviour through the
 // exported helpers + a direct status filter without mounting ViewerHome
 // (which uses localStorage-backed hooks the static React stub can't drive).
-describe('draw-ready is not live (mp-rrd)', () => {
+describe('draw-ready is not running (mp-rrd)', () => {
   it('tournamentMatches excludes setup but includes draw-ready structure', async () => {
     vi.resetModules();
     global.window = global.window || {};
@@ -285,12 +285,12 @@ describe('draw-ready is not live (mp-rrd)', () => {
     }
   });
 
-  it('the live-comp filter (status-based) excludes both setup and draw-ready', () => {
-    // Mirrors the liveCompIds predicate in ViewerHome verbatim.
-    const isLiveComp = c => !!(c.status && c.status !== 'setup' && c.status !== 'draw-ready');
-    expect(isLiveComp({ status: 'setup' })).toBe(false);
-    expect(isLiveComp({ status: 'draw-ready' })).toBe(false);
-    expect(isLiveComp({ status: 'pools' })).toBe(true);
-    expect(isLiveComp({ status: 'started' })).toBe(true);
+  it('the running-comp filter (status-based) excludes both setup and draw-ready', () => {
+    // Mirrors the runningCompIds predicate in ViewerHome verbatim.
+    const isRunningComp = c => !!(c.status && c.status !== 'setup' && c.status !== 'draw-ready');
+    expect(isRunningComp({ status: 'setup' })).toBe(false);
+    expect(isRunningComp({ status: 'draw-ready' })).toBe(false);
+    expect(isRunningComp({ status: 'pools' })).toBe(true);
+    expect(isRunningComp({ status: 'started' })).toBe(true);
   });
 });

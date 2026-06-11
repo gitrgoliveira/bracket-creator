@@ -136,6 +136,30 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2();
     });
 
+    it('(c) late subscriber while source is CONNECTING gets NO synchronous status, then "open" on connect', () => {
+        // First subscriber opens the source but it has NOT connected yet
+        // (readyState === CONNECTING) — mirrors an admin tab where app.jsx
+        // subscribes first and AdminTopbar/AdminDashboard mount mid-handshake.
+        const unsub1 = API.subscribeToEvents(() => {});
+        const src = FakeEventSource.instances[0];
+        expect(src.readyState).toBe(FakeEventSource.CONNECTING);
+
+        // Second subscriber joins during the handshake. It must NOT be handed a
+        // synchronous 'error' (that would flash a false "Reconnecting…").
+        const status2 = vi.fn();
+        const unsub2 = API.subscribeToEvents(() => {}, status2);
+        expect(status2).not.toHaveBeenCalled();
+        // No second EventSource — it multiplexed onto the existing one.
+        expect(FakeEventSource.instances).toHaveLength(1);
+
+        // When the shared source connects, the late subscriber gets the real status.
+        src.simulateOpen();
+        expect(status2).toHaveBeenCalledWith('open');
+        expect(status2).not.toHaveBeenCalledWith('error');
+
+        unsub1(); unsub2();
+    });
+
     it('(c) late subscriber after an error opens a fresh source and is NOT replayed a status', () => {
         // First subscriber opens, then an error fires.
         const status1 = vi.fn();

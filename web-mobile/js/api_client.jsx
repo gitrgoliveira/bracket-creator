@@ -40,11 +40,15 @@ let _retryTimer = null;
 /** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
 const _subscribers = new Set();
 
+function _emitStatus(sub, s) {
+    if (typeof sub.onStatus === 'function') {
+        try { sub.onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+    }
+}
+
 function _fanOutStatus(s) {
     for (const sub of _subscribers) {
-        if (typeof sub.onStatus === 'function') {
-            try { sub.onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
-        }
+        _emitStatus(sub, s);
     }
 }
 
@@ -384,24 +388,27 @@ const API = {
     //
     // All callers share ONE module-level EventSource (ref-counted). The
     // source is opened on the first subscribe and closed when the last
-    // subscriber unsubscribes. New subscribers to an already-open source
-    // receive an immediate onStatus('open') replay so they start in the
+    // subscriber unsubscribes. A subscriber joining an already-OPEN source
+    // receives an immediate onStatus('open') replay so it starts in the
     // correct connected state without waiting for the next onopen event.
     subscribeToEvents(callback, onStatus) {
         const record = { callback, onStatus };
         _subscribers.add(record);
 
         if (_sharedSource === null) {
-            // No source yet — open one. Subscribers see 'error' until onopen
-            // fires (replay below covers anyone joining an existing source).
+            // No source yet — open one. The new subscriber keeps its optimistic
+            // default until this source's onopen/onerror fires.
             _ensureConnected();
-        } else {
-            // Source already exists — replay current status to this subscriber.
-            const currentStatus = (_sharedSource.readyState === EventSource.OPEN) ? 'open' : 'error';
-            if (typeof onStatus === 'function') {
-                try { onStatus(currentStatus); } catch (err) { console.error('SSE status callback failed:', err); }
-            }
+        } else if (_sharedSource.readyState === EventSource.OPEN) {
+            // Source is already connected — replay 'open' to this subscriber.
+            _emitStatus(record, 'open');
         }
+        // Else the source exists but is still CONNECTING (a non-null source is
+        // only ever CONNECTING or OPEN — we null it on close). Replay NOTHING
+        // and let the bound onopen/onerror fan-out deliver the first
+        // authoritative status, exactly as the first subscriber experiences.
+        // Replaying 'error' here would flash a false "Reconnecting…" on admin
+        // load, where AdminTopbar/AdminDashboard subscribe mid-handshake.
 
         // Idempotent unsubscribe: guard with a `done` flag so double-calling
         // never double-decrements the ref count.

@@ -644,9 +644,11 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // teamIVPW already prefers an explicit `sub.winner` (which the server
         // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
         // counted as an IV for its winner there — no extra hantei loop needed.
-        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+        const mA = promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "");
+        const mB = promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "");
+        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, mA, mB);
         return ivShiro === ivAka && pwShiro === pwAka;
-    }, [subResults, isTeamMatch, isKnockoutPhase]);
+    }, [subResults, isTeamMatch, isKnockoutPhase, promoted]);
 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped
@@ -1225,7 +1227,9 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
     // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
-    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+    const ovlSideA = hasLive ? (live.match.sideA?.name || (typeof live.match.sideA === "string" ? live.match.sideA : "")) : "";
+    const ovlSideB = hasLive ? (live.match.sideB?.name || (typeof live.match.sideB === "string" ? live.match.sideB : "")) : "";
+    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults, ovlSideA, ovlSideB) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
 
     // DH-pending: all regular bouts are scored, the match is tied (equal IV
     // and PW), but no DH sub-result has been created yet. In that case

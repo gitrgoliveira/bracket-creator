@@ -2632,7 +2632,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     if (isTeam) {
                       // Team: enrich match the same way as the legacy PoolMatchRow path
                       const isDH = isPoolDaihyosenID(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2643,7 +2643,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                       );
                     } else {
                       // Individual: ippon notation score
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: "", teamSize: 0 };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}

@@ -210,19 +210,19 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
 
 // Aggregate IV (individual victories) + PW (points won) per side from the
 // regular (non-DH) bouts. sideB = shiro/left, sideA = aka/right.
-export function teamIVPW(subResults) {
+export function teamIVPW(subResults, matchSideA, matchSideB) {
   let ivShiro = 0, ivAka = 0, pwShiro = 0, pwAka = 0;
   for (const s of (subResults || []).filter(x => x.position !== -1)) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
-    // IV (individual victory): prefer the explicit winner — quick-score and
-    // decision-based outcomes (fusensho, kiken, hantei) set `winner` without
-    // ippon letters, so an ippon-count comparison alone would miss the
-    // victory. Fall back to ippon counts only when no winner is recorded or
-    // it matches neither side. sideA = aka (right), sideB = shiro (left).
-    if (s.winner && s.winner === s.sideA) ivAka++;
-    else if (s.winner && s.winner === s.sideB) ivShiro++;
+    // Mirror Go backend pattern (scoring.go): check match-level side name
+    // first, then sub-level side name (guarded against "" == "" false
+    // positive). Quick-scored bouts have empty sub-level sides.
+    const isAkaWin = s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
+    const isShiroWin = s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
+    if (isAkaWin) ivAka++;
+    else if (isShiroWin) ivShiro++;
     else if (b > a) ivShiro++;
     else if (a > b) ivAka++;
   }
@@ -291,7 +291,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // `showDH`. Shiro left/dark, Aka right/red.
 export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts — equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a

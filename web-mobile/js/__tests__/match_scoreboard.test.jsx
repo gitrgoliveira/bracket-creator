@@ -83,6 +83,23 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 0, pwAka: 0 });
   });
 
+  it('counts IV via match-level side names when sub-bout sides are empty (quick-score)', () => {
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },
+      { position: 2, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },
+      { position: 3, sideA: '', sideB: '', winner: 'Team Beta', ipponsA: [], ipponsB: [] },
+    ];
+    // matchSideA=aka(right)=Team Alpha, matchSideB=shiro(left)=Team Beta
+    expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 1, ivAka: 2, pwShiro: 0, pwAka: 0 });
+  });
+
+  it('does not false-positive on empty winner with empty sub-sides (draw)', () => {
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: '', ipponsA: [], ipponsB: [] },
+    ];
+    expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
+  });
+
   it('falls back to ippon comparison when winner matches neither side', () => {
     const subs = [
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },

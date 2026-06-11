@@ -169,6 +169,30 @@ func TestQuickScoreHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
+
+	t.Run("negative bout counts rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "teamAWins": -1, "teamBWins": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "non-negative")
+	})
+
+	t.Run("excessive bout count rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "teamAWins": 50, "teamBWins": 51,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "exceeds maximum")
+	})
 }
 
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the

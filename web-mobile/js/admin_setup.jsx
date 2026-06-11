@@ -936,7 +936,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <div className="field">
             <label className="field__label">Assigned shiaijo (courts)</label>
             <div className="radio-group">
-              {tournament.courts.map((cc) => (
+              {safeCourts.map((cc) => (
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>

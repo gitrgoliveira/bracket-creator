@@ -17,6 +17,30 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const hasBothSides = window.hasBothSides;
 const getScoreBtnClass = window.getScoreBtnClass;
 
+// Pure ordering/partition helpers (exported for unit tests). Matches sort
+// running → scheduled → completed, then by scheduled time within a group;
+// partition splits that sorted list into the three operator sections.
+export function sortShiaijoMatches(matches) {
+    const order = { running: 0, scheduled: 1, completed: 2 };
+    return [...matches].sort((a, b) => {
+        const ao = order[a.status] ?? 99;
+        const bo = order[b.status] ?? 99;
+        if (ao !== bo) return ao - bo;
+        return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+    });
+}
+
+export function partitionShiaijoMatches(matches) {
+    const sorted = sortShiaijoMatches(matches);
+    const running = [], scheduled = [], completed = [];
+    for (const m of sorted) {
+        if (m.status === "running") running.push(m);
+        else if (m.status === "scheduled") scheduled.push(m);
+        else if (m.status === "completed") completed.push(m);
+    }
+    return { sorted, running, scheduled, completed };
+}
+
 function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, onViewerMode, password, onSwitchCourt }) {
     const [openMatch, setOpenMatch] = useStateSh(null);
     const mountedRef = useRefSh(true);
@@ -27,22 +51,10 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
         [tournament, court]
     );
 
-    const sorted = useMemoSh(() => {
-        const order = { running: 0, scheduled: 1, completed: 2 };
-        return [...allMatches].sort((a, b) => {
-            const ao = order[a.status] ?? 99;
-            const bo = order[b.status] ?? 99;
-            if (ao !== bo) return ao - bo;
-            return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-        });
-    }, [allMatches]);
-
-    const running = [], scheduled = [], completed = [];
-    for (const m of sorted) {
-        if (m.status === "running") running.push(m);
-        else if (m.status === "scheduled") scheduled.push(m);
-        else if (m.status === "completed") completed.push(m);
-    }
+    const { sorted, running, scheduled, completed } = useMemoSh(
+        () => partitionShiaijoMatches(allMatches),
+        [allMatches]
+    );
 
     const courts = tournament.courts || [];
     // A bookmarked/typo URL (e.g. /admin/shiaijo/Z) names a court that no
@@ -99,13 +111,13 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
                     </div>
                 )}
 
-                {running.length > 0 && (
+                {courtKnown && running.length > 0 && (
                     <ShiaijoMatchGroup label="Now" matches={running} onScore={setOpenMatch} />
                 )}
-                {scheduled.length > 0 && (
+                {courtKnown && scheduled.length > 0 && (
                     <ShiaijoMatchGroup label="Up next" matches={scheduled} onScore={setOpenMatch} />
                 )}
-                {completed.length > 0 && (
+                {courtKnown && completed.length > 0 && (
                     <ShiaijoMatchGroup label="Completed" matches={completed} onScore={setOpenMatch} />
                 )}
 

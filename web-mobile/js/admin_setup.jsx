@@ -108,7 +108,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // DurationDays: default 1 for tournaments that predate this field
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
-  const [courts, setCourts] = useStateA(tournament.courts.length);
+  const [courts, setCourts] = useStateA(window.courtCount(tournament.courts));
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
@@ -662,7 +662,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
-  const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
+  const safeCourts = window.normalizeCourts(tournament.courts);
+  const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
+  const prevCourtsRef = useRefA(tournament.courts);
+  useEffectA(() => {
+    const prev = Array.isArray(prevCourtsRef.current) ? prevCourtsRef.current : [];
+    const curr = Array.isArray(tournament.courts) ? tournament.courts : [];
+    if (prev.length === 0 && curr.length > 0) {
+      setSelectedCourts(curr.slice(0, Math.min(2, curr.length)));
+    }
+    prevCourtsRef.current = tournament.courts;
+  }, [tournament.courts]);
   const [error, setError] = useStateA("");
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
@@ -756,7 +766,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       startTime,
       date: normDate,
       teamSize: kind === "team" ? teamSize : 0,
-      courts: selectedCourts.length ? selectedCourts : [tournament.courts[0]],
+      courts: selectedCourts.length ? selectedCourts : [safeCourts[0] || "A"],
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,
@@ -935,7 +945,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <div className="field">
             <label className="field__label">Assigned shiaijo (courts)</label>
             <div className="radio-group">
-              {tournament.courts.map((cc) => (
+              {safeCourts.map((cc) => (
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>

@@ -23,7 +23,9 @@ const STUBBED_GLOBALS = {
   pluralize: (n, s, p) => `${n} ${n === 1 ? s : (p || `${s}s`)}`,
   formatLabelShort: (f) => f,
   formatDate: (d) => d,
+  formatAdminHeaderSub: () => 'header',
   competitionKindLabel: () => 'Individual',
+  courtCount: () => 1,
   // Stub component: CompCard references <StatusBadge> via the global. The
   // React stub's createElement never invokes it, so a no-op suffices.
   StatusBadge: function StatusBadge() { return null; },
@@ -207,5 +209,20 @@ describe('CompCard', () => {
   it('separates date from the court list with " · " when both are present', () => {
     const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', date: '2026-06-01', courts: ['A'] };
     expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('·');
+  });
+});
+
+describe('AdminDashboard', () => {
+  let AdminDashboard;
+  beforeAll(() => { AdminDashboard = window.AdminDashboard; });
+
+  it('renders a tournament with null courts without throwing', () => {
+    const t = { name: 'Null Courts Cup', courts: null, competitions: [] };
+    expect(() => AdminDashboard({ tournament: t })).not.toThrow();
+  });
+
+  it('renders a tournament with missing courts without throwing', () => {
+    const t = { name: 'Missing Courts Cup', competitions: [] };
+    expect(() => AdminDashboard({ tournament: t })).not.toThrow();
   });
 });

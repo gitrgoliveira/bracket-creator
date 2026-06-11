@@ -307,6 +307,18 @@ function deriveTournamentDays(startDate, durationDays) {
   return days;
 }
 
+// Normalizes a courts array. Fallback to ["A"] if missing or empty,
+// preventing crashes and ensuring a consistent default court selection UI.
+function normalizeCourts(courts) {
+  return (Array.isArray(courts) && courts.length > 0) ? courts : ["A"];
+}
+
+// Returns the count of courts, safely falling back to the normalized minimum of 1.
+// Used for displaying counts in the UI where "0 courts" is semantically invalid.
+function courtCount(courts) {
+  return normalizeCourts(courts).length;
+}
+
 // Guard window assignments so this file stays safely importable in
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
@@ -334,6 +346,8 @@ if (typeof window !== "undefined") {
   window.setCachedAuthConfig = setCachedAuthConfig;
   window.getCachedAuthConfig = getCachedAuthConfig;
   window.promptAdminPassword = promptAdminPassword;
+  window.normalizeCourts = normalizeCourts;
+  window.courtCount = courtCount;
 }
 
 // --- Elevated (destructive-ops) password prompt (spec 004 / mp-e21) ---
@@ -424,4 +438,6 @@ export {
   MAX_RANK,
   MAX_TOURNAMENT_DURATION_DAYS,
   deriveTournamentDays,
+  normalizeCourts,
+  courtCount,
 };

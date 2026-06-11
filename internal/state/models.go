@@ -242,6 +242,10 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t.Mode == "" {
 		t.Mode = TournamentModeOfficiated
 	}
+	if len(t.Courts) == 0 {
+		// Default to at least one court ("A") for legacy or malformed configs
+		t.Courts = []string{"A"}
+	}
 }
 
 // Days returns the ordered list of DD-MM-YYYY calendar day strings

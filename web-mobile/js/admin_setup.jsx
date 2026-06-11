@@ -666,8 +666,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
   const prevCourtsRef = useRefA(tournament.courts);
   useEffectA(() => {
-    const prev = prevCourtsRef.current || [];
-    const curr = tournament.courts || [];
+    const prev = Array.isArray(prevCourtsRef.current) ? prevCourtsRef.current : [];
+    const curr = Array.isArray(tournament.courts) ? tournament.courts : [];
     if (prev.length === 0 && curr.length > 0) {
       setSelectedCourts(curr.slice(0, Math.min(2, curr.length)));
     }

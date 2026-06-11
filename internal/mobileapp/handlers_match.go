@@ -335,6 +335,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		const maxBouts = 100
+		if req.TeamAWins < 0 || req.TeamBWins < 0 || req.Draws < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "win/draw counts must be non-negative"})
+			return
+		}
+		if req.TeamAWins > maxBouts || req.TeamBWins > maxBouts || req.Draws > maxBouts {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "individual bout count exceeds maximum"})
+			return
+		}
+		total := req.TeamAWins + req.TeamBWins + req.Draws
+		if total > maxBouts {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "total bout count exceeds maximum"})
+			return
+		}
 
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the
@@ -352,20 +366,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		// Synthesise SubResults so standings IV/IL/IT counts are correct.
-		// SideA/SideB must be set so the empty-Winner draw case doesn't
-		// accidentally match `sub.Winner == sub.SideA` in computeStandings.
-		subResults := make([]state.SubMatchResult, 0, req.TeamAWins+req.TeamBWins+req.Draws)
+		// Sub-bout SideA/SideB are left empty — individual bout sides are
+		// unknown in quick-score mode (no lineup). Winner attribution in
+		// computeStandings uses `sub.Winner == m.SideA` (the match-level
+		// name); the `sub.Winner == sub.SideA` fallback is guarded against
+		// the "" == "" false-positive.
+		subResults := make([]state.SubMatchResult, 0, total)
 		pos := 1
 		for range req.TeamAWins {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideA})
+			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideA})
 			pos++
 		}
 		for range req.TeamBWins {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideB})
+			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideB})
 			pos++
 		}
 		for range req.Draws {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: ""})
+			subResults = append(subResults, state.SubMatchResult{Position: pos})
 			pos++
 		}
 

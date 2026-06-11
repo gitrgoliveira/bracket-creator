@@ -280,7 +280,7 @@ function useWatchlist() {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized));
-    } catch (_e) { /* see useFollowedPlayer */ }
+    } catch (_e) { /* ignore — in-memory state remains valid for the session */ }
   };
   return [list, persist];
 }
@@ -304,7 +304,7 @@ function usePrimaryWatch() {
     try {
       if (val) window.localStorage.setItem(LS_WATCH_PRIMARY, val);
       else window.localStorage.removeItem(LS_WATCH_PRIMARY);
-    } catch (_e) { /* see useFollowedPlayer */ }
+    } catch (_e) { /* ignore — in-memory primary selection remains valid for the session */ }
   };
   return [key, persist];
 }

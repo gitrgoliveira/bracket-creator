@@ -45,6 +45,11 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
     }
 
     const courts = tournament.courts || [];
+    // A bookmarked/typo URL (e.g. /admin/shiaijo/Z) names a court that no
+    // longer exists. Show an explicit invalid-court state rather than the
+    // generic "no matches" empty state, which would otherwise pair with a
+    // <select> whose value matches none of its options.
+    const courtKnown = courts.includes(court);
 
     return (
         <div className="app">
@@ -64,17 +69,28 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
                             <select
                                 className="input"
                                 style={{ width: "auto" }}
-                                value={court}
+                                value={courtKnown ? court : ""}
                                 onChange={(e) => onSwitchCourt(e.target.value)}
                                 aria-label="Switch court"
                             >
+                                {!courtKnown && <option value="" disabled>Shiaijo {court} (unknown)</option>}
                                 {courts.map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
                             </select>
                         </div>
                     )}
                 </div>
 
-                {allMatches.length === 0 && (
+                {!courtKnown && (
+                    <div className="empty">
+                        <h3>Unknown shiaijo "{court}"</h3>
+                        <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
+                            This court isn't part of the tournament — it may have been renamed or removed.{" "}
+                            <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Back to dashboard</a>.
+                        </p>
+                    </div>
+                )}
+
+                {courtKnown && allMatches.length === 0 && (
                     <div className="empty">
                         <h3>No matches on this court</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>

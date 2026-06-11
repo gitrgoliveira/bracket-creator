@@ -108,7 +108,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // DurationDays: default 1 for tournaments that predate this field
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
-  const [courts, setCourts] = useStateA(tournament.courts && tournament.courts.length > 0 ? tournament.courts.length : 1);
+  const [courts, setCourts] = useStateA(window.courtCount(tournament.courts));
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
@@ -662,8 +662,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
-  const safeCourts = (tournament.courts && tournament.courts.length > 0) ? tournament.courts : ["A"];
+  const safeCourts = window.normalizeCourts(tournament.courts);
   const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
+  const prevCourtsRef = useRefA(tournament.courts);
+  useEffectA(() => {
+    const prev = prevCourtsRef.current || [];
+    const curr = tournament.courts || [];
+    if (prev.length === 0 && curr.length > 0) {
+      setSelectedCourts(curr.slice(0, Math.min(2, curr.length)));
+    }
+    prevCourtsRef.current = tournament.courts;
+  }, [tournament.courts]);
   const [error, setError] = useStateA("");
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());

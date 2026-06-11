@@ -110,31 +110,20 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           </div>
         </div>
         <div className="topbar__spacer"></div>
-        {/* Calm connection indicator: a dot + label that reflects the SSE
-            stream state. Green-tinted "Connected" when the live feed is up;
-            amber-tinted "Reconnecting…" when the stream has dropped. Labelled
-            "Connected" rather than "Live" so it reads as the data-connection
-            state, not "matches are live". role=status + aria-live=polite so a
-            screen reader hears the change without it being alarmist. Uses
-            tokens inline (no new CSS classes). */}
+        {/* Connection-status indicator for the SSE stream. Labelled "Connected"
+            (not "Live") so it reads as the data-connection state, not "matches
+            are live", and styled as a calm STATIC dot — deliberately not the
+            pulsing `.dot--live` liveness signal, which belongs to on-court
+            activity (the live-strip below). Only the disconnected state pulses,
+            so motion flags the moment that actually needs attention. role=status
+            + aria-live=polite announces the change without alarming. */}
         <span
+          className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
           role="status"
           aria-live="polite"
-          title={connected ? "Live feed connected" : "Live feed disconnected — reconnecting"}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 600,
-            color: connected ? "var(--ink-2)" : "var(--red)",
-          }}
+          title={connected ? "Receiving real-time updates" : "Connection lost, reconnecting"}
         >
-          <span
-            aria-hidden="true"
-            className={connected ? "dot dot--live" : "dot"}
-            style={connected ? undefined : { background: "var(--red)" }}
-          ></span>
+          <span aria-hidden="true" className="topbar__conn__dot"></span>
           {connected ? "Connected" : "Reconnecting…"}
         </span>
         <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>

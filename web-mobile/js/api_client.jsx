@@ -49,6 +49,15 @@ function _fanOutStatus(s) {
 }
 
 function _ensureConnected() {
+    // Whoever calls this is establishing the connection NOW, so cancel any
+    // pending reconnect timer — otherwise a retry queued by a previous onerror
+    // can fire later and open a second EventSource (a leaked SSE connection).
+    if (_retryTimer) {
+        clearTimeout(_retryTimer);
+        _retryTimer = null;
+    }
+    // Guard against double-connect: only one shared source may exist at a time.
+    if (_sharedSource) return;
     _sharedSource = new EventSource('/api/events');
 
     _sharedSource.onopen = () => {
@@ -73,6 +82,9 @@ function _ensureConnected() {
         _sharedSource = null;
         _fanOutStatus('error');
         if (_subscribers.size > 0) {
+            // Clear any prior timer before re-arming so repeated error events
+            // can't queue multiple concurrent reconnects.
+            if (_retryTimer) clearTimeout(_retryTimer);
             _retryTimer = setTimeout(_ensureConnected, 5000);
         }
     };

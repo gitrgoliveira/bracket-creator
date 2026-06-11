@@ -59,12 +59,16 @@ FakeEventSource.closedCount = 0;
 // ---------------------------------------------------------------------------
 
 let API;
+let _origEventSource;
 
 beforeEach(async () => {
     FakeEventSource.reset();
     vi.useFakeTimers();
     // Provide FakeEventSource as the global EventSource before importing the
     // module so the module-level code can reference it via EventSource.OPEN etc.
+    // Capture the original so afterEach can restore it (avoid leaking the fake
+    // into unrelated test files sharing this environment).
+    _origEventSource = global.EventSource;
     global.EventSource = FakeEventSource;
     vi.resetModules();
     const mod = await import('../api_client.jsx');
@@ -74,6 +78,11 @@ beforeEach(async () => {
 afterEach(() => {
     vi.useRealTimers();
     vi.resetModules();
+    if (_origEventSource === undefined) {
+        delete global.EventSource;
+    } else {
+        global.EventSource = _origEventSource;
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -281,5 +290,28 @@ describe('subscribeToEvents — shared singleton', () => {
         vi.advanceTimersByTime(5000);
         // Timer should have been cleared — no new source.
         expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    it('a new subscribe during the retry window cancels the pending timer (no double-connect)', () => {
+        // Regression for the leak Copilot flagged on PR #268: after onerror
+        // schedules the 5s reconnect, a fresh subscribe reconnects immediately;
+        // the stale timer must NOT later open a SECOND EventSource.
+        const unsub1 = API.subscribeToEvents(() => {});
+        const src = FakeEventSource.instances[0];
+        src.simulateOpen();
+        src.simulateError(); // source nulled, retry timer armed for 5s
+        expect(FakeEventSource.instances).toHaveLength(1);
+
+        // New subscriber arrives inside the retry window → opens a fresh source now.
+        const unsub2 = API.subscribeToEvents(() => {});
+        expect(FakeEventSource.instances).toHaveLength(2);
+
+        // Advance past the original 5s retry — it must have been cancelled, so
+        // NO third source is created (pre-fix this would be length 3 and leak).
+        vi.advanceTimersByTime(5000);
+        expect(FakeEventSource.instances).toHaveLength(2);
+
+        vi.clearAllTimers();
+        unsub1(); unsub2();
     });
 });

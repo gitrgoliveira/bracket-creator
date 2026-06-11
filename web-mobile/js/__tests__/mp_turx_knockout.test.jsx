@@ -92,7 +92,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     preview: true,
     rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool A-2nd' }, status: 'scheduled' }]],
   };
-  const liveBracket = {
+  const runningBracket = {
     preview: false,
     rounds: [[{ id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' }]],
   };
@@ -112,7 +112,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
-    global.window.buildBracket = () => liveBracket.rounds;
+    global.window.buildBracket = () => runningBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;
@@ -176,14 +176,14 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
   });
 
-  it('shows Bracket tab with live bracket (preview=false, status playoffs)', () => {
+  it('shows Bracket tab with running bracket (preview=false, status playoffs)', () => {
     const tree = runtime.mount(ViewerCompetition, {
       tournament: { competitions: [mkMixedComp({ status: 'playoffs' })] },
       competition: mkMixedComp({ status: 'playoffs' }),
       pools: samplePools,
       poolMatches: [],
       standings: [],
-      bracket: liveBracket,
+      bracket: runningBracket,
       onBack: () => {},
       onSelectCompetition: () => {},
       tweaks: {},
@@ -203,7 +203,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
         pools: samplePools,
         poolMatches: [],
         standings: [],
-        bracket: status === 'playoffs' ? liveBracket : previewBracket,
+        bracket: status === 'playoffs' ? runningBracket : previewBracket,
         onBack: () => {},
         onSelectCompetition: () => {},
         tweaks: {},
@@ -227,7 +227,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
-    'AdminSwissRounds', 'LiveMatchPanel', 'BracketTree', 'promptAdminPassword',
+    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
     'isValidDate', 'roundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
@@ -251,7 +251,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     preview: true,
     rounds: [[{ id: 'r0-m0', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-1st' }, status: 'scheduled' }]],
   };
-  const liveBracket = {
+  const runningBracket = {
     preview: false,
     rounds: [[{ id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' }]],
   };
@@ -281,7 +281,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     global.window.AdminPools = function AdminPools() { return null; };
     global.window.AdminCompOverview = function AdminCompOverview() { return null; };
     global.window.AdminSwissRounds = function AdminSwissRounds() { return null; };
-    global.window.LiveMatchPanel = function LiveMatchPanel() { return null; };
+    global.window.RunningMatchPanel = function RunningMatchPanel() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
     global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
@@ -356,7 +356,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       competition: mkMixedComp({ status: 'playoffs' }),
-      bracket: liveBracket,
+      bracket: runningBracket,
     });
     expect(collectText(tree)).not.toContain('Knockout in progress');
   });
@@ -372,12 +372,12 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     }).not.toThrow();
   });
 
-  it('bracket tab label is "Bracket" (live, not preview) for a running competition', () => {
+  it('bracket tab label is "Bracket" (running, not preview) for a running competition', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       section: 'overview',
       competition: mkMixedComp({ status: 'playoffs' }),
-      bracket: liveBracket,
+      bracket: runningBracket,
     });
     const text = collectText(tree);
     expect(text).toContain('Bracket');
@@ -389,7 +389,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       ...baseProps,
       section: 'overview',
       competition: mkMixedComp({ status: 'draw-ready' }),
-      bracket: liveBracket,
+      bracket: runningBracket,
     });
     expect(collectText(tree)).toContain('Bracket (preview)');
   });
@@ -404,7 +404,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
       bracket: placeholderBracket, // preview: true
     });
     const text = collectText(tree);
-    // status is 'pools' (not draw-ready), so the live "Bracket" label shows
+    // status is 'pools' (not draw-ready), so the "Bracket" label shows
     expect(text).toContain('Bracket');
     expect(text).not.toContain('Bracket (preview)');
   });
@@ -445,7 +445,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
-    'AdminSwissRounds', 'LiveMatchPanel', 'BracketTree', 'promptAdminPassword',
+    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
     'isValidDate', 'roundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
@@ -491,7 +491,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
       ],
     ],
   };
-  const liveBracket = {
+  const runningBracket = {
     preview: false,
     rounds: [[
       { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' },
@@ -522,7 +522,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     global.window.AdminPools = function AdminPools() { return null; };
     global.window.AdminCompOverview = function AdminCompOverview() { return null; };
     global.window.AdminSwissRounds = function AdminSwissRounds() { return null; };
-    global.window.LiveMatchPanel = function LiveMatchPanel() { return null; };
+    global.window.RunningMatchPanel = function RunningMatchPanel() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
     global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
@@ -624,7 +624,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
   });
 
   it('onMatchClick does not throw for a resolved match (hasBothSides returns true)', () => {
-    const { onMatchClick } = mountAdminBracket(liveBracket, { status: 'playoffs' });
+    const { onMatchClick } = mountAdminBracket(runningBracket, { status: 'playoffs' });
     expect(onMatchClick).toBeTypeOf('function');
     const resolvedMatch = { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' };
     expect(() => onMatchClick(resolvedMatch, 0, 0)).not.toThrow();
@@ -636,7 +636,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
   });
 
   it('does NOT show the incremental-fill banner when all bracket matches are resolved', () => {
-    const { tree } = mountAdminBracket(liveBracket, { status: 'playoffs' });
+    const { tree } = mountAdminBracket(runningBracket, { status: 'playoffs' });
     expect(collectText(tree)).not.toContain('fills in automatically');
   });
 });

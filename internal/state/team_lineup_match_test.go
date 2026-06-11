@@ -78,7 +78,7 @@ func TestMatchLineup_LockMatch1LeavesMatch2Editable(t *testing.T) {
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
 
-	// Match 1 goes live and is frozen.
+	// Match 1 starts and is frozen.
 	require.NoError(t, store.LockTeamLineupForMatch(compID, "P1", time.Now().UTC()))
 
 	// Match 1 is now locked: editing it must be refused.
@@ -139,7 +139,7 @@ func TestMatchLineup_RoundLockSkipsMatchScoped(t *testing.T) {
 	const compID = "team-match-roundsweep"
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
 
-	// Engine fires the legacy round-0 lock when some match goes live.
+	// Engine fires the legacy round-0 lock when some match starts.
 	require.NoError(t, store.LockTeamLineupsForRound(compID, 0, time.Now().UTC()))
 
 	got, err := store.LoadTeamLineups(compID)
@@ -149,8 +149,8 @@ func TestMatchLineup_RoundLockSkipsMatchScoped(t *testing.T) {
 }
 
 // TestMatchLineup_SetGuardedByOwnMatchStatus: SetTeamLineup for a
-// match-scoped lineup is refused only when THAT match is live, and is
-// allowed when a DIFFERENT match is live.
+// match-scoped lineup is refused only when THAT match is running, and is
+// allowed when a DIFFERENT match is running.
 func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -159,7 +159,7 @@ func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
 	// Pool match IDs are persisted as "PoolName-Idx" (pools.go), so the
 	// test must use that form for the ID to survive the CSV round-trip
-	// and be found by matchIsLiveOrCompletedLocked.
+	// and be found by matchIsRunningOrCompletedLocked.
 	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
 		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
 		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
@@ -235,11 +235,11 @@ func TestDeleteTeamLineupForMatch_RefusesWhenMatchLive(t *testing.T) {
 	// Set the lineup while the match is still scheduled.
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5))
 
-	// The match goes live WITHOUT the lock stamp landing (the TOCTOU
+	// The match starts WITHOUT the lock stamp landing (the TOCTOU
 	// window). DELETE must still be refused.
 	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
 		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
 	}))
 	require.ErrorIs(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "PoolA-0"), ErrLineupLocked,
-		"DELETE must be refused once the match is live, even before the lock stamp lands")
+		"DELETE must be refused once the match is running, even before the lock stamp lands")
 }

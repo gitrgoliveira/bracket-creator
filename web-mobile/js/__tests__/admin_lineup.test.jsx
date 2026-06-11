@@ -38,7 +38,7 @@ describe('canRevise', () => {
 
   describe('wire-format-drift guard (the recent hardening)', () => {
     // Regression anchor: the heuristic previously returned true whenever
-    // no `Round N+2` match was running AND no `Round N+1` was live.
+    // no `Round N+2` match was running AND no `Round N+1` was running.
     // For a pool-only competition (no `Round N` labels at all), both
     // checks evaluated to false and the helper unconditionally returned
     // true — allowing Revise even when we have no idea what round the
@@ -93,9 +93,9 @@ describe('canRevise', () => {
   });
 
   describe('round-specific gating (after wire-format guard passes)', () => {
-    it('returns false when a current-round match is still live', () => {
+    it('returns false when a current-round match is still running', () => {
       // round=0 (display "Round 1"); a current-round match is in
-      // "Round 1" (round + 1 == 1). Live → block revise.
+      // "Round 1" (round + 1 == 1). Running → block revise.
       window.compMatches = () => [
         { id: 'm1', round: 'Round 1', status: 'running' },
         { id: 'm2', round: 'Round 1', status: 'completed' },
@@ -142,7 +142,7 @@ describe('canRevise', () => {
 
     it('handles round offset correctly: round=1 looks at Round 2/3', () => {
       // round=1 (display "Round 2"); current round is Round 2,
-      // next round is Round 3. A live Round 2 match blocks revise.
+      // next round is Round 3. A running Round 2 match blocks revise.
       window.compMatches = () => [
         { id: 'm1', round: 'Round 1', status: 'completed' },
         { id: 'm2', round: 'Round 2', status: 'running' },

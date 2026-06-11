@@ -73,7 +73,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     myPlayer: null,
     myUpcoming: null,
     currentMatch: null,
-    liveMatches: [],
+    runningMatches: [],
     upcomingMatches: [],
     recentMatches: [],
     tweaks: {},

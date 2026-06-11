@@ -2,7 +2,7 @@
 //
 // Teams pick which player occupies each named position (Senpo, Jiho,
 // Chuken, Fukusho, Taisho for 5-person teams; numeric "1"..."N" for
-// other sizes) before the round's first match goes live. Once the
+// other sizes) before the round's first match starts. Once the
 // server stamps LockedAt the form locks; a "Revise" affordance reopens
 // it locally as long as the current round is finished AND the next
 // round hasn't started yet.
@@ -95,9 +95,9 @@ function canRevise(competition, round) {
   if (!recognisable) return false;
   const inProgressNext = all.some(m => (m.status === "running" || m.status === "completed") && m.round === nextLabel);
   if (inProgressNext) return false;
-  // Otherwise allow revise as long as no current-round match is still live
-  const currentLive = all.some(m => m.status === "running" && m.round === currentLabel);
-  return !currentLive;
+  // Otherwise allow revise as long as no current-round match is still running
+  const currentRunning = all.some(m => m.status === "running" && m.round === currentLabel);
+  return !currentRunning;
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
@@ -180,7 +180,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const onRevise = () => {
     setError("");
     // Local-only flip — the server will accept the next PUT only if
-    // the round's first match hasn't gone live yet (same 409 path).
+    // the round's first match hasn't started yet (same 409 path).
     setRevising(true);
   };
 

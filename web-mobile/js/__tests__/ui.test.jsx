@@ -9,9 +9,9 @@ describe('UI Components', () => {
       expect(badge.children).toContain('Pending');
     });
 
-    it('should show live dot when requested and status is active', () => {
-      const badge = StatusBadge({ status: 'pools', showLiveDot: true });
-      const dot = badge.children.find(c => c && c.props && c.props.className === 'dot dot--live');
+    it('should show running dot when requested and status is active', () => {
+      const badge = StatusBadge({ status: 'pools', showRunningDot: true });
+      const dot = badge.children.find(c => c && c.props && c.props.className === 'dot dot--running');
       expect(dot).toBeDefined();
     });
 

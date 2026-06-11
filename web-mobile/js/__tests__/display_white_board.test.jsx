@@ -44,7 +44,7 @@ describe('overlayPositionLabel — FIK names only for 5-person teams', () => {
   });
 });
 
-function teamPromoted(promotedKind = 'live') {
+function teamPromoted(promotedKind = 'running') {
   return {
     kind: promotedKind,
     match: {
@@ -79,9 +79,9 @@ describe('TvWhiteBoard', () => {
     lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
   };
 
-  it('renders a white board for a live team match, delegating to TeamScoreboard, NO "LIVE"', () => {
+  it('renders a white board for a running team match, delegating to TeamScoreboard, NO "LIVE"', () => {
     const p = teamPromoted();
-    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
     const str = render(props);
     expect(str).toContain('tvd--white');
@@ -97,12 +97,12 @@ describe('TvWhiteBoard', () => {
 
   it('delegates an individual match to IndividualScore (no team bout grid)', () => {
     const p = {
-      kind: 'live',
+      kind: 'running',
       match: { id: 'i1', round: 'Round 1', sideA: { name: 'Aka P' }, sideB: { name: 'Shiro P' },
         ipponsB: ['K'], ipponsA: ['M'], subResults: [] },
       competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
     };
-    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: false, subResults: [], teamSize: 0 };
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: false, subResults: [], teamSize: 0 };
     const str = render(props);
     expect(str).toContain('tvd--white');
     expect(str).not.toContain('tvd-team-bouts');
@@ -119,7 +119,7 @@ describe('TvWhiteBoard', () => {
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: -1, ipponsB: ['M'], ipponsA: [] },
     ];
-    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5, showDH: true };
     const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
     expect(sb).toBeTruthy();
@@ -131,7 +131,7 @@ describe('TvWhiteBoard', () => {
     // persisted with the team name as the winner — the round-5 win-mark fix
     // never reaches the TV display path.
     const p = teamPromoted();
-    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: true,
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
     const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
     expect(sb).toBeTruthy();
@@ -141,14 +141,14 @@ describe('TvWhiteBoard', () => {
 
   it('threads withZekkenName to IndividualScore so zekken-mode shows displayName (tri-review #2)', () => {
     const p = {
-      kind: 'live',
+      kind: 'running',
       match: { id: 'i1', round: 'Round 1',
         sideA: { name: 'Aka Player', displayName: 'AKA' },
         sideB: { name: 'Shiro Player', displayName: 'SHI' },
         ipponsB: [], ipponsA: [], subResults: [] },
       competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
     };
-    const props = { ...base, promoted: p, promotedKind: 'live', isTeamMatch: false,
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: false,
       subResults: [], teamSize: 0, zekken: true };
     const is = findVnode(TvWhiteBoard(props), n => n.type === IndividualScore);
     expect(is).toBeTruthy();

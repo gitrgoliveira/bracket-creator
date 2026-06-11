@@ -171,7 +171,7 @@ describe('compMatchStats', () => {
   };
 
   it('returns zeros for a competition with no matches', () => {
-    expect(compMatchStats({})).toEqual({ total: 0, done: 0, live: 0 });
+    expect(compMatchStats({})).toEqual({ total: 0, done: 0, running: 0 });
   });
 
   it('counts flat poolMatches', () => {
@@ -182,7 +182,7 @@ describe('compMatchStats', () => {
         realMatch("scheduled"),
       ],
     };
-    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, running: 1 });
   });
 
   it('counts pools[].matches when poolMatches is absent', () => {
@@ -192,7 +192,7 @@ describe('compMatchStats', () => {
         { matches: [realMatch("running")] },
       ],
     };
-    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, running: 1 });
   });
 
   it('counts bracket rounds in addition to pool matches', () => {
@@ -205,12 +205,12 @@ describe('compMatchStats', () => {
         ],
       },
     };
-    expect(compMatchStats(c)).toEqual({ total: 4, done: 2, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 4, done: 2, running: 1 });
   });
 
   it('skips bye / unresolved sides (normalizeMatch placeholders)', () => {
     const c = { poolMatches: [realMatch("completed"), byeMatch] };
-    expect(compMatchStats(c)).toEqual({ total: 1, done: 1, live: 0 });
+    expect(compMatchStats(c)).toEqual({ total: 1, done: 1, running: 0 });
   });
 });
 

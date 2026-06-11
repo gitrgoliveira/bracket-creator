@@ -274,7 +274,7 @@ func TestSetTeamLineup_RoundHasLiveBracketMatch(t *testing.T) {
 
 	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
 	require.ErrorIs(t, err, ErrLineupLocked,
-		"live bracket match in round 0 must block SetTeamLineup with ErrLineupLocked")
+		"running bracket match in round 0 must block SetTeamLineup with ErrLineupLocked")
 }
 
 // TestSetTeamLineup_RoundHasLivePoolMatch verifies the T128a guard for pool

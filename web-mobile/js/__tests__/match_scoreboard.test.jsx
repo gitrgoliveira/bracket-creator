@@ -83,6 +83,23 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 0, pwAka: 0 });
   });
 
+  it('counts IV via match-level side names when sub-bout sides are empty (quick-score)', () => {
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },
+      { position: 2, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },
+      { position: 3, sideA: '', sideB: '', winner: 'Team Beta', ipponsA: [], ipponsB: [] },
+    ];
+    // matchSideA=aka(right)=Team Alpha, matchSideB=shiro(left)=Team Beta
+    expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 1, ivAka: 2, pwShiro: 0, pwAka: 0 });
+  });
+
+  it('does not false-positive on empty winner with empty sub-sides (draw)', () => {
+    const subs = [
+      { position: 1, sideA: '', sideB: '', winner: '', ipponsA: [], ipponsB: [] },
+    ];
+    expect(teamIVPW(subs, 'Team A', 'Team B')).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 });
+  });
+
   it('falls back to ippon comparison when winner matches neither side', () => {
     const subs = [
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: '', ipponsB: ['M', 'K'], ipponsA: [] },
@@ -158,6 +175,35 @@ describe('match_scoreboard components', () => {
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
     expect(collectText(shiro)).toBe('Shiro Player');
     expect(collectText(aka)).toBe('Aka Player');
+  });
+
+  it('BoutSubRow filters out match-level team names from sub-bout sides (quick-score path)', () => {
+    // mp-3m1c: when scored via quick-score, the backend stores the TEAM name in
+    // every sub-bout's sideA/sideB. Without the matchSideA/matchSideB filter,
+    // the row would show "Team Alpha" on every row instead of the bout number.
+    const sub = { position: 2, sideA: 'Team Alpha', sideB: 'Team Beta', ipponsA: [], ipponsB: [], winner: 'Team Beta' };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 1, lineupA: null, lineupB: null, teamSize: 5,
+      matchSideA: 'Team Alpha', matchSideB: 'Team Beta',
+    });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    // Should show bout number "#2", not team names
+    expect(collectText(shiro)).toBe('#2');
+    expect(collectText(aka)).toBe('#2');
+  });
+
+  it('BoutSubRow still shows real competitor names when they differ from match-level teams', () => {
+    // Kachinuki: sub-bout sideA/sideB are individual competitor names, not team names.
+    const sub = { position: 3, sideA: 'Tanaka', sideB: 'Suzuki', ipponsB: ['M'], ipponsA: [] };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 2, lineupA: null, lineupB: null, teamSize: 5,
+      matchSideA: 'Team Alpha', matchSideB: 'Team Beta',
+    });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    expect(collectText(shiro)).toBe('Suzuki');
+    expect(collectText(aka)).toBe('Tanaka');
   });
 
   it('IndividualScore: same-name head-to-head does NOT mark BOTH sides as winners on an ippon-less decision', () => {

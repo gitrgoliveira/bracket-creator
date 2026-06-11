@@ -112,6 +112,13 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, "TeamA", result.Winner)
 		assert.Len(t, result.SubResults, 5) // 3+1+1
 
+		// Sub-bouts must NOT carry team names — they're individual bout
+		// slots without known competitors in quick-score mode.
+		for _, sub := range result.SubResults {
+			assert.Empty(t, sub.SideA, "sub-bout SideA must be empty, not team name")
+			assert.Empty(t, sub.SideB, "sub-bout SideB must be empty, not team name")
+		}
+
 		standings, err := eng.CalculatePoolStandings("c1")
 		assert.NoError(t, err)
 		pool := standings["PoolA"]
@@ -161,6 +168,30 @@ func TestQuickScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("negative bout counts rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "teamAWins": -1, "teamBWins": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "non-negative")
+	})
+
+	t.Run("excessive bout count rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"sideA": "TeamA", "sideB": "TeamB", "teamAWins": 50, "teamBWins": 51,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/quick-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "exceeds maximum")
 	})
 }
 

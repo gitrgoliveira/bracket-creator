@@ -1615,7 +1615,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
             matches.forEach((m) => {
                 const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
             });
         });
     }
@@ -1627,11 +1627,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     // renders `bracket`/`derivedBracket` directly and is NOT affected.
     if (bracket && bracket.rounds && !bracket.preview) {
         bracket.rounds.forEach((round, ri) => {
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compKind: c.kind, teamSize: c.teamSize }));
+            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.roundLabel(ri, bracket.rounds.length), phaseName: window.roundLabel(ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize }));
         });
     }
     return out;
-  }, [pools, poolMatches, bracket, c.kind, c.teamSize]);
+  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format]);
 
   const [followedPlayer] = useFollowedPlayer();
   const [watchlist] = useWatchlist();
@@ -1800,7 +1800,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightPlayer={followedPlayer}
                     onMatchClick={(m, ri) => {
                       const label = window.roundLabel(ri, derivedBracket.rounds.length);
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compKind: c.kind, teamSize: c.teamSize });
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
                 </div>
@@ -1831,7 +1831,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 }
 
 // Inline match detail card — shown directly on the page (no modal needed).
-function MatchDetailCard({ match, onClose }) {
+function MatchDetailCard({ match, onClose, escapeToClose = true }) {
+  window.useEscapeToClose(escapeToClose ? onClose : undefined);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const teamSize = match.teamSize || 0;
@@ -1856,6 +1857,7 @@ function MatchDetailCard({ match, onClose }) {
     <div className="match-detail-card">
       <div className="match-detail-card__head">
         <div className="match-detail-card__meta">
+          {match.compName && <><span className="match-detail-card__comp">{match.compName}</span><span>·</span></>}
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
@@ -1890,7 +1892,9 @@ function MatchDetailCard({ match, onClose }) {
           individual → ippon-letter slots. */}
       {isTeam
         ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName} />
+            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName}
+            matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
+            matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")} />
         : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
     </div>
   );
@@ -2630,7 +2634,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                     if (isTeam) {
                       // Team: enrich match the same way as the legacy PoolMatchRow path
                       const isDH = isPoolDaihyosenID(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -2641,7 +2645,7 @@ function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMat
                       );
                     } else {
                       // Individual: ippon notation score
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compName: competition.name, compKind: "", teamSize: 0 };
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
@@ -3508,10 +3512,46 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
 function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId }) {
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
+  const triggerRef = useRefV(null);
+  const trapRef = useRefV(null);
+  const modalRefCb = React.useCallback((node) => {
+    if (node) {
+      triggerRef.current = document.activeElement;
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      const onKeyDown = (e) => {
+        if (e.key !== "Tab") return;
+        const f = [...node.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+          .filter((el) => !el.disabled && el.offsetParent !== null);
+        if (f.length === 0) { e.preventDefault(); return; }
+        const first = f[0], last = f[f.length - 1], active = document.activeElement;
+        if (e.shiftKey && (active === first || active === node)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      };
+      document.addEventListener("keydown", onKeyDown, true);
+      const focusTimer = setTimeout(() => {
+        (node.querySelector("button") || node).focus();
+      }, 0);
+      trapRef.current = { onKeyDown, focusTimer, prevOverflow };
+    } else {
+      const t = trapRef.current;
+      if (t) {
+        clearTimeout(t.focusTimer);
+        document.removeEventListener("keydown", t.onKeyDown, true);
+        document.body.style.overflow = t.prevOverflow;
+        trapRef.current = null;
+      }
+      const trig = triggerRef.current;
+      if (trig && typeof trig.focus === "function" && document.contains(trig)) trig.focus();
+    }
+  }, []);
   if (!match) return null;
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
+  const sideAName = match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "");
+  const sideBName = match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "");
+  const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
   if (scoringMatch && window.ScoreEditorModal) {
     return React.createElement(window.ScoreEditorModal, {
@@ -3533,11 +3573,11 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
+      <div ref={modalRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}
-        <MatchDetailCard match={match} onClose={onClose} />
+        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (

@@ -583,7 +583,7 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   );
 }
 
-function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport }) {
+function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal" }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -593,7 +593,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // correctly stay on the individual editor.
   const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} />;
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} />;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -956,9 +956,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // announce who is fighting and on which shiaijo when the modal opens.
   const dialogLabel = `Score editor — ${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
 
-  return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
+  const inner = (
+    <>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -1217,6 +1216,21 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           {/* Quiet, always-present keyboard-shortcut reminder. */}
           <ScoringShortcutHint />
         </div>
+    </>
+  );
+
+  // Inline variant (shiaijo operator view): no backdrop / overlay / aria-modal
+  // — the panel lives in the page. The shiaijo page passes no prevMatch/
+  // nextMatch (queue drives navigation) so the foot's prev/next render as
+  // empty spans; Cancel/Close still call onClose to deselect.
+  if (variant === "inline") {
+    return <div className="scoring-panel" aria-label={dialogLabel}>{inner}</div>;
+  }
+
+  return (
+    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+      <div className="editor-modal editor-modal--lg editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
+        {inner}
       </div>
     </div>
   );
@@ -1262,7 +1276,7 @@ function renderPositionLabel(label) {
 // to work (scoring_modal_match_lineup.test.jsx imports directly from here).
 import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
 
-function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport }) {
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal" }) {
   const m = match;
   const isComplete = m.status === "completed";
   const numberedPositions = TEAM_POSITIONS.slice(0, teamSize);
@@ -1677,9 +1691,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // individual ScoreEditorModal).
   const dialogLabel = `Team score editor — ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
 
-  return (
-    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
+  const inner = (
+    <>
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
@@ -2141,6 +2154,17 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           {/* Quiet, always-present keyboard-shortcut reminder. */}
           <ScoringShortcutHint />
         </div>
+    </>
+  );
+
+  if (variant === "inline") {
+    return <div className="scoring-panel scoring-panel--team" aria-label={dialogLabel}>{inner}</div>;
+  }
+
+  return (
+    <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
+      <div className={`editor-modal editor-modal--team ${useCompact ? "editor-modal--compact" : ""}`} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()}>
+        {inner}
       </div>
     </div>
   );

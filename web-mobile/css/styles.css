@@ -3995,6 +3995,21 @@ button.pool-match-row {
   box-shadow: var(--shadow-lg);
 }
 
+/* Inline scoring variant (shiaijo operator view, mp-c2yr): ScoreEditorModal /
+   TeamScoreEditorModal rendered with variant="inline" — same head/body/foot
+   markup, but flowing in the page's right column instead of an overlay. No
+   backdrop, no fixed sizing; the surrounding card supplies the frame. */
+.scoring-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.scoring-panel .editor-modal__foot--nav {
+  position: static;
+}
+
 .editor-modal__head {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);

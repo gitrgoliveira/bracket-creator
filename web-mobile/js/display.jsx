@@ -622,6 +622,11 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
+    // Extract stable string primitives from promoted.match.sideA/B so the
+    // useMemo below can dep on values rather than the promoted object literal
+    // (which is recreated on every render, defeating memoisation).
+    const promotedSideA = promoted?.match?.sideA?.name || (typeof promoted?.match?.sideA === "string" ? promoted.match.sideA : "");
+    const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
         const regularSubs = subResults.filter(s => s.position !== -1);
@@ -645,11 +650,9 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // teamIVPW already prefers an explicit `sub.winner` (which the server
         // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
         // counted as an IV for its winner there — no extra hantei loop needed.
-        const mA = promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "");
-        const mB = promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "");
-        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, mA, mB);
+        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, promotedSideA, promotedSideB);
         return ivShiro === ivAka && pwShiro === pwAka;
-    }, [subResults, isTeamMatch, isKnockoutPhase, promoted]);
+    }, [subResults, isTeamMatch, isKnockoutPhase, promotedSideA, promotedSideB]);
 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped

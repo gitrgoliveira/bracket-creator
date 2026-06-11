@@ -251,15 +251,22 @@ function useWatchlist() {
       legacyName = window.localStorage.getItem(LS_MY_PLAYER_NAME) || "";
     } catch (_e) { /* storage unavailable */ }
     const { list: migrated, migrated: didMigrate } = migrateWatchlistOnLoad(raw, legacyId, legacyName);
+    // Persist the migrated list; track whether the write actually landed.
+    // didMigrate=false means there was nothing to fold in, so the legacy keys
+    // (if any) are safe to clear without a fresh write.
+    let persisted = !didMigrate;
     if (didMigrate) {
       try {
         window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(migrated));
-      } catch (_e) { /* see useFollowedPlayer */ }
+        persisted = true;
+      } catch (_e) { /* keep the legacy keys as a fallback — see below */ }
     }
-    // Always clear the legacy keys on first load: once the watchlist owns the
-    // selection, the old single-player keys are dead weight (and leaving them
-    // would re-trigger migration logic on every mount).
-    if (legacyId || legacyName) {
+    // Clear the legacy keys ONLY once the migrated list is durably written.
+    // If the write failed (e.g. QuotaExceededError), leave them in place so the
+    // followed player isn't silently lost and migration safely retries on the
+    // next load. removeItem frees space, so it can succeed even when setItem
+    // threw — gating on `persisted` prevents that asymmetric loss.
+    if ((legacyId || legacyName) && persisted) {
       try {
         window.localStorage.removeItem(LS_MY_PLAYER_ID);
         window.localStorage.removeItem(LS_MY_PLAYER_NAME);
@@ -324,20 +331,6 @@ function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX)
     return xt.localeCompare(yt);
   });
   return upcoming.slice(0, max);
-}
-
-function buildFollowedNextMatch(followedPlayer, allMatches) {
-  if (!followedPlayer || (!followedPlayer.id && !followedPlayer.name)) return null;
-  const mine = buildPlayerMatchHighlight(followedPlayer.id, allMatches, followedPlayer.name)
-    .filter(hasBothSides)
-    .filter((m) => m.status !== "completed");
-  mine.sort((a, b) => {
-    const ao = a.status === "running" ? 0 : 1;
-    const bo = b.status === "running" ? 0 : 1;
-    if (ao !== bo) return ao - bo;
-    return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-  });
-  return mine[0] || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +411,16 @@ function migrateWatchlistOnLoad(rawWatchlist, legacyId, legacyName) {
   return { list: normalizeWatchlist(injected), migrated: true };
 }
 
+// addPlayerToWatchlist — append a player entry (dedup by id), returning the
+// new list (or the original unchanged when the player is missing or already
+// watched). Single source of truth for the player-entry shape + dedup rule,
+// shared by the home panel and its picker.
+function addPlayerToWatchlist(watchlist, p) {
+  if (!p || !p.id) return watchlist;
+  if (watchlist.some((e) => e.type === "player" && e.id === p.id)) return watchlist;
+  return [...watchlist, { type: "player", id: p.id, name: p.name || "", dojo: p.dojo || "" }];
+}
+
 // resolveEntryPlayerIds — the set of roster player ids a single entry covers.
 // A player entry is itself (even if not in the roster — a stale watch still
 // filters matches by id). A dojo entry expands to every CURRENT roster member
@@ -481,11 +484,11 @@ function findPrimaryEntry(watchlist, pinnedKey) {
 
 // buildPrimaryNextMatch — the hero match for the primary entry: the nearest
 // non-completed match involving the primary (a player → just them; a dojo →
-// any current member), running-first then by scheduledAt. Mirrors
-// buildFollowedNextMatch's ordering so the hero reads identically. Callers
-// pass match lists already filtered through hasBothSides (as the home page
-// does) — this helper stays free of the window.hasBothSides proxy so it is
-// unit-testable in isolation.
+// any current member), ordered running-first then by scheduledAt so the hero
+// surfaces a live match before a merely-scheduled one. Callers pass match
+// lists already filtered through hasBothSides (as the home page does) — this
+// helper stays free of the window.hasBothSides proxy so it is unit-testable
+// in isolation.
 function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
   if (!primaryEntry) return null;
   const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
@@ -906,10 +909,10 @@ export function TournamentInfo({ tournament }) {
 }
 
 // Pure helper: resolve a ?player= / ?name= deep link against the participant
-// roster and the currently-followed player. Returns null when no action is
-// needed, or { player, pending } where pending=true means a confirmation banner
-// should be shown instead of silently overwriting the existing selection.
-export function resolveDeepLink(searchString, roster, followedPlayer) {
+// roster. Returns null when no participant matches, else { player: {id,name} }.
+// Adding the resolved player to the watchlist is non-destructive (dedup-add),
+// so there is no overwrite-confirmation concept here any more (mp-xhaa).
+export function resolveDeepLink(searchString, roster) {
   const params = new URLSearchParams(searchString || "");
   const qpPlayer = (params.get("player") || "").trim();
   const qpName = (params.get("name") || "").trim();
@@ -920,8 +923,7 @@ export function resolveDeepLink(searchString, roster, followedPlayer) {
     if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));
   }
   if (!hit) return null;
-  const alreadySet = followedPlayer && followedPlayer.id && followedPlayer.id !== hit.id;
-  return { player: { id: hit.id, name: hit.name }, pending: !!alreadySet };
+  return { player: { id: hit.id, name: hit.name } };
 }
 
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
@@ -959,11 +961,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
 
   // Add a single player to the watchlist (dedup by id). Used by the deep link.
-  const addWatchPlayer = (p) => {
-    if (!p || !p.id) return;
-    if (watchlist.some((e) => e.type === "player" && e.id === p.id)) return;
-    setWatchlist([...watchlist, { type: "player", id: p.id, name: p.name || "", dojo: p.dojo || "" }]);
-  };
+  const addWatchPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
 
   // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
   // links from QR codes exactly once. Adding to the watchlist is
@@ -975,7 +973,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     if (deepLinkApplied.current) return;
     if (typeof window === "undefined" || !window.location) return;
     if (roster.length === 0) return; // wait until participants are loaded
-    const result = resolveDeepLink(window.location.search, roster, null);
+    const result = resolveDeepLink(window.location.search, roster);
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
   }, [roster]);
@@ -1515,11 +1513,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const multi = count >= 2;
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
-  const addPlayer = (p) => {
-    if (!p || !p.id) return;
-    if (watchlist.some((e) => e.type === "player" && e.id === p.id)) return;
-    setWatchlist([...watchlist, { type: "player", id: p.id, name: p.name || "", dojo: p.dojo || "" }]);
-  };
+  const addPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
   const addDojo = (d) => {
     if (!d || !d.name) return;
     if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
@@ -3049,7 +3043,7 @@ function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, buildFollowedNextMatch, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, computeSecondaryAlert, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, isPlayerWatched, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, buildRoster, WatchlistPanel, WatchHeroCard, WatchPicker, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, ViewerHome, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, useWatchlist, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, computeSecondaryAlert, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, isPlayerWatched, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, buildRoster, WatchlistPanel, WatchHeroCard, WatchPicker, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, ViewerHome, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection };
 
 if (typeof window !== 'undefined') {
     window.PlayerMultiFilter = PlayerMultiFilter;

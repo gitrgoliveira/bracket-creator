@@ -235,3 +235,73 @@ describe('WatchPicker', () => {
     expect(onPickDojo).toHaveBeenCalledWith({ name: 'Hagane Dojo', total: 2 });
   });
 });
+
+// Regression for the tri-review finding: the legacy single-follow keys must be
+// deleted ONLY after the migrated watchlist is durably written. A swallowed
+// write (e.g. QuotaExceededError) combined with unconditional deletion would
+// silently and permanently lose the followed player.
+describe('useWatchlist legacy migration', () => {
+  let runtime, useWatchlist, origLSDesc;
+
+  const makeLS = (initial, throwOnSetKey) => {
+    const store = { ...initial };
+    return {
+      _store: store,
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => {
+        if (throwOnSetKey && k === throwOnSetKey) throw new Error('QuotaExceededError');
+        store[k] = String(v);
+      },
+      removeItem: (k) => { delete store[k]; },
+    };
+  };
+  const installLS = (ls) => {
+    Object.defineProperty(global.window, 'localStorage', { value: ls, writable: true, configurable: true });
+  };
+
+  beforeEach(async () => {
+    origLSDesc = Object.getOwnPropertyDescriptor(global.window, 'localStorage');
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window.pluralize = (count, singular, plural) =>
+      count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
+    vi.resetModules();
+    ({ useWatchlist } = await import('../viewer.jsx'));
+  });
+  afterEach(() => {
+    runtime.unmount();
+    if (origLSDesc) Object.defineProperty(global.window, 'localStorage', origLSDesc);
+    global.React = realReact;
+    vi.resetModules();
+  });
+
+  // Mount a probe component that just runs the hook and captures its list.
+  const mountHook = () => {
+    let captured;
+    const Probe = () => { captured = useWatchlist()[0]; return null; };
+    runtime.mount(Probe, {});
+    return captured;
+  };
+
+  it('keeps the legacy keys when the migrated watchlist write fails', () => {
+    const ls = makeLS({ bc_my_player_id: 'p1', bc_my_player_name: 'Alice' }, 'bc_watchlist');
+    installLS(ls);
+    const list = mountHook();
+    // The in-memory list still migrated for the session…
+    expect(list).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: '' }]);
+    // …but the legacy keys MUST survive so the follow isn't lost on reload.
+    expect(ls._store.bc_my_player_id).toBe('p1');
+    expect(ls._store.bc_my_player_name).toBe('Alice');
+    expect(ls._store.bc_watchlist).toBeUndefined();
+  });
+
+  it('deletes the legacy keys once the migrated watchlist is written', () => {
+    const ls = makeLS({ bc_my_player_id: 'p1', bc_my_player_name: 'Alice' });
+    installLS(ls);
+    const list = mountHook();
+    expect(list).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: '' }]);
+    expect(ls._store.bc_my_player_id).toBeUndefined();
+    expect(ls._store.bc_my_player_name).toBeUndefined();
+    expect(JSON.parse(ls._store.bc_watchlist)).toEqual([{ type: 'player', id: 'p1', name: 'Alice', dojo: '' }]);
+  });
+});

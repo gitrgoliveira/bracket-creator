@@ -17,9 +17,9 @@ const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
 
-// Maximum live-match chips rendered in the topbar status strip before the
+// Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
-const LIVE_STRIP_MAX_CHIPS = 6;
+const RUNNING_STRIP_MAX_CHIPS = 6;
 
 // Plain-language expansions for the insider format codes emitted by
 // formatLabelShort (ui.jsx): "P+KO" / "KO". Used as a tooltip + aria-label at
@@ -58,14 +58,44 @@ function Breadcrumbs({ items }) {
   );
 }
 
+// How long the SSE feed must stay down before the topbar escalates from the
+// calm "Reconnecting…" pill to the full-width alert banner. Set above the
+// stream's 5s retry interval so a single failed-then-recovered cycle never
+// trips it — only an outage that survives the first retry escalates.
+const SUSTAINED_DOWN_MS = 8000;
+
+// Framework-free tracker for the escalation timer. `note(connected)` is called
+// on every connection-status change; `onSustained(true|false)` fires when the
+// feed has been continuously down for `thresholdMs`, and `false` the moment it
+// recovers. The timer starts on the first disconnect and is NOT restarted by
+// later error events, so the threshold measures total downtime rather than
+// time-since-last-event. Extracted from AdminTopbar so the timing logic is
+// unit-testable with fake timers without rendering the component.
+function watchSustainedDisconnect(thresholdMs, onSustained) {
+  let timer = null;
+  return {
+    note(connected) {
+      if (connected) {
+        if (timer) { clearTimeout(timer); timer = null; }
+        onSustained(false);
+      } else if (!timer) {
+        timer = setTimeout(() => { timer = null; onSustained(true); }, thresholdMs);
+      }
+    },
+    stop() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    },
+  };
+}
+
 function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // Render running matches as chips below the topbar so admins always
-  // know what's live, regardless of which screen they're on. Clicking
+  // know what's under way, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
   // navigator helper set up by AdminApp. sideName (hoisted to module
   // scope) handles the three possible side shapes; chips with no real
   // name on either side are filtered out.
-  const liveMatches = useMemoA(() => {
+  const runningMatches = useMemoA(() => {
     if (!tournament || !window.compMatches) return [];
     return (tournament.competitions || [])
       .flatMap(cc => window.compMatches(cc))
@@ -78,15 +108,29 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // lightweight subscription purely to read the connection status exposed by
   // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
   // The callback arg is a no-op here: the dashboard already drives data
-  // refreshes off its own subscription; this one only observes liveness.
+  // refreshes off its own subscription; this one only observes the connection state.
+  // Two-tier signal. A brief drop is normal — the SSE stream auto-retries
+  // every 5s — so a transient blip only flips the calm topbar pill to
+  // "Reconnecting…". A *sustained* outage (still down after the first retry
+  // should have landed) escalates to an unmissable banner, because by then
+  // the operator is scoring against data that may be stale. The threshold
+  // filters reconnect noise so the banner never cries wolf. The timer
+  // orchestration lives in watchSustainedDisconnect (below) so it can be
+  // unit-tested with fake timers, independent of the component.
   const [connected, setConnected] = useStateA(true);
+  const [sustainedDown, setSustainedDown] = useStateA(false);
   useEffectA(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
+    const monitor = watchSustainedDisconnect(SUSTAINED_DOWN_MS, setSustainedDown);
     const unsub = window.API.subscribeToEvents(
       () => {},
-      (status) => setConnected(status === "open")
+      (status) => {
+        const up = status === "open";
+        setConnected(up);
+        monitor.note(up);
+      }
     );
-    return unsub;
+    return () => { monitor.stop(); unsub(); };
   }, []);
 
   const onOpenScore = (m) => {
@@ -96,10 +140,10 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   };
 
   return (
-    // Wrap topbar + live-strip in a single sticky container so they scroll
+    // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
     // fixed height) — robust to font scaling / browser zoom — while still
-    // keeping the live-strip visually anchored beneath it.
+    // keeping the running-strip visually anchored beneath it.
     <div className="topbar-stack">
       <div className="topbar">
         <div className="topbar__brand">
@@ -110,39 +154,36 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           </div>
         </div>
         <div className="topbar__spacer"></div>
-        {/* Calm connection indicator: a dot + label that reflects the SSE
-            stream state. Green-tinted "Live" when connected; amber-tinted
-            "Reconnecting…" when the stream has dropped. role=status +
-            aria-live=polite so a screen reader hears the change without it
-            being alarmist. Uses tokens inline (no new CSS classes). */}
+        {/* Connection-status indicator for the SSE stream. Labelled "Connected"
+            so it reads as the data-connection state, not on-court match
+            activity, and styled as a calm STATIC dot, deliberately not the
+            pulsing `.dot--running` signal that flags a match in progress (the
+            strip below). Only the disconnected state pulses, so motion flags
+            the moment that actually needs attention. role=status + aria-live
+            announce the change to assistive tech without alarming. */}
         <span
+          className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
           role="status"
           aria-live="polite"
-          title={connected ? "Live feed connected" : "Live feed disconnected — reconnecting"}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 600,
-            color: connected ? "var(--ink-2)" : "var(--red)",
-          }}
+          title={connected ? "Receiving real-time updates" : "Connection lost, reconnecting"}
         >
-          <span
-            aria-hidden="true"
-            className={connected ? "dot dot--live" : "dot"}
-            style={connected ? undefined : { background: "var(--red)" }}
-          ></span>
-          {connected ? "Live" : "Reconnecting…"}
+          <span aria-hidden="true" className="topbar__conn__dot"></span>
+          {connected ? "Connected" : "Reconnecting…"}
         </span>
         <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
-      {liveMatches.length > 0 && (
-        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} live`}>
-          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
-          <div className="live-strip__chips">
-            {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
+      {!connected && sustainedDown && (
+        <div className="conn-alert" role="alert">
+          <span className="conn-alert__dot" aria-hidden="true"></span>
+          Connection interrupted. Reconnecting… Scores on screen may be out of date.
+        </div>
+      )}
+      {runningMatches.length > 0 && (
+        <div className="running-strip" role="region" aria-label={`${pluralize(runningMatches.length, "match", "matches")} in progress`}>
+          <span className="running-strip__lbl"><span className="dot dot--running"></span> {pluralize(runningMatches.length, "match", "matches")} in progress</span>
+          <div className="running-strip__chips">
+            {runningMatches.slice(0, RUNNING_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
               const b = sideName(m.sideB);
               const courtLabel = m.court ? `Shiaijo ${m.court}` : "Unassigned";
@@ -150,16 +191,16 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
               return (
                 <button
                   key={`${m.compId}:${m.id}`}
-                  className="live-strip__chip"
+                  className="running-strip__chip"
                   onClick={() => onOpenScore && onOpenScore(m)}
                   aria-label={`Open score editor for ${b} versus ${a} ${courtPhrase}`}
                 >
-                  <span className="live-strip__court">{courtLabel}</span>
-                  <span className="live-strip__names">{b} – {a}</span>
+                  <span className="running-strip__court">{courtLabel}</span>
+                  <span className="running-strip__names">{b} – {a}</span>
                 </button>
               );
             })}
-            {liveMatches.length > LIVE_STRIP_MAX_CHIPS && <span className="live-strip__more">+{liveMatches.length - LIVE_STRIP_MAX_CHIPS} more</span>}
+            {runningMatches.length > RUNNING_STRIP_MAX_CHIPS && <span className="running-strip__more">+{runningMatches.length - RUNNING_STRIP_MAX_CHIPS} more</span>}
           </div>
         </div>
       )}
@@ -341,14 +382,14 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
     };
   }, []);
 
-  const { totalMatches, doneMatches, liveMatches, totalParticipants } = useMemoA(() => {
-    let totalMatches = 0, doneMatches = 0, liveMatches = 0, totalParticipants = 0;
+  const { totalMatches, doneMatches, runningMatches, totalParticipants } = useMemoA(() => {
+    let totalMatches = 0, doneMatches = 0, runningMatches = 0, totalParticipants = 0;
     comps.forEach((c) => {
       totalParticipants += (c.players || []).length;
       const s = compMatchStats(c);
-      totalMatches += s.total; doneMatches += s.done; liveMatches += s.live;
+      totalMatches += s.total; doneMatches += s.done; runningMatches += s.running;
     });
-    return { totalMatches, doneMatches, liveMatches, totalParticipants };
+    return { totalMatches, doneMatches, runningMatches, totalParticipants };
   }, [comps]);
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
@@ -399,7 +440,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
           <div className="stat-box"><div className="v">{comps.length}</div><div className="l">Competitions</div></div>
           <div className="stat-box"><div className="v">{totalParticipants}</div><div className="l">Participants</div></div>
           <div className="stat-box"><div className="v">{doneMatches}/{totalMatches}</div><div className="l">Matches done</div></div>
-          <div className="stat-box"><div className="v" style={{ color: liveMatches > 0 ? "var(--red)" : "inherit" }}>{liveMatches}</div><div className="l">Now</div></div>
+          <div className="stat-box"><div className="v" style={{ color: runningMatches > 0 ? "var(--red)" : "inherit" }}>{runningMatches}</div><div className="l">Now</div></div>
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
@@ -427,10 +468,10 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {/* Static dot, not dot--live: these are started competitions, which
-                is not the same as a match being live right now. The pulsing
-                live signal is reserved for actual live matches (topbar
-                live-strip + match rows) per DESIGN.md Principle 3. */}
+            {/* Static dot, not dot--running: these are started competitions, which
+                is not the same as a match in progress right now. The pulsing
+                signal is reserved for matches actually under way (topbar strip
+                + match rows) per DESIGN.md Principle 3. */}
             <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>
@@ -620,7 +661,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
 }
 
 function CompCard({ c, onOpen, onStart, tournament, showToast }) {
-  const { live: liveCount } = compMatchStats(c);
+  const { running: runningCount } = compMatchStats(c);
   const playerCount = (c.players || []).length;
   const courts = c.courts || [];
   const [shareOpen, setShareOpen] = useStateA(false);
@@ -665,7 +706,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               label inline so the abbreviation is legible without forking the
               shared helper. */}
           <div className="tcard__stat" title={FORMAT_LABEL_LONG[c.format] || "Format"}><div className="v" aria-label={FORMAT_LABEL_LONG[c.format] || undefined}>{formatLabelShort(c.format)}</div><div className="l">Format</div></div>
-          {liveCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{liveCount}</div><div className="l">Now</div></div>}
+          {runningCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{runningCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
           {c.status === "setup" && playerCount >= 2 && (
@@ -794,6 +835,8 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
     </div>
   );
 }
+
+export { watchSustainedDisconnect };
 
 window.Breadcrumbs = Breadcrumbs;
 window.AdminTopbar = AdminTopbar;

@@ -339,7 +339,7 @@ function normalizeParticipantName(s) {
 }
 
 // parseParticipantLines parses an array of non-empty CSV lines into player objects.
-// Used by both AdminParticipants.apply() and the live parse preview.
+// Used by both AdminParticipants.apply() and the active parse preview.
 function parseParticipantLines(lines, withZekken) {
   return lines.map((line) => {
     const parts = line.split(",").map((s) => s.trim());

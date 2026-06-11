@@ -122,7 +122,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // failed" can re-run only those). Closed by setting startAll to null.
   const [startAll, setStartAll] = useStateA(null);
 
-  // Expose a navigation helper used by AdminTopbar's live-strip chips,
+  // Expose a navigation helper used by AdminTopbar's running-strip chips,
   // avoiding prop-drilling through every screen. Set once per mount.
   useEffectA(() => {
     window.__adminNavigateToScore = (compId) => setView({ kind: "competition", id: compId, section: "scores" });
@@ -431,7 +431,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         timers.add(id);
       };
       // Coalesce tournament-wide refreshes across all events so the topbar's
-      // live-strip stays current without firing one fetchCompetitions() per
+      // running-strip stays current without firing one fetchCompetitions() per
       // match update.
       let pendingTournament = null;
       let tournamentFetching = false;
@@ -499,8 +499,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
           }
-          // Any of these may change the topbar live-strip (matches becoming
-          // live/done in *other* competitions, a comp starting, a dependent
+          // Any of these may change the topbar running-strip (matches becoming
+          // running/done in *other* competitions, a comp starting, a dependent
           // playoff unblocking, …). Coalesced so a burst is one fetch.
           // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
@@ -656,7 +656,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               catches up. Word it so going back / reloading is clearly safe. */}
           <p className="comp-shell-msg">
             This competition may have been removed, or your view is briefly out of
-            sync while live updates catch up. Going back to the dashboard or
+            sync while real-time updates catch up. Going back to the dashboard or
             reloading the page is safe — if it still exists, it will reappear.
           </p>
         </div>

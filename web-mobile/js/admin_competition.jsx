@@ -1,5 +1,5 @@
 // Competition shell + the sections it embeds (Overview, Settings, Bracket).
-// LiveMatchPanel is the bracket-side detail panel for picking match winners.
+// RunningMatchPanel is the bracket-side detail panel for picking match winners.
 // See web-mobile/admin_split_plan.md.
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -61,7 +61,7 @@ const AdminExport = window.AdminExport;
 // match through the full editor's hikiwake toggle instead.
 //
 // Exported for vitest at __tests__/admin_competition.test.jsx.
-function buildLiveIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppons) {
+function buildRunningIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppons) {
   const winner = winnerSide === "a" ? sideA : sideB;
   const winnerLetters = (winnerIppons && winnerIppons.length > 0) ? winnerIppons : ["M"];
   const loserLetters = loserIppons || [];
@@ -80,25 +80,25 @@ function buildLiveIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIppon
   };
 }
 
-// Pure loader for LiveMatchPanel's scoreboard-mode aPoints/bPoints from
+// Pure loader for RunningMatchPanel's scoreboard-mode aPoints/bPoints from
 // a (possibly completed) match. Reads each side's letters DIRECTLY from
 // match.ipponsA / match.ipponsB rather than from score.ippons (which is
 // only the winner's letters, by buildPatch / normalizeMatch convention).
 //
-// Bug fix companion to buildLiveIpponResult: the previous loader gated
+// Bug fix companion to buildRunningIpponResult: the previous loader gated
 // on `winner.id === sideX.id` and pulled from `score.ippons`, which
 // returned only the winner's letters. That was fine when the writer
-// always recorded loser=[]; once buildLiveIpponResult started writing
+// always recorded loser=[]; once buildRunningIpponResult started writing
 // 2-1 wins correctly (loser's single ippon preserved), the loader's
 // truncation surfaced — a 2-1 win came back as 2-0 on re-render and
 // re-submission silently dropped the loser's letter.
 //
 // admin_scoring_modal.jsx's initialAPts at line 30-31 already used the
-// `m.ipponsA?.filter(...)` pattern; this helper aligns the live panel
+// `m.ipponsA?.filter(...)` pattern; this helper aligns the running panel
 // with the same shape.
 //
 // "•" placeholders are filtered (the full editor uses "•" as an empty
-// slot marker; live panel doesn't write those but the data round-trips
+// slot marker; running panel doesn't write those but the data round-trips
 // through the same backend fields so filtering is defensive).
 //
 // Exported for vitest at __tests__/admin_competition.test.jsx.
@@ -110,14 +110,14 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCourt, onRecord, onOverride }) => {
+const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCourt, onRecord, onOverride }) => {
   const [mode, setMode] = useStateA("tap");
   const [aPoints, setAPoints] = useStateA([]);
   const [bPoints, setBPoints] = useStateA([]);
   useEffectA(() => {
     // Load both sides' letters from the canonical match.ipponsA /
     // match.ipponsB fields so the read shape matches what
-    // buildLiveIpponResult writes — see loadScoreboardPoints above.
+    // buildRunningIpponResult writes — see loadScoreboardPoints above.
     const { aPoints: a, bPoints: b } = loadScoreboardPoints(match);
     setAPoints(a);
     setBPoints(b);
@@ -128,17 +128,17 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCo
   const a = match.sideA, b = match.sideB;
   const isComplete = match.status === "completed";
   return (
-    <div className="live-panel">
-      <div className="live-panel__head">
-        <div className="live-panel__title">Match · {match.id.slice(-6)}</div>
-        <div className="live-panel__court">
+    <div className="running-panel">
+      <div className="running-panel__head">
+        <div className="running-panel__title">Match · {match.id.slice(-6)}</div>
+        <div className="running-panel__court">
           {onMoveCourt && courts && courts.length ? (
             <>
               <CourtPicker
                 value={match.court}
                 courts={courts}
                 onChange={(cc) => onMoveCourt(compId, match.id, cc)}
-                btnClassName="live-panel__court-btn"
+                btnClassName="running-panel__court-btn"
                 label="SHIAIJO "
               />
               <span> · {match.scheduledAt || "TBA"}</span>
@@ -228,11 +228,11 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCo
         // (a single letter) was passed and recordWinner hardcoded winnerPts=1,
         // so a 2-ippon win was silently truncated to 1 ippon. recordWinner now
         // builds winnerPts / ipponsA / ipponsB from the array lengths via
-        // buildLiveIpponResult.
+        // buildRunningIpponResult.
         const winnerArr = aWins ? aPoints : bPoints;
         const loserArr = aWins ? bPoints : aPoints;
         return (
-          <div className="live-panel__actions">
+          <div className="running-panel__actions">
             <button
               className="btn btn--primary btn--full"
               disabled={!hasWinner}
@@ -266,14 +266,14 @@ const LiveMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCo
     </div>
   );
 });
-LiveMatchPanel.displayName = "LiveMatchPanel";
+RunningMatchPanel.displayName = "RunningMatchPanel";
 
 function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   // Prefer the props passed from the detail fetch, but fall back to whatever
   // is already on `c` when the detail hasn't loaded yet (or errored). Using ??
   // avoids overwriting non-null fields on `c` with undefined prop values.
   const statsSource = { ...c, pools: pools ?? c.pools, poolMatches: poolMatches ?? c.poolMatches, bracket: bracket ?? c.bracket };
-  const { total, done, live } = compMatchStats(statsSource);
+  const { total, done, running: runningCount } = compMatchStats(statsSource);
   const pct = total ? Math.round((done / total) * 100) : 0;
   const effectiveBracket = bracket ?? c.bracket;
   // Honour the OS reduced-motion preference for the progress-bar animation.
@@ -286,7 +286,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
         <div className="stat-box"><div className="v">{c.players.length}</div><div className="l">{c.kind === "team" ? "Teams" : "Participants"}</div></div>
         <div className="stat-box"><div className="v">{c.players.filter((p) => p.seed).length}</div><div className="l">Seeded</div></div>
         <div className="stat-box"><div className="v">{done}/{total}</div><div className="l">Matches done</div></div>
-        <div className="stat-box"><div className="v" style={{ color: live > 0 ? "var(--red)" : "inherit" }}>{live}</div><div className="l">Now</div></div>
+        <div className="stat-box"><div className="v" style={{ color: runningCount > 0 ? "var(--red)" : "inherit" }}>{runningCount}</div><div className="l">Now</div></div>
       </div>
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card__head"><div className="card__title">Progress</div><div className="card__sub">{pct}%</div></div>
@@ -1148,14 +1148,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
   // winnerIppons/loserIppons are arrays of letter codes. Tap mode (no
   // detail) and card mode (single explicit letter) pass a single-element
   // array; scoreboard mode passes the full points it accumulated for
-  // each side. See buildLiveIpponResult above for the schema rationale.
+  // each side. See buildRunningIpponResult above for the schema rationale.
   const recordWinner = (winnerSide, _mode = "ippon", winnerIppons = ["M"], loserIppons = []) => {
     const m = findSelectedMatch();
     if (!m) return;
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     if (!winner) return;
 
-    const result = buildLiveIpponResult(winnerSide, m.sideA, m.sideB, winnerIppons, loserIppons);
+    const result = buildRunningIpponResult(winnerSide, m.sideA, m.sideB, winnerIppons, loserIppons);
 
     // Don't call onUpdate(c) on success — AdminApp's onUpdate is the
     // competition-config PUT, which would overwrite server state with
@@ -1173,7 +1173,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       .catch(err => showToast(err.message, "error"));
   };
   const selectedMatch = findSelectedMatch();
-  // mp-turx: per-match playability — a bracket match is live iff hasBothSides()
+  // mp-turx: per-match playability — a bracket match is running iff hasBothSides()
   // returns true (both sides are resolved real participants, not “Winner of rX-mY”
   // feeders or pool-origin placeholders like “Pool A-1st”). The old bracket-wide
   // `isPreview` gate is replaced: the tree always renders, and individual matches
@@ -1189,7 +1189,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       <div>
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
-            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches become live once both sides are decided.
+            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
           </div>
         )}
         <div className="bracket-canvas" ref={scrollRef}>
@@ -1208,7 +1208,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       </div>
       <div>
         {hasBothSides(selectedMatch) ? (
-          <LiveMatchPanel
+          <RunningMatchPanel
             match={selectedMatch}
             compId={c.id}
             courts={t?.courts || []}
@@ -1713,7 +1713,7 @@ window.AdminSwissRounds = AdminSwissRounds;
 // ES export for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
 export {
-  buildLiveIpponResult,
+  buildRunningIpponResult,
   loadScoreboardPoints,
   swissRoundIDPrefix,
   filterSwissRoundMatches,

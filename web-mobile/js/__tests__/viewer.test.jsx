@@ -711,13 +711,13 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('clicking a live-match cell fires onMatchClick', () => {
+  it('clicking a running-match cell fires onMatchClick', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const liveCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--live'));
-    expect(liveCell).toBeTruthy();
-    liveCell.props.onClick();
+    const runningCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--running'));
+    expect(runningCell).toBeTruthy();
+    runningCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
@@ -958,7 +958,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       myPlayer: null,
       myUpcoming: null,
       currentMatch: null,
-      liveMatches: [],
+      runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
       tweaks: {},
@@ -985,7 +985,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       myPlayer: null,
       myUpcoming: null,
       currentMatch: null,
-      liveMatches: [],
+      runningMatches: [],
       upcomingMatches: [m],
       recentMatches: [],
       tweaks: {},
@@ -1011,7 +1011,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       myPlayer: null,
       myUpcoming: null,
       currentMatch: running,
-      liveMatches: [],
+      runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
       tweaks: {},
@@ -1033,7 +1033,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       myPlayer: null,
       myUpcoming: null,
       currentMatch: running,
-      liveMatches: [],
+      runningMatches: [],
       upcomingMatches: [],
       recentMatches: [],
       tweaks: {},

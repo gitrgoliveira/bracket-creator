@@ -229,7 +229,7 @@ describe('AdminScoreEditor chained-nav court scoping', () => {
 // running, scheduled, completed. Anything else (including `pending`,
 // `in_progress`, `complete`) gets `?? 99` and sorts last — same as prod.
 // An earlier version used `in_progress`/`complete` which silently fell
-// through to the scheduledAt tiebreaker for live and finished matches.
+// through to the scheduledAt tiebreaker for running and finished matches.
 function sortScoreEdit(matches) {
   const order = { running: 0, scheduled: 1, completed: 2 };
   return [...matches].sort((a, b) => {

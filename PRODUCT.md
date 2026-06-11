@@ -5,10 +5,10 @@
 product
 
 ## Users
-Both organizers (admin) managing the tournament and attendees (competitors, coaches, spectators) viewing live results. Context includes noisy, bright tournament halls, often using mobile devices on the go.
+Both organizers (admin) managing the tournament and attendees (competitors, coaches, spectators) viewing real-time results. Context includes noisy, bright tournament halls, often using mobile devices on the go.
 
 ## Product Purpose
-To manage and view Kendo tournament brackets and live scores efficiently, ensuring operators can run the event smoothly and attendees can easily find their matches and results.
+To manage and view Kendo tournament brackets and scores efficiently, ensuring operators can run the event smoothly and attendees can easily find their matches and results.
 
 ## Brand Personality
 Clear, functional, reliable

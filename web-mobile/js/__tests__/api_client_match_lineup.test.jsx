@@ -66,7 +66,7 @@ describe('API.putMatchLineup', () => {
   });
 
   it('throws on 409 ErrLineupLocked with server message', async () => {
-    global.fetch = mockFetch(409, { error: 'ErrLineupLocked: match is live' });
+    global.fetch = mockFetch(409, { error: 'ErrLineupLocked: match is running' });
     await expect(API.putMatchLineup('c1', 't1', 'm1', {}, 'pw'))
       .rejects.toThrow('ErrLineupLocked');
   });

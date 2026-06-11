@@ -59,7 +59,7 @@ function applyTheme(theme) {
   document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
 }
 // Expose globally so BrandingManager (loaded as a separate module) can call
-// window.applyTheme() for live previews without duplicating the logic.
+// window.applyTheme() for real-time previews without duplicating the logic.
 window.applyTheme = applyTheme;
 
 // Pure helper: parse the current pathname into the App's view state.
@@ -673,7 +673,7 @@ function App() {
             // transitions (competition_started / competition_completed change
             // status badges), AND for match_updated when the viewer is on
             // the home/schedule screen (viewerCompId is null). Home-screen
-            // widgets (LIVE NOW, progress bars, watchlist, followed-player
+            // widgets (running-match counters, progress bars, watchlist, followed-player
             // matches) derive from tournament.competitions and need the
             // updated match state. Viewers inside a specific competition
             // skip the list refetch for match_updated only (the per-comp

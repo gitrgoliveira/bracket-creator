@@ -563,8 +563,8 @@ window.AdminPools = AdminPools;
 // ES export for the vitest suite — pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
 
-// Build a map of match id → MatchResult for O(1) live-state lookups.
-function buildLiveById(poolMatches) {
+// Build a map of match id → MatchResult for O(1) running-state lookups.
+function buildRunningById(poolMatches) {
   return Object.fromEntries((poolMatches || []).map(m => [m.id, m]));
 }
 
@@ -574,4 +574,4 @@ function isRanksLocked(compStatus) {
   return compStatus !== "pools";
 }
 
-export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, buildLiveById, isRanksLocked };
+export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, buildRunningById, isRanksLocked };

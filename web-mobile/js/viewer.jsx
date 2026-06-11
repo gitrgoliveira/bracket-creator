@@ -126,18 +126,18 @@ function tournamentMatches(t) {
   // draw-ready comps contribute their (unscored) draw matches so the
   // "Find my matches" / watchlist / full-schedule views can surface a
   // spectator's upcoming bout once the draw is published. These never
-  // appear in the home LIVE/Up-next strips: those gate on liveCompIds,
-  // which excludes draw-ready (a draw-ready comp is not live).
+  // appear in the home NOW/Up-next strips: those gate on runningCompIds,
+  // which excludes draw-ready (a draw-ready comp is not running).
   return (t.competitions || [])
     .filter(c => c.status && c.status !== "setup")
     .flatMap(compMatches);
 }
 
-// Next match to be played in this competition (live first, else first scheduled in time order)
+// Next match to be played in this competition (running first, else first scheduled in time order)
 function currentMatchOf(c) {
   const ms = compMatches(c);
-  const live = ms.find((m) => m.status === "running" && hasBothSides(m));
-  if (live) return live;
+  const running = ms.find((m) => m.status === "running" && hasBothSides(m));
+  if (running) return running;
   const sched = ms.filter((m) => m.status === "scheduled" && hasBothSides(m));
   sched.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"));
   return sched[0] || null;
@@ -1007,19 +1007,19 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
-  // Live-comp set: gates the home NOW / Up-next strips and the live dot.
+  // Running-comp set: gates the home NOW / Up-next strips and the running dot.
   // BOTH setup and draw-ready are excluded — a draw-ready comp has a published
-  // draw but no match has been called, so it is NOT live. (The competition
+  // draw but no match has been called, so it is NOT running. (The competition
   // detail view still shows its Pools/Bracket tabs; that is governed separately
   // by isPreStart in ViewerCompetition.)
-  const liveCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
+  const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
   // Apply hasBothSides here too — pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public NOW strip, even though
   // the upcoming list / cards / detail view all reject placeholder
   // sides. Mirrors the upNext filter below.
-  const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
-  let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && liveCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  const running = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && runningCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
+  let upNext = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && runningCompIds.has(m.compId) && (courtFilter === "all" || m.court === courtFilter));
   if (courtFilter === "all") upNext = upNext.slice(0, 3);
 
   // mp-xhaa: resolve the watchlist to a flat player set (dojo entries expand to
@@ -1099,11 +1099,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         </div>
 
         <div className="viewer__body">
-          {/* T063: SSE connection indicator — visible only when the live feed drops. */}
+          {/* T063: SSE connection indicator, visible only when the connection drops. */}
           {!sseConnected && (
             <div className="sse-offline-banner" role="status" aria-live="polite">
               <span className="sse-offline-banner__dot" aria-hidden="true" />
-              Live feed reconnecting — scores may be outdated
+              Connection interrupted. Reconnecting… Scores may be out of date.
             </div>
           )}
           <TournamentInfo tournament={t} />
@@ -1154,11 +1154,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           {/* mp-cw1: Browser push notification opt-in toggle. */}
           <NotificationSettings />
 
-          {live.length > 0 && (
-            <div className="hero-live">
-              <div className="hero-live__lbl"><span className="dot dot--live"></span> NOW · {pluralize(live.length, "match", "matches")}</div>
-              <div className="vsched hero-live__vsched">
-                {live.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+          {running.length > 0 && (
+            <div className="hero-running">
+              <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(running.length, "match", "matches")}</div>
+              <div className="vsched hero-running__vsched">
+                {running.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </div>
           )}
@@ -1211,7 +1211,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                   const matches = compMatches(c).filter(hasBothSides);
                   const total = matches.length;
                   const done = matches.filter((m) => m.status === "completed").length;
-                  const liveCount = matches.filter((m) => m.status === "running").length;
+                  const runningCount = matches.filter((m) => m.status === "running").length;
                   const pct = total ? Math.round((done / total) * 100) : 0;
                   const showRegister = shouldShowRegister(t, c, !!onRegister);
                   return (
@@ -1225,13 +1225,13 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                               {c.players.length} {c.kind === "team" ? "teams" : "players"} · {formatLabel(c.format)} · Starts {c.startTime}
                             </div>
                           </div>
-                          <StatusBadge status={c.status} showLiveDot format={c.format} />
+                          <StatusBadge status={c.status} showRunningDot format={c.format} />
                         </div>
                         {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                           <div className="vlist-item__progress">
                             <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
                             <div className="vlist-item__pct">
-                              {liveCount > 0 ? <span className="bc-live-count">● {liveCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
+                              {runningCount > 0 ? <span className="bc-running-count">● {runningCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>
                           </div>
                         )}
@@ -1495,8 +1495,12 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
             aria-atomic="true"
           >
             <span className="l">Queue</span>
-            {/* .my-match bg is --accent (navy), so text inherits white from
-                --accent-fg; emphasise up-next with a bullet, not colour. */}
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the in-progress/up-next
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
             <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
               {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
               {queueLabel}
@@ -1933,7 +1937,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     return s;
   }, [resolvedWatched]);
 
-  const { liveMatches, upcomingMatches, recentMatches } = useMemo(() => {
+  const { runningMatches, upcomingMatches, recentMatches } = useMemo(() => {
     const matchInvolvesWatched = (m) => {
       if (!hasActiveFilter) return true;
       const [aId, bId] = matchParticipantIds(m);
@@ -1946,7 +1950,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
       }
       return false;
     };
-    const live = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
+    const running = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
     const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))
       .slice(0, hasActiveFilter ? 20 : 3);
@@ -1958,7 +1962,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
       .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
       .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
       .slice(0, hasActiveFilter ? 20 : 5);
-    return { liveMatches: live, upcomingMatches: upcoming, recentMatches: recent };
+    return { runningMatches: running, upcomingMatches: upcoming, recentMatches: recent };
   }, [allMatches, watchedIds, watchedNames, hasActiveFilter]);
 
   const filterLabel = useMemo(() => {
@@ -1999,9 +2003,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   ].filter(Boolean);
 
   const currentMatch = useMemo(() => {
-    if (liveMatches.length > 0) return liveMatches[0];
+    if (runningMatches.length > 0) return runningMatches[0];
     return upcomingMatches[0] || null;
-  }, [liveMatches, upcomingMatches]);
+  }, [runningMatches, upcomingMatches]);
 
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
@@ -2031,7 +2035,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               reads "League", so the badge is pure redundancy. Other statuses
               (Playoffs / Completed) still carry information, so keep those. */}
           {!(c.status === "pools" && c.format === "league") && (
-            <StatusBadge status={c.status} showLiveDot format={c.format} />
+            <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
           {authed && onEditCompetition && (
             <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
@@ -2051,7 +2055,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               myPlayer={myPlayer}
               myUpcoming={myUpcoming}
               currentMatch={currentMatch}
-              liveMatches={liveMatches}
+              runningMatches={runningMatches}
               upcomingMatches={upcomingMatches}
               recentMatches={recentMatches}
               tweaks={tweaks}
@@ -2123,7 +2127,7 @@ function MatchDetailCard({ match, onClose, escapeToClose = true }) {
   const bName = withNumber(match.sideB);
   const aWin = match.winner?.id === match.sideA?.id && match.winner?.id;
   const bWin = match.winner?.id === match.sideB?.id && match.winner?.id;
-  const isLive = match.status === "running";
+  const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
   // mp-13y: fetch per-match lineups for team matches so bout rows show
@@ -2144,7 +2148,7 @@ function MatchDetailCard({ match, onClose, escapeToClose = true }) {
           {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {isLive && <span className="bc-live">● NOW</span>}
+          {isRunning && <span className="bc-running">● NOW</span>}
           {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
           {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
         </div>
@@ -2175,12 +2179,12 @@ function MatchDetailCard({ match, onClose, escapeToClose = true }) {
             teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")} />
-        : (isDone || isLive) && <IndividualScore match={match} variant="card" />}
+        : (isDone || isRunning) && <IndividualScore match={match} variant="card" />}
     </div>
   );
 }
 
-function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
+function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches, upcomingMatches, recentMatches, tweaks, tournament, compId, standings, pools, poolMatches, onSwitchTab, hasActiveFilter, filterLabel, highlightPlayers }) {
   const [expandedMatchId, setExpandedMatchId] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
   const isSelfRun = tournament && tournament.mode === "self-run";
@@ -2207,7 +2211,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
   }
 
   // draw-ready: the draw is published but no match has been called yet.
-  // The comp is not live, so the Overview has no live/recent matches to
+  // The comp is not running, so the Overview has no running/recent matches to
   // show — point spectators to the now-available tabs. Swiss comps render a
   // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
   // logic in ViewerCompetition), so the pointer text must match.
@@ -2356,21 +2360,21 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
             }
           } : undefined}
         >
-          <div className="section-title section-title--live">
-            <span className="dot dot--live"></span> ON NOW
+          <div className="section-title section-title--running">
+            <span className="dot dot--running"></span> ON NOW
           </div>
           <MatchDetailCard match={currentMatch} />
         </div>
       )}
 
-      {/* Live matches beyond the single current match */}
-      {liveMatches.length > 1 && (
+      {/* Running matches beyond the single current match */}
+      {runningMatches.length > 1 && (
         <>
-          <div className="section-title section-title--live">
-            <span className="dot dot--live"></span> NOW · {liveMatches.length}
+          <div className="section-title section-title--running">
+            <span className="dot dot--running"></span> NOW · {runningMatches.length}
           </div>
           <div className="vsched">
-            {liveMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
+            {runningMatches.filter(m => !currentMatch || m.id !== currentMatch.id).map((m) => (
               <React.Fragment key={m.id}>
                 <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} />
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
@@ -2395,8 +2399,8 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, liveMatches, up
         </>
       )}
 
-      {/* No live or upcoming */}
-      {!currentMatch && upcomingMatches.length === 0 && liveMatches.length === 0 && (
+      {/* No running or upcoming */}
+      {!currentMatch && upcomingMatches.length === 0 && runningMatches.length === 0 && (
         <div className="empty" style={{ padding: 20 }}><h3>Nothing scheduled</h3></div>
       )}
 
@@ -2434,7 +2438,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
   // stays gracefully empty for non-queued matches and pre-T046 responses.
   // Wording is owned by display.jsx::queueLabel (bead mp-e3k) so every
   // viewer surface stays in sync; we still gate on scheduled+qp>0 here
-  // because this row already renders ●LIVE / Final on the right for
+  // because this row already renders ● NOW / Final on the right for
   // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
   // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
@@ -2446,16 +2450,16 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
     : null;
   return (
-    <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
-      <div className="vsched-item__meta">
-        <span className="vsched-item__court">SHIAIJO {m.court}</span>
+    <button className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
+      <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
+        <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-live">● NOW</span>}
+        {m.status === "running" && <span className="bc-running">● NOW</span>}
         {m.status === "completed" && <span className="vsched-item__status">Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
@@ -2518,7 +2522,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
         {m.status === "completed" ? (
           scoreStr || "—"
         ) : m.status === "running" ? (
-          <span className="bc-live" style={{ fontSize: 10 }}>●</span>
+          <span className="bc-running" style={{ fontSize: 10 }}>●</span>
         ) : "–"}
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
@@ -2635,8 +2639,8 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayers })
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--live" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
-                    {m.status === "running" ? <span className="bc-live" style={{ fontSize: 9 }}>●</span> : "–"}
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--running" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
+                    {m.status === "running" ? <span className="bc-running" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
 
@@ -2739,7 +2743,7 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
         <span className="pool-match-numbered-row__name">{bName || "—"}</span>
       </div>
       <span className="pool-match-numbered-row__score">
-        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-live" style={{ fontSize: 10 }}>●</span> : "–"}
+        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-running" style={{ fontSize: 10 }}>●</span> : "–"}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
@@ -3241,16 +3245,16 @@ function ScheduleViewer({ tournament, tweaks }) {
           </div>
         ) : courts.map((cc) => {
           const list = byCourt[cc] || [];
-          const liveOn = list.find((m) => m.status === "running");
+          const runningOn = list.find((m) => m.status === "running");
           if (courtFilter !== "all" && cc !== courtFilter) return null;
           return (
             <div key={cc} className="tw-court">
               <div className="tw-court__head">
                 <div>
                   <div className="tw-court__title">SHIAIJO {cc}</div>
-                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{liveOn ? " · live now" : ""}</div>
+                  <div className="tw-court__sub">{list.length} match{list.length === 1 ? "" : "es"}{runningOn ? " · in progress" : ""}</div>
                 </div>
-                {liveOn && <span className="bc-live">● NOW</span>}
+                {runningOn && <span className="bc-running">● NOW</span>}
               </div>
               <div className="tw-court__list">
                 {list.length === 0 ? (
@@ -3284,7 +3288,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
   const qp = Number(m.queuePosition);
   const queuePill = (window.queueLabelCompact || _localQueueLabelCompact)(m);
   return (
-    <button className={`tw-match ${m.status === "running" ? "tw-match--live" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <button className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
@@ -3308,7 +3312,7 @@ function TWMatch({ m, highlight, _tweaks, onClick }) {
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
         {m.status === "completed" && scoreStr}
         {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
-        {m.status === "running" && <span className="bc-live">●</span>}
+        {m.status === "running" && <span className="bc-running">●</span>}
       </div>
     </button>
   );

@@ -274,7 +274,7 @@ func TestUpdateTournamentChanged_ParseFailureFallback(t *testing.T) {
 
 // TestSetTeamLineup_BracketParseErrorFromRoundCheck verifies that a malformed
 // bracket.json causes setTeamLineupLocked to propagate the parse error from
-// roundHasLiveOrCompletedMatchLocked rather than silently succeeding.
+// roundHasRunningOrCompletedMatchLocked rather than silently succeeding.
 func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)

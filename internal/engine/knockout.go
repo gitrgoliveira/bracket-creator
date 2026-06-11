@@ -153,12 +153,12 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // Resolution is RE-SEEDABLE, not a one-shot string replace. It recomputes the
 // deterministic placeholder template (the same GenerateFinals → CreateBalancedTree
 // → ApplyPoolAdjustments → TreeToLeafArray pipeline used at draw) and resolves the
-// live bracket against it BY POSITION. So if an operator re-scores a completed
+// running bracket against it BY POSITION. So if an operator re-scores a completed
 // pool match after that pool was already seeded — changing the 1st/2nd finisher —
 // the new finisher overwrites the stale name in the same slot, instead of being
 // silently dropped (the live side no longer holds the placeholder string, but the
 // template still does). Pools and PoolWinners are fixed after the draw, so the
-// template's shape is identical to the live bracket's. The bracket's court/time
+// template's shape is identical to the running bracket's. The bracket's court/time
 // slots are assigned at draw time and never change here — only competitor labels.
 //
 // Known limitation (mp-e2k1): re-seeding repaints round-0 leaves and
@@ -224,7 +224,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	}
 
 	// Recompute the deterministic placeholder template so seeding is re-seedable
-	// (see the doc comment): we resolve the live bracket by POSITION against this
+	// (see the doc comment): we resolve the running bracket by POSITION against this
 	// template, whose sides still hold the original "Pool X-Nth" placeholders even
 	// after the live sides have been replaced with real names.
 	finals := helper.GenerateFinals(pools, poolWinners)
@@ -250,23 +250,23 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				if mi >= len(template.Rounds[ri]) {
 					break
 				}
-				live := &bracket.Rounds[ri][mi]
+				m := &bracket.Rounds[ri][mi]
 				tpl := template.Rounds[ri][mi]
 				// tpl.SideA/SideB/Winner hold the ORIGINAL placeholder labels (or
 				// "Winner of …"/""), stable across re-scores. Only completed-pool
 				// placeholders are resolver keys; "Winner of" and "" never are, so
 				// already-scored knockout sides and unresolved feeders are untouched.
-				// Compare against the live value so an unchanged re-run is a no-op.
-				if name, ok := resolver[tpl.SideA]; ok && live.SideA != name {
-					live.SideA = name
+				// Compare against the current value so an unchanged re-run is a no-op.
+				if name, ok := resolver[tpl.SideA]; ok && m.SideA != name {
+					m.SideA = name
 					n++
 				}
-				if name, ok := resolver[tpl.SideB]; ok && live.SideB != name {
-					live.SideB = name
+				if name, ok := resolver[tpl.SideB]; ok && m.SideB != name {
+					m.SideB = name
 					n++
 				}
-				if name, ok := resolver[tpl.Winner]; ok && live.Winner != name {
-					live.Winner = name
+				if name, ok := resolver[tpl.Winner]; ok && m.Winner != name {
+					m.Winner = name
 					n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
 				}
 			}
@@ -280,26 +280,26 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		// may still be in progress).
 		for ri := range bracket.Rounds {
 			for mi := range bracket.Rounds[ri] {
-				live := &bracket.Rounds[ri][mi]
-				if live.Status != state.MatchStatusScheduled {
+				m := &bracket.Rounds[ri][mi]
+				if m.Status != state.MatchStatusScheduled {
 					continue
 				}
-				aEmpty := live.SideA == ""
-				bEmpty := live.SideB == ""
-				aResolved := !aEmpty && !isUnresolvedBracketSide(live.SideA)
-				bResolved := !bEmpty && !isUnresolvedBracketSide(live.SideB)
+				aEmpty := m.SideA == ""
+				bEmpty := m.SideB == ""
+				aResolved := !aEmpty && !isUnresolvedBracketSide(m.SideA)
+				bResolved := !bEmpty && !isUnresolvedBracketSide(m.SideB)
 				if aEmpty && bResolved {
-					live.Winner = live.SideB
-					live.Status = state.MatchStatusCompleted
+					m.Winner = m.SideB
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				} else if bEmpty && aResolved {
-					live.Winner = live.SideA
-					live.Status = state.MatchStatusCompleted
+					m.Winner = m.SideA
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				} else if aEmpty && bEmpty {
-					live.Status = state.MatchStatusCompleted
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				}

@@ -129,9 +129,9 @@ a:hover {
 }
 
 /* ---------- Top bar (admin) ---------- */
-/* The .topbar-stack wrapper is sticky; topbar + live-strip sit inside as
+/* The .topbar-stack wrapper is sticky; topbar + running-strip sit inside as
    normal flow, so the topbar can size to its content (font scaling / zoom
-   never clip the brand block, and the live-strip stays glued underneath
+   never clip the brand block, and the running-strip stays glued underneath
    without a hardcoded offset). */
 .topbar-stack {
   position: sticky;
@@ -186,6 +186,87 @@ a:hover {
   flex: 1;
 }
 
+/* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
+   `.dot--running` running-match signal (Principle 3): a healthy data
+   connection is a calm, passive status, so its dot is static navy. Only the
+   disconnected state moves, so motion is reserved for the state that actually
+   needs attention. This keeps it distinct from the strip's pulsing dot sitting
+   directly below it. */
+.topbar__conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.topbar__conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: none;
+}
+
+.topbar__conn--down {
+  color: var(--red);
+}
+
+.topbar__conn--down .topbar__conn__dot {
+  background: var(--red);
+  animation: conn-pulse 1.6s ease-out infinite;
+}
+
+@keyframes conn-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 35%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+  }
+}
+
+/* Sustained-outage escalation. The calm `.topbar__conn` pill covers transient
+   reconnects; this full-width strip only appears once a drop outlives the
+   stream's first retry, when the operator may be scoring against stale data.
+   Solid red + white (≈6.4:1) so it's unmissable across a bright hall; role=alert
+   announces it to assistive tech. */
+.conn-alert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--red);
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.conn-alert__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-fg);
+  flex: none;
+  animation: conn-alert-pulse 1.4s ease-out infinite;
+}
+
+@keyframes conn-alert-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-fg) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-fg) 0%, transparent);
+  }
+}
+
 .topbar__nav {
   display: flex;
   gap: 4px;
@@ -227,14 +308,14 @@ a:hover {
   border-color: var(--ink-4);
 }
 
-/* ---------- Live status strip (under topbar) ---------- */
+/* ---------- Running status strip (under topbar) ---------- */
 /* Stickiness is provided by the parent .topbar-stack so the strip never
    needs to know the topbar's height — it sits naturally below in flow. */
-/* Live-strip: the admin "matches running now" bar. It is a NAVIGATION control
+/* Running-strip: the admin "matches running now" bar. It is a NAVIGATION control
    (each chip is a button → opens that match's score editor), so it stays — but
    recoloured off red onto --accent navy, since red is now reserved for Aka +
-   danger. Liveness is still conveyed by the strip's presence + pulsing dot. */
-.live-strip {
+   danger. The running state is still conveyed by the strip's presence + pulsing dot. */
+.running-strip {
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
   padding: 6px 20px;
@@ -244,7 +325,7 @@ a:hover {
   font-size: 12px;
 }
 
-.live-strip__lbl {
+.running-strip__lbl {
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
@@ -253,14 +334,14 @@ a:hover {
   gap: 6px;
 }
 
-.live-strip__chips {
+.running-strip__chips {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.live-strip__chip {
+.running-strip__chip {
   background: var(--surface);
   border: 1px solid var(--accent);
   border-radius: 999px;
@@ -273,22 +354,22 @@ a:hover {
   transition: background 120ms;
 }
 
-.live-strip__chip:hover {
+.running-strip__chip:hover {
   background: var(--accent);
   color: white;
 }
 
-.live-strip__court {
+.running-strip__court {
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.04em;
 }
 
-.live-strip__names {
+.running-strip__names {
   font-size: 12px;
 }
 
-.live-strip__more {
+.running-strip__more {
   color: var(--ink-3);
   font-size: 11px;
 }
@@ -521,7 +602,7 @@ a:hover {
    .ipt-btn focus is owned elsewhere — deliberately not included here. */
 .btn:focus-visible,
 .court-popover button:focus-visible,
-.live-strip__chip:focus-visible,
+.running-strip__chip:focus-visible,
 .radio-pill:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -833,10 +914,10 @@ a:hover {
   display: inline-block;
 }
 
-/* Liveness cue: pulsing dot. Colour moved off red → --accent navy so red is
+/* Running-match signal: pulsing dot. Colour moved off red → --accent navy so red is
    reserved for Aka (side) + danger (DESIGN.md §2/§4). The PULSE (motion) is the
-   liveness signal, not the hue. */
-.dot--live {
+   running-match signal, not the hue. */
+.dot--running {
   background: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
   animation: pulse 1.6s infinite;
@@ -1036,7 +1117,7 @@ a:hover {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.bc-match--live {
+.bc-match--running {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -1068,7 +1149,7 @@ a:hover {
   color: var(--ink-3);
 }
 
-.bc-live {
+.bc-running {
   color: var(--accent);
   font-weight: 700;
 }
@@ -1554,7 +1635,7 @@ a:hover {
   color: #15803d;
 }
 
-.phase-chip--live {
+.phase-chip--running {
   background: #fee2e2;
   color: #b91c1c;
 }
@@ -1622,7 +1703,7 @@ a:hover {
   border-color: var(--ink-4);
 }
 
-.sched-row--live {
+.sched-row--running {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
@@ -1809,27 +1890,27 @@ a:hover {
   margin-top: 14px;
 }
 
-/* ---------- Live match panel (admin) ---------- */
-.live-panel {
+/* ---------- Running match panel (admin) ---------- */
+.running-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 22px;
 }
 
-.live-panel__head {
+.running-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
 }
 
-.live-panel__title {
+.running-panel__title {
   font-weight: 600;
   font-size: 16px;
 }
 
-.live-panel__court {
+.running-panel__court {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
@@ -2120,7 +2201,7 @@ a:hover {
   .sc-board__vs { display: none; }
 }
 
-.live-panel__actions {
+.running-panel__actions {
   display: flex;
   gap: 8px;
   margin-top: 16px;
@@ -2426,12 +2507,12 @@ a.vlist-item {
   padding: 10px 12px;
 }
 
-.vsched-item--live {
+.vsched-item--running {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.vsched-item__meta {
+.vsched-item__head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2535,7 +2616,7 @@ button.vsched-item:not([data-clickable]) {
   cursor: default;
 }
 
-/* Queue position chip — flex-pushed to the right of vsched-item__meta */
+/* Queue position chip — flex-pushed to the right of vsched-item__head */
 .vsched-item__queue {
   margin-left: auto;
   font-size: 11px;
@@ -2552,8 +2633,8 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink-3);
 }
 
-/* Running "● NOW" label inside meta row pushed right automatically */
-.vsched-item__meta .bc-live {
+/* Running "● NOW" label inside head row pushed right automatically */
+.vsched-item__head .bc-running {
   margin-left: auto;
 }
 
@@ -2627,8 +2708,8 @@ button.vsched-item:not([data-clickable]) {
   color: var(--accent, #36c);
 }
 
-/* Section-title with inline live dot */
-.section-title--live {
+/* Section-title with inline running-match dot */
+.section-title--running {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2713,8 +2794,8 @@ button.vsched-item:not([data-clickable]) {
   min-width: 0;
 }
 
-/* Live count indicator in competition progress row */
-.bc-live-count {
+/* Running count indicator in competition progress row */
+.bc-running-count {
   color: var(--red);
   font-weight: 600;
 }
@@ -2872,7 +2953,7 @@ button.pool-match-row {
   color: var(--ink-2);
 }
 
-.hero-live {
+.hero-running {
   background: var(--surface);
   border: 1px solid var(--red);
   border-radius: var(--r-lg);
@@ -2881,7 +2962,7 @@ button.pool-match-row {
   box-shadow: 0 0 0 4px var(--red-soft);
 }
 
-.hero-live__lbl {
+.hero-running__lbl {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -2891,7 +2972,7 @@ button.pool-match-row {
   gap: 6px;
 }
 
-.hero-live__vsched {
+.hero-running__vsched {
   margin-top: 8px;
 }
 
@@ -3689,7 +3770,7 @@ button.pool-match-row {
   font-size: 13px;
 }
 
-.tw-match--live {
+.tw-match--running {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
@@ -3831,7 +3912,7 @@ button.pool-match-row {
   border-radius: 10px;
 }
 
-.score-edit-row--live {
+.score-edit-row--running {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
@@ -4313,7 +4394,7 @@ button.pool-match-row {
   border-color: var(--ink);
 }
 
-.live-panel__court-btn {
+.running-panel__court-btn {
   font: inherit;
   color: inherit;
   background: transparent;
@@ -4328,7 +4409,7 @@ button.pool-match-row {
   text-overflow: ellipsis;
 }
 
-.live-panel__court-btn:hover {
+.running-panel__court-btn:hover {
   border-color: var(--line);
   background: var(--surface-2);
 }
@@ -4603,7 +4684,7 @@ button.pool-match-row {
 /* Competitor number prefix (e.g. "K1") shown before a player name. The value
    in player.number already embeds the competition's configured numberPrefix;
    this only styles it as a compact monospace badge (mp-3 / numberPrefix).
-   Deliberately neutral (not red/navy) so it doesn't read as Aka/Shiro/liveness
+   Deliberately neutral (not red/navy) so it doesn't read as Aka/Shiro/running-match state
    (mp-938b colour law). */
 .num-prefix {
   font-family: var(--font-mono);
@@ -5242,7 +5323,7 @@ button.pool-match-row {
   font-size: 16px; font-weight: 800; height: auto; }
 .msb-lab { display: block; font-size: 10px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
 abbr.msb-lab { text-decoration: none; cursor: help; }
-/* live highlight */
+/* running-match highlight */
 .msb-row--now { background: #fef3c7; }
 .msb-row--queued .msb-name { color: #9ca3af; }
 .msb-row--queued .msb-name--aka { color: #d4a5a8; }
@@ -5329,7 +5410,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
 .league-matrix__cell--empty { background: var(--bg-2); }
 .league-matrix__cell--pending { color: var(--ink-3); }
-.league-matrix__cell--live { color: var(--accent); }
+.league-matrix__cell--running { color: var(--accent); }
 .league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
@@ -6235,7 +6316,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot--live,
+  .dot--running,
+  .topbar__conn--down .topbar__conn__dot,
+  .conn-alert__dot,
   .spinner,
   .toast,
   .decision-prompt,

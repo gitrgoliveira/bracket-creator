@@ -29,7 +29,7 @@ func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 // TeamLineup pins which player occupies each Position for a team in a
 // given round OR for a specific match. The lineup is replaceable up
 // until its match (match-scoped) or its round's first match
-// (round-scoped) goes live, at which point LockedAt is set and further
+// (round-scoped) starts, at which point LockedAt is set and further
 // PUT/PATCH operations are rejected.
 //
 // Keying (mp-825): when MatchID is non-empty the lineup is
@@ -38,7 +38,7 @@ func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 // independently when its own match starts. When MatchID is empty the
 // lineup is round-scoped (the legacy behavior, still used by bracket
 // rounds and pre-mp-825 data): one lineup per (team, round), frozen
-// when the round's first match goes live. The two scopes coexist; a
+// when the round's first match starts. The two scopes coexist; a
 // match-scoped entry shadows the round-scoped fallback for that match.
 //
 // FR-040, data-model §4.

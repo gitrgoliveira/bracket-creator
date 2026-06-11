@@ -734,7 +734,7 @@ func TestCourtLive_MatchNotRunning(t *testing.T) {
 }
 
 // TestCourtLive_HasParticipantIDs covers the comp.HasParticipantIDs hasIDsHint
-// branch (lines 80-83 in handlers_display.go) when finding a live match.
+// branch (lines 80-83 in handlers_display.go) when finding a running match.
 func TestCourtLive_HasParticipantIDs(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{

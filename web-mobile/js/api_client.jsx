@@ -25,6 +25,88 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
+// ---------------------------------------------------------------------------
+// Shared ref-counted SSE singleton
+// ---------------------------------------------------------------------------
+// All subscribeToEvents callers share ONE EventSource connection. A Set of
+// subscriber records ({callback, onStatus}) is maintained; when the last
+// subscriber unsubscribes the source is closed and nulled out.
+// ---------------------------------------------------------------------------
+
+/** @type {EventSource|null} */
+let _sharedSource = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _retryTimer = null;
+/** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
+const _subscribers = new Set();
+
+function _emitStatus(sub, s) {
+    if (typeof sub.onStatus === 'function') {
+        try { sub.onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+    }
+}
+
+function _fanOutStatus(s) {
+    for (const sub of _subscribers) {
+        _emitStatus(sub, s);
+    }
+}
+
+function _ensureConnected() {
+    // Guard: the 5s retry timer may fire after all subscribers have unsubscribed
+    // (clearTimeout only cancels a pending callback — it cannot stop one that is
+    // already queued in the event loop). No-op when no one is listening so we
+    // don't open a zombie EventSource that can never be closed.
+    if (_subscribers.size === 0) return;
+    // Whoever calls this is establishing the connection NOW, so cancel any
+    // pending reconnect timer — otherwise a retry queued by a previous onerror
+    // can fire later and open a second EventSource (a leaked SSE connection).
+    if (_retryTimer) {
+        clearTimeout(_retryTimer);
+        _retryTimer = null;
+    }
+    // Guard against double-connect: only one shared source may exist at a time.
+    if (_sharedSource) return;
+    // Bind handlers to THIS instance via a local const. Each handler ignores
+    // events from a superseded source (`source !== _sharedSource`) so a stale
+    // instance — should one ever fire after being replaced — can't close the
+    // live connection or fan out a false status/message to current subscribers.
+    const source = new EventSource('/api/events');
+    _sharedSource = source;
+
+    source.onopen = () => {
+        if (source !== _sharedSource) return;
+        _fanOutStatus('open');
+    };
+
+    source.onmessage = (event) => {
+        if (source !== _sharedSource) return;
+        let parsed;
+        try {
+            parsed = JSON.parse(event.data);
+        } catch (err) {
+            console.error('Error parsing SSE event:', err);
+            return;
+        }
+        for (const sub of _subscribers) {
+            try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
+        }
+    };
+
+    source.onerror = () => {
+        if (source !== _sharedSource) return;
+        source.close();
+        _sharedSource = null;
+        _fanOutStatus('error');
+        if (_subscribers.size > 0) {
+            // Clear any prior timer before re-arming so repeated error events
+            // can't queue multiple concurrent reconnects.
+            if (_retryTimer) clearTimeout(_retryTimer);
+            _retryTimer = setTimeout(_ensureConnected, 5000);
+        }
+    };
+}
+
 // adminHdr returns the X-Admin-Password header object for the elevated
 // (destructive-ops) password (spec 004 / mp-e21), or an empty object when no
 // admin password is supplied. Destructive methods spread it into their
@@ -308,42 +390,46 @@ const API = {
     // scenario 4 / T063) to render a reconnect indicator when the
     // browser is between connections. Existing call sites that omit
     // the second arg are unaffected.
+    //
+    // All callers share ONE module-level EventSource (ref-counted). The
+    // source is opened on the first subscribe and closed when the last
+    // subscriber unsubscribes. A subscriber joining an already-OPEN source
+    // receives an immediate onStatus('open') replay so it starts in the
+    // correct connected state without waiting for the next onopen event.
     subscribeToEvents(callback, onStatus) {
-        let source = null;
-        let retryTimer = null;
-        let cancelled = false;
+        const record = { callback, onStatus };
+        _subscribers.add(record);
 
-        const status = (s) => {
-            if (typeof onStatus === 'function') {
-                try { onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
-            }
-        };
+        if (_sharedSource === null) {
+            // No source yet — open one. The new subscriber keeps its optimistic
+            // default until this source's onopen/onerror fires.
+            _ensureConnected();
+        } else if (_sharedSource.readyState === EventSource.OPEN) {
+            // Source is already connected — replay 'open' to this subscriber.
+            _emitStatus(record, 'open');
+        }
+        // Else the source exists but is still CONNECTING (a non-null source is
+        // only ever CONNECTING or OPEN — we null it on close). Replay NOTHING
+        // and let the bound onopen/onerror fan-out deliver the first
+        // authoritative status, exactly as the first subscriber experiences.
+        // Replaying 'error' here would flash a false "Reconnecting…" on admin
+        // load, where AdminTopbar/AdminDashboard subscribe mid-handshake.
 
-        const connect = () => {
-            if (cancelled) return;
-            source = new EventSource('/api/events');
-            source.onopen = () => status('open');
-            source.onmessage = (event) => {
-                try {
-                    callback(JSON.parse(event.data));
-                } catch (err) {
-                    console.error("Error parsing SSE event:", err);
-                }
-            };
-            source.onerror = () => {
-                if (source) source.close();
-                source = null;
-                status('error');
-                if (!cancelled) retryTimer = setTimeout(connect, 5000);
-            };
-        };
-
-        connect();
-
+        // Idempotent unsubscribe: guard with a `done` flag so double-calling
+        // never double-decrements the ref count.
+        let done = false;
         return () => {
-            cancelled = true;
-            clearTimeout(retryTimer);
-            if (source) source.close();
+            if (done) return;
+            done = true;
+            _subscribers.delete(record);
+            if (_subscribers.size === 0) {
+                clearTimeout(_retryTimer);
+                _retryTimer = null;
+                if (_sharedSource) {
+                    _sharedSource.close();
+                    _sharedSource = null;
+                }
+            }
         };
     },
     async recordScore(compID, matchID, result, password, match) {
@@ -593,7 +679,7 @@ const API = {
     // TeamLineup for (compId, teamId, round) — 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
     // the lineup; the server rejects with 409 (ErrLineupLocked) once the
-    // round's first match has gone live. DELETE clears the lineup so an
+    // round's first match has gone running. DELETE clears the lineup so an
     // operator can revise pre-lock.
     async fetchTeamLineup(compID, teamId, round) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
@@ -634,7 +720,7 @@ const API = {
     // place of the round key — successive encounters between the same
     // two teams each carry an independent, lockable lineup entry.
     // 404 → null (no lineup saved yet; form treats as blank/editable).
-    // 409 ErrLineupLocked on PUT → the match is already live; surface
+    // 409 ErrLineupLocked on PUT → the match is already running; surface
     // as a clear error (same pattern as round-scoped PUT).
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);

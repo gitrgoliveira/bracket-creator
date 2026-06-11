@@ -1,12 +1,12 @@
 # mobile-app
 
-Starts the live tournament management server (Preact UI + REST/SSE backend). Used **on the day of the tournament** for drawing pools, recording scores, and pushing live updates to spectator screens.
+Starts the tournament management server (Preact UI + REST/SSE backend). Used **on the day of the tournament** for drawing pools, recording scores, and pushing real-time updates to spectator screens.
 
 ```
 bracket-creator mobile-app [flags]
 ```
 
-See the [Mobile / Live Tournament App guide](../mobile-app.md) for a full walkthrough of the UI.
+See the [Mobile Tournament App guide](../mobile-app.md) for a full walkthrough of the UI.
 
 ## Flags
 

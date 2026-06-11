@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -200,6 +202,128 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		c.Data(http.StatusOK, "application/json; charset=utf-8", data)
 	})
 
+	// GET /shiaijo/:court/matches — cross-competition unified queue for one
+	// court (mp-c2yr). Aggregates pool + bracket matches across every
+	// non-setup competition, filters to the requested court, and sorts by
+	// status priority (running → scheduled → completed) then scheduled time
+	// then queue position — the same ordering the operator view's
+	// sortShiaijoMatches applies client-side. Returns a flat match list plus
+	// a per-competition `players` sidecar so the frontend reuses
+	// normalizeMatch (which needs a per-comp player map) without any new
+	// client-side normalization. Public read, same trust level as
+	// GET /competitions.
+	r.GET("/shiaijo/:court/matches", func(c *gin.Context) {
+		court := strings.TrimSpace(c.Param("court"))
+		if court == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "court is required"})
+			return
+		}
+
+		ids, err := store.ListCompetitions()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+
+		type entry struct {
+			raw      map[string]any
+			priority int
+			schedAt  string
+			queuePos int
+		}
+		var entries []entry
+		players := gin.H{} // compId -> []player, only for comps contributing matches
+
+		for _, id := range ids {
+			comp, _ := viewerLoadCompetition(store, id)
+			// Skip setup/unstarted comps — they have no real bouts yet, mirroring
+			// compMatches() in viewer.jsx.
+			if comp == nil || comp.Status == "" || comp.Status == state.CompStatusSetup {
+				continue
+			}
+
+			var hasIDsHint *bool
+			if comp.HasParticipantIDs {
+				t := true
+				hasIDsHint = &t
+			}
+			compPlayers, _ := store.LoadParticipantsOpt(id, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+
+			poolMatches, _ := store.LoadPoolMatches(id)
+			bracket, _ := store.LoadBracket(id)
+			// A preview bracket carries pool-origin placeholders, never real
+			// bouts — exclude it (same rule as GET /competitions).
+			if bracket != nil && bracket.Preview {
+				bracket = nil
+			}
+			annotateQueuePositions(poolMatches)
+			annotateBracketQueuePositions(bracket)
+
+			meta := func(m map[string]any, phase string, roundIndex int) map[string]any {
+				m["compId"] = id
+				m["compName"] = comp.Name
+				m["compKind"] = comp.Kind
+				m["teamSize"] = comp.TeamSize
+				m["phase"] = phase
+				if phase == "bracket" {
+					m["roundIndex"] = roundIndex
+				}
+				return m
+			}
+
+			contributed := false
+			for i := range poolMatches {
+				m := &poolMatches[i]
+				if strings.TrimSpace(m.Court) != court {
+					continue
+				}
+				raw, merrr := matchToMap(m)
+				if merrr != nil {
+					continue
+				}
+				entries = append(entries, entry{meta(raw, "pool", 0), statusPriority(string(m.Status)), m.ScheduledAt, m.QueuePosition})
+				contributed = true
+			}
+			if bracket != nil {
+				for ri := range bracket.Rounds {
+					for j := range bracket.Rounds[ri] {
+						m := &bracket.Rounds[ri][j]
+						// Hidden = structural-bye phantom, never a real bout.
+						if m.Hidden || strings.TrimSpace(m.Court) != court {
+							continue
+						}
+						raw, merrr := matchToMap(m)
+						if merrr != nil {
+							continue
+						}
+						entries = append(entries, entry{meta(raw, "bracket", ri), statusPriority(string(m.Status)), m.ScheduledAt, m.QueuePosition})
+						contributed = true
+					}
+				}
+			}
+			if contributed {
+				players[id] = compPlayers
+			}
+		}
+
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].priority != entries[j].priority {
+				return entries[i].priority < entries[j].priority
+			}
+			ki, kj := schedSortKey(entries[i].schedAt), schedSortKey(entries[j].schedAt)
+			if ki != kj {
+				return ki < kj
+			}
+			return entries[i].queuePos < entries[j].queuePos
+		})
+
+		matches := make([]map[string]any, len(entries))
+		for i := range entries {
+			matches[i] = entries[i].raw
+		}
+		c.JSON(http.StatusOK, gin.H{"court": court, "matches": matches, "players": players})
+	})
+
 	r.GET("/competitions/:id", func(c *gin.Context) {
 		// Validate the :id like the admin handlers do — pre-fix, an
 		// invalid ID here returned 500 (LoadCompetition's internal
@@ -343,4 +467,44 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		}
 		c.JSON(http.StatusOK, allEntries)
 	})
+}
+
+// matchToMap marshals a pool/bracket match struct to a generic JSON object so
+// the cross-court aggregator can attach competition metadata (compId, phase,
+// …) alongside the match's own fields. The frontend consumes this flat object
+// the same way it consumes a raw match from GET /competitions.
+func matchToMap(v any) (map[string]any, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// statusPriority orders matches running → scheduled → completed (everything
+// else last), matching the operator view's sortShiaijoMatches.
+func statusPriority(status string) int {
+	switch status {
+	case "running":
+		return 0
+	case "scheduled":
+		return 1
+	case "completed":
+		return 2
+	default:
+		return 99
+	}
+}
+
+// schedSortKey sorts untimed matches after timed ones (mirrors the
+// `scheduledAt || "99:99"` fallback in sortShiaijoMatches).
+func schedSortKey(scheduledAt string) string {
+	if scheduledAt == "" {
+		return "99:99"
+	}
+	return scheduledAt
 }

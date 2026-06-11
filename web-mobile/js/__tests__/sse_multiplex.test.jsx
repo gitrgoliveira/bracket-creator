@@ -121,7 +121,7 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2(); unsub3();
     });
 
-    it('(c) late subscriber to OPEN source gets immediate onStatus("open")', () => {
+    it('(c1) late subscriber to OPEN source gets immediate onStatus("open")', () => {
         // First subscriber opens and connects the source.
         const unsub1 = API.subscribeToEvents(() => {});
         const src = FakeEventSource.instances[0];
@@ -136,7 +136,7 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2();
     });
 
-    it('(c) late subscriber while source is CONNECTING gets NO synchronous status, then "open" on connect', () => {
+    it('(c2) late subscriber while source is CONNECTING gets NO synchronous status, then "open" on connect', () => {
         // First subscriber opens the source but it has NOT connected yet
         // (readyState === CONNECTING) — mirrors an admin tab where app.jsx
         // subscribes first and AdminTopbar/AdminDashboard mount mid-handshake.
@@ -160,7 +160,7 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2();
     });
 
-    it('(c) late subscriber after an error opens a fresh source and is NOT replayed a status', () => {
+    it('(c3) late subscriber after an error opens a fresh source and is NOT replayed a status', () => {
         // First subscriber opens, then an error fires.
         const status1 = vi.fn();
         const unsub1 = API.subscribeToEvents(() => {}, status1);
@@ -228,7 +228,7 @@ describe('subscribeToEvents — shared singleton', () => {
         expect(src.readyState).toBe(FakeEventSource.CLOSED);
     });
 
-    it('(f) one throwing callback does not block delivery to the others', () => {
+    it('(f1) one throwing callback does not block delivery to the others', () => {
         const cb1 = vi.fn(() => { throw new Error('boom'); });
         const cb2 = vi.fn();
 
@@ -250,7 +250,7 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2();
     });
 
-    it('(f) one throwing onStatus does not block other onStatus callbacks', () => {
+    it('(f2) one throwing onStatus does not block other onStatus callbacks', () => {
         const status1 = vi.fn(() => { throw new Error('boom'); });
         const status2 = vi.fn();
 

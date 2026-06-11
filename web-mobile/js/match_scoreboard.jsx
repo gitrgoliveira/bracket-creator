@@ -193,7 +193,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     if (n === matchSideA || n === matchSideB) return "";
     return n;
   };
-  const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
+  const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
   const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
   const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no

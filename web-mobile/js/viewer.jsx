@@ -3115,15 +3115,23 @@ function ScheduleViewer({ tournament, tweaks }) {
   const schedRoster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
   const initialPicked = useMemo(() => {
     return resolveWatchedPlayers(watchlist, schedRoster).map((p) => ({ id: p.id, name: p.name || "", dojo: p.dojo || "" }));
-    // Compute once at mount only — re-derivation would clobber user edits
-    // as soon as they removed a seeded chip. Re-sync explicitly via the
-    // Clear/Reseed buttons instead.
-  }, []);
+  }, [watchlist, schedRoster]);
   const primaryEntry = useMemo(() => findPrimaryEntry(watchlist, primaryKey), [watchlist, primaryKey]);
   const primaryLabel = primaryEntry
     ? (primaryEntry.type === "dojo" ? primaryEntry.dojo : (schedRoster.find((p) => p.id === primaryEntry.id)?.name || primaryEntry.name || ""))
     : "";
   const [picked, setPicked] = useState(initialPicked);
+  // If schedRoster was empty at mount (async load), seed picked once it arrives.
+  // pickedSeeded starts true when data was ready at mount (no async case to handle).
+  // Once seeded, user edits are never overwritten.
+  const pickedSeeded = useRefV(initialPicked.length > 0);
+  React.useEffect(() => {
+    if (pickedSeeded.current) return;
+    if (initialPicked.length > 0) {
+      setPicked(initialPicked);
+      pickedSeeded.current = true;
+    }
+  }, [initialPicked]);
   const [dojoText, setDojoText] = useState("");
   const [courtFilter, setCourtFilter] = useState("all");
 

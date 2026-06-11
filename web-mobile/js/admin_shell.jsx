@@ -176,7 +176,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
       {!connected && sustainedDown && (
         <div className="conn-alert" role="alert">
           <span className="conn-alert__dot" aria-hidden="true"></span>
-          Live updates interrupted. Reconnecting… Scores on screen may be out of date.
+          Connection interrupted. Reconnecting… Scores on screen may be out of date.
         </div>
       )}
       {liveMatches.length > 0 && (

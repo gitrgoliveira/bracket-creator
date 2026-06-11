@@ -53,6 +53,11 @@ function _fanOutStatus(s) {
 }
 
 function _ensureConnected() {
+    // Guard: the 5s retry timer may fire after all subscribers have unsubscribed
+    // (clearTimeout only cancels a pending callback — it cannot stop one that is
+    // already queued in the event loop). No-op when no one is listening so we
+    // don't open a zombie EventSource that can never be closed.
+    if (_subscribers.size === 0) return;
     // Whoever calls this is establishing the connection NOW, so cancel any
     // pending reconnect timer — otherwise a retry queued by a previous onerror
     // can fire later and open a second EventSource (a leaked SSE connection).

@@ -180,8 +180,16 @@ function centreMarks(sub) {
 // pinned lineup, else the per-bout competitor stored on the sub (kachinuki
 // matches carry sub.sideA/sub.sideB), else the bout number — never the team
 // name (it would repeat on every row).
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state }) {
-  const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB }) {
+  const subSideName = (v) => {
+    const n = (v && v.name) || (typeof v === "string" ? v : "");
+    if (!n) return "";
+    // Filter out match-level team names — when the backend stores the team
+    // name in every sub-bout (quick-score path), we must fall through to the
+    // bout number rather than repeating the team name on every row.
+    if (n === matchSideA || n === matchSideB) return "";
+    return n;
+  };
   const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
   const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
   const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
@@ -281,7 +289,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // TeamScoreboard — §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName }) {
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
@@ -330,7 +338,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {/* per-bout rows */}
       {regular.map((sub, i) => (
         <BoutSubRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state={rowState(i)} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* No bouts recorded yet (lineups not submitted / up-next): show the
@@ -339,7 +347,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           pinned player name when a lineup exists, else the bout number. */}
       {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
         <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state="queued" />
+          teamSize={teamSize} isDH={false} state="queued" matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
@@ -354,7 +362,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           {dhSub
             ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
                 index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state="now" />
+                teamSize={teamSize} isDH={true} state="now" matchSideA={matchSideA} matchSideB={matchSideB} />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>
       )}

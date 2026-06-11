@@ -365,7 +365,9 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                         MatchDetailCard). */}
                     <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
                         teamSize={teamSize} showDH={showDH} variant="tv"
-                        shiroName={shiroTeam} akaName={akaTeam} />
+                        shiroName={shiroTeam} akaName={akaTeam}
+                        matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
+                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")} />
                 </div>
             ) : (
                 <div style={{ flex: 1, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: "2vh" }}>
@@ -483,13 +485,14 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
             <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
+                    const isDone = !isNow && m.status === "completed";
                     return (
                         <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
-                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "")}
+                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "") + (isDone ? " tvd-indiv-row--done" : "")}
                             style={{
                                 padding: "1vh 1.5vw", borderRadius: "0.6vw",
-                                background: isNow ? "#fef3c7" : "transparent",
-                                opacity: isNow ? 1 : 0.78,
+                                background: isNow ? "#fef3c7" : isDone ? "#f9fafb" : "transparent",
+                                opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
                             }}>
                             <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
                         </div>
@@ -619,6 +622,11 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     const subResults = (promoted && promoted.match && promoted.match.subResults) || [];
     const isKnockoutPhase = !!(promoted && promoted.isBracket) ||
         !!(promoted && promoted.match && promoted.match.phase === "bracket");
+    // Extract stable string primitives from promoted.match.sideA/B so the
+    // useMemo below can dep on values rather than the promoted object literal
+    // (which is recreated on every render, defeating memoisation).
+    const promotedSideA = promoted?.match?.sideA?.name || (typeof promoted?.match?.sideA === "string" ? promoted.match.sideA : "");
+    const promotedSideB = promoted?.match?.sideB?.name || (typeof promoted?.match?.sideB === "string" ? promoted.match.sideB : "");
     const showDH = useMD(() => {
         if (!isTeamMatch || !isKnockoutPhase) return false;
         const regularSubs = subResults.filter(s => s.position !== -1);
@@ -642,9 +650,9 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // teamIVPW already prefers an explicit `sub.winner` (which the server
         // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
         // counted as an IV for its winner there — no extra hantei loop needed.
-        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+        const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, promotedSideA, promotedSideB);
         return ivShiro === ivAka && pwShiro === pwAka;
-    }, [subResults, isTeamMatch, isKnockoutPhase]);
+    }, [subResults, isTeamMatch, isKnockoutPhase, promotedSideA, promotedSideB]);
 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped
@@ -1223,7 +1231,9 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
     // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
-    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+    const ovlSideA = hasLive ? (live.match.sideA?.name || (typeof live.match.sideA === "string" ? live.match.sideA : "")) : "";
+    const ovlSideB = hasLive ? (live.match.sideB?.name || (typeof live.match.sideB === "string" ? live.match.sideB : "")) : "";
+    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults, ovlSideA, ovlSideB) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
 
     // DH-pending: all regular bouts are scored, the match is tied (equal IV
     // and PW), but no DH sub-result has been created yet. In that case

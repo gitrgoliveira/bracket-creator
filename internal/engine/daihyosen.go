@@ -295,8 +295,8 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 		if sub.Position < 0 {
 			continue
 		}
-		sideAWin := sub.Winner == sideAName || sub.Winner == sub.SideA
-		sideBWin := sub.Winner == sideBName || sub.Winner == sub.SideB
+		sideAWin := isWinForSide(sub.Winner, sideAName, sub.SideA)
+		sideBWin := isWinForSide(sub.Winner, sideBName, sub.SideB)
 		switch {
 		case sideAWin:
 			a.IndividualWins++

@@ -40,7 +40,7 @@ This project lets any club or organisation run kendo tournaments in three ways:
 
 * **Offline** — no internet required; relies entirely on printed brackets and score sheets.
 * **Partially connected** — internet available but no display screens; some printed material still needed.
-* **Fully digital** — complete setup with multiple monitors and live score tracking.
+* **Fully digital** — complete setup with multiple monitors and real-time score tracking.
 
 I've been using this application to organise the London Cup since ~2023. It reflects everything I've learned from running real tournaments and the feedback I've received. 
 
@@ -251,9 +251,9 @@ Straight knockout team competition with teams of 3:
 ./bin/bracket-creator create-playoffs -t 3 -f mock_data.csv -o output.xlsx
 ```
 
-## Mobile / Live Tournament App
+## Mobile Tournament App
 
-The `mobile-app` command starts a live tournament management server you can use **on the day** to draw pools, run matches, and display real-time results on any device (phone, tablet, laptop).
+The `mobile-app` command starts a real-time tournament management server you can use **on the day** to draw pools, run matches, and display real-time results on any device (phone, tablet, laptop).
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data
@@ -280,11 +280,11 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 | Feature | Description |
 |---------|-------------|
 | **Admin console** | Password-protected. Create competitions, upload participants, draw pools, manage the bracket, record scores. |
-| **Public viewer** | Accessible without a password. Shows the schedule, pool standings, and elimination bracket live. |
+| **Public viewer** | Accessible without a password. Shows the schedule, pool standings, and elimination bracket in real time. |
 | **Multiple competitions** | Run Teams, Men's Individual, Women's Individual etc. in parallel on separate shiai-jo. |
 | **Participant import** | Paste a CSV (with or without zekken/display names) or upload a file directly in the browser. The participant textarea shows **line numbers** for easy error spotting. |
 | **Seeds** | Import a seeds CSV to control bracket placement, or type seed numbers per participant. |
-| **Live updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
+| **Real-time updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
 | **Password reset** | Visit `/reset` to set a new admin password if you've forgotten it (file mode only — see *Admin authentication* below). |
 | **Locked-password mode** | For internet-exposed deployments. `--lock-password` reads a bcrypt hash from `TOURNAMENT_PASSWORD_HASH` and disables `POST /api/tournament/reset` (the SPA `/reset` page still renders an operator-disabled message). |
 
@@ -321,10 +321,10 @@ The mobile app exposes several court-scoped URLs for running a multi-court event
 | URL | Audience | What it shows |
 |-----|----------|---------------|
 | `/admin/schedule?court=A` | Operator at Shiai-jo A | Admin schedule view filtered to that court. Chained Prev/Next/←/→ stay on the same court. |
-| `/display?court=A` | Spectator screen / TV | Live single-court board: current match, upcoming queue, recent results. |
+| `/display?court=A` | Spectator screen / TV | Single-court display: current match, upcoming queue, recent results. |
 | `/display?court=all` | Lobby / overview | 4-card grid showing all courts at once. |
 | `/display?court=A&overlay=true` | OBS / streaming | Transparent variant suitable for chroma-keying into a broadcast overlay. |
-| `/api/viewer/court/:court/live` | Public JSON | Read-only snapshot of one court's live state. No auth. |
+| `/api/viewer/court/:court/live` | Public JSON | Read-only snapshot of one court's current state. No auth. |
 
 ### Data format
 

@@ -1053,12 +1053,12 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              onClick={() => {
+              onClick={async () => {
                 // Confirm intent: reset is global (everyone's
                 // re-authenticated) — see resetPassword's tournament
                 // broadcast. Cheaper to ask twice than to surprise an
                 // operator who clicked the wrong link.
-                if (window.confirm("Reset the tournament password? This will sign out all other admins.")) {
+                if (await window.confirmDialog({ message: "Reset the tournament password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
                   onForgotPassword();
                 }
               }}
@@ -1388,6 +1388,10 @@ window.fireNotification = fireNotification;
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <App />
+    {/* Single host for confirmDialog()/promptDialog() — sibling to App so it
+        is always mounted exactly once, on every screen (incl. the pre-auth
+        login screen's "Forgot password?" confirm). */}
+    <window.DialogHost />
   </ErrorBoundary>
 );
 

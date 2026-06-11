@@ -2664,9 +2664,11 @@ components:
         decidedByHantei:
           type: boolean
           description: >
-            True when the winner was declared by referee hantei after a tied encho
-            (FIK Art. 7-5 / 29-6). On a bracket-match score request, omitting the field
-            preserves the stored value; sending an explicit true/false applies it.
+            True when the winner was declared by referee hantei on a tied bout
+            (FIK Art. 7-5 / 29-6). Overtime is not required — a tied scoreline may be
+            taken straight to a judges' decision. On a bracket-match score request,
+            omitting the field preserves the stored value; sending an explicit
+            true/false applies it.
 
     SubMatchResult:
       type: object
@@ -2702,20 +2704,21 @@ components:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
             (per-bout default win). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"` — including when its
-            winner is declared by hantei after a tied encho (the frontend emits
+            winner is declared by hantei on a tied bout (the frontend emits
             `decision: "daihyosen"` together with `decidedByHantei: true`). The
             server also tolerates `""` or `"fought"` alongside hantei, but
             `"daihyosen"` is the canonical persisted value for the rep bout.
         decidedByHantei:
           type: boolean
           description: >
-            True when this sub-bout's winner was declared by referee hantei after a
-            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`)
-            AND only when `encho.periodCount > 0`; regular numbered bouts have fixed
-            regulation time and are never decided by hantei. The accompanying `decision`
-            is `"daihyosen"` (the value the frontend persists for the rep bout); the
-            server additionally accepts `""` or `"fought"`. `winner` must be set — the
-            server rejects hantei without encho or with any other decision code.
+            True when this sub-bout's winner was declared by referee hantei on a
+            tied bout. Valid ONLY for the daihyosen representative bout (`position: -1`);
+            regular numbered bouts have fixed regulation time and are never decided by
+            hantei. Overtime is NOT required — a tied daihyosen may be decided by judges
+            directly (`encho` is optional). The accompanying `decision` is `"daihyosen"`
+            (the value the frontend persists for the rep bout); the server additionally
+            accepts `""` or `"fought"`. `winner` must be set and the scoreline must be
+            tied — the server rejects hantei with any other decision code.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
@@ -2768,7 +2771,7 @@ components:
           $ref: '#/components/schemas/EnchoMetadata'
         decidedByHantei:
           type: boolean
-          description: True when the match winner was declared by referee hantei after a tied encho.
+          description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
         subResults:
           type: array
           description: >

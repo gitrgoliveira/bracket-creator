@@ -719,7 +719,9 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.Equal(t, "decidedByHantei", verr.Field)
 	})
 
-	t.Run("invalid hantei: no encho set", func(t *testing.T) {
+	t.Run("valid hantei: no encho set (encho is not required)", func(t *testing.T) {
+		// Encho was decoupled from hantei — a tied match may be taken straight
+		// to a judges' decision without an overtime period.
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
@@ -727,14 +729,10 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			Status:          state.MatchStatusCompleted,
 			DecidedByHantei: boolPtr(true),
 		}
-		err := req.Validate()
-		require.Error(t, err)
-		var verr *ValidationError
-		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.NoError(t, req.Validate())
 	})
 
-	t.Run("invalid hantei: encho period count is zero", func(t *testing.T) {
+	t.Run("valid hantei: encho period count is zero", func(t *testing.T) {
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
@@ -743,11 +741,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			DecidedByHantei: boolPtr(true),
 			Encho:           &state.EnchoMetadata{PeriodCount: 0},
 		}
-		err := req.Validate()
-		require.Error(t, err)
-		var verr *ValidationError
-		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("valid hantei: tied 1-1 scoreline", func(t *testing.T) {
@@ -965,7 +959,9 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 
-	t.Run("invalid: daihyosen hantei without encho", func(t *testing.T) {
+	t.Run("valid: daihyosen hantei without encho (encho not required)", func(t *testing.T) {
+		// Encho was decoupled from hantei — a tied daihyosen may be decided by
+		// judges without an overtime period.
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
@@ -975,9 +971,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := req.Validate()
-		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline", func(t *testing.T) {
@@ -1059,8 +1053,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				},
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil, // invalid: no encho
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}, // invalid: non-tied scoreline
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
 				},
 			},
 		}
@@ -1131,7 +1125,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 
-	t.Run("invalid: daihyosen hantei without encho rejected on bulk path", func(t *testing.T) {
+	t.Run("valid: daihyosen hantei without encho accepted on bulk path", func(t *testing.T) {
 		r := &state.MatchResult{
 			SubResults: []state.SubMatchResult{
 				{
@@ -1141,9 +1135,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
-		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.NoError(t, validateBulkScoreLengths(r))
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline rejected on bulk path", func(t *testing.T) {

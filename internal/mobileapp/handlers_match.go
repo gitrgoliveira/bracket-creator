@@ -341,7 +341,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 		if req.TeamAWins > maxBouts || req.TeamBWins > maxBouts || req.Draws > maxBouts {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "total bout count exceeds maximum"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "individual bout count exceeds maximum"})
 			return
 		}
 		total := req.TeamAWins + req.TeamBWins + req.Draws
@@ -371,7 +371,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// computeStandings uses `sub.Winner == m.SideA` (the match-level
 		// name); the `sub.Winner == sub.SideA` fallback is guarded against
 		// the "" == "" false-positive.
-		subResults := make([]state.SubMatchResult, 0, req.TeamAWins+req.TeamBWins+req.Draws)
+		subResults := make([]state.SubMatchResult, 0, total)
 		pos := 1
 		for range req.TeamAWins {
 			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideA})

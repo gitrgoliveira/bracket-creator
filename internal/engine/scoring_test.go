@@ -250,12 +250,19 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 	pool := standings["PoolA"]
 	require.Len(t, pool, 2)
 
-	teamA := pool[0]
+	var teamA, teamB state.PlayerStanding
+	for _, s := range pool {
+		switch s.Player.Name {
+		case "TeamA":
+			teamA = s
+		case "TeamB":
+			teamB = s
+		}
+	}
 	assert.Equal(t, 1, teamA.IndividualWins, "sub with Winner=TeamA → IV for A")
 	assert.Equal(t, 1, teamA.IndividualLosses, "sub with Winner=TeamB → IL for A")
 	assert.Equal(t, 1, teamA.IndividualDraws, "sub with empty Winner+empty SideA → draw, not false win")
 
-	teamB := pool[1]
 	assert.Equal(t, 1, teamB.IndividualWins)
 	assert.Equal(t, 1, teamB.IndividualLosses)
 	assert.Equal(t, 1, teamB.IndividualDraws, "sub with empty Winner+empty SideB → draw, not false win")

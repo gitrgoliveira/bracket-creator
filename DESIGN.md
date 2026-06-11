@@ -10,7 +10,7 @@ Use this doc when adding UI, naming a new class, picking a color, or reviewing a
 2. [Principles](#2-principles) — six rules that shape every decision
 3. [Design tokens](#3-design-tokens) — colors, typography, spacing, radius, shadows, motion, breakpoints, z-index
 4. [Components](#4-components) — buttons, cards, badges, modals, match cards, pools, score input, …
-5. [Patterns](#5-patterns) — page shell, admin workspace, viewer shell, live signal
+5. [Patterns](#5-patterns) — page shell, admin workspace, viewer shell, running signal
 6. [Accessibility](#6-accessibility)
 7. [Frontend conventions](#7-frontend-conventions) — naming, JSX→surface map, Preact primitives, build pipeline
 8. [Bracket generator (`web/`)](#8-bracket-generator-web) — legacy form-only surface
@@ -20,7 +20,7 @@ Use this doc when adding UI, naming a new class, picking a color, or reviewing a
 - *Picking a color* → §3
 - *Naming a class or finding the right component* → §4 (component index, then drill in)
 - *Adding a new component or pattern* → §9 first, then §4 for the closest existing example
-- *Touching the live-tournament UI* → §4 Match cards, then §5 Live signal
+- *Touching the running-match UI* → §4 Match cards, then §5 Running signal
 - *Writing an admin screen* → §7 JSX→surface map, then §4 component index
 
 ## 1. Surfaces
@@ -29,7 +29,7 @@ The repo ships two frontends, both embedded into the Go binary at build time:
 
 | Surface | Path | Purpose | Stack |
 |---|---|---|---|
-| **Mobile/live app** | [web-mobile/](web-mobile/) | Live tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact, with JSX compiled to `React.createElement` via esbuild's classic transform (see [Makefile:esbuild-jsx](Makefile#L110)). Single ~5,000-line `styles.css`. |
+| **Mobile app** | [web-mobile/](web-mobile/) | Tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact, with JSX compiled to `React.createElement` via esbuild's classic transform (see [Makefile:esbuild-jsx](Makefile#L110)). Single ~5,000-line `styles.css`. |
 | **Bracket generator** | [web/](web/) | One-shot Excel-bracket generator served by the `serve` command. | Bootstrap 5.3 + plain JS, ~350 lines of overrides |
 
 When extending the design system, **mobile-app is the canonical surface**. The bracket generator is a form; keep it functional and visually simple, don't import mobile-app patterns.
@@ -40,7 +40,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
 2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface** — and the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine — give each side a tinted cell, a colored header, or a filled badge so the signal stays legible as the component shrinks. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
-3. **Live state is loud — but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, and a pulsing dot whose *motion* is the primary signal. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only** — liveness must never use red, so the two never collide on the same card (a live match still shows its Aka side in red while the live ring stays navy).
+3. **Running state is loud — but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, and a pulsing dot whose *motion* is the primary signal. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only** — running state must never use red, so the two never collide on the same card (a running match still shows its Aka side in red while the running ring stays navy).
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row` — readability wins.
@@ -53,10 +53,10 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **liveness** (border/ring/dot/live-strip), brand fills |
-| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **liveness rings/backgrounds** |
+| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills |
+| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds** |
 | `--accent-fg` | `#ffffff` | Text on `--accent` |
-| `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only — never liveness** (see Principle 3) |
+| `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only — never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
 | `--shiro-edge` | `#2a3346` | Shiro framing on dark surfaces (rare; most Shiro frames use `--accent`) |
 | `--shiro-hatch` | `rgba(42,51,70,0.07)` | 45° diagonal hatch on the Shiro side |
@@ -107,7 +107,7 @@ Base: 15px / 1.4. Use the documented sizes below — don't introduce new in-betw
 | 26px | Page-head titles |
 | 28px | Player-viewer hero (`.my-match__name`) — intentionally larger than page-head so the player's name dominates on the viewer screen |
 
-Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, live strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
+Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, running strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
 
 ### Spacing
 
@@ -120,7 +120,7 @@ There is no formal scale; the conventions are honest rather than aspirational. R
 | `--r-sm` | 6px | Small buttons, badges |
 | `--r` | 10px | Match cards, pool wrappers, modals |
 | `--r-lg` | 14px | Tournament cards, large cards, full modals |
-| (literal) | 999px | Pills, chips, the live dot |
+| (literal) | 999px | Pills, chips, the running dot |
 
 ### Shadows
 
@@ -144,12 +144,12 @@ Never combine shadow with a solid border on the same side — pick one elevation
 | `300ms` | Progress bars, toast slide-in |
 
 Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.css)):
-- `pulse` (1.6s infinite) — `.dot--live` only
+- `pulse` (1.6s infinite) — `.dot--running` only
 - `spin` (0.6s linear infinite) — loading spinners
 - `toast-in` (300ms) — toast entrance
 - `decision-prompt-in` (160ms, cubic-bezier(0.2, 0.8, 0.2, 1)) — match-decision modal entrance
 
-A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables all four animations (`.dot--live`, `.spinner`, `.toast`, `.decision-prompt`). Gate any new non-essential animation behind this media query.
+A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables all four animations (`.dot--running`, `.spinner`, `.toast`, `.decision-prompt`). Gate any new non-essential animation behind this media query.
 
 ### Breakpoints
 
@@ -205,7 +205,7 @@ Quick lookup — scan, then `Ctrl+F` the class name to jump to its subsection.
 | Mode tabs | `.mode-tabs` | Pill-group tab switcher |
 | Viewer head & tabs | `.viewer__head`, `.viewer__tabs` | Sticky viewer chrome |
 | Score input | `.score-card`, `.score-pt` | Operator ippon entry widget |
-| Live strip chip | `.live-strip__chip` | Court chips in the live banner |
+| Running strip chip | `.running-strip__chip` | Court chips in the running banner |
 | Tournament-card add | `.tcard--add` | Dashed "create tournament" tile |
 | Schedule rows | `.sched-row` (admin), `.vsched-item` (viewer) | Schedule list items |
 | Podium | `.podium-step--{1,2,3}` | Final-standings podium |
@@ -242,7 +242,7 @@ Uppercase 12px column headers, 13px body, `--line-2` row separators, hover row t
 
 ### Badges — `.badge`
 
-Variant maps to tournament status, **not** to severity. Use `<StatusBadge status={...}/>` from [ui.jsx#L3](web-mobile/js/ui.jsx#L3) — don't write the class manually unless adding a new status type. Live dot via `<span className="dot dot--live"/>`.
+Variant maps to tournament status, **not** to severity. Use `<StatusBadge status={...}/>` from [ui.jsx#L3](web-mobile/js/ui.jsx#L3) — don't write the class manually unless adding a new status type. Running dot via `<span className="dot dot--running"/>`.
 
 ### Match cards — `.bc-match`
 
@@ -253,11 +253,11 @@ Layout variants (composed by [bracket.jsx#L148](web-mobile/js/bracket.jsx#L148) 
 - `bc-match--v2` — filled sides, used in the viewer's "now playing" surface ([styles.css#L986](web-mobile/css/styles.css#L986))
 - `bc-match--v3` — compact, used in dense round columns ([styles.css#L1055](web-mobile/css/styles.css#L1055))
 
-State modifiers: `bc-match--live` (**navy `--accent` ring** — liveness is navy, not red), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
+State modifiers: `bc-match--running` (**navy `--accent` ring** — running state is navy, not red), `bc-match--highlight` (accent ring), and `bc-match--done` (0.75 opacity — completed matches fade back so active ones stand out) all have CSS rules.
 
 Side composition (via `PlayerLine` in [bracket.jsx#L104](web-mobile/js/bracket.jsx#L104)): sides are `bc-side--a` (Aka/Red) and `bc-side--b` (Shiro/White), rendered in that order with a `.bc-divider` between them. In the horizontal bracket-tree layout this places Aka on top and Shiro on bottom. Each side carries a leading colour bar (red for Aka / navy for Shiro) and, on v1, a faint side tint (`--red-soft` / hatched `--white-side`); the Shiro side adds the 45° hatch so white reads as a deliberate side. Winner side gets `bc-side--winner` (bolder name + thicker leading bar; v2 floods `--red`/`--accent`). **Never swap side order based on seeding** — the geometry is the rule. TBD/empty rows reuse the same structure with `bc-side--empty` and a `.bc-name--tbd` text node.
 
-Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-live` (**`--accent` navy**, 700-weight "● LIVE" — liveness, not red), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
+Meta-row chips (rendered inside `.bc-match-meta`): `.bc-court`, `.bc-time`, `.bc-running` (**`--accent` navy**, 700-weight "● NOW" — running state, not red), `.bc-bye-tag` (BYE marker, `--ink-4`), `.bc-draw` (△ for hikiwake, H for hantei, `--ink-3`), `.bc-decision-chip` (Kiken/Fus./DH, `--accent`, 10px 700), `.bc-encho` ((E), `--accent`, 10px 700).
 
 #### Match-decision visual suffixes
 
@@ -273,7 +273,7 @@ Decision types ([CLAUDE.md](CLAUDE.md) "Match Decision Types") map to short tags
 | Encho (overtime) | `(E)` | `.bc-encho` | `--accent` |
 | `kachinuki-exhaustion` | rendered via score-line suffix only | — | inherits |
 
-Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for the Aka side and danger — never for outcome or liveness.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
+Outcome tags use either the muted ink-3 (draws) or the navy accent (decisions). **Red is reserved for the Aka side and danger — never for outcome or running state.** If you add a new decision tag, follow the same color rule — don't let red bleed into outcome chips.
 
 ### Aka/Shiro side treatment
 
@@ -322,9 +322,9 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 [styles.css#L1439](web-mobile/css/styles.css#L1439). Operator-critical widget for entering ippon. Layout: `.score-card` wraps two `.score-side` columns (`--white` / `--red`) split by a vs-cell. Each side carries `.score-side__lbl`, `.score-side__name`, `.score-side__dojo`, `.score-side__points`. Individual ippon buttons are `.score-pt` with `--filled` / `--empty` and `--aka` / `--shiro` modifiers ([#L3671](web-mobile/css/styles.css#L3671)). Match the `.score-pt--aka` color hooks if you add new score-entry surfaces.
 
-### Live strip chip — `.live-strip__chip`
+### Running strip chip — `.running-strip__chip`
 
-[styles.css#L216](web-mobile/css/styles.css#L216). **Navy (`--accent`)-bordered** pill rendered inside `.live-strip__chips` (recoloured off red — liveness is navy). Each chip represents one live court and is clickable to jump to the corresponding match. When adding a live-surface entry-point, surface it here rather than introducing a parallel chip strip.
+[styles.css#L216](web-mobile/css/styles.css#L216). **Navy (`--accent`)-bordered** pill rendered inside `.running-strip__chips` (recoloured off red — running state is navy). Each chip represents one in-progress court and is clickable to jump to the corresponding match. When adding a running-state entry-point, surface it here rather than introducing a parallel chip strip.
 
 ### Tournament-card add — `.tcard--add`
 
@@ -332,7 +332,7 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 ### Schedule rows — `.sched-row` (admin), `.vsched-item` (viewer)
 
-Grid: `60px (court) | 70px (time) | 1fr (matchup) | auto (actions)`. `--live` adds the **navy `--accent` ring** (liveness, not red); `--done` drops opacity to 0.7. Court chips reuse `--accent-soft`.
+Grid: `60px (court) | 70px (time) | 1fr (matchup) | auto (actions)`. `--running` adds the **navy `--accent` ring** (running state, not red); `--done` drops opacity to 0.7. Court chips reuse `--accent-soft`.
 
 ### Podium — `.podium-step--{1,2,3}`
 
@@ -350,7 +350,7 @@ Player-viewer-only. Solid `--accent` background, `--accent-fg` text. The only pl
 .app
   ├── .topbar-stack            (sticky z-30)
   │   ├── .topbar              (logo + nav + actions)
-  │   └── .live-strip          (navy banner, only when any court is live)
+  │   └── .running-strip          (navy banner, only when any match is running)
   └── .page                    (max-width 1280, 24×32 padding)
       └── route content
 ```
@@ -373,12 +373,12 @@ The mobile constraint still holds for phone-sized screens — content layout, ty
 
 If you add new viewer surfaces, design for the 480px-shell mobile case first and let the tablet/desktop breakpoints relax the container — don't introduce desktop-only layouts inside the viewer.
 
-### Live signal
+### Running signal
 
-When any match is live, three things must be true simultaneously:
-1. `.live-strip` appears in the topbar stack with one chip per live court
-2. The relevant `.bc-match`, `.sched-row`, `.vsched-item` carry the `--live` modifier
-3. A `.dot--live` pulses next to the status badge
+When any match is running, three things must be true simultaneously:
+1. `.running-strip` appears in the topbar stack with one chip per running court
+2. The relevant `.bc-match`, `.sched-row`, `.vsched-item` carry the `--running` modifier
+3. A `.dot--running` pulses next to the status badge
 
 If only one or two surface the signal, it's a bug.
 
@@ -409,7 +409,7 @@ When a screenshot lands on your desk, this is where to start reading:
 | App shell, routing, toast host | [app.jsx](web-mobile/js/app.jsx) |
 | Admin tournament list & landing | [admin.jsx](web-mobile/js/admin.jsx) |
 | Admin competition CRUD (config, participants, pools setup) | [admin_competition.jsx](web-mobile/js/admin_competition.jsx), [admin_setup.jsx](web-mobile/js/admin_setup.jsx), [admin_participants.jsx](web-mobile/js/admin_participants.jsx), [admin_pools.jsx](web-mobile/js/admin_pools.jsx) |
-| Admin live scoring & schedule | [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx), [admin_scoring_modal.jsx](web-mobile/js/admin_scoring_modal.jsx), [admin_lineup.jsx](web-mobile/js/admin_lineup.jsx) |
+| Admin scoring & schedule | [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx), [admin_scoring_modal.jsx](web-mobile/js/admin_scoring_modal.jsx), [admin_lineup.jsx](web-mobile/js/admin_lineup.jsx) |
 | Admin chrome (nav, side-nav, breadcrumbs) | [admin_shell.jsx](web-mobile/js/admin_shell.jsx) |
 | Spectator/player viewer | [viewer.jsx](web-mobile/js/viewer.jsx) |
 | Bracket tree rendering | [bracket.jsx](web-mobile/js/bracket.jsx) |
@@ -423,7 +423,7 @@ Shared primitives live in [web-mobile/js/ui.jsx](web-mobile/js/ui.jsx) and are a
 
 | Primitive | Purpose |
 |---|---|
-| `StatusBadge` | Render `.badge--<status>` with optional live dot. Use for any tournament-status pill. |
+| `StatusBadge` | Render `.badge--<status>` with optional running dot. Use for any tournament-status pill. |
 | `StableInput` | Debounced controlled input — keeps a local value during typing and pushes to the parent on debounce/blur. Reach for it when an input lives inside a tree that re-renders on SSE; the parent's setState can otherwise drop characters. |
 | `Toast` | Auto-dismissing notification. |
 | `useEscapeToClose` | Hook every modal needs. |
@@ -452,6 +452,6 @@ Before introducing a new component, color, or pattern:
 3. **Token-only colors, with two carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root` — add it there and reference it. Two existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), and (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`. New exceptions need to be argued for, not assumed — and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent.
 4. **Domain-specific is fine.** Match-side colors and podium gradients live inside their component blocks intentionally. Don't generalize them.
 5. **Verify visually.** UI changes are validated in a running browser via `make run-mobile`, not by diff inspection — see [CLAUDE.md](CLAUDE.md) "Common Pitfalls".
-6. **Match the prefix.** Pick the existing prefix that covers your concept (`bc-`, `pool-`, `sched-`, `vsched-`, `tcard-`, `viewer-`, `score-`, `live-`, `my-match-`) before inventing a new one.
+6. **Match the prefix.** Pick the existing prefix that covers your concept (`bc-`, `pool-`, `sched-`, `vsched-`, `tcard-`, `viewer-`, `score-`, `running-`, `my-match-`) before inventing a new one.
 
 When in doubt, read the equivalent block in `styles.css` and copy its structure. This system favors visible consistency over abstraction.

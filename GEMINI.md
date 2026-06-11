@@ -15,7 +15,7 @@ Before implementing features or making architectural decisions, read the project
 - **Web Framework:** [Gin](https://github.com/gin-gonic/gin)
 - **Excel Manipulation:** [Excelize](https://github.com/xuri/excelize/v2)
 - **Frontend (bracket generator):** Vanilla HTML/JS embedded in the Go binary (`web/`)
-- **Frontend (mobile/live app):** Preact + JSX compiled by esbuild, embedded in the Go binary (`web-mobile/`)
+- **Frontend (mobile app):** Preact + JSX compiled by esbuild, embedded in the Go binary (`web-mobile/`)
 - **Containerization:** Docker & Docker Compose
 
 ### Architecture
@@ -25,11 +25,11 @@ Before implementing features or making architectural decisions, read the project
     - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
     - `excel/`: Lower-level Excel client and styling logic.
     - `resources/`: Management of embedded assets (both `web/` and `web-mobile/`).
-    - `mobileapp/`: Gin HTTP handlers for the live tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
+    - `mobileapp/`: Gin HTTP handlers for the tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
     - `state/`: File-backed store for the mobile app. Reads/writes `tournament.md` and per-competition `config.md` + `participants.csv` in the data folder.
     - `engine/`: Thin adapter bridging `state.Competition` to `internal/helper` pool/bracket generation.
 - `web/`: Frontend assets for the bracket-generator web UI, embedded via `go:embed`.
-- `web-mobile/`: Preact/JSX frontend for the live tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, live score editor, public viewer.
+- `web-mobile/`: Preact/JSX frontend for the tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, score editor, public viewer.
 - `tests/`: Integration tests for the Web API and CLI.
 - `specs/`: OpenAPI specification (`openapi.yaml`) for the web API, fully synchronized with the backend implementation.
 
@@ -90,7 +90,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 ### Key Commands
 - **Build the application:** `make go/build` (outputs to `./bin/bracket-creator`)
 - **Run the Web UI (bracket generator):** `make run` or `./bin/bracket-creator serve`
-- **Run the mobile/live app:** `make run-mobile` (default: `./tournament-data`, port 8080)
+- **Run the mobile app:** `make run-mobile` (default: `./tournament-data`, port 8080)
   - Override port: `PORT=8082 make run-mobile`
   - Override data dir: `TOURNAMENT_DATA_DIR=/path make run-mobile`
   - The binary reads `PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` directly, so the env vars also apply when running without `make` (e.g. `TOURNAMENT_DATA_DIR=/path bracket-creator mobile-app`). Explicit `--port`/`--bind`/`--folder` flags win.

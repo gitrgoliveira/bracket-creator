@@ -286,19 +286,25 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1();
     });
 
-    it('retry timer is NOT scheduled after onerror when no subscribers remain', () => {
-        const unsub1 = API.subscribeToEvents(() => {});
+    it('retry timer is NOT scheduled after onerror when subscriber unsubs during error fan-out', () => {
+        // Model the real scenario: the subscriber reacts to onStatus('error')
+        // by calling its own unsubscribe, dropping the subscriber count to 0
+        // *during* the onerror handler's fan-out.  The retry-scheduling check
+        // (`_subscribers.size > 0`) that runs after the fan-out must see 0 and
+        // skip the timer.
+        let unsub;
+        const onStatus = (s) => {
+            if (s === 'error') unsub();
+        };
+        unsub = API.subscribeToEvents(() => {}, onStatus);
         const src = FakeEventSource.instances[0];
         src.simulateOpen();
-        unsub1(); // last subscriber leaves before error fires
 
-        // Manually trigger onerror on the (now-orphaned) source to confirm no timer.
-        // We have to reach inside since unsub already cleared things.
-        // Simulate error directly — should not schedule a reconnect.
+        // Error on the *active* source — NOT a stale orphan.
         src.simulateError();
 
         vi.advanceTimersByTime(10000);
-        // No new sources should have been opened.
+        // No reconnect should have been scheduled.
         expect(FakeEventSource.instances).toHaveLength(1);
     });
 

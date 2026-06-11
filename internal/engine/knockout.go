@@ -250,23 +250,23 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				if mi >= len(template.Rounds[ri]) {
 					break
 				}
-				running := &bracket.Rounds[ri][mi]
+				m := &bracket.Rounds[ri][mi]
 				tpl := template.Rounds[ri][mi]
 				// tpl.SideA/SideB/Winner hold the ORIGINAL placeholder labels (or
 				// "Winner of …"/""), stable across re-scores. Only completed-pool
 				// placeholders are resolver keys; "Winner of" and "" never are, so
 				// already-scored knockout sides and unresolved feeders are untouched.
-				// Compare against the running value so an unchanged re-run is a no-op.
-				if name, ok := resolver[tpl.SideA]; ok && running.SideA != name {
-					running.SideA = name
+				// Compare against the current value so an unchanged re-run is a no-op.
+				if name, ok := resolver[tpl.SideA]; ok && m.SideA != name {
+					m.SideA = name
 					n++
 				}
-				if name, ok := resolver[tpl.SideB]; ok && running.SideB != name {
-					running.SideB = name
+				if name, ok := resolver[tpl.SideB]; ok && m.SideB != name {
+					m.SideB = name
 					n++
 				}
-				if name, ok := resolver[tpl.Winner]; ok && running.Winner != name {
-					running.Winner = name
+				if name, ok := resolver[tpl.Winner]; ok && m.Winner != name {
+					m.Winner = name
 					n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
 				}
 			}
@@ -280,26 +280,26 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		// may still be in progress).
 		for ri := range bracket.Rounds {
 			for mi := range bracket.Rounds[ri] {
-				running := &bracket.Rounds[ri][mi]
-				if running.Status != state.MatchStatusScheduled {
+				m := &bracket.Rounds[ri][mi]
+				if m.Status != state.MatchStatusScheduled {
 					continue
 				}
-				aEmpty := running.SideA == ""
-				bEmpty := running.SideB == ""
-				aResolved := !aEmpty && !isUnresolvedBracketSide(running.SideA)
-				bResolved := !bEmpty && !isUnresolvedBracketSide(running.SideB)
+				aEmpty := m.SideA == ""
+				bEmpty := m.SideB == ""
+				aResolved := !aEmpty && !isUnresolvedBracketSide(m.SideA)
+				bResolved := !bEmpty && !isUnresolvedBracketSide(m.SideB)
 				if aEmpty && bResolved {
-					running.Winner = running.SideB
-					running.Status = state.MatchStatusCompleted
+					m.Winner = m.SideB
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				} else if bEmpty && aResolved {
-					running.Winner = running.SideA
-					running.Status = state.MatchStatusCompleted
+					m.Winner = m.SideA
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				} else if aEmpty && bEmpty {
-					running.Status = state.MatchStatusCompleted
+					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				}

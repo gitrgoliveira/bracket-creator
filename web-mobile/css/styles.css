@@ -221,11 +221,49 @@ a:hover {
 
 @keyframes conn-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(193, 18, 31, 0.35);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 35%, transparent);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 5px rgba(193, 18, 31, 0);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+  }
+}
+
+/* Sustained-outage escalation. The calm `.topbar__conn` pill covers transient
+   reconnects; this full-width strip only appears once a drop outlives the
+   stream's first retry, when the operator may be scoring against stale data.
+   Solid red + white (≈6.4:1) so it's unmissable across a bright hall; role=alert
+   announces it to assistive tech. */
+.conn-alert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--red);
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.conn-alert__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-fg);
+  flex: none;
+  animation: conn-alert-pulse 1.4s ease-out infinite;
+}
+
+@keyframes conn-alert-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-fg) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-fg) 0%, transparent);
   }
 }
 
@@ -6280,6 +6318,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 @media (prefers-reduced-motion: reduce) {
   .dot--live,
   .topbar__conn--down .topbar__conn__dot,
+  .conn-alert__dot,
   .spinner,
   .toast,
   .decision-prompt,

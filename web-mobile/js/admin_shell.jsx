@@ -58,6 +58,36 @@ function Breadcrumbs({ items }) {
   );
 }
 
+// How long the SSE feed must stay down before the topbar escalates from the
+// calm "Reconnecting…" pill to the full-width alert banner. Set above the
+// stream's 5s retry interval so a single failed-then-recovered cycle never
+// trips it — only an outage that survives the first retry escalates.
+const SUSTAINED_DOWN_MS = 8000;
+
+// Framework-free tracker for the escalation timer. `note(connected)` is called
+// on every connection-status change; `onSustained(true|false)` fires when the
+// feed has been continuously down for `thresholdMs`, and `false` the moment it
+// recovers. The timer starts on the first disconnect and is NOT restarted by
+// later error events, so the threshold measures total downtime rather than
+// time-since-last-event. Extracted from AdminTopbar so the timing logic is
+// unit-testable with fake timers without rendering the component.
+function watchSustainedDisconnect(thresholdMs, onSustained) {
+  let timer = null;
+  return {
+    note(connected) {
+      if (connected) {
+        if (timer) { clearTimeout(timer); timer = null; }
+        onSustained(false);
+      } else if (!timer) {
+        timer = setTimeout(() => { timer = null; onSustained(true); }, thresholdMs);
+      }
+    },
+    stop() {
+      if (timer) { clearTimeout(timer); timer = null; }
+    },
+  };
+}
+
 function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // Render running matches as chips below the topbar so admins always
   // know what's live, regardless of which screen they're on. Clicking
@@ -79,14 +109,28 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
   // The callback arg is a no-op here: the dashboard already drives data
   // refreshes off its own subscription; this one only observes liveness.
+  // Two-tier signal. A brief drop is normal — the SSE stream auto-retries
+  // every 5s — so a transient blip only flips the calm topbar pill to
+  // "Reconnecting…". A *sustained* outage (still down after the first retry
+  // should have landed) escalates to an unmissable banner, because by then
+  // the operator is scoring against data that may be stale. The threshold
+  // filters reconnect noise so the banner never cries wolf. The timer
+  // orchestration lives in watchSustainedDisconnect (below) so it can be
+  // unit-tested with fake timers, independent of the component.
   const [connected, setConnected] = useStateA(true);
+  const [sustainedDown, setSustainedDown] = useStateA(false);
   useEffectA(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
+    const monitor = watchSustainedDisconnect(SUSTAINED_DOWN_MS, setSustainedDown);
     const unsub = window.API.subscribeToEvents(
       () => {},
-      (status) => setConnected(status === "open")
+      (status) => {
+        const up = status === "open";
+        setConnected(up);
+        monitor.note(up);
+      }
     );
-    return unsub;
+    return () => { monitor.stop(); unsub(); };
   }, []);
 
   const onOpenScore = (m) => {
@@ -129,6 +173,12 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
+      {!connected && sustainedDown && (
+        <div className="conn-alert" role="alert">
+          <span className="conn-alert__dot" aria-hidden="true"></span>
+          Live updates interrupted. Reconnecting… Scores on screen may be out of date.
+        </div>
+      )}
       {liveMatches.length > 0 && (
         <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} live`}>
           <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
@@ -776,6 +826,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
 
 window.Breadcrumbs = Breadcrumbs;
 window.AdminTopbar = AdminTopbar;
+window.watchSustainedDisconnect = watchSustainedDisconnect;
 window.AdminDashboard = AdminDashboard;
 window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;

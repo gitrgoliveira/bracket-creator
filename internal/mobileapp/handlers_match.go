@@ -335,12 +335,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		const maxBouts = 100
 		if req.TeamAWins < 0 || req.TeamBWins < 0 || req.Draws < 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "win/draw counts must be non-negative"})
 			return
 		}
-		const maxBouts = 100
-		if req.TeamAWins+req.TeamBWins+req.Draws > maxBouts || req.TeamAWins+req.TeamBWins+req.Draws < 0 {
+		if req.TeamAWins > maxBouts || req.TeamBWins > maxBouts || req.Draws > maxBouts {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "total bout count exceeds maximum"})
+			return
+		}
+		total := req.TeamAWins + req.TeamBWins + req.Draws
+		if total > maxBouts {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "total bout count exceeds maximum"})
 			return
 		}

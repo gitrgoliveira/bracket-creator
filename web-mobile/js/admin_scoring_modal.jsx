@@ -1597,8 +1597,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     // When transitioning to "running" (▶ Start), teamWinner is typically
     // null (0–0). Don't emit score.type: "hikiwake" — toBackendMatchResult
     // maps score.type to decision, which would persist a draw decision on
-    // a running match. Send live: true with no completed-state semantics so
-    // the backend leaves decision empty until the match actually finishes.
+    // a running match. Send score.live: true with no completed-state semantics
+    // so the backend leaves decision empty until the match actually finishes.
     if (targetStatus === "running") {
       return {
         winner: null,

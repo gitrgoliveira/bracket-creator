@@ -18,6 +18,12 @@ func TestApplyTournamentDefaults_ZeroValues(t *testing.T) {
 	assert.Equal(t, []string{"A"}, tour.Courts)
 }
 
+func TestApplyTournamentDefaults_EmptySlice(t *testing.T) {
+	tour := &Tournament{Courts: []string{}}
+	ApplyTournamentDefaults(tour)
+	assert.Equal(t, []string{"A"}, tour.Courts)
+}
+
 func TestApplyTournamentDefaults_NonZeroPreserved(t *testing.T) {
 	tour := &Tournament{
 		ClockToElapsedMultiplier: 2.0,

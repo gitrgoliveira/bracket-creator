@@ -117,11 +117,17 @@ function ipponLetters(arr) {
 // outer edge is the left), aka fills right→left (its outer edge is the right),
 // so for aka we reverse the visual cell order. The testid stays on the logical
 // outer cell (letters[0]) regardless of which side renders it.
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)" };
+
 function slotCells(letters, side, testid) {
-  const cells = [0, 1].map(i => (
-    <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
-      data-testid={i === 0 ? testid : undefined}>{letters[i] || ""}</span>
-  ));
+  const cells = [0, 1].map(i => {
+    const ch = letters[i] || "";
+    return (
+      <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
+        title={WAZA_NAMES[ch] || undefined}
+        data-testid={i === 0 ? testid : undefined}>{ch}</span>
+    );
+  });
   return side === "aka" ? cells.reverse() : cells;
 }
 
@@ -131,7 +137,7 @@ function slotCells(letters, side, testid) {
 // decision (hantei, fusensho, kiken) the winning side is otherwise invisible,
 // so we mark it with ○ (FIK hantei-win symbol) in the winner's first slot.
 // A plain helper (not a component) so it renders inline into the parent's tree.
-function centreMarks(sub) {
+function centreMarks(sub, matchSideA, matchSideB) {
   const lettersB = ipponLetters(sub.ipponsB); // shiro / left
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
@@ -141,16 +147,13 @@ function centreMarks(sub) {
     (window.isHikiwake(sub.score?.type) || window.isHikiwake(sub.decision));
   // Win mark only when there are no ippon letters (otherwise the letters
   // already show who won). sideB = shiro/left, sideA = aka/right.
-  // The backend may persist a daihyosen winner as the TEAM name rather than
-  // the rep competitor's name — accept sub.teamB/sub.teamA as fallback keys
-  // (TeamScoreboard threads shiroName/akaName into the DH sub as teamB/teamA)
-  // so the win mark still lands on the winning side instead of falling back
-  // to the centre Ht.
+  // Fallback chain: sub-level side → daihyosen team alias → match-level side
+  // (quick-score sub-bouts have empty sub.sideA/sideB).
   const noIppons = !lettersB.some(Boolean) && !lettersA.some(Boolean);
   const winShiro = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideB || sub.winner === sub.teamB));
+    (sub.winner === sub.sideB || sub.winner === sub.teamB || (matchSideB && sub.winner === matchSideB)));
   const winAka = !!(noIppons && sub.winner &&
-    (sub.winner === sub.sideA || sub.winner === sub.teamA));
+    (sub.winner === sub.sideA || sub.winner === sub.teamA || (matchSideA && sub.winner === matchSideA)));
   // The mark sits on the WINNING side, not in the centre: "Ht" for a hantei
   // decision, else ○ (fusensho/kiken/other ippon-less win). Only when the
   // hantei winner is unknown does "Ht" fall back to the centre cell.
@@ -180,9 +183,17 @@ function centreMarks(sub) {
 // pinned lineup, else the per-bout competitor stored on the sub (kachinuki
 // matches carry sub.sideA/sub.sideB), else the bout number — never the team
 // name (it would repeat on every row).
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state }) {
-  const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
-  const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB }) {
+  const subSideName = (v) => {
+    const n = (v && v.name) || (typeof v === "string" ? v : "");
+    if (!n) return "";
+    // Filter out match-level team names — when the backend stores the team
+    // name in every sub-bout (quick-score path), we must fall through to the
+    // bout number rather than repeating the team name on every row.
+    if (n === matchSideA || n === matchSideB) return "";
+    return n;
+  };
+  const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
   const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
   const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
@@ -194,7 +205,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name" data-testid="sub-shiro-name">{shiroName}</span>
-      {centreMarks(sub)}
+      {centreMarks(sub, matchSideA, matchSideB)}
       <span className="msb-name msb-name--aka" data-testid="sub-aka-name">{akaName}</span>
     </div>
   );
@@ -202,19 +213,19 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
 
 // Aggregate IV (individual victories) + PW (points won) per side from the
 // regular (non-DH) bouts. sideB = shiro/left, sideA = aka/right.
-export function teamIVPW(subResults) {
+export function teamIVPW(subResults, matchSideA, matchSideB) {
   let ivShiro = 0, ivAka = 0, pwShiro = 0, pwAka = 0;
   for (const s of (subResults || []).filter(x => x.position !== -1)) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
-    // IV (individual victory): prefer the explicit winner — quick-score and
-    // decision-based outcomes (fusensho, kiken, hantei) set `winner` without
-    // ippon letters, so an ippon-count comparison alone would miss the
-    // victory. Fall back to ippon counts only when no winner is recorded or
-    // it matches neither side. sideA = aka (right), sideB = shiro (left).
-    if (s.winner && s.winner === s.sideA) ivAka++;
-    else if (s.winner && s.winner === s.sideB) ivShiro++;
+    // Mirror Go backend pattern (scoring.go): check match-level side name
+    // first, then sub-level side name (guarded against "" == "" false
+    // positive). Quick-scored bouts have empty sub-level sides.
+    const isAkaWin = s.winner && (s.winner === matchSideA || (s.sideA && s.winner === s.sideA));
+    const isShiroWin = s.winner && (s.winner === matchSideB || (s.sideB && s.winner === s.sideB));
+    if (isAkaWin) ivAka++;
+    else if (isShiroWin) ivShiro++;
     else if (b > a) ivShiro++;
     else if (a > b) ivAka++;
   }
@@ -281,9 +292,9 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // TeamScoreboard — §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName }) {
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults);
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts — equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
@@ -315,13 +326,13 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
         <span className="msb-name" data-testid="summary-shiro-name">{shiroName || ""}</span>
         <span className="msb-marks">
           <span className="msb-slots">
-            <span className="msb-slot msb-sum"><span className="msb-lab">IV</span>{ivShiro}</span>
-            <span className="msb-slot msb-sum"><span className="msb-lab">PW</span>{pwShiro}</span>
+            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
+            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
           </span>
           <span className="msb-vs" />
           <span className="msb-slots msb-slots--aka">
-            <span className="msb-slot msb-slot--aka msb-sum"><span className="msb-lab">PW</span>{pwAka}</span>
-            <span className="msb-slot msb-slot--aka msb-sum"><span className="msb-lab">IV</span>{ivAka}</span>
+            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
+            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
           </span>
         </span>
         <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>
@@ -330,7 +341,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {/* per-bout rows */}
       {regular.map((sub, i) => (
         <BoutSubRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state={rowState(i)} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* No bouts recorded yet (lineups not submitted / up-next): show the
@@ -339,7 +350,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           pinned player name when a lineup exists, else the bout number. */}
       {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
         <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state="queued" />
+          teamSize={teamSize} isDH={false} state="queued" matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
@@ -354,7 +365,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           {dhSub
             ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
                 index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state="now" />
+                teamSize={teamSize} isDH={true} state="now" matchSideA={matchSideA} matchSideB={matchSideB} />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>
       )}

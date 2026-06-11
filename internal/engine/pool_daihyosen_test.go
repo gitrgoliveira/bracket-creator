@@ -117,8 +117,9 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 // all matches completed. If tieAll is true all teams share identical statistics
 // (full 3-way 8-criteria tie). If tieAll is false Alpha has a clear lead.
 //
-// SubMatchResult.SideA/SideB are always set to avoid the "" == "" false-positive
-// in computeStandings (sub.Winner == sub.SideA when both are "").
+// SubMatchResult.SideA/SideB are set here to exercise the sub.SideA fallback
+// path in computeStandings. The "" == "" false-positive is now guarded by a
+// sub.SideA != "" check, so empty sub-bout sides (from quick-score) are safe.
 func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *state.Store) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)

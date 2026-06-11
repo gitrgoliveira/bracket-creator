@@ -139,6 +139,15 @@ func applyHansokuIppons(result *state.MatchResult) {
 	}
 }
 
+// isWinForSide reports whether subWinner indicates a win for the given
+// match-level side. It checks both the canonical match side name and the
+// sub-result-level side name (which may differ when the operator used a
+// player name instead of the team name). The subSide != "" guard prevents
+// "" == "" false-positives when sub-bout sides are unset (quick-score).
+func isWinForSide(subWinner, matchSide, subSide string) bool {
+	return subWinner == matchSide || (subSide != "" && subWinner == subSide)
+}
+
 // deriveDaihyosenWinner fills result.Winner from a completed daihyosen
 // sub-result (Position == -1) when the caller has not set it explicitly.
 // Playoff team matches end in daihyosen when IV and PW are tied; the
@@ -155,8 +164,8 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		if sub.Position != -1 || sub.Winner == "" {
 			continue
 		}
-		sideAWin := sub.Winner == result.SideA || sub.Winner == sub.SideA
-		sideBWin := sub.Winner == result.SideB || sub.Winner == sub.SideB
+		sideAWin := isWinForSide(sub.Winner, result.SideA, sub.SideA)
+		sideBWin := isWinForSide(sub.Winner, result.SideB, sub.SideB)
 		switch {
 		case sideAWin:
 			result.Winner = result.SideA
@@ -551,8 +560,8 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 			if isTeam && len(m.SubResults) > 0 {
 				for _, sub := range m.SubResults {
-					sideAWin := sub.Winner == m.SideA || sub.Winner == sub.SideA
-					sideBWin := sub.Winner == m.SideB || sub.Winner == sub.SideB
+					sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
+					sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
 					switch {
 					case sideAWin:
 						sA.IndividualWins++

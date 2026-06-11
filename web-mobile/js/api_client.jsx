@@ -25,6 +25,59 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
+// ---------------------------------------------------------------------------
+// Shared ref-counted SSE singleton
+// ---------------------------------------------------------------------------
+// All subscribeToEvents callers share ONE EventSource connection. A Set of
+// subscriber records ({callback, onStatus}) is maintained; when the last
+// subscriber unsubscribes the source is closed and nulled out.
+// ---------------------------------------------------------------------------
+
+/** @type {EventSource|null} */
+let _sharedSource = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
+let _retryTimer = null;
+/** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
+const _subscribers = new Set();
+
+function _fanOutStatus(s) {
+    for (const sub of _subscribers) {
+        if (typeof sub.onStatus === 'function') {
+            try { sub.onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+        }
+    }
+}
+
+function _ensureConnected() {
+    _sharedSource = new EventSource('/api/events');
+
+    _sharedSource.onopen = () => {
+        _fanOutStatus('open');
+    };
+
+    _sharedSource.onmessage = (event) => {
+        let parsed;
+        try {
+            parsed = JSON.parse(event.data);
+        } catch (err) {
+            console.error('Error parsing SSE event:', err);
+            return;
+        }
+        for (const sub of _subscribers) {
+            try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
+        }
+    };
+
+    _sharedSource.onerror = () => {
+        if (_sharedSource) _sharedSource.close();
+        _sharedSource = null;
+        _fanOutStatus('error');
+        if (_subscribers.size > 0) {
+            _retryTimer = setTimeout(_ensureConnected, 5000);
+        }
+    };
+}
+
 // adminHdr returns the X-Admin-Password header object for the elevated
 // (destructive-ops) password (spec 004 / mp-e21), or an empty object when no
 // admin password is supplied. Destructive methods spread it into their
@@ -308,42 +361,43 @@ const API = {
     // scenario 4 / T063) to render a reconnect indicator when the
     // browser is between connections. Existing call sites that omit
     // the second arg are unaffected.
+    //
+    // All callers share ONE module-level EventSource (ref-counted). The
+    // source is opened on the first subscribe and closed when the last
+    // subscriber unsubscribes. New subscribers to an already-open source
+    // receive an immediate onStatus('open') replay so they start in the
+    // correct connected state without waiting for the next onopen event.
     subscribeToEvents(callback, onStatus) {
-        let source = null;
-        let retryTimer = null;
-        let cancelled = false;
+        const record = { callback, onStatus };
+        _subscribers.add(record);
 
-        const status = (s) => {
+        if (_sharedSource === null) {
+            // No source yet — open one. Subscribers see 'error' until onopen
+            // fires (replay below covers anyone joining an existing source).
+            _ensureConnected();
+        } else {
+            // Source already exists — replay current status to this subscriber.
+            const currentStatus = (_sharedSource.readyState === EventSource.OPEN) ? 'open' : 'error';
             if (typeof onStatus === 'function') {
-                try { onStatus(s); } catch (err) { console.error('SSE status callback failed:', err); }
+                try { onStatus(currentStatus); } catch (err) { console.error('SSE status callback failed:', err); }
             }
-        };
+        }
 
-        const connect = () => {
-            if (cancelled) return;
-            source = new EventSource('/api/events');
-            source.onopen = () => status('open');
-            source.onmessage = (event) => {
-                try {
-                    callback(JSON.parse(event.data));
-                } catch (err) {
-                    console.error("Error parsing SSE event:", err);
-                }
-            };
-            source.onerror = () => {
-                if (source) source.close();
-                source = null;
-                status('error');
-                if (!cancelled) retryTimer = setTimeout(connect, 5000);
-            };
-        };
-
-        connect();
-
+        // Idempotent unsubscribe: guard with a `done` flag so double-calling
+        // never double-decrements the ref count.
+        let done = false;
         return () => {
-            cancelled = true;
-            clearTimeout(retryTimer);
-            if (source) source.close();
+            if (done) return;
+            done = true;
+            _subscribers.delete(record);
+            if (_subscribers.size === 0) {
+                clearTimeout(_retryTimer);
+                _retryTimer = null;
+                if (_sharedSource) {
+                    _sharedSource.close();
+                    _sharedSource = null;
+                }
+            }
         };
     },
     async recordScore(compID, matchID, result, password, match) {

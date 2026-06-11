@@ -2439,14 +2439,9 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--live" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
-      <div className="vsched-item__head">
-        <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
+      <div className="vsched-item__meta">
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
-        {showCompetition && m.compName ? <span>· {m.compName}</span> : null}
-        {m.phase === "pool" ? <span>· {poolLabel(m)}</span> : <span>· {m.round || ""}</span>}
-        {m.round != null && typeof m.round === "number" && m.round >= 0 && (
-          <span className="tw-match__round">R{m.round + 1}</span>
-        )}
+        <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
             {queueLabel}
@@ -2458,11 +2453,17 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
           <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
         )}
       </div>
+      {(showCompetition || m.phase === "pool" || m.round) ? (
+        <div className="vsched-item__ctx">
+          {showCompetition && m.compName ? m.compName : null}
+          {showCompetition && m.compName && (m.phase === "pool" || m.round) ? " · " : null}
+          {m.phase === "pool" ? poolLabel(m) : (m.round || null)}
+        </div>
+      ) : null}
       <div className="vsched-item__players">
-        <div className={`vsched-item__side ${bWin ? "vsched-item__side--w" : ""}`}>
+        <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
-          <span className="vsched-item__color-badge vsched-item__color-badge--shiro">SHIRO</span>
         </div>
         {m.status === "completed" && scoreStr ? (
           <span className="vsched-item__score">{scoreStr}</span>
@@ -2471,8 +2472,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
         ) : (
           <span className="vsched-item__vs">vs</span>
         )}
-        <div className={`vsched-item__side ${aWin ? "vsched-item__side--w" : ""}`}>
-          <span className="vsched-item__color-badge vsched-item__color-badge--aka">AKA</span>
+        <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="n">{withNumber(m.sideA)}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>

@@ -2431,13 +2431,22 @@ a.vlist-item {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.vsched-item__head {
+.vsched-item__meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 11px;
   color: var(--ink-3);
+  margin-bottom: 2px;
+}
+
+.vsched-item__ctx {
+  font-size: 10px;
+  color: var(--ink-3);
   margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .vsched-item__time {
@@ -2462,23 +2471,22 @@ a.vlist-item {
 
 .vsched-item__side {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   min-width: 0;
   /* Aka/Shiro side treatment (DESIGN.md §4): tint each side so red vs white
      reads in the viewer schedule list. Keep the original block flow (name over
-     dojo); just add padding + a tint. Tint is keyed off the badge each side
-     carries (:has) so side order can't desync the colour. */
+     dojo); just add padding + a tint. */
   padding: 5px 8px;
   border-radius: 7px;
 }
-.vsched-item__side:has(.vsched-item__color-badge--shiro) {
+.vsched-item__side--shiro {
   background: var(--white-side);
   background-image: repeating-linear-gradient(
     -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
   text-align: right;
 }
-.vsched-item__side:has(.vsched-item__color-badge--aka) {
+.vsched-item__side--aka {
   background: var(--red-soft);
 }
 
@@ -2527,7 +2535,7 @@ button.vsched-item:not([data-clickable]) {
   cursor: default;
 }
 
-/* Queue position chip — flex-pushed to the right of vsched-item__head */
+/* Queue position chip — flex-pushed to the right of vsched-item__meta */
 .vsched-item__queue {
   margin-left: auto;
   font-size: 11px;
@@ -2544,8 +2552,8 @@ button.vsched-item:not([data-clickable]) {
   color: var(--ink-3);
 }
 
-/* Running "● NOW" label inside head row pushed right automatically */
-.vsched-item__head .bc-live {
+/* Running "● NOW" label inside meta row pushed right automatically */
+.vsched-item__meta .bc-live {
   margin-left: auto;
 }
 
@@ -4661,31 +4669,6 @@ button.pool-match-row {
   text-decoration: underline;
 }
 
-/* VSchedItem Aka/Shiro side badges */
-.vsched-item__color-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 7.5px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  vertical-align: middle;
-}
-
-.vsched-item__color-badge--aka {
-  background: var(--red);
-  color: white;
-  margin-right: 4px;
-}
-
-.vsched-item__color-badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  margin-left: 4px;
-}
 
 /* Pool match row Aka/Shiro */
 .pool-match-row {

@@ -640,7 +640,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
               catches up. Word it so going back / reloading is clearly safe. */}
           <p className="comp-shell-msg">
             This competition may have been removed, or your view is briefly out of
-            sync while live updates catch up. Going back to the dashboard or
+            sync while real-time updates catch up. Going back to the dashboard or
             reloading the page is safe — if it still exists, it will reappear.
           </p>
         </div>

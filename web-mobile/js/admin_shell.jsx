@@ -90,7 +90,7 @@ function watchSustainedDisconnect(thresholdMs, onSustained) {
 
 function AdminTopbar({ onLogout, onViewerMode, tournament }) {
   // Render running matches as chips below the topbar so admins always
-  // know what's live, regardless of which screen they're on. Clicking
+  // know what's under way, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
   // navigator helper set up by AdminApp. sideName (hoisted to module
   // scope) handles the three possible side shapes; chips with no real
@@ -180,8 +180,8 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         </div>
       )}
       {liveMatches.length > 0 && (
-        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} live`}>
-          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} live</span>
+        <div className="live-strip" role="region" aria-label={`${pluralize(liveMatches.length, "match", "matches")} in progress`}>
+          <span className="live-strip__lbl"><span className="dot dot--live"></span> {pluralize(liveMatches.length, "match", "matches")} in progress</span>
           <div className="live-strip__chips">
             {liveMatches.slice(0, LIVE_STRIP_MAX_CHIPS).map(m => {
               const a = sideName(m.sideA);
@@ -457,9 +457,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {/* Static dot, not dot--live: these are started competitions, which
-                is not the same as a match being live right now. The pulsing
-                live signal is reserved for actual live matches (topbar
-                live-strip + match rows) per DESIGN.md Principle 3. */}
+                is not the same as a match in progress right now. The pulsing
+                signal is reserved for matches actually under way (topbar strip
+                + match rows) per DESIGN.md Principle 3. */}
             <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>

@@ -1189,7 +1189,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
       <div>
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
-            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches become live once both sides are decided.
+            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
           </div>
         )}
         <div className="bracket-canvas" ref={scrollRef}>

@@ -1832,6 +1832,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 
 // Inline match detail card — shown directly on the page (no modal needed).
 function MatchDetailCard({ match, onClose }) {
+  window.useEscapeToClose(onClose);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const teamSize = match.teamSize || 0;
@@ -1856,6 +1857,7 @@ function MatchDetailCard({ match, onClose }) {
     <div className="match-detail-card">
       <div className="match-detail-card__head">
         <div className="match-detail-card__meta">
+          {match.compName && <><span className="match-detail-card__comp">{match.compName}</span><span>·</span></>}
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
@@ -3510,10 +3512,46 @@ function ViewerSchedule({ tournament, onBack, tweaks }) {
 function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId }) {
   window.useEscapeToClose(onClose);
   const [scoringMatch, setScoringMatch] = useState(null);
+  const triggerRef = useRefV(null);
+  const trapRef = useRefV(null);
+  const modalRefCb = React.useCallback((node) => {
+    if (node) {
+      triggerRef.current = document.activeElement;
+      const prevOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      const onKeyDown = (e) => {
+        if (e.key !== "Tab") return;
+        const f = [...node.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+          .filter((el) => !el.disabled && el.offsetParent !== null);
+        if (f.length === 0) { e.preventDefault(); return; }
+        const first = f[0], last = f[f.length - 1], active = document.activeElement;
+        if (e.shiftKey && (active === first || active === node)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+      };
+      document.addEventListener("keydown", onKeyDown, true);
+      const focusTimer = setTimeout(() => {
+        (node.querySelector("button") || node).focus();
+      }, 0);
+      trapRef.current = { onKeyDown, focusTimer, prevOverflow };
+    } else {
+      const t = trapRef.current;
+      if (t) {
+        clearTimeout(t.focusTimer);
+        document.removeEventListener("keydown", t.onKeyDown, true);
+        document.body.style.overflow = t.prevOverflow;
+        trapRef.current = null;
+      }
+      const trig = triggerRef.current;
+      if (trig && typeof trig.focus === "function" && document.contains(trig)) trig.focus();
+    }
+  }, []);
   if (!match) return null;
   const isSelfRun = tournament && tournament.mode === "self-run";
   const bothSidesReady = window.hasBothSides ? window.hasBothSides(match) : false;
   const isFinalized = match.status === "completed";
+  const sideAName = match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "");
+  const sideBName = match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "");
+  const dialogLabel = sideAName && sideBName ? `Match: ${sideBName} vs ${sideAName}` : "Match details";
 
   if (scoringMatch && window.ScoreEditorModal) {
     return React.createElement(window.ScoreEditorModal, {
@@ -3535,7 +3573,7 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
   return (
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
+      <div ref={modalRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 500, margin: 16 }}>
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}

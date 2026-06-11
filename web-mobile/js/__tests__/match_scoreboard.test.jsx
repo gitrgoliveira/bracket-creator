@@ -188,9 +188,9 @@ describe('match_scoreboard components', () => {
     });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
-    // Should show bout number "2", not team names
-    expect(collectText(shiro)).toBe('2');
-    expect(collectText(aka)).toBe('2');
+    // Should show bout number "#2", not team names
+    expect(collectText(shiro)).toBe('#2');
+    expect(collectText(aka)).toBe('#2');
   });
 
   it('BoutSubRow still shows real competitor names when they differ from match-level teams', () => {

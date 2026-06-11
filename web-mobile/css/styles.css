@@ -5104,6 +5104,10 @@ button.pool-match-row {
   letter-spacing: 0.04em;
 }
 
+.match-detail-card__comp {
+  color: var(--ink-2, #374151);
+}
+
 .match-detail-card__close {
   background: none;
   border: none;
@@ -5253,7 +5257,8 @@ button.pool-match-row {
 .msb-row--summary { border-top: 2px solid #111; }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
   font-size: 16px; font-weight: 800; height: auto; }
-.msb-lab { display: block; font-size: 8px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
+.msb-lab { display: block; font-size: 10px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
+abbr.msb-lab { text-decoration: none; cursor: help; }
 /* live highlight */
 .msb-row--now { background: #fef3c7; }
 .msb-row--queued .msb-name { color: #9ca3af; }
@@ -5275,6 +5280,9 @@ button.pool-match-row {
 .msb--tv .msb-lab { font-size: 1.2vh; }
 .msb--tv .msb-hansoku { font-size: 2.6vh; }
 .msb--tv .msb-dh-tag { font-size: 1.8vh; padding: 0.4vh 1.2vh; letter-spacing: .12em; }
+/* TV bout decisiveness: winning side's filled slots are slightly bolder
+   so spectators can read the match result at a glance from distance. */
+.msb--tv .msb-slots--win .msb-slot { font-size: 3.2vh; }
 
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {

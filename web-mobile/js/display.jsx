@@ -485,13 +485,14 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
             <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
+                    const isDone = !isNow && m.status === "completed";
                     return (
                         <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
-                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "")}
+                            className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "") + (isDone ? " tvd-indiv-row--done" : "")}
                             style={{
                                 padding: "1vh 1.5vw", borderRadius: "0.6vw",
-                                background: isNow ? "#fef3c7" : "transparent",
-                                opacity: isNow ? 1 : 0.78,
+                                background: isNow ? "#fef3c7" : isDone ? "#f9fafb" : "transparent",
+                                opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
                             }}>
                             <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
                         </div>

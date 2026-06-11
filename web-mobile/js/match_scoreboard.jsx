@@ -117,11 +117,17 @@ function ipponLetters(arr) {
 // outer edge is the left), aka fills right→left (its outer edge is the right),
 // so for aka we reverse the visual cell order. The testid stays on the logical
 // outer cell (letters[0]) regardless of which side renders it.
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)" };
+
 function slotCells(letters, side, testid) {
-  const cells = [0, 1].map(i => (
-    <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
-      data-testid={i === 0 ? testid : undefined}>{letters[i] || ""}</span>
-  ));
+  const cells = [0, 1].map(i => {
+    const ch = letters[i] || "";
+    return (
+      <span key={i} className={"msb-slot" + (side === "aka" ? " msb-slot--aka" : "")}
+        title={WAZA_NAMES[ch] || undefined}
+        data-testid={i === 0 ? testid : undefined}>{ch}</span>
+    );
+  });
   return side === "aka" ? cells.reverse() : cells;
 }
 
@@ -190,7 +196,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     if (n === matchSideA || n === matchSideB) return "";
     return n;
   };
-  const boutNum = isDH ? "DH" : String(sub && sub.position > 0 ? sub.position : index + 1);
+  const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
   const shiroName = (lineupB ? pickFromLineup(lineupB, index, teamSize) : "") || subSideName(sub && sub.sideB) || boutNum;
   const akaName = (lineupA ? pickFromLineup(lineupA, index, teamSize) : "") || subSideName(sub && sub.sideA) || boutNum;
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
@@ -323,13 +329,13 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
         <span className="msb-name" data-testid="summary-shiro-name">{shiroName || ""}</span>
         <span className="msb-marks">
           <span className="msb-slots">
-            <span className="msb-slot msb-sum"><span className="msb-lab">IV</span>{ivShiro}</span>
-            <span className="msb-slot msb-sum"><span className="msb-lab">PW</span>{pwShiro}</span>
+            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
+            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
           </span>
           <span className="msb-vs" />
           <span className="msb-slots msb-slots--aka">
-            <span className="msb-slot msb-slot--aka msb-sum"><span className="msb-lab">PW</span>{pwAka}</span>
-            <span className="msb-slot msb-slot--aka msb-sum"><span className="msb-lab">IV</span>{ivAka}</span>
+            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
+            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
           </span>
         </span>
         <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>

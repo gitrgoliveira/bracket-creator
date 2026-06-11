@@ -115,7 +115,7 @@ jobs:
         run: go test ${{ matrix.packages.path }} -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage-${{ matrix.packages.name }}.txt
           flags: ${{ matrix.packages.name }}
@@ -169,7 +169,7 @@ jobs:
         run: go test ./internal/pdf/... -timeout=10m -coverprofile=coverage-pdf.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (pdf)
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage-pdf.txt
           flags: pdf

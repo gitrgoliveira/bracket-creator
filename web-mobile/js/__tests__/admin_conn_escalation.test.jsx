@@ -5,18 +5,8 @@
 // consumes this can't be exercised by the React-stub test harness (useEffect
 // is a no-op, useState setters are no-ops), so the timing contract is tested
 // here on the extracted helper directly.
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-
-let watchSustainedDisconnect;
-
-beforeAll(async () => {
-  await import('../admin_shell.jsx');
-  watchSustainedDisconnect = window.watchSustainedDisconnect;
-});
-
-afterAll(() => {
-  delete window.watchSustainedDisconnect;
-});
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { watchSustainedDisconnect } from '../admin_shell.jsx';
 
 describe('watchSustainedDisconnect', () => {
   beforeEach(() => vi.useFakeTimers());

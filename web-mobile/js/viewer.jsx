@@ -315,15 +315,22 @@ function usePrimaryWatch() {
 // list so a coach can spot a watched player who just started.
 function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
   const watchedIds = new Set();
+  const watchedNames = new Set();
   (Array.isArray(watched) ? watched : []).forEach((w) => {
     if (w && w.id) watchedIds.add(String(w.id));
+    if (w && w.name) watchedNames.add(w.name.trim().toLowerCase());
   });
-  if (watchedIds.size === 0) return [];
+  if (watchedIds.size === 0 && watchedNames.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
   const upcoming = list.filter((m) => {
     if (!m || m.status === "completed") return false;
     const [a, b] = matchParticipantIds(m);
-    return (a && watchedIds.has(a)) || (b && watchedIds.has(b));
+    if ((a && watchedIds.has(a)) || (b && watchedIds.has(b))) return true;
+    if (watchedNames.size > 0) {
+      const [aN, bN] = matchParticipantNames(m);
+      if ((aN && watchedNames.has(aN.trim().toLowerCase())) || (bN && watchedNames.has(bN.trim().toLowerCase()))) return true;
+    }
+    return false;
   });
   upcoming.sort((x, y) => {
     const xt = x.scheduledAt || "99:99";
@@ -494,11 +501,30 @@ function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
   const ids = new Set(resolveEntryPlayerIds(primaryEntry, roster));
   if (ids.size === 0) return null;
   const list = Array.isArray(allMatches) ? allMatches : [];
-  const mine = list.filter((m) => {
-    if (!m || m.status === "completed") return false;
+  const pending = list.filter((m) => m && m.status !== "completed");
+  const mine = pending.filter((m) => {
     const [a, b] = matchParticipantIds(m);
     return (a && ids.has(a)) || (b && ids.has(b));
   });
+  if (mine.length === 0) {
+    const names = new Set();
+    const rosterArr = Array.isArray(roster) ? roster : [];
+    ids.forEach((id) => {
+      const p = rosterArr.find((r) => r && String(r.id) === id);
+      if (p && p.name) names.add(p.name.trim().toLowerCase());
+    });
+    if (primaryEntry.type === "player" && primaryEntry.name) {
+      names.add(primaryEntry.name.trim().toLowerCase());
+    }
+    if (names.size > 0) {
+      pending.forEach((m) => {
+        const [aN, bN] = matchParticipantNames(m);
+        if ((aN && names.has(aN.trim().toLowerCase())) || (bN && names.has(bN.trim().toLowerCase()))) {
+          mine.push(m);
+        }
+      });
+    }
+  }
   mine.sort((a, b) => {
     const ao = a.status === "running" ? 0 : 1;
     const bo = b.status === "running" ? 0 : 1;
@@ -1016,11 +1042,17 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const secondaryOnDeck = useMemo(() => {
     if (resolvedWatched.length === 0) return [];
     const watchedIds = new Set(resolvedWatched.map((p) => p.id));
+    const watchedNames = new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean));
     return bothSidesMatches.filter((m) => {
       if (!isFollowedMatchOnDeck(m)) return false;
       const [a, b] = matchParticipantIds(m);
       if ((a && primaryIds.has(a)) || (b && primaryIds.has(b))) return false;
-      return (a && watchedIds.has(a)) || (b && watchedIds.has(b));
+      if ((a && watchedIds.has(a)) || (b && watchedIds.has(b))) return true;
+      if (watchedNames.size > 0) {
+        const [aN, bN] = matchParticipantNames(m);
+        if ((aN && watchedNames.has(aN.trim().toLowerCase())) || (bN && watchedNames.has(bN.trim().toLowerCase()))) return true;
+      }
+      return false;
     });
   }, [bothSidesMatches, resolvedWatched, primaryIds]);
 
@@ -3129,7 +3161,7 @@ function ScheduleViewer({ tournament, tweaks }) {
 
   return (
     <div className="tw-sched">
-      {primaryEntry ? (
+      {primaryEntry && watchlist.length >= 2 && primaryKey ? (
         <div
           className="tw-sched__following"
           style={{

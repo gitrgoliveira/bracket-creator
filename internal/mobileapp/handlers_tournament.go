@@ -108,12 +108,12 @@ func validateCourts(courts []string) error {
 
 // validateCompetitionCourts is the looser competition-level check:
 // 0..helper.MaxCourts entries, each (when present) a single non-empty
-// character. Empty is allowed because the engine defaults a
-// competition with no Courts to 1 court — this matches the existing
-// import handler's `if len(comp.Courts) == 0 { comp.Courts = []string{"A"} }`
-// fallback semantics and the engine generators' `if numCourts == 0 { numCourts = 1 }`
-// behavior. The label and cap invariants from validateCourtLabels
-// still apply when courts are explicitly provided.
+// character. Empty is allowed at validation time because all three write
+// paths (POST /competitions, PUT settings, and the manifest importer)
+// resolve empty courts to the tournament's courts via
+// resolveCompetitionCourts immediately after this check — so a persisted
+// competition always carries >=1 court. The label and cap invariants from
+// validateCourtLabels still apply when courts are explicitly provided.
 func validateCompetitionCourts(courts []string) error {
 	return validateCourtLabels(courts)
 }

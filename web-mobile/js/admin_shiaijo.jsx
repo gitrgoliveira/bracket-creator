@@ -41,10 +41,16 @@ export function partitionShiaijoMatches(matches) {
     return { sorted, running, scheduled, completed };
 }
 
-function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, onViewerMode, password, onSwitchCourt }) {
+function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onLogout, onViewerMode, password, onSwitchCourt }) {
     const [openMatch, setOpenMatch] = useStateSh(null);
     const mountedRef = useRefSh(true);
     useEffectSh(() => () => { mountedRef.current = false; }, []);
+
+    // Normalize once: filterMatchesByCourt trims its param, so a bookmarked
+    // URL with stray whitespace (e.g. /admin/shiaijo/A%20) must use the same
+    // trimmed value for courtKnown and the <select> — otherwise the matches
+    // filter to "A" while the court reads as unknown and the dropdown desyncs.
+    const court = (routeCourt || "").trim();
 
     const allMatches = useMemoSh(
         () => window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court),
@@ -97,7 +103,11 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
                         <h3>Unknown shiaijo "{court}"</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                             This court isn't part of the tournament — it may have been renamed or removed.{" "}
-                            <a href="#" onClick={(e) => { e.preventDefault(); onBack(); }}>Back to dashboard</a>.
+                            <button
+                                type="button"
+                                onClick={onBack}
+                                style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", textDecoration: "underline", cursor: "pointer", font: "inherit" }}
+                            >Back to dashboard</button>.
                         </p>
                     </div>
                 )}

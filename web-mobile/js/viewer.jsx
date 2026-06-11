@@ -1831,8 +1831,8 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
 }
 
 // Inline match detail card — shown directly on the page (no modal needed).
-function MatchDetailCard({ match, onClose }) {
-  window.useEscapeToClose(onClose);
+function MatchDetailCard({ match, onClose, escapeToClose = true }) {
+  window.useEscapeToClose(escapeToClose ? onClose : undefined);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
   const teamSize = match.teamSize || 0;
@@ -3577,7 +3577,7 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}
-        <MatchDetailCard match={match} onClose={onClose} />
+        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (

@@ -118,6 +118,27 @@ func validateCompetitionCourts(courts []string) error {
 	return validateCourtLabels(courts)
 }
 
+// resolveCompetitionCourts guarantees a competition resolves to at least one
+// court. Empty competition courts have always *meant* "fall back to the
+// tournament-wide courts" (see validateCourtLabels's doc), but that fallback
+// was never materialized: bracket/pool generation left such matches with an
+// empty Court (engine bracket.go only assigns a label when len(comp.Courts)>0),
+// which the per-court Shiaijo operator view (/admin/shiaijo/:court) filters on
+// and therefore cannot surface — the matches become invisible. Inheriting the
+// tournament's courts makes every match carry a real label and distribute
+// across the venue's courts so each court's operator view is populated.
+// Tournaments always have >=1 court (validateCourts rejects empty); the
+// ["A"] return is pure defense for the no-tournament-yet bootstrap edge.
+func resolveCompetitionCourts(compCourts []string, tourn *state.Tournament) []string {
+	if len(compCourts) > 0 {
+		return compCourts
+	}
+	if tourn != nil && len(tourn.Courts) > 0 {
+		return append([]string(nil), tourn.Courts...)
+	}
+	return []string{"A"}
+}
+
 // errPasswordRequired is the sentinel the PUT /tournament transform
 // returns when the desired Password is empty AND the stored Password
 // is also empty (or no record exists yet). It propagates back through

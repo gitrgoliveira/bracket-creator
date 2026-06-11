@@ -333,6 +333,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Guarantee >=1 court: empty competition courts inherit the
+		// tournament's courts so every match carries a real court label
+		// (otherwise the per-court Shiaijo operator view can't surface them).
+		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
+
 		// Reject negative per-phase or legacy durations.
 		if err := validateCompetitionDurations(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -608,6 +613,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
+			// Guarantee >=1 court: a settings PUT that clears courts (or a
+			// direct API caller sending none) inherits the tournament's
+			// courts so every match carries a real court label. The transform
+			// below copies comp.Courts onto current for settings-only PUTs.
+			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
+
 			// Reject negative per-phase or legacy durations.
 			if err := validateCompetitionDurations(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -781,6 +792,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolSize = comp.PoolSize
 				current.PoolWinners = comp.PoolWinners
 				current.PoolSizeMode = comp.PoolSizeMode
+				// comp.Courts was already defaulted to >=1 court (tournament
+				// fallback) in the settings-validation block above.
 				current.Courts = comp.Courts
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName

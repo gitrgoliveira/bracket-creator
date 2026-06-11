@@ -1002,7 +1002,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     const result = resolveDeepLink(window.location.search, roster);
     deepLinkApplied.current = true;
     if (result && result.player) addWatchPlayer(result.player);
-  }, [roster]);
+  }, [roster, watchlist]);
 
   // global "across-all-competitions" lists for the home page
   const allMatches = useMemo(() => tournamentMatches(t), [t]);

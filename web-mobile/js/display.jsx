@@ -71,7 +71,7 @@ function findRunningOnCourt(competitions, court) {
         const poolMatches = c.poolMatches || [];
         for (const m of poolMatches) {
             if ((m.court || "") !== court) continue;
-            if (m.status === "running" && m.sideA && m.sideB) {
+            if (m.status === "running" && bracketSidesReady(m)) {
                 return { match: m, competition: c };
             }
         }

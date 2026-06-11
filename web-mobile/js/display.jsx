@@ -1231,8 +1231,8 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // mp-13y #10: running IV/PW aggregate per side. teamIVPW excludes the
     // Daihyosen (position -1) row. sideB = shiro, sideA = aka.
-    const ovlSideA = hasLive ? (live.match.sideA?.name || (typeof live.match.sideA === "string" ? live.match.sideA : "")) : "";
-    const ovlSideB = hasLive ? (live.match.sideB?.name || (typeof live.match.sideB === "string" ? live.match.sideB : "")) : "";
+    const ovlSideA = hasRunning ? (running.match.sideA?.name || (typeof running.match.sideA === "string" ? running.match.sideA : "")) : "";
+    const ovlSideB = hasRunning ? (running.match.sideB?.name || (typeof running.match.sideB === "string" ? running.match.sideB : "")) : "";
     const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults, ovlSideA, ovlSideB) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
 
     // DH-pending: all regular bouts are scored, the match is tied (equal IV

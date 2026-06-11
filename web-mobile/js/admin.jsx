@@ -613,6 +613,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   if (view.kind === "shiaijo") {
     return <AdminShiaijoPage
+      key={view.court}
       tournament={t}
       court={view.court}
       onBack={() => setView({ kind: "dashboard" })}

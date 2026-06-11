@@ -1085,6 +1085,14 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
+// Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
+function startPatch() {
+  return {
+    status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
+    score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
+  };
+}
+
 function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
@@ -1266,10 +1274,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
         // serializer treats as "no bouts scored yet"). The server routes this
         // through eng.StartMatchTx, so all start-gating (eligibility 409,
         // ≥players checks) still runs — a 409 throws and is caught below.
-        const startPatch = () => ({
-          status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
-          score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
-        });
+        // Defined at module level as window.startPatch for reuse across admin_*.jsx.
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
@@ -1597,6 +1602,8 @@ window.PerCourtBreakdown = PerCourtBreakdown;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
+window.filterMatchesByCourt = filterMatchesByCourt;
+window.startPatch = startPatch;
 
 // ES exports for the vitest suite. computeCourtPaceStats,
 // filterMatchesByCourt, and CourtPacePanel use `export function`

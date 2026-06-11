@@ -132,7 +132,7 @@ function pathFromState(m, vs, vcid, av) {
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "editTournament") return "/admin/edit-tournament";
       if (av.kind === "createComp") return "/admin/create-competition";
-      if (av.kind === "shiaijo") return `/admin/shiaijo/${encodeURIComponent(av.court || "")}`;
+      if (av.kind === "shiaijo") return av.court ? `/admin/shiaijo/${encodeURIComponent(av.court)}` : "/admin";
       if (av.kind === "competition") {
         let url = `/admin/competition/${av.id}`;
         if (av.section && av.section !== "overview") url += `/${av.section}`;

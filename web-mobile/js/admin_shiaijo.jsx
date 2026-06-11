@@ -6,9 +6,8 @@
 // Operator taps "Score" / "Correct" to open ScoreEditorModal as an overlay.
 //
 // Data flows entirely from window.tournamentMatches(tournament) — no new
-// backend API is needed. The court filter mirrors filterMatchesByCourt in
-// admin_schedule.jsx; inlined because each JSX file is compiled independently
-// by esbuild (cross-file ES imports are not used in this module pattern).
+// backend API is needed. Court filtering via window.filterMatchesByCourt
+// (exported from admin_schedule.jsx via window).
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh } = React;
 
@@ -18,19 +17,13 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const hasBothSides = window.hasBothSides;
 const getScoreBtnClass = window.getScoreBtnClass;
 
-function courtMatches(matches, court) {
-    const c = (court || "").trim();
-    if (!c || c === "all") return matches;
-    return matches.filter((m) => m.court === c);
-}
-
 function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, onViewerMode, password, onSwitchCourt }) {
     const [openMatch, setOpenMatch] = useStateSh(null);
     const mountedRef = useRefSh(true);
     useEffectSh(() => () => { mountedRef.current = false; }, []);
 
     const allMatches = useMemoSh(
-        () => courtMatches(window.tournamentMatches(tournament).filter(hasBothSides), court),
+        () => window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court),
         [tournament, court]
     );
 
@@ -44,15 +37,12 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
         });
     }, [allMatches]);
 
-    const running   = sorted.filter(m => m.status === "running");
-    const scheduled = sorted.filter(m => m.status === "scheduled");
-    const completed = sorted.filter(m => m.status === "completed");
-
-    // Mirrors AdminScoreEditor's start-patch constant.
-    const startPatch = () => ({
-        status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
-        score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
-    });
+    const running = [], scheduled = [], completed = [];
+    for (const m of sorted) {
+        if (m.status === "running") running.push(m);
+        else if (m.status === "scheduled") scheduled.push(m);
+        else if (m.status === "completed") completed.push(m);
+    }
 
     const courts = tournament.courts || [];
 
@@ -69,7 +59,7 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
                         <h1 className="page-head__title">Shiaijo {court}</h1>
                         <div className="page-head__sub">Table operator view — matches assigned to this court.</div>
                     </div>
-                    {courts.length > 1 && onSwitchCourt && (
+                    {courts.length > 1 && (
                         <div className="page-head__actions">
                             <select
                                 className="input"
@@ -137,7 +127,7 @@ function AdminShiaijoPage({ tournament, court, onBack, onEditScore, onLogout, on
                                     setOpenMatch(nextActiveMatch);
                                     if (nextActiveMatch.status === "scheduled") {
                                         try {
-                                            await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
+                                            await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, window.startPatch(), nextActiveMatch);
                                             if (mountedRef.current) setOpenMatch(prev => prev ? { ...prev, status: "running" } : prev);
                                         } catch (_startErr) { /* eligibility gate; stay on next match */ }
                                     }

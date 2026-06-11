@@ -243,6 +243,7 @@ func ApplyTournamentDefaults(t *Tournament) {
 		t.Mode = TournamentModeOfficiated
 	}
 	if len(t.Courts) == 0 {
+		// Default to at least one court ("A") for legacy or malformed configs
 		t.Courts = []string{"A"}
 	}
 }

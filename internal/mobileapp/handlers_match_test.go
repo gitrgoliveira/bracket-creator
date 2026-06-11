@@ -112,6 +112,13 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, "TeamA", result.Winner)
 		assert.Len(t, result.SubResults, 5) // 3+1+1
 
+		// Sub-bouts must NOT carry team names — they're individual bout
+		// slots without known competitors in quick-score mode.
+		for _, sub := range result.SubResults {
+			assert.Empty(t, sub.SideA, "sub-bout SideA must be empty, not team name")
+			assert.Empty(t, sub.SideB, "sub-bout SideB must be empty, not team name")
+		}
+
 		standings, err := eng.CalculatePoolStandings("c1")
 		assert.NoError(t, err)
 		pool := standings["PoolA"]

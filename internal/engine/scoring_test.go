@@ -215,6 +215,52 @@ func TestScoreSummary_Team(t *testing.T) {
 	assert.Equal(t, "W:0 L:1 D:0 | IV:1 IL:2 IT:0 | PW:0 PL:0", teamB.ScoreSummary)
 }
 
+func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-empty-sub-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "empty-sub-draw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Team", TeamSize: 3,
+		Format: state.CompFormatLeague, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+			Winner: "", Decision: "hikiwake",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, Winner: "TeamA"},
+				{Position: 2, Winner: "TeamB"},
+				{Position: 3, Winner: ""},
+			},
+		},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	pool := standings["PoolA"]
+	require.Len(t, pool, 2)
+
+	teamA := pool[0]
+	assert.Equal(t, 1, teamA.IndividualWins, "sub with Winner=TeamA → IV for A")
+	assert.Equal(t, 1, teamA.IndividualLosses, "sub with Winner=TeamB → IL for A")
+	assert.Equal(t, 1, teamA.IndividualDraws, "sub with empty Winner+empty SideA → draw, not false win")
+
+	teamB := pool[1]
+	assert.Equal(t, 1, teamB.IndividualWins)
+	assert.Equal(t, 1, teamB.IndividualLosses)
+	assert.Equal(t, 1, teamB.IndividualDraws, "sub with empty Winner+empty SideB → draw, not false win")
+}
+
 func TestMaybeAutoCompletePools(t *testing.T) {
 	dir, err := os.MkdirTemp("", "engine-autocomplete-*")
 	require.NoError(t, err)

@@ -352,20 +352,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		// Synthesise SubResults so standings IV/IL/IT counts are correct.
-		// SideA/SideB must be set so the empty-Winner draw case doesn't
-		// accidentally match `sub.Winner == sub.SideA` in computeStandings.
+		// Sub-bout SideA/SideB are left empty — individual bout sides are
+		// unknown in quick-score mode (no lineup). Winner attribution in
+		// computeStandings uses `sub.Winner == m.SideA` (the match-level
+		// name); the `sub.Winner == sub.SideA` fallback is guarded against
+		// the "" == "" false-positive.
 		subResults := make([]state.SubMatchResult, 0, req.TeamAWins+req.TeamBWins+req.Draws)
 		pos := 1
 		for range req.TeamAWins {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideA})
+			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideA})
 			pos++
 		}
 		for range req.TeamBWins {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: req.SideB})
+			subResults = append(subResults, state.SubMatchResult{Position: pos, Winner: req.SideB})
 			pos++
 		}
 		for range req.Draws {
-			subResults = append(subResults, state.SubMatchResult{Position: pos, SideA: req.SideA, SideB: req.SideB, Winner: ""})
+			subResults = append(subResults, state.SubMatchResult{Position: pos})
 			pos++
 		}
 

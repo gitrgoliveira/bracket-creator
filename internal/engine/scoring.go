@@ -155,8 +155,8 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		if sub.Position != -1 || sub.Winner == "" {
 			continue
 		}
-		sideAWin := sub.Winner == result.SideA || sub.Winner == sub.SideA
-		sideBWin := sub.Winner == result.SideB || sub.Winner == sub.SideB
+		sideAWin := sub.Winner == result.SideA || (sub.SideA != "" && sub.Winner == sub.SideA)
+		sideBWin := sub.Winner == result.SideB || (sub.SideB != "" && sub.Winner == sub.SideB)
 		switch {
 		case sideAWin:
 			result.Winner = result.SideA
@@ -551,8 +551,8 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 			if isTeam && len(m.SubResults) > 0 {
 				for _, sub := range m.SubResults {
-					sideAWin := sub.Winner == m.SideA || sub.Winner == sub.SideA
-					sideBWin := sub.Winner == m.SideB || sub.Winner == sub.SideB
+					sideAWin := sub.Winner == m.SideA || (sub.SideA != "" && sub.Winner == sub.SideA)
+					sideBWin := sub.Winner == m.SideB || (sub.SideB != "" && sub.Winner == sub.SideB)
 					switch {
 					case sideAWin:
 						sA.IndividualWins++

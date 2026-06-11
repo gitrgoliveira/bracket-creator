@@ -1631,7 +1631,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
         });
     }
     return out;
-  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize]);
+  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format]);
 
   const [followedPlayer] = useFollowedPlayer();
   const [watchlist] = useWatchlist();
@@ -1800,7 +1800,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightPlayer={followedPlayer}
                     onMatchClick={(m, ri) => {
                       const label = window.roundLabel(ri, derivedBracket.rounds.length);
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
                 </div>

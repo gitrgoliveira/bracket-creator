@@ -186,6 +186,49 @@ a:hover {
   flex: 1;
 }
 
+/* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
+   `.dot--live` liveness signal (Principle 3): a healthy data connection is a
+   calm, passive status, so its dot is static navy. Only the disconnected state
+   moves — motion is reserved for the state that actually needs attention. This
+   keeps it distinct from the live-strip's pulsing "N matches live" dot sitting
+   directly below it. */
+.topbar__conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.topbar__conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: none;
+}
+
+.topbar__conn--down {
+  color: var(--red);
+}
+
+.topbar__conn--down .topbar__conn__dot {
+  background: var(--red);
+  animation: conn-pulse 1.6s ease-out infinite;
+}
+
+@keyframes conn-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(193, 18, 31, 0.35);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px rgba(193, 18, 31, 0);
+  }
+}
+
 .topbar__nav {
   display: flex;
   gap: 4px;
@@ -6236,6 +6279,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 @media (prefers-reduced-motion: reduce) {
   .dot--live,
+  .topbar__conn--down .topbar__conn__dot,
   .spinner,
   .toast,
   .decision-prompt,

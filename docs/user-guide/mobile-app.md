@@ -1,6 +1,6 @@
-# Mobile / Live Tournament App
+# Mobile Tournament App
 
-The `mobile-app` command starts a live tournament management server for use **on the day of the tournament**. Any device on the same network can open the URL to view live results or — with the admin password — manage pools and scores.
+The `mobile-app` command starts a real-time tournament management server for use **on the day of the tournament**. Any device on the same network can open the URL to view running results or — with the admin password — manage pools and scores.
 
 ## Starting the server
 
@@ -154,7 +154,7 @@ Once pools are drawn, the **Pools** tab shows all pools and their current standi
 
 ### Bracket (live)
 
-After all pool matches are complete, advance the pool winners to the elimination bracket. The bracket updates live as scores come in.
+After all pool matches are complete, advance the pool winners to the elimination bracket. The bracket updates in real time as scores come in.
 
 ### Export & print
 

@@ -824,9 +824,10 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   );
 }
 
+export { watchSustainedDisconnect };
+
 window.Breadcrumbs = Breadcrumbs;
 window.AdminTopbar = AdminTopbar;
-window.watchSustainedDisconnect = watchSustainedDisconnect;
 window.AdminDashboard = AdminDashboard;
 window.CompCard = CompCard;
 window.CourtPicker = CourtPicker;

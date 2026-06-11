@@ -58,13 +58,20 @@ function _ensureConnected() {
     }
     // Guard against double-connect: only one shared source may exist at a time.
     if (_sharedSource) return;
-    _sharedSource = new EventSource('/api/events');
+    // Bind handlers to THIS instance via a local const. Each handler ignores
+    // events from a superseded source (`source !== _sharedSource`) so a stale
+    // instance — should one ever fire after being replaced — can't close the
+    // live connection or fan out a false status/message to current subscribers.
+    const source = new EventSource('/api/events');
+    _sharedSource = source;
 
-    _sharedSource.onopen = () => {
+    source.onopen = () => {
+        if (source !== _sharedSource) return;
         _fanOutStatus('open');
     };
 
-    _sharedSource.onmessage = (event) => {
+    source.onmessage = (event) => {
+        if (source !== _sharedSource) return;
         let parsed;
         try {
             parsed = JSON.parse(event.data);
@@ -77,8 +84,9 @@ function _ensureConnected() {
         }
     };
 
-    _sharedSource.onerror = () => {
-        if (_sharedSource) _sharedSource.close();
+    source.onerror = () => {
+        if (source !== _sharedSource) return;
+        source.close();
         _sharedSource = null;
         _fanOutStatus('error');
         if (_subscribers.size > 0) {

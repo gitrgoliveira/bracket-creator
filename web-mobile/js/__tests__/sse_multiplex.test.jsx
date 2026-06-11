@@ -136,7 +136,7 @@ describe('subscribeToEvents — shared singleton', () => {
         unsub1(); unsub2();
     });
 
-    it('(c) late subscriber to errored source gets immediate onStatus("error")', () => {
+    it('(c) late subscriber after an error opens a fresh source and is NOT replayed a status', () => {
         // First subscriber opens, then an error fires.
         const status1 = vi.fn();
         const unsub1 = API.subscribeToEvents(() => {}, status1);
@@ -151,13 +151,13 @@ describe('subscribeToEvents — shared singleton', () => {
         vi.clearAllTimers();
 
         // Late subscriber: no shared source exists right now (it was nulled on
-        // error), so the new subscribe opens a fresh source in CONNECTING state.
+        // error). subscribeToEvents only replays a status when a source ALREADY
+        // exists; here it opens a fresh source (CONNECTING) and waits for that
+        // source's onopen/onerror — so status2 is NOT called synchronously.
         const status2 = vi.fn();
         const unsub2 = API.subscribeToEvents(() => {}, status2);
 
-        // The late subscriber must NOT get 'open' (source is CONNECTING/new).
-        // Per spec: readyState !== OPEN → onStatus('error').
-        expect(status2).not.toHaveBeenCalledWith('open');
+        expect(status2).not.toHaveBeenCalled();
 
         // Clean up the retry timers.
         vi.clearAllTimers();

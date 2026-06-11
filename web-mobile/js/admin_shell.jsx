@@ -111,10 +111,12 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         </div>
         <div className="topbar__spacer"></div>
         {/* Calm connection indicator: a dot + label that reflects the SSE
-            stream state. Green-tinted "Live" when connected; amber-tinted
-            "Reconnecting…" when the stream has dropped. role=status +
-            aria-live=polite so a screen reader hears the change without it
-            being alarmist. Uses tokens inline (no new CSS classes). */}
+            stream state. Green-tinted "Connected" when the live feed is up;
+            amber-tinted "Reconnecting…" when the stream has dropped. Labelled
+            "Connected" rather than "Live" so it reads as the data-connection
+            state, not "matches are live". role=status + aria-live=polite so a
+            screen reader hears the change without it being alarmist. Uses
+            tokens inline (no new CSS classes). */}
         <span
           role="status"
           aria-live="polite"
@@ -133,7 +135,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
             className={connected ? "dot dot--live" : "dot"}
             style={connected ? undefined : { background: "var(--red)" }}
           ></span>
-          {connected ? "Live" : "Reconnecting…"}
+          {connected ? "Connected" : "Reconnecting…"}
         </span>
         <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
         <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>

@@ -2512,7 +2512,7 @@ a.vlist-item {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.vsched-item__meta {
+.vsched-item__head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2616,7 +2616,7 @@ button.vsched-item:not([data-clickable]) {
   cursor: default;
 }
 
-/* Queue position chip — flex-pushed to the right of vsched-item__meta */
+/* Queue position chip — flex-pushed to the right of vsched-item__head */
 .vsched-item__queue {
   margin-left: auto;
   font-size: 11px;

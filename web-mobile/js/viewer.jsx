@@ -2466,6 +2466,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
       ) : null}
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
+          <span className="sr-only">Shiro:</span>
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
@@ -2477,6 +2478,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
           <span className="vsched-item__vs">vs</span>
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
+          <span className="sr-only">Aka:</span>
           <span className="n">{withNumber(m.sideA)}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>

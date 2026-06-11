@@ -74,6 +74,9 @@ function parsePath(path) {
       if (parts[1] === "import") return { mode: "admin", admin: { kind: "import" } };
       if (parts[1] === "edit-tournament") return { mode: "admin", admin: { kind: "editTournament" } };
       if (parts[1] === "create-competition") return { mode: "admin", admin: { kind: "createComp" } };
+      if (parts[1] === "shiaijo" && parts[2]) {
+        return { mode: "admin", admin: { kind: "shiaijo", court: decodeURIComponent(parts[2]) } };
+      }
       if (parts[1] === "competition" && parts[2]) {
         return { mode: "admin", admin: { kind: "competition", id: parts[2], section: parts[3] || "overview" } };
       }
@@ -129,6 +132,7 @@ function pathFromState(m, vs, vcid, av) {
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "editTournament") return "/admin/edit-tournament";
       if (av.kind === "createComp") return "/admin/create-competition";
+      if (av.kind === "shiaijo") return `/admin/shiaijo/${encodeURIComponent(av.court || "")}`;
       if (av.kind === "competition") {
         let url = `/admin/competition/${av.id}`;
         if (av.section && av.section !== "overview") url += `/${av.section}`;

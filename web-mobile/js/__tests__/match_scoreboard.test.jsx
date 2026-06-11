@@ -160,6 +160,35 @@ describe('match_scoreboard components', () => {
     expect(collectText(aka)).toBe('Aka Player');
   });
 
+  it('BoutSubRow filters out match-level team names from sub-bout sides (quick-score path)', () => {
+    // mp-3m1c: when scored via quick-score, the backend stores the TEAM name in
+    // every sub-bout's sideA/sideB. Without the matchSideA/matchSideB filter,
+    // the row would show "Team Alpha" on every row instead of the bout number.
+    const sub = { position: 2, sideA: 'Team Alpha', sideB: 'Team Beta', ipponsA: [], ipponsB: [], winner: 'Team Beta' };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 1, lineupA: null, lineupB: null, teamSize: 5,
+      matchSideA: 'Team Alpha', matchSideB: 'Team Beta',
+    });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    // Should show bout number "2", not team names
+    expect(collectText(shiro)).toBe('2');
+    expect(collectText(aka)).toBe('2');
+  });
+
+  it('BoutSubRow still shows real competitor names when they differ from match-level teams', () => {
+    // Kachinuki: sub-bout sideA/sideB are individual competitor names, not team names.
+    const sub = { position: 3, sideA: 'Tanaka', sideB: 'Suzuki', ipponsB: ['M'], ipponsA: [] };
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 2, lineupA: null, lineupB: null, teamSize: 5,
+      matchSideA: 'Team Alpha', matchSideB: 'Team Beta',
+    });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    expect(collectText(shiro)).toBe('Suzuki');
+    expect(collectText(aka)).toBe('Tanaka');
+  });
+
   it('IndividualScore: same-name head-to-head does NOT mark BOTH sides as winners on an ippon-less decision', () => {
     // mp-13y: when both sides share a NAME and no ids disambiguate them, a
     // hantei/fusensho decision must not flag a win on both sides (the

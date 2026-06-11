@@ -155,12 +155,12 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
         </div>
         <div className="topbar__spacer"></div>
         {/* Connection-status indicator for the SSE stream. Labelled "Connected"
-            (not "Live") so it reads as the data-connection state, not "matches
-            are live", and styled as a calm STATIC dot — deliberately not the
-            pulsing `.dot--live` liveness signal, which belongs to on-court
-            activity (the live-strip below). Only the disconnected state pulses,
-            so motion flags the moment that actually needs attention. role=status
-            + aria-live=polite announces the change without alarming. */}
+            so it reads as the data-connection state, not on-court match
+            activity, and styled as a calm STATIC dot, deliberately not the
+            pulsing `.dot--live` signal that flags a match in progress (the
+            strip below). Only the disconnected state pulses, so motion flags
+            the moment that actually needs attention. role=status + aria-live
+            announce the change to assistive tech without alarming. */}
         <span
           className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
           role="status"

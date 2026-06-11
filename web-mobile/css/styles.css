@@ -187,10 +187,10 @@ a:hover {
 }
 
 /* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
-   `.dot--live` liveness signal (Principle 3): a healthy data connection is a
-   calm, passive status, so its dot is static navy. Only the disconnected state
-   moves — motion is reserved for the state that actually needs attention. This
-   keeps it distinct from the live-strip's pulsing "N matches live" dot sitting
+   `.dot--live` match-in-progress signal (Principle 3): a healthy data
+   connection is a calm, passive status, so its dot is static navy. Only the
+   disconnected state moves, so motion is reserved for the state that actually
+   needs attention. This keeps it distinct from the strip's pulsing dot sitting
    directly below it. */
 .topbar__conn {
   display: inline-flex;

@@ -242,6 +242,9 @@ func ApplyTournamentDefaults(t *Tournament) {
 	if t.Mode == "" {
 		t.Mode = TournamentModeOfficiated
 	}
+	if len(t.Courts) == 0 {
+		t.Courts = []string{"A"}
+	}
 }
 
 // Days returns the ordered list of DD-MM-YYYY calendar day strings

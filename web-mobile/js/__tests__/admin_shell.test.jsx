@@ -209,3 +209,18 @@ describe('CompCard', () => {
     expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('·');
   });
 });
+
+describe('AdminDashboard', () => {
+  let AdminDashboard;
+  beforeAll(() => { AdminDashboard = window.AdminDashboard; });
+
+  it('renders a tournament with null courts without throwing', () => {
+    const t = { name: 'Null Courts Cup', courts: null };
+    expect(() => AdminDashboard({ tournament: t, competitions: [] })).not.toThrow();
+  });
+
+  it('renders a tournament with missing courts without throwing', () => {
+    const t = { name: 'Missing Courts Cup' };
+    expect(() => AdminDashboard({ tournament: t, competitions: [] })).not.toThrow();
+  });
+});

@@ -108,7 +108,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // DurationDays: default 1 for tournaments that predate this field
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
-  const [courts, setCourts] = useStateA(tournament.courts.length);
+  const [courts, setCourts] = useStateA((tournament.courts || []).length);
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
@@ -662,7 +662,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
-  const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
+  const safeCourts = tournament.courts || [];
+  const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
   const [error, setError] = useStateA("");
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
@@ -756,7 +757,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       startTime,
       date: normDate,
       teamSize: kind === "team" ? teamSize : 0,
-      courts: selectedCourts.length ? selectedCourts : [tournament.courts[0]],
+      courts: selectedCourts.length ? selectedCourts : [safeCourts[0] || "A"],
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,

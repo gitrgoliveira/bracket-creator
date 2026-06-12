@@ -2,7 +2,7 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, findActiveCourts, sideLabel, phaseLabel, TermD, poolNameOf, StreamingQR } from './display_helpers.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -375,12 +375,29 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         />;
     }
 
-    // No promoted match → white empty state (matches the white board chrome).
+    // ─── Empty-state redesign (mp-s99q) ──────────────────────────────────────
+    // No promoted match → white board with high-contrast empty state.
+    // Three sub-states: allCompleted / noMatches / between-matches.
+    // Headline uses var(--ink-1) (~10:1 on white) instead of the prior
+    // #9ca3af (2.5:1) which failed WCAG AA — critical for wall screens in
+    // bright halls.
+    // The completed check-badge colours mirror the playoffs/completed status
+    // palette used across the app: #ecfdf5 bg / #065f46 ink / #a7f3d0 border.
+    // Active-courts wayfinding strip shows sibling courts with running or
+    // scheduled matches so operators can redirect spectators.
+    // ─────────────────────────────────────────────────────────────────────────
+    const qrUrl = typeof window !== 'undefined' ? window.location.origin + '/viewer' : '';
+    const otherCourts = useMD(
+        () => findActiveCourts(tournament, competitions).filter(c => c !== court),
+        [tournament, competitions, court]
+    );
+
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
             display: "flex", flexDirection: "column", padding: "4vh 5vw",
         }}>
+            {/* Court header + black rule */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh", fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
                 <div>{tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}</div>
                 {!connected && (
@@ -391,19 +408,72 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     </span>
                 )}
             </div>
-            <div data-testid={allCompleted ? "display-all-completed" : "display-no-matches"}
-                style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "2vh", fontSize: "5vh", color: "#9ca3af", textAlign: "center", padding: "0 5vw" }}>
-                {allCompleted ? (
-                    <>
-                        <span style={{ fontSize: "6vh", color: "#16a34a" }}>✓</span>
-                        <span>All matches completed on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
-                    </>
-                ) : noMatches ? (
-                    <span>No matches scheduled</span>
-                ) : (
-                    <span>No match in progress on <TermD name="shiaijo">Shiaijo</TermD> {court}</span>
+
+            {/* Centre block — anchored slightly above dead-centre */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: "8vh", gap: "3vh" }}>
+
+                {/* a) Status icon + headline */}
+                <div data-testid={allCompleted ? "display-all-completed" : "display-no-matches"}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2vh", textAlign: "center", maxWidth: "60vw" }}>
+                    {allCompleted ? (
+                        <>
+                            {/* Drawn SVG checkmark — NOT the raw ✓ Unicode glyph */}
+                            <div style={{
+                                width: "8vh", height: "8vh", borderRadius: "50%",
+                                /* completed-status palette: mirrors playoffs/completed used across the app */
+                                background: "#ecfdf5", border: "2px solid #a7f3d0",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                flexShrink: 0,
+                            }}>
+                                <svg viewBox="0 0 24 24" width="4.5vh" height="4.5vh" fill="none"
+                                    stroke="#065f46" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                    aria-hidden="true">
+                                    <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                            </div>
+                            <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
+                                All matches completed
+                            </div>
+                        </>
+                    ) : noMatches ? (
+                        <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
+                            No matches scheduled
+                        </div>
+                    ) : (
+                        <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
+                            No match in progress
+                        </div>
+                    )}
+                </div>
+
+                {/* b) QR affordance — "Scan for results" */}
+                {qrUrl && (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "1.5vw", marginTop: "1vh" }}>
+                        <StreamingQR url={qrUrl} />
+                        <span style={{ fontSize: "2vh", color: "var(--ink-2)", fontWeight: 500 }}>Scan for results</span>
+                    </div>
+                )}
+
+                {/* c) IN PROGRESS wayfinding strip — other active courts */}
+                {otherCourts.length > 0 && (
+                    <div data-testid="tvd-active-courts" style={{ display: "inline-flex", alignItems: "center", gap: "1.2vw", flexWrap: "wrap", justifyContent: "center", marginTop: "1vh" }}>
+                        <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>IN PROGRESS</span>
+                        {otherCourts.map(c => (
+                            <span key={c} data-court={c} style={{
+                                display: "inline-flex", alignItems: "center", gap: "0.5vw",
+                                background: "var(--accent-soft)", color: "var(--accent)",
+                                borderRadius: "0.6vw", padding: "0.5vh 1.2vw",
+                                fontWeight: 700, fontSize: "1.8vh",
+                            }}>
+                                {/* Static navy dot — wayfinding only, NOT pulsing */}
+                                <span style={{ width: "0.9vh", height: "0.9vh", borderRadius: "50%", background: "var(--accent)", display: "inline-block", flexShrink: 0 }} />
+                                Shiaijo {c}
+                            </span>
+                        ))}
+                    </div>
                 )}
             </div>
+
             {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="tv" />}
         </div>
     );

@@ -1034,8 +1034,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const primaryIds = useMemo(() => new Set(resolveEntryPlayerIds(primaryEntry, roster)), [primaryEntry, roster]);
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
-  // Compact "watched upcoming" list shown when ≥2 entities are watched and no
-  // single primary is pinned. Bounded so it stays glanceable on a phone.
+  // Compact "watched upcoming" list shown when ≥2 entities are watched and
+  // there are upcoming matches (regardless of whether a primary is pinned).
+  // Bounded so it stays glanceable on a phone.
   const watchedUpcoming = useMemo(
     () => buildWatchlistUpcoming(resolvedWatched, bothSidesMatches, WATCHED_UPCOMING_LIST_MAX),
     [resolvedWatched, bothSidesMatches]

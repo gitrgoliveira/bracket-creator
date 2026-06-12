@@ -2383,6 +2383,42 @@ a:hover {
   border-radius: 1px 1px 0 0;
 }
 
+.viewer__filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.viewer__filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
 .viewer__body {
   padding: 14px 16px 80px;
   flex: 1;

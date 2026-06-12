@@ -1939,9 +1939,10 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   // current members). ALL watched players are highlighted via highlightPlayers
   // (a Set of ids+names); myPlayer (the primary, when it's a single player)
   // still feeds the "your next match" opponent-side logic.
-  const [watchlist] = useWatchlist();
+  const [watchlist, setWatchlist] = useWatchlist();
   const [primaryKey] = usePrimaryWatch();
   const compRoster = useMemo(() => buildRoster([c]), [c]);
+  const rosterById = useMemo(() => new Map(compRoster.map((p) => [p.id, p])), [compRoster]);
   const resolvedWatched = useMemo(() => resolveWatchedPlayers(watchlist, compRoster), [watchlist, compRoster]);
   const watchedIds = useMemo(() => new Set(resolvedWatched.map((p) => String(p.id))), [resolvedWatched]);
   const watchedNames = useMemo(() => new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)), [resolvedWatched]);
@@ -2080,6 +2081,36 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             </button>
           ))}
         </div>
+        {hasActiveFilter && (
+          <div className="viewer__filter-bar">
+            <span className="viewer__filter-label">Filter:</span>
+            {watchlist.map((entry) => {
+              const k = entryKey(entry);
+              if (entry.type === "dojo") {
+                return (
+                  <span key={k} className="pmf__chip pmf__chip--dojo">
+                    <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
+                    {entry.dojo}
+                    <button onClick={() => setWatchlist(watchlist.filter((e) => entryKey(e) !== k))} aria-label={`Remove ${entry.dojo}`}>×</button>
+                  </span>
+                );
+              }
+              const pRecord = rosterById.get(entry.id);
+              const name = (pRecord && pRecord.name) || entry.name || "(unknown)";
+              const number = pRecord?.number || "";
+              return (
+                <span key={k} className="pmf__chip">
+                  {number && <span className="num-prefix">{number}</span>}
+                  {name}
+                  <button onClick={() => setWatchlist(watchlist.filter((e) => entryKey(e) !== k))} aria-label={`Remove ${name}`}>×</button>
+                </span>
+              );
+            })}
+            {watchlist.length > 1 && (
+              <button className="viewer__filter-clear" onClick={() => setWatchlist([])}>Clear all</button>
+            )}
+          </div>
+        )}
         <div className="viewer__body">
           {tab === "overview" && (
             <ViewerOverview

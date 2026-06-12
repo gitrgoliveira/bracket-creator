@@ -1943,18 +1943,21 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	t.Run("empty prefix is always exempt", func(t *testing.T) {
 		seed("pfx-empty-1", "EmptyPfx1", "")
 		seed("pfx-empty-2", "EmptyPfx2", "")
-		_, valErr := checkUniqueCompFields(store, "NewComp", "", "")
+		infraErr, valErr := checkUniqueCompFields(store, "NewComp", "", "")
+		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
-		_, valErr := checkUniqueCompFields(store, "AnotherNewComp", "  ", "")
+		infraErr, valErr := checkUniqueCompFields(store, "AnotherNewComp", "  ", "")
+		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("no collision for distinct prefixes", func(t *testing.T) {
 		seed("pfx-k", "KendoComp", "K")
-		_, valErr := checkUniqueCompFields(store, "DistinctName", "M", "")
+		infraErr, valErr := checkUniqueCompFields(store, "DistinctName", "M", "")
+		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
@@ -1974,7 +1977,8 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
 		seed("pfx-self", "SelfComp", "Z")
-		_, valErr := checkUniqueCompFields(store, "SelfComp", "Z", "pfx-self")
+		infraErr, valErr := checkUniqueCompFields(store, "SelfComp", "Z", "pfx-self")
+		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 

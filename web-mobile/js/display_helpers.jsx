@@ -4,7 +4,11 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 
-const { useMemo: useMD, useEffect: useED } = React;
+// NOTE: this module is the shared *leaf* — other modules import its pure
+// functions (findRunningOnCourt, sideLabel, …). Do NOT destructure hooks off
+// `React` at module-evaluation time: that would throw if the leaf is imported
+// before React loads or in a non-React context, taking the pure helpers down
+// with it. StreamingQR/TermD reference `React.*` lazily, at call time instead.
 
 // TermD — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and display.jsx doesn't matter.
@@ -251,9 +255,9 @@ function StreamingQR({ url, label }) {
     // Use a stable object as the ref container so the useEffect dependency
     // doesn't change on every render. The canvas element is stored in
     // canvasHolder.el after the JSX ref callback fires.
-    const canvasHolder = useMD(() => ({ el: null }), []);
+    const canvasHolder = React.useMemo(() => ({ el: null }), []);
 
-    useED(() => {
+    React.useEffect(() => {
         const canvas = canvasHolder.el;
         if (!canvas || !url) return undefined;
         // renderQR may be available on window if qr.jsx has been imported

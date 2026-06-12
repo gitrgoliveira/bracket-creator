@@ -7,6 +7,21 @@ import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './mat
 
 const { useMemo: useMD } = React;
 
+// emptyStateHeadline — headline text for the TvDisplay empty state, by sub-state.
+// The third case ("No match in progress") is a defensive fallback that is
+// UNREACHABLE under the current promote logic: countCourtMatches and
+// findUpcomingOnCourt/findRunningOnCourt share the same bracketSidesReady
+// predicate, so any running/scheduled match the counts see is also
+// auto-promoted — and the empty state only renders when nothing is promoted
+// (so counts.running and counts.scheduled are both 0 here). It is kept so that
+// if that invariant is ever broken the screen degrades to a correct message
+// rather than a wrong one. Exported + unit-tested per the PR #274 review (mp-s99q).
+function emptyStateHeadline(allCompleted, noMatches) {
+    if (allCompleted) return "All matches completed";
+    if (noMatches) return "No matches scheduled";
+    return "No match in progress";
+}
+
 // TvWhiteTeamBoard — mp-13y: white scoreboard for a running TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
 // team case with a light board: court header + black rule, team name row
@@ -415,35 +430,25 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                 {/* a) Status icon + headline */}
                 <div data-testid={allCompleted ? "display-all-completed" : "display-no-matches"}
                     style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2vh", textAlign: "center", maxWidth: "60vw" }}>
-                    {allCompleted ? (
-                        <>
-                            {/* Drawn SVG checkmark — NOT the raw ✓ Unicode glyph */}
-                            <div style={{
-                                width: "8vh", height: "8vh", borderRadius: "50%",
-                                /* completed-status palette: mirrors playoffs/completed used across the app */
-                                background: "#ecfdf5", border: "2px solid #a7f3d0",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                flexShrink: 0,
-                            }}>
-                                <svg viewBox="0 0 24 24" width="4.5vh" height="4.5vh" fill="none"
-                                    stroke="#065f46" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                                    aria-hidden="true">
-                                    <polyline points="20 6 9 17 4 12" />
-                                </svg>
-                            </div>
-                            <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
-                                All matches completed
-                            </div>
-                        </>
-                    ) : noMatches ? (
-                        <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
-                            No matches scheduled
-                        </div>
-                    ) : (
-                        <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
-                            No match in progress
+                    {allCompleted && (
+                        /* Drawn SVG checkmark — NOT the raw ✓ Unicode glyph */
+                        <div style={{
+                            width: "8vh", height: "8vh", borderRadius: "50%",
+                            /* completed-status palette: mirrors playoffs/completed used across the app */
+                            background: "#ecfdf5", border: "2px solid #a7f3d0",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            flexShrink: 0,
+                        }}>
+                            <svg viewBox="0 0 24 24" width="4.5vh" height="4.5vh" fill="none"
+                                stroke="#065f46" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                                aria-hidden="true">
+                                <polyline points="20 6 9 17 4 12" />
+                            </svg>
                         </div>
                     )}
+                    <div style={{ fontSize: "5vh", fontWeight: 700, color: "var(--ink-1)", textWrap: "balance", lineHeight: 1.15 }}>
+                        {emptyStateHeadline(allCompleted, noMatches)}
+                    </div>
                 </div>
 
                 {/* b) QR affordance — "Scan for results" */}
@@ -479,4 +484,4 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup };
+export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, emptyStateHeadline };

@@ -1036,6 +1036,19 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     [resolvedWatched, bothSidesMatches]
   );
 
+  // mp-42rg: de-duplicate the global NOW section — exclude matches already
+  // visible in the watched-upcoming list so the same card doesn't appear
+  // twice on a phone viewport. When every running match is tracked, the
+  // hero-running section disappears entirely (hybrid approach).
+  const watchedUpcomingIds = useMemo(
+    () => new Set(watchedUpcoming.map((m) => m.id)),
+    [watchedUpcoming]
+  );
+  const globalRunning = useMemo(
+    () => running.filter((m) => !watchedUpcomingIds.has(m.id)),
+    [running, watchedUpcomingIds]
+  );
+
   // On-deck matches for NON-primary watched players (the quiet, rate-limited
   // banner path). A match that involves the primary is handled by the loud
   // path, so it is excluded here.
@@ -1154,11 +1167,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
           {/* mp-cw1: Browser push notification opt-in toggle. */}
           <NotificationSettings />
 
-          {running.length > 0 && (
+          {globalRunning.length > 0 && (
             <div className="hero-running">
-              <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(running.length, "match", "matches")}</div>
+              <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(globalRunning.length, "match", "matches")}</div>
               <div className="vsched hero-running__vsched">
-                {running.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+                {globalRunning.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </div>
           )}
@@ -1677,6 +1690,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
                 m={m}
                 tweaks={{ showDojo: true }}
                 showCompetition
+                hideNowBadge
                 onClick={() => onMatchClick && onMatchClick(m)}
               />
             ))}
@@ -2422,7 +2436,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches,
   );
 }
 
-const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
+const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, hideNowBadge }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
@@ -2459,7 +2473,7 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight 
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && <span className="bc-running">● NOW</span>}
+        {m.status === "running" && !hideNowBadge && <span className="bc-running">● NOW</span>}
         {m.status === "completed" && <span className="vsched-item__status">Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>

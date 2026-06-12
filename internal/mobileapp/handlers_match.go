@@ -770,23 +770,22 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					return nil
 				}
 			}
-			// Correction audit: when the incoming result is completed AND the
-			// stored match is already completed it is a correction — require
-			// a non-empty CorrectionReason for traceability. Check runs inside
-			// the tx so the is-completed read is race-free (same lock). We skip
-			// withdrawal-type decisions here since those go through the /decision
-			// endpoint and are not corrections.
+			// Correction audit: overwriting an already-completed result
+			// (completed -> completed) is a correction and requires a non-empty
+			// CorrectionReason for traceability. This applies to ANY decision
+			// type, including a withdrawal (kiken/fusenpai) submitted via /score
+			// — exempting those would let a finalized result be overwritten with
+			// no audit reason. The check runs inside the tx so the is-completed
+			// read is race-free (same lock). A first finalization (existing
+			// status is not completed) needs no reason.
 			if result.Status == state.MatchStatusCompleted {
-				isWithdrawalDecision := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
-				if !isWithdrawalDecision {
-					existing := lookupMatchStatusUnderTx(stx, id, mid)
-					if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
-						engErr = &ValidationError{
-							Field:   "correctionReason",
-							Message: "correcting a completed match result requires a non-empty correctionReason",
-						}
-						return nil
+				existing := lookupMatchStatusUnderTx(stx, id, mid)
+				if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
+					engErr = &ValidationError{
+						Field:   "correctionReason",
+						Message: "correcting a completed match result requires a non-empty correctionReason",
 					}
+					return nil
 				}
 			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"

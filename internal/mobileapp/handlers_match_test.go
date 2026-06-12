@@ -1453,6 +1453,44 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "correctionReason")
 	})
 
+	t.Run("withdrawal decision cannot overwrite a finalized result without correctionReason", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// Establish a finalized result.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID:      "PoolA-1",
+				SideA:   "Alice",
+				SideB:   "Bob",
+				Winner:  "Alice",
+				Status:  state.MatchStatusCompleted,
+				IpponsA: []string{"M", "K"},
+			},
+		}))
+
+		// A withdrawal (kiken) overwrite — valid decision payload (decisionBy +
+		// 2-0 scoreline + winner) but no correctionReason — must still be
+		// rejected: the decision field must not bypass the correction gate.
+		body, _ := json.Marshal(state.MatchResult{
+			ID:         "PoolA-1",
+			SideA:      "Alice",
+			SideB:      "Bob",
+			Winner:     "Bob", // shiro survives; aka withdrew
+			Decision:   "kiken-voluntary",
+			DecisionBy: "aka",
+			IpponsB:    []string{"M", "K"},
+			Status:     state.MatchStatusCompleted,
+			// CorrectionReason deliberately omitted.
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "correctionReason")
+	})
+
 	t.Run("first completion does not require correctionReason", func(t *testing.T) {
 		r, _, compID := setupSelfRunScoreRouter(t, "secret")
 

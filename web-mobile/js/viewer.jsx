@@ -1485,7 +1485,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
         {nextMatch.status === "running" ? (
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <span className="dot--running" style={{ width: 8, height: 8, borderRadius: '50%' }}></span>
-            LIVE NOW
+            CURRENT
           </span>
         ) : (
           showDojoEyebrow ? `${entityLabel} · next up` : "Your next match"

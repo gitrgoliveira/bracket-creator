@@ -1041,11 +1041,11 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // twice on a phone viewport. When every running match is tracked, the
   // hero-running section disappears entirely (hybrid approach).
   const watchedUpcomingIds = useMemo(
-    () => new Set(watchedUpcoming.map((m) => m.id)),
+    () => new Set(watchedUpcoming.map((m) => `${m.compId}:${m.id}`)),
     [watchedUpcoming]
   );
   const globalRunning = useMemo(
-    () => running.filter((m) => !watchedUpcomingIds.has(m.id)),
+    () => running.filter((m) => !watchedUpcomingIds.has(`${m.compId}:${m.id}`)),
     [running, watchedUpcomingIds]
   );
 

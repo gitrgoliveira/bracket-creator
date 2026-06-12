@@ -63,8 +63,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [callingKey, setCallingKey] = useStateSh(null);
     const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // Short-circuit to [] for a blank/unknown court so an accidental landing
+    // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
+    // Same condition as courtKnown below.
     const allMatches = useMemoSh(
-        () => window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court),
+        () => (tournament.courts || []).includes(court)
+            ? window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court)
+            : [],
         [tournament, court]
     );
     const { sorted, running, scheduled, completed } = useMemoSh(

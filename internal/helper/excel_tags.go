@@ -85,19 +85,23 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
-					// Top-left corner: OffsetX/Y in px (96 DPI). At 390 pt row height
-					// (≈520 px) the 150 pt centred number starts at ~160 px from the
-					// top, so a 100 px QR (200 px × ScaleX 0.5) at offset (5, 5)
-					// sits above the text without overlap.
+					// Bottom-left corner (OffsetX/Y in px at 96 DPI).
+					// Tags are worn on the competitor's leg and read from far away —
+					// the large centred number is primary. The QR is secondary: it
+					// lets the competitor scan their own public profile with a phone.
+					// At 409 pt row height (≈545 px), the 200 pt number occupies
+					// roughly the middle 400 px. A 60 px QR (200 px × ScaleX 0.3) at
+					// OffsetY 480 (= 545 − 60 − 5) sits in the bottom-left corner,
+					// well clear of the number and unambiguously secondary.
 					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
 						Extension: ".png",
 						File:      qrPNG,
 						Format: &excelize.GraphicOptions{
 							PrintObject: &printObj,
 							OffsetX:     5,
-							OffsetY:     5,
-							ScaleX:      0.5,
-							ScaleY:      0.5,
+							OffsetY:     480,
+							ScaleX:      0.3,
+							ScaleY:      0.3,
 							Positioning: "oneCell",
 						},
 					}); err != nil {

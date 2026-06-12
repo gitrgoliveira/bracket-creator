@@ -372,7 +372,7 @@ function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip })
         <div
             className={`score-edit-row shiaijo-row ${isRunning ? "score-edit-row--running" : ""} ${isComplete ? "score-edit-row--complete" : ""} ${selected ? "is-selected" : ""}`}
             onClick={() => onSelect(m)} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(m); } }}
+            onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(m); } }}
         >
             <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
@@ -384,8 +384,7 @@ function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip })
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 </div>
                 <div className="score-edit-row__score">
-                    {isComplete && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {isRunning && <span className="bc-running">●</span>}
+                    {(isComplete || isRunning) && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                 </div>
                 <div className="score-edit-row__side">

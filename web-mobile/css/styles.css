@@ -927,11 +927,11 @@ a:hover {
 
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+    box-shadow: 0 0 0 4px rgba(29, 53, 87, 0.18);
   }
 
   50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 6px rgba(29, 53, 87, 0);
   }
 }
 
@@ -2955,18 +2955,18 @@ button.pool-match-row {
 
 .hero-running {
   background: var(--surface);
-  border: 1px solid var(--red);
+  border: 1px solid var(--accent);
   border-radius: var(--r-lg);
   padding: 12px 14px 14px;
   margin-bottom: 16px;
-  box-shadow: 0 0 0 4px var(--red-soft);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 .hero-running__lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--red);
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 6px;

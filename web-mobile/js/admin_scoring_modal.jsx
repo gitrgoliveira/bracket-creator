@@ -1982,6 +1982,21 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const playerAName = pickFromLineup(lineupA) || existingSubAtIdx?.sideA || "";
             const playerBName = pickFromLineup(lineupB) || existingSubAtIdx?.sideB || "";
 
+            // Feature 2 / layout: each player's name select lives WITH that
+            // side's score controls (grouped, and aligned down the sheet),
+            // not in the position column. Compute the per-side name props here
+            // so they can ride on the rowSides entries below.
+            const matchStartedForLineup = m.status === "running" || m.status === "completed";
+            const lineupPosKey = posKey5 || posKeyN;
+            const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
+            const teamIdA = teamIdForSide(m.sideA); // AKA = right
+            const rosterB = rosterForSide(m.sideB);
+            const rosterA = rosterForSide(m.sideA);
+            const pickPlayer = (teamId, lineup) => (value) => {
+              if (matchStartedForLineup) setInlineLineupPrompt({ teamId, posKey: lineupPosKey, value, lineup });
+              else submitInlineLineup(teamId, lineup, lineupPosKey, value, "");
+            };
+
             // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
             // flag AND discard the _preFusensho snapshot so the bout becomes
@@ -2003,6 +2018,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
                 }),
                 color: "shiro", label: "SHIRO",
+                playerName: playerBName, roster: rosterB, onSelectName: pickPlayer(teamIdB, lineupB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -2013,6 +2029,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
                 }),
                 color: "aka", label: "AKA",
+                playerName: playerAName, roster: rosterA, onSelectName: pickPlayer(teamIdA, lineupA),
               },
             ];
 
@@ -2033,74 +2050,43 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             return (
               <div key={idx} className="team-sub-match">
                 <div className="team-sub-match__pos">
-                  {/* T131 + Feature 2: position label + inline player
-                      selects (SHIRO left, AKA right). Selecting a name
-                      calls putMatchLineup immediately; mid-match edits
-                      require an audit reason (ReasonPrompt). */}
+                  {/* Just the bout position (Senpo/Jiho/…). Player names now
+                      live with each side's score controls below, so every
+                      bout's columns line up down the sheet. */}
                   <span style={{ fontWeight: 700 }}>{renderPositionLabel(posLabel)}</span>
-                  {(() => {
-                    const matchStarted = m.status === "running" || m.status === "completed";
-                    const teamIdA = teamIdForSide(m.sideA);
-                    const teamIdB = teamIdForSide(m.sideB);
-                    const rosterB = rosterForSide(m.sideB); // SHIRO
-                    const rosterA = rosterForSide(m.sideA); // AKA
-                    if (rosterA.length === 0 && rosterB.length === 0) {
-                      // No roster data yet — show the static caption as fallback
-                      return (playerAName || playerBName) ? (
-                        <span style={{ display: "block", fontSize: 11, color: "var(--ink-3)", fontWeight: 500, marginTop: 2 }}>
-                          {playerBName || "?"} (SHIRO) vs {playerAName || "?"} (AKA)
-                        </span>
-                      ) : null;
-                    }
-                    const handleSelect = (side, teamId, lineup, posKey, value) => {
-                      if (matchStarted) {
-                        // Require audit reason before calling the API.
-                        setInlineLineupPrompt({ teamId, posKey, value, lineup });
-                      } else {
-                        submitInlineLineup(teamId, lineup, posKey, value, "");
-                      }
-                    };
-                    const selectStyle = { fontSize: 11, padding: "1px 4px", maxWidth: 130, border: "1px solid var(--line, #ddd)", borderRadius: 3, background: "var(--bg, white)" };
-                    return (
-                      <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
-                        {/* SHIRO (White) = sideB = left */}
-                        <select
-                          aria-label={`${posLabel} SHIRO player`}
-                          style={selectStyle}
-                          disabled={inlineLineupSaving}
-                          value={playerBName || ""}
-                          onChange={(e) => handleSelect("b", teamIdB, lineupB, posKey5 || posKeyN, e.target.value)}
-                        >
-                          <option value="">SHIRO —</option>
-                          {rosterB.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <span style={{ fontSize: 10, color: "var(--ink-3)" }}>vs</span>
-                        {/* AKA (Red) = sideA = right */}
-                        <select
-                          aria-label={`${posLabel} AKA player`}
-                          style={selectStyle}
-                          disabled={inlineLineupSaving}
-                          value={playerAName || ""}
-                          onChange={(e) => handleSelect("a", teamIdA, lineupA, posKey5 || posKeyN, e.target.value)}
-                        >
-                          <option value="">AKA —</option>
-                          {rosterA.map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                      </div>
-                    );
-                  })()}
                 </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
                       <div className={`team-sub-match__side ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
-                        {/* Row 1: side label + point slots + M/K/D/T/H buttons.
-                            In compact mode these align on one horizontal
-                            channel-strip; in roomy mode the wrapper is
-                            display:contents so the legacy column stack is
-                            preserved without rewriting CSS. */}
+                        {/* Name select grouped with this side's score controls.
+                            SHIRO chip + dropdown (or static name when there's
+                            no roster metadata). Mid-match changes gate through
+                            the audit ReasonPrompt; pre-match are saved direct. */}
+                        <div className="tsm-name">
+                          <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
+                          {rs.roster && rs.roster.length > 0 ? (
+                            <select
+                              className="tsm-name__select"
+                              aria-label={`${posLabel} ${rs.label} player`}
+                              disabled={inlineLineupSaving}
+                              value={rs.playerName || ""}
+                              onChange={(e) => rs.onSelectName(e.target.value)}
+                            >
+                              <option value="">Add player…</option>
+                              {rs.roster.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                          ) : (
+                            rs.playerName
+                              ? <span className="tsm-name__static">{rs.playerName}</span>
+                              : <span className="tsm-name__static tsm-name__static--empty">—</span>
+                          )}
+                        </div>
+                        {/* Row 1: point slots + M/K/D/T/H buttons. In compact
+                            mode these align on one horizontal channel-strip;
+                            in roomy mode the wrapper is display:contents so the
+                            legacy column stack is preserved. */}
                         <div className="tsm-row-1">
-                          <div className="tsm-side-label">{rs.label}</div>
                           {/* Point slots */}
                           <div className="team-sub-match__pts">
                             {[0, 1].map(i => (

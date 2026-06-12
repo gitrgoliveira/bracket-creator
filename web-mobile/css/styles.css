@@ -4618,6 +4618,44 @@ button.pool-match-row {
   border-radius: 4px;
 }
 
+/* Per-side player name, grouped with that side's score controls so every
+   bout's columns align down the sheet (the physical kendo scoresheet). */
+.tsm-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.team-sub-match__side--right .tsm-name { flex-direction: row-reverse; }
+.tsm-name__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--ink-1);
+}
+.tsm-name__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tsm-name__static {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-sub-match__side--right .tsm-name__static { text-align: right; }
+.tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
+
+/* Compact (operator console inline) — tighter name row. */
+.editor-modal--compact .tsm-name { margin-bottom: 4px; }
+.editor-modal--compact .tsm-name__select { height: 28px; font-size: 11px; }
+
 .team-sub-match__score--a-win {
   background: var(--white-side);
 }

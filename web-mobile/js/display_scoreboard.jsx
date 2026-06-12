@@ -2,7 +2,7 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, findActiveCourts, sideLabel, phaseLabel, TermD, poolNameOf, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, StreamingQR } from './display_helpers.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -403,7 +403,11 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // ─────────────────────────────────────────────────────────────────────────
     const qrUrl = typeof window !== 'undefined' ? window.location.origin + '/viewer' : '';
     const otherCourts = useMD(
-        () => findActiveCourts(tournament, competitions).filter(c => c !== court),
+        () => (tournament?.courts || []).filter(c => {
+            if (c === court) return false;
+            const cts = countCourtMatches(competitions, c);
+            return cts.running + cts.scheduled > 0;
+        }),
         [tournament, competitions, court]
     );
 

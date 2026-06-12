@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -318,14 +319,14 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
-			if req.Force && req.ChangeReason == "" {
+			if req.Force && strings.TrimSpace(req.ChangeReason) == "" {
 				respErr = &httpErr{
 					status: http.StatusBadRequest,
 					body:   gin.H{"error": "changeReason is required when force=true"},
 				}
 				return nil
 			}
-			lineup.ChangeReason = req.ChangeReason
+			lineup.ChangeReason = strings.TrimSpace(req.ChangeReason)
 			setLineup := stx.SetTeamLineup
 			if req.Force {
 				setLineup = stx.SetTeamLineupForce

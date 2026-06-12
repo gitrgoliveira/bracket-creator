@@ -649,7 +649,7 @@ const LINEUP_PRESETS = ["Late lineup", "Substitution", "Correction", "Other"];
 // (e.g. admin_schedule.jsx which cannot use cross-file ES imports).
 window.LINEUP_PRESETS = LINEUP_PRESETS;
 
-function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal" }) {
+function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -659,7 +659,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // correctly stay on the individual editor.
   const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} />;
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -1047,7 +1047,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
 
@@ -1378,7 +1378,7 @@ function renderPositionLabel(label) {
 // to work (scoring_modal_match_lineup.test.jsx imports directly from here).
 import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
 
-function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal" }) {
+function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   const numberedPositions = TEAM_POSITIONS.slice(0, teamSize);
@@ -1877,7 +1877,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
-            <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
 

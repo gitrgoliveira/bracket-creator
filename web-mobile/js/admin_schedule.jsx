@@ -796,7 +796,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     setError("");
     setSaving(true);
     try {
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch, reason);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), reason);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast("Match lineup saved");
@@ -874,7 +874,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         setShowLineupReasonPrompt(true);
         return;
       }
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch, "");
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), "");
       // Apply cloned values into local state
       const next = {};
       positions.forEach(p => {

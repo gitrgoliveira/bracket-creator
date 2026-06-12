@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -239,6 +240,15 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// Skip setup/unstarted comps — they have no real bouts yet, mirroring
 			// compMatches() in viewer.jsx.
 			if comp == nil || comp.Status == "" || comp.Status == state.CompStatusSetup {
+				continue
+			}
+
+			// Skip comps whose court list does not include the requested court.
+			// Match courts are resolved into comp.Courts at write time, so any
+			// match on this court will only appear in a comp that lists it.
+			// If comp.Courts is empty, fall through; the per-match court
+			// filter below still applies.
+			if len(comp.Courts) > 0 && !slices.Contains(comp.Courts, court) {
 				continue
 			}
 

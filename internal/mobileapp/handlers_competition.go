@@ -324,9 +324,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
-		// the tournament version — empty courts is allowed because the
-		// engine applies a 1-court default and the import handler has
-		// the same fallback). Defense against direct API callers
+		// the tournament version: empty courts are allowed here because
+		// they are immediately resolved to the tournament's courts via
+		// resolveCompetitionCourts on the next line, so every match ends
+		// up with a real court label). Defense against direct API callers
 		// sending multi-character labels.
 		if err := validateCompetitionCourts(comp.Courts); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})

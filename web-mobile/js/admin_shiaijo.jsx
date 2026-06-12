@@ -290,6 +290,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     variant="inline"
                                     match={selectedMatch}
                                     onClose={() => setSelectedKey(null)}
+                                    canClose={!!selectedKey}
                                     onSubmit={async (patch) => {
                                         try {
                                             await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);

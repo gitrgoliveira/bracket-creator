@@ -776,7 +776,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				isWithdrawalDecision := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 				if !isWithdrawalDecision {
 					existing := lookupMatchStatusUnderTx(stx, id, mid)
-					if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
+					if existing == state.MatchStatusCompleted && strings.TrimSpace(result.CorrectionReason) == "" {
 						engErr = &ValidationError{
 							Field:   "correctionReason",
 							Message: "correcting a completed match result requires a non-empty correctionReason",

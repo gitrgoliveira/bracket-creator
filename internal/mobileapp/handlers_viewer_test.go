@@ -269,7 +269,7 @@ func TestShiaijoMatches_CrossCompAggregation(t *testing.T) {
 	// Order: running (b-run) → scheduled (p-A-0905) → completed (b-done).
 	assert.Equal(t, []string{"b-run", "p-A-0905", "b-done"}, ids)
 	// Cross-competition: both comps contributed.
-	assert.Contains(t, resp.Matches[0].CompID, "c2")
+	assert.Equal(t, "c2", resp.Matches[0].CompID)
 	assert.Equal(t, "pool", resp.Matches[1].Phase)
 	assert.Equal(t, "bracket", resp.Matches[0].Phase)
 }

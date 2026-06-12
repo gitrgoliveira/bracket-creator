@@ -732,6 +732,9 @@ const API = {
         return res.json();
     },
     async putMatchLineup(compID, teamId, matchId, positions, password, force = false, reason = "") {
+        if (force && !(reason && reason.trim())) {
+            throw new Error("A change reason is required to override the lineup lock.");
+        }
         const body = { teamId, competitionId: compID, matchId, positions, force };
         if (reason) body.changeReason = reason;
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {

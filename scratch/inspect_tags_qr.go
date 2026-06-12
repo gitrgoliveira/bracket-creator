@@ -57,7 +57,10 @@ func main() {
 		log.Fatalf("SaveAs: %v", err)
 	}
 
-	abs, _ := os.Getwd()
+	abs, err := os.Getwd()
+	if err != nil {
+		abs = "."
+	}
 	fmt.Printf("Wrote %s/%s\n", abs, out)
 	fmt.Printf("Public URL: %s\n", publicURL)
 	fmt.Printf("Players: %d (QR per player × 2 tags = %d QR codes embedded)\n",

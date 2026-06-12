@@ -1943,11 +1943,6 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const compRoster = useMemo(() => buildRoster([c]), [c]);
   const rosterById = useMemo(() => new Map(compRoster.map((p) => [p.id, p])), [compRoster]);
-  const resolvedWatched = useMemo(() => resolveWatchedPlayers(watchlist, compRoster), [watchlist, compRoster]);
-  const watchedIds = useMemo(() => new Set(resolvedWatched.map((p) => String(p.id))), [resolvedWatched]);
-  const watchedNames = useMemo(() => new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)), [resolvedWatched]);
-  const hasActiveFilter = watchedIds.size > 0;
-
   // Restrict the filter bar chips to entries that are relevant to THIS competition:
   // player entries only shown when the player is in compRoster; dojo entries only
   // when at least one roster player belongs to that dojo.
@@ -1956,6 +1951,10 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     () => watchlist.filter((e) => e.type === "dojo" ? compDojos.has(e.dojo) : rosterById.has(e.id)),
     [watchlist, compDojos, rosterById],
   );
+  const resolvedWatched = useMemo(() => resolveWatchedPlayers(compWatchlist, compRoster), [compWatchlist, compRoster]);
+  const watchedIds = useMemo(() => new Set(resolvedWatched.map((p) => String(p.id))), [resolvedWatched]);
+  const watchedNames = useMemo(() => new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)), [resolvedWatched]);
+  const hasActiveFilter = compWatchlist.length > 0;
 
   const primaryEntry = useMemo(() => findPrimaryEntry(watchlist, primaryKey), [watchlist, primaryKey]);
   const myPlayer = useMemo(() => {

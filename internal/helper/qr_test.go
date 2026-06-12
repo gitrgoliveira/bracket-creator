@@ -18,25 +18,25 @@ func TestPlayerTagURL(t *testing.T) {
 			name:      "basic",
 			publicURL: "https://kendo.example.com",
 			number:    "K1",
-			want:      "https://kendo.example.com/viewer.html?playerNumber=K1",
+			want:      "https://kendo.example.com/?playerNumber=K1",
 		},
 		{
 			name:      "trailing slash is trimmed",
 			publicURL: "https://kendo.example.com/",
 			number:    "K1",
-			want:      "https://kendo.example.com/viewer.html?playerNumber=K1",
+			want:      "https://kendo.example.com/?playerNumber=K1",
 		},
 		{
 			name:      "number with special chars is query-escaped",
 			publicURL: "https://example.com",
 			number:    "A+B",
-			want:      "https://example.com/viewer.html?playerNumber=A%2BB",
+			want:      "https://example.com/?playerNumber=A%2BB",
 		},
 		{
 			name:      "number with space is query-escaped",
 			publicURL: "https://example.com",
 			number:    "K 1",
-			want:      "https://example.com/viewer.html?playerNumber=K+1",
+			want:      "https://example.com/?playerNumber=K+1",
 		},
 	}
 	for _, tc := range tests {

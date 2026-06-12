@@ -31,8 +31,12 @@ file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/nul
 [ -z "$file" ] && exit 0
 
 # Resolve the main checkout root: parent of the shared .git directory.
-common_git="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-[ -z "$common_git" ] && exit 0            # not in a git repo -> allow
+# --path-format=absolute requires Git ≥ 2.31; cd + pwd -P resolves portably
+# whether git-common-dir returns a relative or absolute path.
+_raw_git="$(git rev-parse --git-common-dir 2>/dev/null)"
+[ -z "$_raw_git" ] && exit 0              # not in a git repo -> allow
+common_git="$(cd "$_raw_git" 2>/dev/null && pwd -P)"
+[ -z "$common_git" ] && exit 0
 main_root="$(cd "$(dirname "$common_git")" 2>/dev/null && pwd -P)"
 [ -z "$main_root" ] && exit 0             # can't canonicalize root -> allow
 worktrees_dir="$main_root/.claude/worktrees"

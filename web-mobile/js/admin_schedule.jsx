@@ -726,6 +726,10 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+  // Audit reason for in-match lineup changes (allowDuringMatch=true + started).
+  // pendingPositions holds the positions map while the ReasonPrompt is open.
+  const [showLineupReasonPrompt, setShowLineupReasonPrompt] = useStateA(false);
+  const [pendingPositions, setPendingPositions] = useStateA(null);
 
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {
@@ -788,15 +792,11 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // The save then sends force=true so the backend bypasses the same freeze.
   const isLocked = !allowDuringMatch && (!!lockedAt || matchStarted);
 
-  const save = async () => {
+  const doSave = async (positionsOut, reason) => {
     setError("");
     setSaving(true);
     try {
-      const positionsOut = {};
-      Object.entries(values).forEach(([k, v]) => {
-        if (v) positionsOut[k] = v;
-      });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch, reason);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast("Match lineup saved");
@@ -810,6 +810,22 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = () => {
+    const positionsOut = {};
+    Object.entries(values).forEach(([k, v]) => {
+      if (v) positionsOut[k] = v;
+    });
+    // Audit reason required when saving a lineup mid-match (allowDuringMatch
+    // + the match has started). Show the ReasonPrompt overlay; doSave fires
+    // after the operator confirms.
+    if (allowDuringMatch && matchStarted) {
+      setPendingPositions(positionsOut);
+      setShowLineupReasonPrompt(true);
+      return;
+    }
+    doSave(positionsOut, "");
   };
 
   // Copy from previous: probe sibling lineups on demand (deferred until click
@@ -847,7 +863,18 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         const v = (sourceLineup.positions || {})[p.key] || "";
         if (v) positionsOut[p.key] = v;
       });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch);
+      // Like save(), require an audit reason when copying mid-match.
+      if (allowDuringMatch && matchStarted) {
+        // Pre-apply values into local state for immediate UI feedback;
+        // the actual API call fires after the operator confirms a reason.
+        const preview = {};
+        positions.forEach(p => { preview[p.key] = positionsOut[p.key] || ""; });
+        setValues(preview);
+        setPendingPositions(positionsOut);
+        setShowLineupReasonPrompt(true);
+        return;
+      }
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch, "");
       // Apply cloned values into local state
       const next = {};
       positions.forEach(p => {
@@ -922,6 +949,21 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         )}
       </div>
 
+      {/* Audit reason prompt for in-match lineup changes.
+          Shown when allowDuringMatch=true and the match has started.
+          Confirms a reason before calling doSave with force=true. */}
+      {showLineupReasonPrompt && (
+        <window.ReasonPrompt
+          label="Reason for lineup change"
+          presets={window.LINEUP_PRESETS || ["Late lineup", "Substitution", "Correction", "Other"]}
+          submitting={saving}
+          onConfirm={(r) => {
+            setShowLineupReasonPrompt(false);
+            doSave(pendingPositions || {}, r);
+          }}
+          onCancel={() => { setShowLineupReasonPrompt(false); setPendingPositions(null); }}
+        />
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {!isLocked && (
           <button

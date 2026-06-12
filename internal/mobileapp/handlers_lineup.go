@@ -36,6 +36,11 @@ type LineupRequest struct {
 	// after the match has started (officiated mode). Lineup validation
 	// still applies. Ignored by the round-scoped PUT.
 	Force bool `json:"force"`
+	// ChangeReason is mandatory when Force=true — it must be a non-empty
+	// audit justification in the format "<category>: <note>"
+	// (e.g. "Substitution: injury to jiho"). Omitted for pre-match
+	// lineup submissions.
+	ChangeReason string `json:"changeReason,omitempty"`
 }
 
 // matchLineupLockedMsg is the 409 body for the match-scoped endpoints.
@@ -313,6 +318,14 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
+			if req.Force && req.ChangeReason == "" {
+				respErr = &httpErr{
+					status: http.StatusBadRequest,
+					body:   gin.H{"error": "changeReason is required when force=true"},
+				}
+				return nil
+			}
+			lineup.ChangeReason = req.ChangeReason
 			setLineup := stx.SetTeamLineup
 			if req.Force {
 				setLineup = stx.SetTeamLineupForce

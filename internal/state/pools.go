@@ -362,6 +362,9 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 18 {
 			m.WinnerID = rec[18]
 		}
+		if len(rec) > 19 {
+			m.CorrectionReason = rec[19]
+		}
 
 		results = append(results, m)
 	}
@@ -398,7 +401,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason"}); err != nil {
 		return err
 	}
 
@@ -436,6 +439,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.SideAID,
 			r.SideBID,
 			r.WinnerID,
+			r.CorrectionReason,
 		}); err != nil {
 			return err
 		}

@@ -731,14 +731,16 @@ const API = {
         }
         return res.json();
     },
-    async putMatchLineup(compID, teamId, matchId, positions, password, force = false) {
+    async putMatchLineup(compID, teamId, matchId, positions, password, force = false, reason = "") {
+        const body = { teamId, competitionId: compID, matchId, positions, force };
+        if (reason) body.changeReason = reason;
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ teamId, competitionId: compID, matchId, positions, force })
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

@@ -583,6 +583,72 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   );
 }
 
+// ReasonPrompt — inline form for collecting a mandatory audit justification
+// when an operator corrects a completed match or edits a lineup mid-match.
+//
+// Renders a preset <select> + optional free-text note; calls onConfirm with
+// the combined "<category>: <note>" string (or just "<category>" when note is
+// empty). Calls onCancel to dismiss without submitting.
+//
+// presets: array of string labels (e.g. ["Scoring error","Wrong competitor",…])
+// Registered as window.ReasonPrompt for use from other modules.
+function ReasonPrompt({ label = "Reason for change", presets = [], onConfirm, onCancel, submitting = false }) {
+  const [category, setCategory] = useStateA(presets[0] || "");
+  const [note, setNote] = useStateA("");
+  const built = note.trim() ? `${category}: ${note.trim()}` : category;
+  const canConfirm = !!category && !submitting;
+  const submit = (e) => {
+    e.preventDefault();
+    if (!canConfirm) return;
+    onConfirm(built);
+  };
+  return (
+    <form
+      className="reason-prompt"
+      onSubmit={submit}
+      style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{label}</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select
+          className="input"
+          style={{ flex: "0 0 auto", minWidth: 160 }}
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          disabled={submitting}
+          aria-label="Reason category"
+        >
+          {presets.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <input
+          className="input"
+          style={{ flex: "1 1 160px", minWidth: 100 }}
+          type="text"
+          placeholder="Optional note…"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={submitting}
+          aria-label="Reason note"
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+        <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button type="submit" className="btn btn--sm btn--primary" disabled={!canConfirm}>
+          {submitting ? "Saving…" : "Confirm"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+window.ReasonPrompt = ReasonPrompt;
+
+const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
+const LINEUP_PRESETS = ["Late lineup", "Substitution", "Correction", "Other"];
+// Export for consumers loaded after admin_scoring_modal.jsx
+// (e.g. admin_schedule.jsx which cannot use cross-file ES imports).
+window.LINEUP_PRESETS = LINEUP_PRESETS;
+
 function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal" }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -644,6 +710,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
   const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
+  // Audit reason collected when correcting a completed match. showCorrectionPrompt
+  // gates the ReasonPrompt overlay; correctionReason carries the confirmed string.
+  const [correctionReason, setCorrectionReason] = useStateA("");
+  const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
   // AdminScoreEditor unmounts), gate the setState. handleDismiss
@@ -785,7 +855,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
       ...enchoBlock(), ...hanteiClear,
     };
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
+    const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -794,10 +865,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
   };
 
   // Hantei submit: tied scoreline (with or without encho). Operator picks a
@@ -896,7 +967,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei };
+  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -918,6 +989,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
       if (ev.key === "Enter" && s.canFinish) {
         ev.preventDefault();
+        if (s.isComplete && !s.correctionReason) {
+          s.setShowCorrectionPrompt(true);
+          return;
+        }
         const patch = s.buildPatch("completed");
         if (s.onSubmitAndNext) s.doSubmit(() => s.onSubmitAndNext(patch));
         else s.doSubmit(() => s.onSubmit(patch));
@@ -1186,6 +1261,27 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
         {/* Sticky navigation + action footer */}
         <div className="editor-modal__foot editor-modal__foot--nav">
+          {/* Audit reason prompt — shown when correcting a completed match.
+              Operator must confirm a reason before the patch is submitted. */}
+          {isComplete && showCorrectionPrompt && (
+            <ReasonPrompt
+              label="Reason for correction"
+              presets={CORRECTION_PRESETS}
+              submitting={submitting}
+              onConfirm={(r) => {
+                setCorrectionReason(r);
+                setShowCorrectionPrompt(false);
+                // Re-trigger submit with the now-populated reason.
+                // buildPatch reads correctionReason from state, but state
+                // updates are async — pass r inline via a local override
+                // so the patch is correct on the very first submit.
+                const patch = { ...buildPatch("completed"), correctionReason: r };
+                if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
+                else doSubmit(() => onSubmit(patch));
+              }}
+              onCancel={() => setShowCorrectionPrompt(false)}
+            />
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
@@ -1199,11 +1295,17 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               )}
               <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
               {onSubmitAndNext ? (
-                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting || !canFinish}>
+                <button className="btn btn--primary" onClick={() => {
+                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  doSubmit(() => onSubmitAndNext(buildPatch("completed")));
+                }} disabled={submitting || !canFinish}>
                   {submitting ? "Saving…" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmit(buildPatch("completed")))} disabled={submitting || !canFinish}>
+                <button className="btn btn--primary" onClick={() => {
+                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  doSubmit(() => onSubmit(buildPatch("completed")));
+                }} disabled={submitting || !canFinish}>
                   {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
                 </button>
               )}
@@ -1307,6 +1409,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const [decisionSubmitting, setDecisionSubmitting] = useStateA(false);
   const [decisionErr, setDecisionErr] = useStateA("");
   const [withdrawnPlayer, setWithdrawnPlayer] = useStateA(null);
+  // Audit reason collected when correcting a completed team match — mirrors
+  // the ScoreEditorModal correction flow (same ReasonPrompt + CORRECTION_PRESETS).
+  const [correctionReason, setCorrectionReason] = useStateA("");
+  const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (404 → null).
@@ -1418,6 +1524,68 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   const maxEnchoPeriods = compMeta?.config?.maxEnchoPeriods || 0;
   const isNaginataTeam = !!compMeta?.config?.naginata;
   const isKnockoutPhase = m.phase === "bracket" || compFormat === "playoffs" || compFormat === "mixed";
+
+  // Inline lineup select state: tracks whether a lineup-reason prompt is shown
+  // for inline position changes mid-match, and which (teamId, positionKey, value)
+  // is pending confirmation.
+  const [inlineLineupPrompt, setInlineLineupPrompt] = useStateA(null); // { teamId, posKey, value, lineup }
+  const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);
+
+  // Derive each team's roster from compMeta.players. rosterFor expects the
+  // team object (with metadata array); resolveLineupTeamId matches by name.
+  const allPlayers =
+    (compMeta?.players?.length ? compMeta.players : null)
+    || (compMeta?.config?.players)
+    || [];
+  const rosterForSide = (side) => {
+    if (!window.AdminLineupHelpers?.rosterFor) return [];
+    const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
+    const teamObj = allPlayers.find(p => {
+      const pid = p?.id || p?.ID || p?.name || p?.Name || "";
+      const pname = p?.name || p?.Name || "";
+      return pid === sideKey || pname === sideKey;
+    });
+    return window.AdminLineupHelpers.rosterFor(teamObj || null);
+  };
+  const teamIdForSide = (side) => {
+    const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
+    const teamObj = allPlayers.find(p => {
+      const pid = p?.id || p?.ID || p?.name || p?.Name || "";
+      const pname = p?.name || p?.Name || "";
+      return pid === sideKey || pname === sideKey;
+    });
+    return teamObj ? (teamObj.id || teamObj.ID || teamObj.name || teamObj.Name || sideKey) : sideKey;
+  };
+
+  // Submit an inline position change: builds the full positions map from the
+  // existing lineup + the changed key→value, then PUTs. force=true + reason
+  // when the match has already started.
+  const submitInlineLineup = async (teamId, lineup, posKey, value, reason) => {
+    setInlineLineupSaving(true);
+    try {
+      const existing = lineup?.positions || {};
+      const updated = { ...existing };
+      if (value) updated[posKey] = value;
+      else delete updated[posKey];
+      const matchStarted = m.status === "running" || m.status === "completed";
+      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, matchStarted, reason);
+      // Refresh lineup state from the response is deferred — on next open the
+      // modal re-fetches. For immediate feedback we do a partial reload of
+      // lineup state for the affected side.
+      if (!mountedRef.current) return;
+      if (teamId === teamIdForSide(m.sideA)) {
+        setLineupA(prev => ({ ...(prev || {}), positions: updated }));
+      } else {
+        setLineupB(prev => ({ ...(prev || {}), positions: updated }));
+      }
+    } catch (e) {
+      // Surface error briefly — can't use a toast from inside the modal so
+      // we reuse the daihyosenErr channel for a one-off message.
+      if (mountedRef.current) setDaihyosenErr(e?.message || "Failed to update lineup");
+    } finally {
+      if (mountedRef.current) setInlineLineupSaving(false);
+    }
+  };
 
   // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
   // hoisted to a shared hook because the two modals own different "after
@@ -1608,6 +1776,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       return entry;
     });
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
+    const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
     // When transitioning to "running" (▶ Start), teamWinner is typically
     // null (0–0). Don't emit score.type: "hikiwake" — toBackendMatchResult
     // maps score.type to decision, which would persist a draw decision on
@@ -1632,6 +1801,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       score: { type: teamWinner ? "ippon" : "hikiwake", winnerPts: teamWinner === "a" ? ivA : ivB, loserPts: teamWinner === "a" ? ivB : ivA, fouls: { a: 0, b: 0 }, corrected: isComplete },
       subResults,
       ...enchoBlock(),
+      ...correctionBlock,
     };
   };
 
@@ -1863,17 +2033,62 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             return (
               <div key={idx} className="team-sub-match">
                 <div className="team-sub-match__pos">
-                  {/* T131: position label + assigned player names from
-                      lineup data. The position label (Senpo/Jiho/etc.
-                      for 5-person teams, "Match N" otherwise) comes from
-                      positionLabelFor; player names are joined from the
-                      team lineups when available. */}
+                  {/* T131 + Feature 2: position label + inline player
+                      selects (SHIRO left, AKA right). Selecting a name
+                      calls putMatchLineup immediately; mid-match edits
+                      require an audit reason (ReasonPrompt). */}
                   <span style={{ fontWeight: 700 }}>{renderPositionLabel(posLabel)}</span>
-                  {(playerAName || playerBName) && (
-                    <span style={{ display: "block", fontSize: 11, color: "var(--ink-3)", fontWeight: 500, marginTop: 2 }}>
-                      {playerBName || "?"} (SHIRO) vs {playerAName || "?"} (AKA)
-                    </span>
-                  )}
+                  {(() => {
+                    const matchStarted = m.status === "running" || m.status === "completed";
+                    const teamIdA = teamIdForSide(m.sideA);
+                    const teamIdB = teamIdForSide(m.sideB);
+                    const rosterB = rosterForSide(m.sideB); // SHIRO
+                    const rosterA = rosterForSide(m.sideA); // AKA
+                    if (rosterA.length === 0 && rosterB.length === 0) {
+                      // No roster data yet — show the static caption as fallback
+                      return (playerAName || playerBName) ? (
+                        <span style={{ display: "block", fontSize: 11, color: "var(--ink-3)", fontWeight: 500, marginTop: 2 }}>
+                          {playerBName || "?"} (SHIRO) vs {playerAName || "?"} (AKA)
+                        </span>
+                      ) : null;
+                    }
+                    const handleSelect = (side, teamId, lineup, posKey, value) => {
+                      if (matchStarted) {
+                        // Require audit reason before calling the API.
+                        setInlineLineupPrompt({ teamId, posKey, value, lineup });
+                      } else {
+                        submitInlineLineup(teamId, lineup, posKey, value, "");
+                      }
+                    };
+                    const selectStyle = { fontSize: 11, padding: "1px 4px", maxWidth: 130, border: "1px solid var(--line, #ddd)", borderRadius: 3, background: "var(--bg, white)" };
+                    return (
+                      <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
+                        {/* SHIRO (White) = sideB = left */}
+                        <select
+                          aria-label={`${posLabel} SHIRO player`}
+                          style={selectStyle}
+                          disabled={inlineLineupSaving}
+                          value={playerBName || ""}
+                          onChange={(e) => handleSelect("b", teamIdB, lineupB, posKey5 || posKeyN, e.target.value)}
+                        >
+                          <option value="">SHIRO —</option>
+                          {rosterB.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <span style={{ fontSize: 10, color: "var(--ink-3)" }}>vs</span>
+                        {/* AKA (Red) = sideA = right */}
+                        <select
+                          aria-label={`${posLabel} AKA player`}
+                          style={selectStyle}
+                          disabled={inlineLineupSaving}
+                          value={playerAName || ""}
+                          onChange={(e) => handleSelect("a", teamIdA, lineupA, posKey5 || posKeyN, e.target.value)}
+                        >
+                          <option value="">AKA —</option>
+                          {rosterA.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (
@@ -2115,6 +2330,21 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
             />
           )}
+          {/* Inline lineup position change — requires an audit reason when
+              the match has already started (force=true on the API call). */}
+          {inlineLineupPrompt && (
+            <ReasonPrompt
+              label="Reason for lineup change"
+              presets={LINEUP_PRESETS}
+              submitting={inlineLineupSaving}
+              onConfirm={(r) => {
+                const { teamId, posKey, value, lineup } = inlineLineupPrompt;
+                setInlineLineupPrompt(null);
+                submitInlineLineup(teamId, lineup, posKey, value, r);
+              }}
+              onCancel={() => setInlineLineupPrompt(null)}
+            />
+          )}
           {withdrawnPlayer && (
             <RemainingMatchesPanel
               compID={m.compId}
@@ -2128,6 +2358,23 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         </div>
 
         <div className="editor-modal__foot editor-modal__foot--nav">
+          {/* Audit reason prompt for team-match corrections — same contract
+              as ScoreEditorModal: operator must confirm before the patch fires. */}
+          {isComplete && showCorrectionPrompt && (
+            <ReasonPrompt
+              label="Reason for correction"
+              presets={CORRECTION_PRESETS}
+              submitting={submitting}
+              onConfirm={(r) => {
+                setCorrectionReason(r);
+                setShowCorrectionPrompt(false);
+                const patch = { ...buildPatch("completed"), correctionReason: r };
+                if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
+                else doSubmit(() => onSubmit(patch));
+              }}
+              onCancel={() => setShowCorrectionPrompt(false)}
+            />
+          )}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
@@ -2138,11 +2385,17 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               )}
               <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
               {onSubmitAndNext ? (
-                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmitAndNext(buildPatch("completed")))} disabled={submitting}>
+                <button className="btn btn--primary" onClick={() => {
+                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  doSubmit(() => onSubmitAndNext(buildPatch("completed")));
+                }} disabled={submitting}>
                   {submitting ? "Saving…" : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className="btn btn--primary" onClick={() => doSubmit(() => onSubmit(buildPatch("completed")))} disabled={submitting}>
+                <button className="btn btn--primary" onClick={() => {
+                  if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  doSubmit(() => onSubmit(buildPatch("completed")));
+                }} disabled={submitting}>
                   {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
                 </button>
               )}

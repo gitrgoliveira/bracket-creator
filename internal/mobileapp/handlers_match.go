@@ -638,6 +638,35 @@ func isMatchFinalized(r *state.MatchResult) bool {
 	return r.Status == state.MatchStatusCompleted
 }
 
+// lookupMatchStatusUnderTx reads the current status of matchID from
+// the pool-matches CSV or bracket JSON (in that order) without taking
+// any additional lock (caller MUST hold the per-comp lock via
+// WithTransaction). Returns the empty MatchStatus "" when the match
+// cannot be found in either store — callers treat an unknown match as
+// "not yet completed" (the engine will reject it via errMatchNotFound
+// on the actual score write, so we don't need to fail here).
+func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.MatchStatus {
+	poolMatches, err := stx.LoadPoolMatches(compID)
+	if err == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				return poolMatches[i].Status
+			}
+		}
+	}
+	bracket, err := stx.LoadBracket(compID)
+	if err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				if round[i].ID == matchID {
+					return round[i].Status
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
 // endpoint via the consumer-boundary interfaces (T014/T017) instead of
 // the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
@@ -737,6 +766,25 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					return nil
 				}
 			}
+			// Correction audit: when the incoming result is completed AND the
+			// stored match is already completed it is a correction — require
+			// a non-empty CorrectionReason for traceability. Check runs inside
+			// the tx so the is-completed read is race-free (same lock). We skip
+			// withdrawal-type decisions here since those go through the /decision
+			// endpoint and are not corrections.
+			if result.Status == state.MatchStatusCompleted {
+				isWithdrawalDecision := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
+				if !isWithdrawalDecision {
+					existing := lookupMatchStatusUnderTx(stx, id, mid)
+					if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
+						engErr = &ValidationError{
+							Field:   "correctionReason",
+							Message: "correcting a completed match result requires a non-empty correctionReason",
+						}
+						return nil
+					}
+				}
+			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 			if !isWithdrawal {
 				if err := eng.StartMatchTx(stx, id, mid); err != nil {
@@ -807,6 +855,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					"matchId":  downstreamKnockoutErr.MatchID,
 					"message":  downstreamKnockoutErr.Error(),
 				})
+				return
+			}
+			var valErr *ValidationError
+			if errors.As(engErr, &valErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})

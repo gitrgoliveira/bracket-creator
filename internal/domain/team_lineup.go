@@ -49,6 +49,11 @@ type TeamLineup struct {
 	MatchID       string              `json:"matchId,omitempty" yaml:"matchId,omitempty"`
 	Positions     map[Position]string `json:"positions" yaml:"positions"`
 	LockedAt      *time.Time          `json:"lockedAt,omitempty" yaml:"lockedAt,omitempty"`
+	// ChangeReason is a mandatory audit justification when an operator
+	// edits a lineup after the match has started (force=true). Format:
+	// "<category>: <note>" (e.g. "Substitution: injury to jiho").
+	// Omitted for pre-match lineup submissions.
+	ChangeReason string `json:"changeReason,omitempty" yaml:"changeReason,omitempty"`
 }
 
 var (

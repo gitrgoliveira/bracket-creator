@@ -95,9 +95,9 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "round has started")
 }
 
-// TestMatchLineupPUT_ForceOverridesLiveLock: with force=true the operator
-// can still set a lineup on a running match (officiated-mode override) — the
-// same request that 409s without force succeeds with it.
+// TestMatchLineupPUT_ForceOverridesLiveLock: with force=true and a changeReason
+// the operator can still set a lineup on a running match (officiated-mode
+// override) — the same request that 409s without force succeeds with it.
 func TestMatchLineupPUT_ForceOverridesLiveLock(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
@@ -107,7 +107,8 @@ func TestMatchLineupPUT_ForceOverridesLiveLock(t *testing.T) {
 	}))
 
 	body, _ := json.Marshal(LineupRequest{
-		Force: true,
+		Force:        true,
+		ChangeReason: "Substitution: injury to jiho",
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "p1", domain.PosJiho: "p2", domain.PosChuken: "p3",
 			domain.PosFukusho: "p4", domain.PosTaisho: "p5",
@@ -120,6 +121,66 @@ func TestMatchLineupPUT_ForceOverridesLiveLock(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "PoolA-0")
+}
+
+// TestMatchLineupPUT_ForceRequiresChangeReason: force=true without changeReason
+// must return 400.
+func TestMatchLineupPUT_ForceRequiresChangeReason(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
+	}))
+
+	body, _ := json.Marshal(LineupRequest{
+		Force: true, // no ChangeReason
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1", domain.PosJiho: "p2", domain.PosChuken: "p3",
+			domain.PosFukusho: "p4", domain.PosTaisho: "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "changeReason")
+}
+
+// TestMatchLineupPUT_ForceChangeReasonPersisted: the changeReason submitted
+// with a force=true lineup is persisted and survives a reload.
+func TestMatchLineupPUT_ForceChangeReasonPersisted(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
+	}))
+
+	wantReason := "Substitution: injury to jiho"
+	body, _ := json.Marshal(LineupRequest{
+		Force:        true,
+		ChangeReason: wantReason,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1", domain.PosJiho: "p2", domain.PosChuken: "p3",
+			domain.PosFukusho: "p4", domain.PosTaisho: "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Verify the reason survived the write and reload.
+	lineups, err := store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	saved, found := findMatchLineup(lineups, "teamA", "PoolA-0")
+	require.True(t, found, "lineup must be present after force-write")
+	assert.Equal(t, wantReason, saved.ChangeReason)
 }
 
 // TestMatchLineupPUT_NoCompetition: PUT to a missing competition → 404.

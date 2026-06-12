@@ -1382,7 +1382,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		assert.Equal(t, "admin", stored[0].ResultSource)
 	})
 
-	t.Run("admin can overwrite finalized result with valid password", func(t *testing.T) {
+	t.Run("admin can overwrite finalized result with valid password and correctionReason", func(t *testing.T) {
 		r, store, compID := setupSelfRunScoreRouter(t, "secret")
 
 		// First, establish a finalized result.
@@ -1397,14 +1397,15 @@ func TestSelfRunScoreHandler(t *testing.T) {
 			},
 		}))
 
-		// Admin overwrite with valid password succeeds.
+		// Admin overwrite with valid password and correctionReason succeeds.
 		body, _ := json.Marshal(state.MatchResult{
-			ID:      "PoolA-1",
-			SideA:   "Alice",
-			SideB:   "Bob",
-			Winner:  "Bob",
-			IpponsB: []string{"M", "K"},
-			Status:  state.MatchStatusCompleted,
+			ID:               "PoolA-1",
+			SideA:            "Alice",
+			SideB:            "Bob",
+			Winner:           "Bob",
+			IpponsB:          []string{"M", "K"},
+			Status:           state.MatchStatusCompleted,
+			CorrectionReason: "Scoring error: scores were recorded in wrong columns",
 		})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
@@ -1416,6 +1417,100 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		var result state.MatchResult
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 		assert.Equal(t, "admin", result.ResultSource)
+	})
+
+	t.Run("admin overwrite without correctionReason returns 400", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// Establish a finalized result.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID:      "PoolA-1",
+				SideA:   "Alice",
+				SideB:   "Bob",
+				Winner:  "Alice",
+				Status:  state.MatchStatusCompleted,
+				IpponsA: []string{"M", "K"},
+			},
+		}))
+
+		// Correction attempt without a reason must be rejected.
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Bob",
+			IpponsB: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+			// CorrectionReason deliberately omitted.
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "correctionReason")
+	})
+
+	t.Run("first completion does not require correctionReason", func(t *testing.T) {
+		r, _, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// The pre-seeded match has no status — completing it is a first
+		// submission, not a correction, so no correctionReason is needed.
+		body, _ := json.Marshal(state.MatchResult{
+			ID:      "PoolA-1",
+			SideA:   "Alice",
+			SideB:   "Bob",
+			Winner:  "Alice",
+			IpponsA: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	})
+
+	t.Run("correction with reason persists to storage", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// Establish a finalized result.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{
+				ID:      "PoolA-1",
+				SideA:   "Alice",
+				SideB:   "Bob",
+				Winner:  "Alice",
+				Status:  state.MatchStatusCompleted,
+				IpponsA: []string{"M", "K"},
+			},
+		}))
+
+		wantReason := "Data entry: scores entered for wrong match"
+		body, _ := json.Marshal(state.MatchResult{
+			ID:               "PoolA-1",
+			SideA:            "Alice",
+			SideB:            "Bob",
+			Winner:           "Bob",
+			IpponsB:          []string{"M", "K"},
+			Status:           state.MatchStatusCompleted,
+			CorrectionReason: wantReason,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		// Verify the reason survived the write and reload.
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		assert.Equal(t, wantReason, stored[0].CorrectionReason)
 	})
 
 	t.Run("officiated mode PUT score sets resultSource admin", func(t *testing.T) {

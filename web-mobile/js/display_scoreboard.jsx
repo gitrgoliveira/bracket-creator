@@ -432,7 +432,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: "8vh", gap: "3vh" }}>
 
                 {/* a) Status icon + headline */}
-                <div data-testid={allCompleted ? "display-all-completed" : "display-no-matches"}
+                <div data-testid={allCompleted ? "display-all-completed" : (noMatches ? "display-no-matches" : "display-between-matches")}
                     style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2vh", textAlign: "center", maxWidth: "60vw" }}>
                     {allCompleted && (
                         /* Drawn SVG checkmark — NOT the raw ✓ Unicode glyph */

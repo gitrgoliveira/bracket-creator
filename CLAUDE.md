@@ -169,16 +169,16 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 ## PR Workflow
 
 - **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section — `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
-- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binaries). Push the PNG to the `pr-assets` branch (never merged to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser/MCP captured a shot, state what wasn't captured plus a textual geometry/DOM attestation — never silently skip the section. Full verified recipe: `bd memories screenshot`.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binaries). Push the PNG to the `pr-assets` branch (never merged to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser/MCP captured a shot, state what wasn't captured plus a textual geometry/DOM attestation — never silently skip the section. Full verified recipe: the `/pr-screenshots` skill (`.claude/skills/pr-screenshots/SKILL.md`). **Capture only via the browser/MCP screenshot tools — NEVER a desktop or full-screen grab (`screencapture`, `scrot`, OS shortcuts), which exposes the user's private screen.**
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
 - **Keep the bead `in_progress` until the PR actually merges.** A green review is not a merge. Only `bd close <id>` after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run the full `/cleanup` sequence** (close bead → fast-forward main → remove worktree → delete local + remote branch → prune). Don't wait to be asked for each step. See `.claude/skills/cleanup/SKILL.md`.
+- **Verify the worktree/branch before any edit.** This repo uses a git worktree per PR; edits applied to the wrong worktree (or to the `main` checkout on the default branch) force patch-and-revert recovery. When there is any ambiguity, confirm with `pwd` and `git branch --show-current` before the first Edit/Write, and never edit the main checkout while on the default branch.
 
 ## Code Review (Copilot)
 
 - **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero. The `/review-loop` skill (`.claude/skills/review-loop/SKILL.md`) encodes the full loop.
-- **Re-request Copilot via REST**, not `gh pr edit --add-reviewer` (which lowercases the login and fails):
-  `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
+- **Re-request Copilot via the GraphQL `requestReviews` mutation with the bot node id** — both `gh pr edit --add-reviewer Copilot` (lowercases the login, fails) and REST `POST .../requested_reviewers -f "reviewers[]=Copilot"` (silently no-ops; that array is users-only and Copilot is a Bot) are broken. Full recipe + verification step in `.claude/skills/review-loop/SKILL.md` (rule 4).
 - Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
 
 ## Testing & Verification
@@ -187,6 +187,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
 - Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+- **Diagnose failures from evidence, never fabricate a cause.** When a test, build, or CI step fails (Codecov, GPG, lint, etc.), read the actual logs before explaining it. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround — if the root cause isn't established, say so and keep investigating.
 - **Test coverage gate: every package that has test files must maintain ≥85% statement coverage.** Verify before any PR with:
   ```bash
   go test -race -cover . ./cmd/... ./internal/... ./tests/...
@@ -199,6 +200,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 When rebasing or resolving conflicts, watch for these recurring breakages:
 - Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
 - UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- Missed call sites when removing or renaming a symbol — `grep -r` the name across **all** packages **including `_test.go` files** before committing; a refactor that compiles can still leave stale test references or skip-test code pointing at dead paths.
 - Re-run `make go/test` after every rebase; a clean rebase that compiles must not be semantically broken.
 
 

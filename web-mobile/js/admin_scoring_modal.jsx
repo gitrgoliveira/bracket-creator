@@ -1296,7 +1296,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   ▶ Start Match
                 </button>
               )}
-              <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
+              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
@@ -2364,7 +2364,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               {m.status === "scheduled" && (
                 <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start</button>
               )}
-              <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>
+              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }

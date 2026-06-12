@@ -183,6 +183,33 @@ func TestMatchLineupPUT_ForceChangeReasonPersisted(t *testing.T) {
 	assert.Equal(t, wantReason, saved.ChangeReason)
 }
 
+// TestMatchLineupPUT_ForcePreMatchRejected: force=true is rejected (400) when
+// the target match has not started — the override path is mid-match only, so a
+// client cannot use it (or persist an audit reason) on a normal pre-match edit.
+func TestMatchLineupPUT_ForcePreMatchRejected(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusScheduled},
+	}))
+
+	body, _ := json.Marshal(LineupRequest{
+		Force:        true,
+		ChangeReason: "should not be allowed pre-match",
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1", domain.PosJiho: "p2", domain.PosChuken: "p3",
+			domain.PosFukusho: "p4", domain.PosTaisho: "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
 // TestMatchLineupPUT_NoCompetition: PUT to a missing competition → 404.
 func TestMatchLineupPUT_NoCompetition(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)

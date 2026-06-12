@@ -326,6 +326,20 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
+			// force is a mid-match override: only valid once the match has
+			// actually started (running or completed). Reject a pre-match force
+			// so a client can't use the override path — or persist an audit
+			// reason — on a normal pre-match lineup edit.
+			if req.Force {
+				status := lookupMatchStatusUnderTx(stx, compID, matchID)
+				if status != state.MatchStatusRunning && status != state.MatchStatusCompleted {
+					respErr = &httpErr{
+						status: http.StatusBadRequest,
+						body:   gin.H{"error": "force override is only allowed after the match has started"},
+					}
+					return nil
+				}
+			}
 			// ChangeReason is an audit justification for a mid-match override
 			// only. For a normal (force=false) pre-match save it carries no
 			// meaning, so don't persist a client-supplied value.

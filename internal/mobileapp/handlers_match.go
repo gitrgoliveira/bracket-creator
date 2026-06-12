@@ -736,6 +736,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		result := req.AsMatchResult()
 		result.ResultSource = resultSource
+		// Normalize the audit reason once, before validation and the engine
+		// write, so a whitespace-only reason can't satisfy the correction gate
+		// and the persisted value never carries leading/trailing whitespace.
+		result.CorrectionReason = strings.TrimSpace(result.CorrectionReason)
 
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The
@@ -776,7 +780,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				isWithdrawalDecision := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 				if !isWithdrawalDecision {
 					existing := lookupMatchStatusUnderTx(stx, id, mid)
-					if existing == state.MatchStatusCompleted && strings.TrimSpace(result.CorrectionReason) == "" {
+					if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
 						engErr = &ValidationError{
 							Field:   "correctionReason",
 							Message: "correcting a completed match result requires a non-empty correctionReason",

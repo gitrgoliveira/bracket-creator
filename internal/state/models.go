@@ -586,7 +586,8 @@ type MatchResult struct {
 	// overwrites a completed match result. Format: "<category>: <note>" (e.g.
 	// "Scoring error: wrong waza entered"). Only required on corrections
 	// (completed → completed); omitted on first completions. Append-only CSV
-	// column (col 19) and bracket.json field keep older files fully compatible.
+	// column (rec index 19, the 20th column, after the original 19) and the
+	// bracket.json field keep older files fully compatible.
 	CorrectionReason string `json:"correctionReason,omitempty" yaml:"correction_reason,omitempty"`
 }
 

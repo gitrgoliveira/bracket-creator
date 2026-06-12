@@ -1482,14 +1482,9 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   return (
     <div className={`my-match ${nextMatch.status === "running" ? "my-match--running" : ""}`} data-testid="watch-hero">
       <div className="my-match__lbl">
-        {nextMatch.status === "running" ? (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span className="dot--running" style={{ width: 8, height: 8, borderRadius: '50%' }}></span>
-            CURRENT
-          </span>
-        ) : (
-          showDojoEyebrow ? `${entityLabel} · next up` : "Your next match"
-        )}
+        {nextMatch.status === "running"
+          ? (showDojoEyebrow ? entityLabel : "Your match")
+          : (showDojoEyebrow ? `${entityLabel} · next up` : "Your next match")}
       </div>
       <div className="my-match__name">
         <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>

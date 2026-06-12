@@ -109,12 +109,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const courts = tournament.courts || [];
     const courtKnown = courts.includes(court);
 
-    // The match shown in the scoring panel: explicit selection, else the
-    // running match, else nothing.
+    // The scoring panel shows the running (NOW) match being officiated, or a
+    // completed match the operator picked to correct. Never a scheduled match:
+    // you start the next match from the Up Next card — you don't "score" a
+    // match that hasn't begun. A scheduled selection falls back to the running
+    // match so the panel always reflects what's actually on court.
     const selectedMatch = useMemoSh(() => {
         if (selectedKey) {
             const found = sorted.find((m) => matchKey(m) === selectedKey);
-            if (found) return found;
+            if (found && (found.status === "running" || found.status === "completed")) return found;
         }
         return running[0] || null;
     }, [selectedKey, sorted, running]);
@@ -276,26 +279,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {/* Running matches are scored in the panel on the right, so the
-                                one being scored is not repeated here. A second running match
-                                on this court (not currently selected) still surfaces so the
-                                operator can switch to it. */}
-                            {(() => {
-                                const k = selectedMatch && matchKey(selectedMatch);
-                                const others = running.filter((m) => matchKey(m) !== k);
-                                return others.length > 0 ? (
-                                    <ShiaijoQueueGroup
-                                        label="Now" matches={others} selectedKey={k}
-                                        onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
-                                    />
-                                ) : null;
-                            })()}
+                            {/* No "Now" group: the running match is officiated in the
+                                scoring panel on the right, so repeating it in the queue is
+                                redundant. */}
 
                             {scheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
-                                    selectedKey={selectedMatch && matchKey(selectedMatch)}
-                                    onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
+                                    selectable={false}
+                                    courts={courts} onMoveCourt={onMoveCourt}
                                     onSkip={skipMatch}
                                 />
                             )}
@@ -384,7 +376,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 }
 
 // A queued match row with select + court reassign (+ optional skip).
-function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMoveCourt, onSkip }) {
+// selectable=false renders rows as plain info (Upcoming): the court reassign
+// and Skip controls still work, but the row itself can't be opened in the
+// scoring panel (you start a match from the Up Next card, not by clicking it).
+function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMoveCourt, onSkip, selectable = true }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
@@ -393,6 +388,7 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
                     <ShiaijoQueueRow
                         key={matchKey(m)} m={m} selected={selectedKey === matchKey(m)}
                         onSelect={onSelect} courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip}
+                        selectable={selectable}
                     />
                 ))}
             </div>
@@ -400,15 +396,20 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
     );
 }
 
-function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip }) {
+function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip, selectable = true }) {
     const isRunning = m.status === "running";
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
+    const selectProps = selectable
+        ? {
+            onClick: () => onSelect(m), role: "button", tabIndex: 0,
+            onKeyDown: (e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(m); } },
+        }
+        : {};
     return (
         <div
-            className={`score-edit-row shiaijo-row ${isRunning ? "score-edit-row--running" : ""} ${isComplete ? "score-edit-row--complete" : ""} ${selected ? "is-selected" : ""}`}
-            onClick={() => onSelect(m)} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(m); } }}
+            className={`score-edit-row shiaijo-row ${isRunning ? "score-edit-row--running" : ""} ${isComplete ? "score-edit-row--complete" : ""} ${selected ? "is-selected" : ""} ${selectable ? "" : "shiaijo-row--static"}`}
+            {...selectProps}
         >
             <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>

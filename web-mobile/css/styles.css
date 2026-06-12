@@ -7248,6 +7248,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    court-picker / Skip controls line up vertically across every queue row
    regardless of each row's content width. */
 .shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; cursor: pointer; }
+/* Upcoming rows are informational (start via Up Next, manage via the row's
+   own controls) — not openable in the scoring panel, so no button affordance. */
+.shiaijo-row--static { cursor: default; }
 .shiaijo-row.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .shiaijo-row__comp { font-size: 10px; color: var(--ink-3); margin-top: 2px; }
 .shiaijo-row__status { display: flex; align-items: center; justify-content: flex-end; }

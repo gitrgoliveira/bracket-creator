@@ -1046,14 +1046,10 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // visible in the watched-upcoming list so the same card doesn't appear
   // twice on a phone viewport. When every running match is tracked, the
   // hero-running section disappears entirely (hybrid approach).
-  const watchedUpcomingIds = useMemo(
-    () => new Set(watchedUpcoming.map((m) => `${m.compId}:${m.id}`)),
-    [watchedUpcoming]
-  );
-  const globalRunning = useMemo(
-    () => running.filter((m) => !watchedUpcomingIds.has(`${m.compId}:${m.id}`)),
-    [running, watchedUpcomingIds]
-  );
+  const globalRunning = useMemo(() => {
+    const watchedIds = new Set(watchedUpcoming.map((m) => `${m.compId}:${m.id}`));
+    return running.filter((m) => !watchedIds.has(`${m.compId}:${m.id}`));
+  }, [running, watchedUpcoming]);
 
   // On-deck matches for NON-primary watched players (the quiet, rate-limited
   // banner path). A match that involves the primary is handled by the loud
@@ -1330,13 +1326,16 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 // Contract:
 //   - status==="scheduled" + queuePosition===1 → "Next up"
 //   - status==="scheduled" + queuePosition>1   → "<qp-1> before yours"
-//   - status==="running"                       → null (round label already shows " · NOW")
+//   - status==="running"                       → null (WatchHeroCard signals running
+//                                                        via .my-match--running ring + label change;
+//                                                        no Queue chip needed)
 //   - anything else (completed/forfeit/cancelled, or no qp)  → null (hide chip)
 //
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
-// the my-match__round label already appends " · NOW" — rendering it
-// again in the Queue chip would be a duplicate. We intentionally do NOT
+// WatchHeroCard already signals the running state via the .my-match--running
+// CSS ring and label change ("Your match") — the Queue chip must not add a
+// redundant label. We intentionally do NOT
 // fall back to "Scheduled HH:MM" the way display.jsx does — the
 // MyMatchPanel already has a dedicated Time chip.
 // Exported for unit-testing.

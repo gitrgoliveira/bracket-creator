@@ -1329,6 +1329,103 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   );
 }
 
+// WatchPicker — unified typeahead over the tournament roster that yields
+// EITHER a player pick or a whole-dojo pick. A single search box surfaces both
+// (matching dojos first, then matching players), so "Hagane" offers
+// "Watch all of Hagane Dojo" as one entry instead of forcing the user to add
+// members one by one. Replaces the old SinglePlayerPicker (mp-xhaa).
+function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlayer, onPickDojo, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const ref = useRefV(null);
+  const excludedPlayers = useMemo(() => new Set(watchedPlayerIds || []), [watchedPlayerIds]);
+  const excludedDojos = useMemo(() => new Set(watchedDojos || []), [watchedDojos]);
+  const q = query.trim().toLowerCase();
+
+  // Dojo matches: a dojo is offered until it is watched as a dojo entry. The
+  // count shows how many roster members it currently covers.
+  const dojoMatches = useMemo(() => {
+    return (dojos || [])
+      .filter((d) => !excludedDojos.has(d.name))
+      .filter((d) => !q || d.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [dojos, q, excludedDojos]);
+
+  const playerMatches = useMemo(() => {
+    const base = roster.filter((p) => !excludedPlayers.has(p.id));
+    if (!q) return base.slice(0, 20);
+    return base.filter((p) =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.dojo || "").toLowerCase().includes(q) ||
+      (p.number || "").toLowerCase().includes(q)
+    ).slice(0, 20);
+  }, [roster, q, excludedPlayers]);
+
+  const total = dojoMatches.length + playerMatches.length;
+
+  React.useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const pickPlayer = (p) => { onPickPlayer(p); setQuery(""); setOpen(false); };
+  const pickDojo = (d) => { onPickDojo(d); setQuery(""); setOpen(false); };
+
+  return (
+    <div className="pmf" ref={ref}>
+      <div className="pmf__bar" onClick={() => setOpen(true)}>
+        <input
+          className="pmf__input"
+          placeholder={placeholder || "Search players or dojos…"}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+        />
+      </div>
+      {open && total > 0 && (
+        <div className="pmf__dropdown">
+          <div className="pmf__dropdown-head">
+            {q ? pluralize(total, "match", "matches") : `${pluralize(roster.length, "participant")} · ${pluralize((dojos || []).length, "dojo")} — type to search`}
+          </div>
+          {/* Dojo options first — a dojo entry is dynamic (auto-includes late
+              registrations), so it's the higher-leverage choice for a coach. */}
+          {dojoMatches.map((d) => (
+            <button
+              key={"dojo:" + d.name}
+              className="pmf__option pmf__option--dojo"
+              onClick={() => pickDojo(d)}
+            >
+              <span className="pmf__check" aria-hidden="true">⌂</span>
+              <span className="pmf__opt-body">
+                <span className="pmf__opt-name">{d.name}</span>
+                <span className="pmf__opt-dojo">Watch all · {pluralize(d.total, "member")}</span>
+              </span>
+            </button>
+          ))}
+          {playerMatches.map((p) => (
+            <button
+              key={p.id}
+              className="pmf__option"
+              onClick={() => pickPlayer(p)}
+            >
+              <span className="pmf__check">{p.checkedIn ? "✓" : ""}</span>
+              <span className="pmf__opt-body">
+                <span className="pmf__opt-name">
+                  {p.number && <span className="num-prefix">{p.number}</span>}
+                  {p.name}
+                  {p.checkedIn && <span className="tag-badge pmf__checkin-tag">Checked in</span>}
+                </span>
+                <span className="pmf__opt-dojo">{p.dojo || ""}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // mymatchQueueLabel — FR-025 label for the "Your next match" Queue chip.
 //
 // Contract:

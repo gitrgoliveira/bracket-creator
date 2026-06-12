@@ -797,6 +797,13 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     setSaving(true);
     try {
       const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), reason);
+      // Reflect exactly what was persisted. This is also what applies the
+      // copy-from-previous mid-match values: that path defers setValues until
+      // this confirmed save, so a cancelled ReasonPrompt never leaves stale
+      // copied values on screen.
+      const next = {};
+      positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
+      setValues(next);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast("Match lineup saved");
@@ -863,13 +870,11 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         const v = (sourceLineup.positions || {})[p.key] || "";
         if (v) positionsOut[p.key] = v;
       });
-      // Like save(), require an audit reason when copying mid-match.
+      // Like save(), require an audit reason when copying mid-match. Defer
+      // applying the copied values until the operator confirms — doSave then
+      // sets them from the persisted response. If the ReasonPrompt is
+      // cancelled, the form still reflects the actual saved lineup.
       if (allowDuringMatch && matchStarted) {
-        // Pre-apply values into local state for immediate UI feedback;
-        // the actual API call fires after the operator confirms a reason.
-        const preview = {};
-        positions.forEach(p => { preview[p.key] = positionsOut[p.key] || ""; });
-        setValues(preview);
         setPendingPositions(positionsOut);
         setShowLineupReasonPrompt(true);
         return;

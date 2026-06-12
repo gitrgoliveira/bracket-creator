@@ -88,7 +88,7 @@ function watchSustainedDisconnect(thresholdMs, onSustained) {
   };
 }
 
-function AdminTopbar({ onLogout, onViewerMode, tournament }) {
+function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   // Render running matches as chips below the topbar so admins always
   // know what's under way, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
@@ -179,7 +179,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           Connection interrupted. Reconnecting… Scores on screen may be out of date.
         </div>
       )}
-      {runningMatches.length > 0 && (
+      {!hideRunningStrip && runningMatches.length > 0 && (
         <div className="running-strip" role="region" aria-label={`${pluralize(runningMatches.length, "match", "matches")} in progress`}>
           <span className="running-strip__lbl"><span className="dot dot--running"></span> {pluralize(runningMatches.length, "match", "matches")} in progress</span>
           <div className="running-strip__chips">

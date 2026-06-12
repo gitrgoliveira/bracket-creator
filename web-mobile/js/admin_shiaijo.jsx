@@ -23,14 +23,20 @@ const Icon = window.Icon;
 const hasBothSides = window.hasBothSides;
 
 // Pure ordering/partition helpers (exported for unit tests). Matches sort
-// running → scheduled → completed, then by scheduled time within a group.
+// running → scheduled → completed, then by scheduled time, then queue
+// position within a group.
 export function sortShiaijoMatches(matches) {
     const order = { running: 0, scheduled: 1, completed: 2 };
     return [...matches].sort((a, b) => {
         const ao = order[a.status] ?? 99;
         const bo = order[b.status] ?? 99;
         if (ao !== bo) return ao - bo;
-        return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+        const ta = (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+        if (ta !== 0) return ta;
+        // Final tie-break on queuePosition so the order matches the backend
+        // court queue and stays deterministic for same- or untimed matches
+        // (e.g. the ""-scheduledAt rows that Skip produces).
+        return (Number(a.queuePosition) || 0) - (Number(b.queuePosition) || 0);
     });
 }
 
@@ -46,6 +52,29 @@ export function partitionShiaijoMatches(matches) {
 }
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
+
+// shiaijoScoreCell — decide what the queue row's middle score column shows.
+// Exported so the team-vs-individual routing is unit-testable. A team
+// encounter's headline number is Individual Victories (IV); it must always
+// carry the IV label and never appear as a bare figure (which could be read
+// as wins or points). Individual bouts show the self-explanatory ippon score.
+// Returns one of: {kind:"team",iv} | {kind:"ippon",ippon} | {kind:"vs"} | {kind:"none"}.
+export function shiaijoScoreCell(m) {
+    if (!m) return { kind: "none" };
+    if (m.status === "scheduled") return { kind: "vs" };
+    if (m.status !== "completed" && m.status !== "running") return { kind: "none" };
+    const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
+    if (isTeam) {
+        const iv = window.teamIVScore ? window.teamIVScore(m) : null;
+        return iv ? { kind: "team", iv } : { kind: "none" };
+    }
+    const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
+    const ipponsB = m.ipponsB || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreB) : []);
+    const s = window.formatIpponsScore
+        ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei)
+        : "";
+    return s ? { kind: "ippon", ippon: s } : { kind: "none" };
+}
 
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
@@ -167,7 +196,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     return (
         <div className="app">
-            <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
+            <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} hideRunningStrip />
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: onBack }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head">
@@ -247,12 +276,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {running.length > 0 && (
-                                <ShiaijoQueueGroup
-                                    label="Now" matches={running} selectedKey={selectedMatch && matchKey(selectedMatch)}
-                                    onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
-                                />
-                            )}
+                            {/* Running matches are scored in the panel on the right, so the
+                                one being scored is not repeated here. A second running match
+                                on this court (not currently selected) still surfaces so the
+                                operator can switch to it. */}
+                            {(() => {
+                                const k = selectedMatch && matchKey(selectedMatch);
+                                const others = running.filter((m) => matchKey(m) !== k);
+                                return others.length > 0 ? (
+                                    <ShiaijoQueueGroup
+                                        label="Now" matches={others} selectedKey={k}
+                                        onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
+                                    />
+                                ) : null;
+                            })()}
 
                             {scheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
@@ -366,8 +403,7 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
 function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip }) {
     const isRunning = m.status === "running";
     const isComplete = m.status === "completed";
-    const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
-    const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+    const scoreCell = shiaijoScoreCell(m);
     return (
         <div
             className={`score-edit-row shiaijo-row ${isRunning ? "score-edit-row--running" : ""} ${isComplete ? "score-edit-row--complete" : ""} ${selected ? "is-selected" : ""}`}
@@ -384,8 +420,9 @@ function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip })
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 </div>
                 <div className="score-edit-row__score">
-                    {(isComplete || isRunning) && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {scoreCell.kind === "ippon" && scoreCell.ippon}
+                    {scoreCell.kind === "vs" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                 </div>
                 <div className="score-edit-row__side">
                     <span className="se-color-badge se-color-badge--aka">AKA</span>

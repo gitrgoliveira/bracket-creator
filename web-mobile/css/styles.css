@@ -2310,6 +2310,20 @@ a:hover {
   color: var(--ink);
 }
 
+/* Status badge in the scoring panel head (CORRECTION / ● NOW / PRE-MATCH).
+   Same pill shape as .viewer__admin-pill but it is NOT interactive — no
+   pointer cursor or hover, so operators don't read it as a control. */
+.editor-head-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .viewer__tabs {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -7208,10 +7222,27 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-sides--lg .name { font-size: 18px; }
 
 /* Queue rows: 4-column variant of score-edit-row (no standalone court cell). */
-.shiaijo-row { grid-template-columns: 52px 1fr auto auto; cursor: pointer; }
+/* Fixed status + actions columns (not auto) so the "Final" badge and the
+   court-picker / Skip controls line up vertically across every queue row
+   regardless of each row's content width. */
+.shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; cursor: pointer; }
 .shiaijo-row.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .shiaijo-row__comp { font-size: 10px; color: var(--ink-3); margin-top: 2px; }
-.shiaijo-row__status { display: flex; align-items: center; }
+.shiaijo-row__status { display: flex; align-items: center; justify-content: flex-end; }
+.shiaijo-row__actions { justify-content: flex-end; }
+
+/* Team encounter score in the queue row: always carries an IV label so a
+   bare figure is never shown out of context (a team number could read as
+   wins / points otherwise). */
+.shiaijo-row__teamscore { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+.shiaijo-row__iv {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+  text-decoration: none;
+  border: 0;
+}
 
 .shiaijo-completed__toggle,
 .shiaijo-context__toggle {

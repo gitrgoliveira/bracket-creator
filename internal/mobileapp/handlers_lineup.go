@@ -326,10 +326,15 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
-			lineup.ChangeReason = strings.TrimSpace(req.ChangeReason)
+			// ChangeReason is an audit justification for a mid-match override
+			// only. For a normal (force=false) pre-match save it carries no
+			// meaning, so don't persist a client-supplied value.
 			setLineup := stx.SetTeamLineup
 			if req.Force {
+				lineup.ChangeReason = strings.TrimSpace(req.ChangeReason)
 				setLineup = stx.SetTeamLineupForce
+			} else {
+				lineup.ChangeReason = ""
 			}
 			if err := setLineup(compID, lineup, teamSize); err != nil {
 				switch {

@@ -1,6 +1,42 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell } from '../admin_shiaijo.jsx';
+
+// A team encounter's score must never be shown as a bare number — it always
+// carries an IV (Individual Victories) label, since a raw figure could read as
+// wins or points. Individual bouts show the self-explanatory ippon score.
+describe('shiaijoScoreCell — team numbers are never context-free', () => {
+  const orig = {};
+  beforeEach(() => {
+    orig.iv = window.teamIVScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore;
+    window.teamIVScore = (m) => (m.subResults && m.subResults.length ? '2–1' : null);
+    window.formatIpponsScore = () => 'M–K';
+    window.ipponsFromScore = () => [];
+  });
+  afterEach(() => {
+    window.teamIVScore = orig.iv; window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip;
+  });
+
+  it('routes a completed team match to a labeled IV cell', () => {
+    expect(shiaijoScoreCell({ status: 'completed', compKind: 'team', teamSize: 5, subResults: [{}] }))
+      .toEqual({ kind: 'team', iv: '2–1' });
+  });
+
+  it('shows nothing (not a bare number) for a running team match with no decided bouts', () => {
+    expect(shiaijoScoreCell({ status: 'running', teamSize: 5, subResults: [] }))
+      .toEqual({ kind: 'none' });
+  });
+
+  it('routes an individual match to the self-explanatory ippon score', () => {
+    expect(shiaijoScoreCell({ status: 'completed', teamSize: 0 }))
+      .toEqual({ kind: 'ippon', ippon: 'M–K' });
+  });
+
+  it('shows "vs" for a scheduled match regardless of team size', () => {
+    expect(shiaijoScoreCell({ status: 'scheduled', teamSize: 5 })).toEqual({ kind: 'vs' });
+    expect(shiaijoScoreCell({ status: 'scheduled', teamSize: 0 })).toEqual({ kind: 'vs' });
+  });
+});
 
 // Routing for the dedicated shiaijo operator view (mp-c2yr).
 describe('parsePath — /admin/shiaijo/:court', () => {

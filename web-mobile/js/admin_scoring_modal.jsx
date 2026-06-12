@@ -1044,7 +1044,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+            <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
@@ -1299,7 +1299,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   doSubmit(() => onSubmitAndNext(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className="btn btn--primary" onClick={() => {
@@ -1874,7 +1874,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div className={`viewer__admin-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+            <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
@@ -2375,7 +2375,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   doSubmit(() => onSubmitAndNext(buildPatch("completed")));
                 }} disabled={submitting}>
-                  {submitting ? "Saving…" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
                 </button>
               ) : (
                 <button className="btn btn--primary" onClick={() => {

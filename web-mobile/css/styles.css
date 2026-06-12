@@ -4591,6 +4591,23 @@ button.pool-match-row {
   align-items: flex-end;
 }
 
+/* Operator console (inline) team scoresheet alignment (mp-c2yr).
+   The bare rules above size the two side columns to content (1fr ==
+   minmax(min-content, 1fr)), so a side with a selected name floors wider
+   than the empty side and the AKA stack is right-justified while SHIRO is
+   centred — the name, mark slots, ippon row and fouls then sit on three
+   different axes. Pin both sides to an equal minmax(0,1fr) column and
+   centre both stacks so every element shares one axis down the sheet.
+   Scoped to .scoring-panel so the (always-compact) schedule modal, which
+   uses the tsm-row strip layout, is untouched. */
+.scoring-panel .team-sub-match__row {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+.scoring-panel .team-sub-match__side,
+.scoring-panel .team-sub-match__side--right {
+  align-items: center;
+}
+
 .team-sub-match__pts {
   display: flex;
   gap: 3px;

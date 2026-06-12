@@ -1164,9 +1164,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             onMatchClick={setSelectedMatch}
           />
 
-          {/* mp-cw1: Browser push notification opt-in toggle. */}
-          <NotificationSettings />
-
           {globalRunning.length > 0 && (
             <div className="hero-running">
               <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(globalRunning.length, "match", "matches")}</div>
@@ -1309,6 +1306,10 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               (viewer) keeps its tab and stays interactive. Collapsed by
               default (mp-mjaq) since most viewers are spectators; only
               tournament operators need these links. */}
+          {/* mp-cw1: Browser push notification opt-in toggle — settings belong at the
+              bottom of the page, not between the watchlist and live-match signals. */}
+          <NotificationSettings />
+
           <DisplayModes tournament={t} />
           {window.VersionFooter && <window.VersionFooter />}
         </div>
@@ -1627,9 +1628,9 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
 
   return (
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
-      <div className="section-title section-title--inrow">
-        <span>Watchlist</span>
-        {count > 0 && <span className="watchlist-count">{pluralize(count, "entry", "entries")}</span>}
+      <div className="watchlist-card-head">
+        <span className="watchlist-card-title">Watchlist</span>
+        {count > 0 && <span className="watchlist-count">{count}</span>}
       </div>
 
       {count === 0 ? (
@@ -1683,17 +1684,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           entities are watched so a coach sees the whole squad at a glance. */}
       {multi && upcoming.length > 0 && (
         <>
-          <div className="section-title section-title--sub">
-            Watched matches · upcoming {upcoming.length}
-          </div>
-          <div className="vsched">
+          <div className="vsched vsched--incard">
             {upcoming.map((m) => (
               <VSchedItem
                 key={m.compId + m.id}
                 m={m}
                 tweaks={{ showDojo: true }}
                 showCompetition
-                hideNowBadge
                 onClick={() => onMatchClick && onMatchClick(m)}
               />
             ))}
@@ -2439,7 +2436,7 @@ function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningMatches,
   );
 }
 
-const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, hideNowBadge }) => {
+const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays.
@@ -2448,7 +2445,13 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight,
   // both ippon arrays are absent (which would invert left/right when AKA wins).
   const vIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const vIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-  const scoreStr = m.status === "completed" ? window.matchScoreStr(m, vIpponsB, vIpponsA) : null;
+  // Score string for completed matches (final) and running matches (live, once
+  // at least one ippon has landed). matchScoreStr returns "" before any score
+  // exists, so a just-started running match falls through to the "vs" render.
+  const isRunning = m.status === "running";
+  const scoreStr = (m.status === "completed" || isRunning)
+    ? (window.matchScoreStr(m, vIpponsB, vIpponsA) || null)
+    : null;
   // FR-025: queue position is 1-indexed per court for scheduled matches;
   // running/completed are 0 (set server-side, omitempty in JSON → undefined
   // on older payloads). Treat null/undefined/0 as "don't render" so the UI
@@ -2476,7 +2479,6 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight,
             {queueLabel}
           </span>
         )}
-        {m.status === "running" && !hideNowBadge && <span className="bc-running">● NOW</span>}
         {m.status === "completed" && <span className="vsched-item__status">Final</span>}
         {m.status === "completed" && m.decidedByHantei && (
           <span className="vsched-item__hantei" data-testid="vsched-hantei">HANTEI</span>
@@ -2495,8 +2497,8 @@ const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight,
           <span className="n">{withNumber(m.sideB)}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
-        {m.status === "completed" && scoreStr ? (
-          <span className="vsched-item__score">{scoreStr}</span>
+        {scoreStr ? (
+          <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : m.status === "completed" ? (
           <span className="vsched-item__vs">—</span>
         ) : (

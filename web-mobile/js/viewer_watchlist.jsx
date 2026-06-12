@@ -64,6 +64,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
         <input
           className="pmf__input"
           placeholder={placeholder || "Search players or dojos…"}
+          aria-label={placeholder || "Search players or dojos"}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
@@ -295,7 +296,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
       <div className="watchlist-card-head">
         <span className="watchlist-card-title">Watchlist</span>
-        {count > 0 && <span className="watchlist-count">{count}</span>}
+        {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
       </div>
 
       {count === 0 ? (

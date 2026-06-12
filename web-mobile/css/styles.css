@@ -66,7 +66,7 @@
 
   /* Focus ring (DESIGN.md §6): the soft 3px ring on text-entry controls
      (.input/.textarea/.select, .radio-pill, .lined-textarea, .ipt-btn).
-     Buttons use the solid `outline: 2px var(--accent)` convention instead. */
+     Buttons use the solid `outline: 2px solid var(--accent)` convention instead. */
   --focus-ring: 0 0 0 3px var(--accent-soft);
   /* Active/highlight card ring (DESIGN.md §5 "Running signal"): the navy
      running/highlight halo on cards (.bc-match--running/--highlight,

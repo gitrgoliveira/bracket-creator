@@ -114,19 +114,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // view, so the console never opens an upcoming or completed match here.
     const selectedMatch = useMemoSh(() => running[0] || null, [running]);
 
+    // The standings/context panel follows the court's current focus — not
+    // strictly the running match — so it stays visible (and updates) after a
+    // bout is finished, instead of collapsing to the empty state. Priority:
+    // the running match; else the bout just played (last completed), so the
+    // operator sees their result land in the standings; else the next
+    // scheduled bout (before the court's first match).
+    const contextMatch = useMemoSh(
+        () => selectedMatch || completed[completed.length - 1] || scheduled[0] || null,
+        [selectedMatch, completed, scheduled]
+    );
+
     // Up Next = the first non-completed, non-running match (the one to call).
     const upNext = scheduled[0] || null;
 
     // "Which pool is next" for the context panel: the first upcoming pool on
-    // this court whose pool differs from the one currently being scored.
+    // this court whose pool differs from the one currently in focus.
     const nextPoolName = useMemoSh(() => {
-        const cur = (selectedMatch && selectedMatch.phase === "pool") ? (selectedMatch.poolName || "") : "";
+        const cur = (contextMatch && contextMatch.phase === "pool") ? (contextMatch.poolName || "") : "";
         for (const m of scheduled) {
             const pn = m.poolName || "";
             if (m.phase === "pool" && pn && pn !== cur) return pn;
         }
         return null;
-    }, [selectedMatch, scheduled]);
+    }, [contextMatch, scheduled]);
 
     // Auto-advance target after a submit: next non-completed match.
     const nextActiveAfter = (m) => {
@@ -345,9 +356,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {selectedMatch && (
+                            {contextMatch && (
                                 <ShiaijoContext
-                                    match={selectedMatch} tournament={tournament}
+                                    match={contextMatch} tournament={tournament}
                                     court={court} nextPoolName={nextPoolName} tweaks={tweaks}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />

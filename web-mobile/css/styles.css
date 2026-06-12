@@ -64,6 +64,20 @@
   --shadow: 0 1px 2px rgba(20, 25, 40, 0.05), 0 8px 20px -12px rgba(20, 25, 40, 0.18);
   --shadow-lg: 0 12px 32px -16px rgba(20, 25, 40, 0.25);
 
+  /* Focus ring (DESIGN.md §6): the soft 3px ring on text-entry controls
+     (.input/.textarea/.select, .radio-pill, .lined-textarea, .ipt-btn).
+     Buttons use the solid `outline: 2px var(--accent)` convention instead. */
+  --focus-ring: 0 0 0 3px var(--accent-soft);
+  /* Active/highlight card ring (DESIGN.md §5 "Running signal"): the navy
+     running/highlight halo on cards (.bc-match--running/--highlight,
+     .sched-row--running, .vsched-item--running). Same value as --focus-ring
+     today, separate token by intent so the two can diverge independently. */
+  --ring-active: 0 0 0 3px var(--accent-soft);
+
+  /* Standard ease-out curve — the project's default entrance/transition
+     easing (DESIGN.md Motion). Decelerates hard, no overshoot. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -605,7 +619,7 @@ a:hover {
 .running-strip__chip:focus-visible,
 .radio-pill:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .score-btn:disabled {
@@ -697,7 +711,7 @@ a:hover {
 .textarea:focus,
 .select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .textarea {
@@ -719,7 +733,7 @@ a:hover {
 
 .lined-textarea:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .lined-textarea__nums {
@@ -1114,12 +1128,12 @@ a:hover {
 
 .bc-match--highlight {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .bc-match--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .bc-match--done {
@@ -1705,7 +1719,7 @@ a:hover {
 
 .sched-row--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .sched-row--done {
@@ -2513,7 +2527,7 @@ a.vlist-item {
 
 .vsched-item--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
   background-color: var(--accent-soft);
 }
 
@@ -5835,9 +5849,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   text-transform: uppercase;
   cursor: pointer;
   min-height: 24px;
-  transition: border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out),
+              background-color 120ms var(--ease-out);
 }
 .encho-pill:hover,
 .encho-pill:focus-visible {
@@ -5855,7 +5869,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -5955,9 +5969,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   height: 38px;
   font-size: 16px;
   border-radius: 6px;
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: background-color 120ms var(--ease-out),
+              border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out);
 }
 /* Drop the heavy scale+shadow on filled slots; use an inset 2px border in
    the side colour for a "value locked in" instrument-readout feel. */
@@ -6130,9 +6144,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   place-items: center;
   cursor: pointer;
   color: var(--ink-3);
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: background-color 120ms var(--ease-out),
+              border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out);
   padding: 0;
 }
 .editor-modal--compact .editor-side__pt--filled {
@@ -6279,12 +6293,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .ipt-btn:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 /* --- Decision prompt motion (compact + roomy) -------------------------- */
 .decision-prompt {
-  animation: decision-prompt-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: decision-prompt-in 160ms var(--ease-out) both;
 }
 @keyframes decision-prompt-in {
   from { opacity: 0; transform: translateY(12px); }

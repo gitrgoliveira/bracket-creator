@@ -213,7 +213,10 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) (error, err
 			continue
 		}
 		existing, err := store.LoadCompetition(existingID)
-		if err == nil && existing != nil && strings.EqualFold(existing.Name, name) {
+		if err != nil {
+			return fmt.Errorf("load competition %s: %w", existingID, err), nil
+		}
+		if existing != nil && strings.EqualFold(existing.Name, name) {
 			return nil, fmt.Errorf("competition name %q already exists", name)
 		}
 	}
@@ -239,7 +242,10 @@ func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) (erro
 			continue
 		}
 		existing, err := store.LoadCompetition(existingID)
-		if err == nil && existing != nil && existing.NumberPrefix != "" &&
+		if err != nil {
+			return fmt.Errorf("load competition %s: %w", existingID, err), nil
+		}
+		if existing != nil && existing.NumberPrefix != "" &&
 			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
 			return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 		}
@@ -437,25 +443,25 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// name was unique) and then SaveCompetitionChanged silently
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
-		var nameErr, idErr error
+		var validationErr, idErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
 			var infraErr error
-			infraErr, nameErr = checkUniqueCompName(store, comp.Name, "")
+			infraErr, validationErr = checkUniqueCompName(store, comp.Name, "")
 			if infraErr != nil {
 				return infraErr
 			}
-			if nameErr != nil {
+			if validationErr != nil {
 				return nil
 			}
-			infraErr, nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, "")
+			infraErr, validationErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, "")
 			if infraErr != nil {
 				return infraErr
 			}
-			if nameErr != nil {
+			if validationErr != nil {
 				return nil
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
@@ -466,8 +472,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
 		}
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
 		if err != nil {
@@ -732,7 +738,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (`{ ...c, players: np }`): when the body has Players, we run
 		// the participants/seeds save AFTER the transform commits and
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
-		var nameErr error
+		var validationErr error
 		var notFoundFlag bool
 		var drawReadyFlag bool
 		var changed bool
@@ -805,18 +811,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
 				var infraErr error
-				infraErr, nameErr = checkUniqueCompName(store, comp.Name, id)
+				infraErr, validationErr = checkUniqueCompName(store, comp.Name, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
-				if nameErr != nil {
+				if validationErr != nil {
 					return nil, nil
 				}
-				infraErr, nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id)
+				infraErr, validationErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
-				if nameErr != nil {
+				if validationErr != nil {
 					return nil, nil
 				}
 				// Populate per-phase durations from legacy MatchDuration
@@ -864,9 +870,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return updateErr
 		})
 		// 404 before 400 — with the uniqueness check now inside the
-		// transform (after the current == nil branch), notFoundFlag and
-		// nameErr are mutually exclusive. Order kept defensive in case
-		// either flag escapes the transform unexpectedly.
+		// transform (after current == nil), notFoundFlag and validationErr
+		// are mutually exclusive. Order kept defensive in case either flag
+		// escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
@@ -875,8 +881,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
 			return
 		}
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
 		if err != nil {

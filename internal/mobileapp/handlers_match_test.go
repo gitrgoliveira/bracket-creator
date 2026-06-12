@@ -1512,6 +1512,40 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
 	})
 
+	t.Run("correctionReason on a first completion is dropped, not persisted", func(t *testing.T) {
+		r, store, compID := setupSelfRunScoreRouter(t, "secret")
+
+		// First completion (the pre-seeded match has no status) carrying a stray
+		// correctionReason — it must NOT be persisted (the reason is only for a
+		// completed→completed correction).
+		body, _ := json.Marshal(state.MatchResult{
+			ID:               "PoolA-1",
+			SideA:            "Alice",
+			SideB:            "Bob",
+			Winner:           "Alice",
+			IpponsA:          []string{"M", "K"},
+			Status:           state.MatchStatusCompleted,
+			CorrectionReason: "Scoring error: should be dropped on first completion",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/PoolA-1/score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Tournament-Password", "secret")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+		pms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		var found bool
+		for _, m := range pms {
+			if m.ID == "PoolA-1" {
+				found = true
+				assert.Empty(t, m.CorrectionReason, "correctionReason must not persist on a first completion")
+			}
+		}
+		require.True(t, found, "PoolA-1 must be present after the write")
+	})
+
 	t.Run("correction with reason persists to storage", func(t *testing.T) {
 		r, store, compID := setupSelfRunScoreRouter(t, "secret")
 

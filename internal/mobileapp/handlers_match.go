@@ -740,6 +740,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// write, so a whitespace-only reason can't satisfy the correction gate
 		// and the persisted value never carries leading/trailing whitespace.
 		result.CorrectionReason = strings.TrimSpace(result.CorrectionReason)
+		// A correctionReason is meaningful only on a correction (an overwrite of
+		// an already-completed result). A non-completed write can never be one,
+		// so don't persist a client-supplied reason there.
+		if result.Status != state.MatchStatusCompleted {
+			result.CorrectionReason = ""
+		}
 
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The
@@ -780,12 +786,19 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// status is not completed) needs no reason.
 			if result.Status == state.MatchStatusCompleted {
 				existing := lookupMatchStatusUnderTx(stx, id, mid)
-				if existing == state.MatchStatusCompleted && result.CorrectionReason == "" {
-					engErr = &ValidationError{
-						Field:   "correctionReason",
-						Message: "correcting a completed match result requires a non-empty correctionReason",
+				if existing == state.MatchStatusCompleted {
+					// Overwriting a finalized result is a correction — require a reason.
+					if result.CorrectionReason == "" {
+						engErr = &ValidationError{
+							Field:   "correctionReason",
+							Message: "correcting a completed match result requires a non-empty correctionReason",
+						}
+						return nil
 					}
-					return nil
+				} else {
+					// First finalization — not a correction. The contract says the
+					// reason is omitted here, so drop any client-supplied value.
+					result.CorrectionReason = ""
 				}
 			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"

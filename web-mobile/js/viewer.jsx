@@ -1480,15 +1480,23 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
 
   return (
-    <div className="my-match" data-testid="watch-hero">
-      <div className="my-match__lbl">{showDojoEyebrow ? `${entityLabel} · next up` : "Your next match"}</div>
+    <div className={`my-match ${nextMatch.status === "running" ? "my-match--running" : ""}`} data-testid="watch-hero">
+      <div className="my-match__lbl">
+        {nextMatch.status === "running" ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className="dot--running" style={{ width: 8, height: 8, borderRadius: '50%' }}></span>
+            LIVE NOW
+          </span>
+        ) : (
+          showDojoEyebrow ? `${entityLabel} · next up` : "Your next match"
+        )}
+      </div>
       <div className="my-match__name">
         <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>
         {subjectName}
       </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
-        {nextMatch.status === "running" ? " · NOW" : ""}
       </div>
       <div className="my-match__row">
         <div className="my-match__chip">

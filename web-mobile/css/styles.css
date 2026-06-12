@@ -2373,6 +2373,10 @@ a:hover {
   overflow: hidden;
 }
 
+.my-match--running {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
 .my-match__lbl {
   font-size: 10.5px;
   font-weight: 700;

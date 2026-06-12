@@ -349,19 +349,17 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       {/* Bounded compact list of upcoming watched matches — shown when ≥2
           entities are watched so a coach sees the whole squad at a glance. */}
       {multi && upcoming.length > 0 && (
-        <>
-          <div className="vsched vsched--incard">
-            {upcoming.map((m) => (
-              <VSchedItem
-                key={`${m.compId}:${m.id}`}
-                m={m}
-                tweaks={{ showDojo: true }}
-                showCompetition
-                onClick={() => onMatchClick && onMatchClick(m)}
-              />
-            ))}
-          </div>
-        </>
+        <div className="vsched vsched--incard">
+          {upcoming.map((m) => (
+            <VSchedItem
+              key={`${m.compId}:${m.id}`}
+              m={m}
+              tweaks={{ showDojo: true }}
+              showCompetition
+              onClick={() => onMatchClick && onMatchClick(m)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

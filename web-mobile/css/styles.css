@@ -2378,9 +2378,9 @@ a:hover {
 }
 
 .my-match__lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.7;
 }

@@ -352,7 +352,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           <div className="vsched vsched--incard">
             {upcoming.map((m) => (
               <VSchedItem
-                key={m.compId + m.id}
+                key={`${m.compId}:${m.id}`}
                 m={m}
                 tweaks={{ showDojo: true }}
                 showCompetition

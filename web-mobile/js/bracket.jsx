@@ -63,7 +63,7 @@ function decisionSuffix(match) {
   // FIK 7-5 / 29-6: judges' decision after a tied encho. Mark explicitly so
   // a hantei-decided final is distinguishable from an ippon-derived one
   // (audit + Excel + viewer parity).
-  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "HT";
+  if (hanteiOn) suffix = (suffix ? suffix + " " : "") + "Ht";
   return suffix;
 }
 
@@ -82,8 +82,8 @@ function ipponsFromScore(scoreStr) {
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
 // Returns something like "MM–K", "M–·", "△", "X", "BYE".
 // Hantei (judges' decision after tied encho) is NOT a separate return value;
-// it surfaces as an "HT" suffix appended by decisionSuffix when
-// decidedByHantei=true — e.g. "M–K (E) HT".
+// it surfaces as an "Ht" suffix appended by decisionSuffix when
+// decidedByHantei=true — e.g. "M–K (E) Ht".
 //
 // FR-033: when `encho` carries a positive periodCount, append " (E)" to the
 // rendered string so operators and viewers see at a glance that the match
@@ -221,7 +221,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
         {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
-        {match.decidedByHantei ? <span className="bc-decision-chip">HT</span> : null}
+        {match.decidedByHantei ? <span className="bc-decision-chip">Ht</span> : null}
         {isKikenDecisionBC(match.decision) ? (
           <span className="bc-decision-chip"><TermBC name="kiken">Kiken</TermBC></span>
         ) : null}

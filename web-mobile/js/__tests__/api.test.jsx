@@ -39,7 +39,7 @@ describe('API Utils', () => {
     });
 
     it('forwards decidedByHantei on the wire payload', () => {
-      // mp-6di: judges' decision flag must round-trip so the HT suffix
+      // mp-6di: judges' decision flag must round-trip so the Ht suffix
       // persists in the viewer and bracket DecidedByHantei mirror.
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({

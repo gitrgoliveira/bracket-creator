@@ -184,7 +184,7 @@ FIK Article 7-3 also lists **chusen** (drawing lots) as a possible resolution me
 
 If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei** — upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei — one side must be chosen.
 
-The scoreboard will have an "H" in the person who wins.
+The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters — it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
 
 ## Match Procedure
 
@@ -263,7 +263,7 @@ The scoreboard is what table operators and court managers work from — either o
 
 ### Individual Match Scoreboard
 
-Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hantei/hansoku point).
+Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hansoku point — the ippon awarded by the opponent's second hansoku). A hantei (judges' decision) win is **not** an ippon at all; it is marked **Ht** on the winner's side to record that the referees **decided the match** (see below).
 
 | Name (White) | | | vs | | | Name (Red) |
 |---|---|---|---|---|---|---|
@@ -273,11 +273,11 @@ Each match has a 7-column row (plus an 8th spacer column between courts). The op
 - **vs** — centre column, normally blank. **X** marks a hikiwake (draw).
 - **Fouls** — hansoku are tracked per side. A single outstanding hansoku displays as a **red upward triangle (▲)** on the offending competitor's side (FIK Shinpan Management p.15, Table 1). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots), so the outstanding count is always 0 or 1 — a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
 - **Draw** — an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
-- **Hantei** — if a knockout match is decided by judges' decision, an **H** is placed in the winner's scoring slot.
+- **Hantei** — if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon) — it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
 
-A team match block has one row per individual bout plus a **summary row**. Each bout uses the same scoring structure as an individual match. The team match result is decided by **IV** (Individual Victories) first, then **PW** (Points Won) as tiebreaker.
+A team match block has one row per individual bout plus a **summary row**. Each bout uses the same scoring structure as an individual match. The team match result is decided by **IV** (Individual Victories) first, then **PW** (Points Won) as tiebreaker. This bout-row layout follows the FIK dantai-shiai (team match) scoreboard in the *Regulations of Kendo Shiai and Shinpan*, Shinpan Management Table 2 (p.16): white/shiro names on the left, red/aka on the right, scoring marks in the centre.
 
 | Row | Name (White) | | | vs | | | Name (Red) |
 |---|---|---|---|---|---|---|---|

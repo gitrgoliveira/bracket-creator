@@ -841,7 +841,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // decidedByHantei is only set via the dedicated submitHantei path
   // (SHIRO/AKA hantei buttons). The regular Finish/Enter buildPatch
   // explicitly clears the flag (sends false) when the match was previously
-  // hantei-decided, so a re-edit via the normal flow removes the stale HT
+  // hantei-decided, so a re-edit via the normal flow removes the stale Ht
   // marker rather than preserving it on the server.
   const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
 
@@ -873,7 +873,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
 
   // Hantei submit: tied scoreline (with or without encho). Operator picks a
   // side; we send a completed patch with the chosen side as winner, the
-  // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the HT
+  // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the Ht
   // marker — clearing them would lose the tied score history that the
   // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
@@ -2038,9 +2038,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
             const scoreDisplay = (() => {
               // mp-4pc: a hantei-decided daihyosen has a tied scoreline but
-              // a declared winner — show the winner + (HT) rather than X.
+              // a declared winner — show the winner + (Ht) rather than X.
               if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
-                return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(HT)</span></span>;
+                return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
               }
               if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               if (t.winner === null) return <span className="tsm-draw">X</span>;

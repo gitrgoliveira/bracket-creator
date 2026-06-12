@@ -1138,7 +1138,6 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   <React.Fragment key={s.key}>
                     <div className={`sb-side sb-side--${s.color}`}>
                       <div className="sb-name">{s.name}</div>
-                      <div className="sb-dojo">{s.label}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (
                           <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
@@ -1888,7 +1887,6 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
                   <div className="sb-name">{s.name}</div>
-                  <div className="sb-dojo">{s.label}</div>
                 </div>
                 {idx === 0 && (
                   <div className="sb-center">

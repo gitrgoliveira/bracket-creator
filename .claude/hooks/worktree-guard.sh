@@ -7,6 +7,21 @@
 #
 # Fails OPEN: if anything is ambiguous (no jq, not a git repo, no path),
 # it allows the edit rather than blocking all work.
+#
+# ACTIVATION (required — the script is inert until registered):
+# .claude/settings.json is gitignored, so a fresh checkout receives this
+# file but nothing invokes it. To enable the guard, add to your local
+# .claude/settings.json (merge with any existing "hooks"):
+#
+#   "hooks": {
+#     "PreToolUse": [
+#       { "matcher": "Edit|Write|NotebookEdit",
+#         "hooks": [ { "type": "command",
+#                      "command": ".claude/hooks/worktree-guard.sh" } ] }
+#     ]
+#   }
+#
+# Then open /hooks once (or restart) so Claude Code reloads the config.
 
 input="$(cat 2>/dev/null)"
 
@@ -18,7 +33,8 @@ file="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/nul
 # Resolve the main checkout root: parent of the shared .git directory.
 common_git="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
 [ -z "$common_git" ] && exit 0            # not in a git repo -> allow
-main_root="$(dirname "$common_git")"
+main_root="$(cd "$(dirname "$common_git")" 2>/dev/null && pwd -P)"
+[ -z "$main_root" ] && exit 0             # can't canonicalize root -> allow
 worktrees_dir="$main_root/.claude/worktrees"
 
 # Normalize target to an absolute path (file may not exist yet for Write).
@@ -26,6 +42,15 @@ case "$file" in
   /*) abs="$file" ;;
   *)  abs="$PWD/$file" ;;
 esac
+
+# Canonicalize so '..' segments and symlinks can't fool the glob matching
+# below (e.g. <worktree>/../../CLAUDE.md resolving into the main checkout).
+# The parent dir exists even when the Write target itself doesn't; resolve
+# it with `pwd -P` (macOS/BSD has no `realpath -m`) and re-append the
+# basename. Fail OPEN if the parent can't be resolved (new nested dir).
+abs_parent="$(cd "$(dirname "$abs")" 2>/dev/null && pwd -P)"
+[ -z "$abs_parent" ] && exit 0
+abs="$abs_parent/$(basename "$abs")"
 
 # Outside the repo entirely (e.g. ~/.claude memory) -> allow.
 case "$abs" in

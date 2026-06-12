@@ -168,7 +168,26 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
+	return s.setTeamLineupLocked(compID, lineup, teamSize, false, s.directWrite)
+}
+
+// SetTeamLineupForce is SetTeamLineup with the start-of-match freeze bypassed.
+// It is the operator-override path (officiated mode): a table operator who is
+// running behind can still set or correct a team's lineup after the match has
+// started. Lineup validation (FIK position rules) still applies — only the
+// LockedAt / running-match refusal is skipped. Callers must be authenticated
+// operators (the HTTP layer already gates this on the admin password).
+func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, teamSize int) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	if err := lineup.Validate(teamSize); err != nil {
+		return err
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.setTeamLineupLocked(compID, lineup, teamSize, true, s.directWrite)
 }
 
 // setTeamLineupLocked applies the freeze-check + load-mutate-save dance
@@ -179,7 +198,7 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 // public method — transaction bodies don't have to remember to
 // validate first. The write parameter routes the final save
 // (T211/T212).
-func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, write writeFn) error {
+func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, force bool, write writeFn) error {
 	if err := lineup.Validate(teamSize); err != nil {
 		return err
 	}
@@ -188,6 +207,19 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 		return err
 	}
 	key := lineupStorageKey(lineup)
+	// force bypasses the start-of-match freeze (operator override, officiated
+	// mode). Lineup validation above still ran, so a forced write can never
+	// persist a structurally invalid lineup.
+	if force {
+		lineup.CompetitionID = compID
+		// Preserve any existing LockedAt stamp so a later non-force write
+		// still refuses — the override is per-write, not a permanent unlock.
+		if existing, ok := current[key]; ok {
+			lineup.LockedAt = existing.LockedAt
+		}
+		current[key] = lineup
+		return s.saveTeamLineupsLocked(compID, current, write)
+	}
 	if existing, ok := current[key]; ok && existing.LockedAt != nil {
 		return ErrLineupLocked
 	}

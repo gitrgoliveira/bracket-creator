@@ -31,6 +31,11 @@ import (
 // stamps it when the round's first match starts).
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
+	// Force, on the match-scoped PUT only, bypasses the start-of-match
+	// freeze so an operator running behind can still set/correct a lineup
+	// after the match has started (officiated mode). Lineup validation
+	// still applies. Ignored by the round-scoped PUT.
+	Force bool `json:"force"`
 }
 
 // matchLineupLockedMsg is the 409 body for the match-scoped endpoints.
@@ -308,7 +313,11 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
-			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+			setLineup := stx.SetTeamLineup
+			if req.Force {
+				setLineup = stx.SetTeamLineupForce
+			}
+			if err := setLineup(compID, lineup, teamSize); err != nil {
 				switch {
 				case errors.Is(err, state.ErrLineupLocked):
 					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": matchLineupLockedMsg}}

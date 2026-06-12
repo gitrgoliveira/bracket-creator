@@ -95,6 +95,77 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "round has started")
 }
 
+// TestMatchLineupPUT_ForceOverridesLiveLock: with force=true the operator
+// can still set a lineup on a running match (officiated-mode override) — the
+// same request that 409s without force succeeds with it.
+func TestMatchLineupPUT_ForceOverridesLiveLock(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
+	}))
+
+	body, _ := json.Marshal(LineupRequest{
+		Force: true,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1", domain.PosJiho: "p2", domain.PosChuken: "p3",
+			domain.PosFukusho: "p4", domain.PosTaisho: "p5",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "PoolA-0")
+}
+
+// TestMatchLineupPUT_NoCompetition: PUT to a missing competition → 404.
+func TestMatchLineupPUT_NoCompetition(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/ghost/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+}
+
+// TestMatchLineupPUT_ZeroTeamSize: a non-team competition (teamSize 0) → 400.
+func TestMatchLineupPUT_ZeroTeamSize(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 0}))
+
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "team play")
+}
+
+// TestMatchLineupPUT_ValidationError: a structurally invalid lineup (missing
+// the mandatory Senpo/Taisho) → 400, even with force.
+func TestMatchLineupPUT_ValidationError(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	body, _ := json.Marshal(LineupRequest{Positions: map[domain.Position]string{domain.PosJiho: "p2"}})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
 // TestMatchLineupDELETE: a match-scoped DELETE removes the entry and
 // returns 204.
 func TestMatchLineupDELETE(t *testing.T) {

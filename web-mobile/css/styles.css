@@ -7110,6 +7110,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .shiaijo-lineup-bar__label { font-size: 12px; color: var(--ink-2); min-width: 0; }
 
+/* Inline lineup editor (no popup) — lives in the main column where the
+   scoring panel would be. */
+.lineup-panel--inline { padding: 16px 18px; }
+
+/* Queue-row action cell: court picker + skip, kept compact. */
+.shiaijo-row__actions { display: flex; align-items: center; gap: 6px; }
+.shiaijo-row__skip { padding: 2px 8px; font-size: 11px; }
+
 /* Big sides block for the Up Next card */
 .shiaijo-sides { display: flex; align-items: center; gap: 12px; }
 .shiaijo-sides__side { flex: 1; min-width: 0; }

@@ -103,6 +103,7 @@ type StoreTx interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
@@ -519,6 +520,17 @@ func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, 
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
+	return t.setTeamLineup(compID, l, teamSize, false)
+}
+
+// SetTeamLineupForce is the in-tx twin of Store.SetTeamLineupForce: it bypasses
+// the start-of-match freeze (operator override, officiated mode) while still
+// validating the lineup. See that method for the rationale.
+func (t *storeTx) SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error {
+	return t.setTeamLineup(compID, l, teamSize, true)
+}
+
+func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int, force bool) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
@@ -537,8 +549,15 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 			return perr
 		}
 		key := lineupStorageKey(l)
-		if existing, present := current[key]; present && existing.LockedAt != nil {
-			return ErrLineupLocked
+		if existing, present := current[key]; present {
+			if existing.LockedAt != nil && !force {
+				return ErrLineupLocked
+			}
+			// Preserve the stamp under a forced write so a later
+			// non-force write still refuses (per-write override).
+			if force {
+				l.LockedAt = existing.LockedAt
+			}
 		}
 		// In-tx writers have already passed the round-live check
 		// upstream (handlers do that BEFORE entering the tx body
@@ -550,7 +569,7 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		current[key] = l
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+	return t.store.setTeamLineupLocked(compID, l, teamSize, force, t.txWriteFn())
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {

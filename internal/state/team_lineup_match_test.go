@@ -175,6 +175,42 @@ func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 		"scheduled match PoolA-1 must allow its lineup")
 }
 
+// TestSetTeamLineupForce_BypassesMatchFreeze: the operator override sets a
+// lineup on a running match (which the normal path refuses), and preserves an
+// existing LockedAt stamp so a later non-force write still refuses.
+func TestSetTeamLineupForce_BypassesMatchFreeze(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-force"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+
+	// Normal path refuses on the running match; force succeeds.
+	require.ErrorIs(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		ErrLineupLocked, "running match blocks the normal set")
+	require.NoError(t, store.SetTeamLineupForce(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		"force overrides the running-match freeze")
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Contains(t, got, teamLineupMatchKey("team-alpha", "PoolA-0"), "forced lineup persisted")
+
+	// Stamp a lock, then force again: it succeeds but preserves the stamp,
+	// so the next non-force write still refuses (per-write override).
+	require.NoError(t, store.LockTeamLineupForMatch(compID, "PoolA-0", time.Now().UTC()))
+	require.NoError(t, store.SetTeamLineupForce(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		"force overrides a stamped LockedAt")
+	got, err = store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.NotNil(t, got[teamLineupMatchKey("team-alpha", "PoolA-0")].LockedAt,
+		"force preserves the existing LockedAt stamp")
+	require.ErrorIs(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		ErrLineupLocked, "non-force still refuses after a forced write")
+}
+
 // TestLockTeamLineupForMatch_OnlyTargetMatch: locking match P1 stamps
 // every team's P1 lineup but leaves other matches untouched.
 func TestLockTeamLineupForMatch_OnlyTargetMatch(t *testing.T) {

@@ -138,6 +138,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
+    // Skip — defer a not-yet-started match to the end of this court's queue.
+    // Clearing scheduledAt sinks it past the timed matches (backend
+    // updateMatchTime, persisted + broadcast). The operator goes back to it by
+    // selecting it from Upcoming later. No-op on running/completed matches.
+    const skipMatch = async (m) => {
+        if (!window.API || typeof window.API.updateMatchTime !== "function") return;
+        if (m.status === "running" || m.status === "completed") return;
+        const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
+        try {
+            await window.API.updateMatchTime(m.compId, m.id, "", password);
+            if (mountedRef.current && selectedKey === matchKey(m)) setSelectedKey(null);
+            if (showToast) showToast(`Skipped ${label} — moved to the end of the queue`);
+        } catch (e) {
+            if (showToast) showToast((e && e.message) || "Could not skip the match", "error");
+        }
+    };
+
     const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && scheduled.length === 0;
 
     return (
@@ -209,10 +226,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                     {callingKey === matchKey(upNext) ? "Calling…" : (calledKey === matchKey(upNext) ? "Call again" : "Call to court")}
                                                 </button>
                                             )}
-                                            {/* Team lineups lock the moment the match starts, so the
-                                                lineup must be set here, before Start match. */}
                                             {isTeamMatch(upNext) && MatchLineupPanel && (
                                                 <button className="btn btn--sm" onClick={() => setLineupMatch(upNext)}>Set lineup</button>
+                                            )}
+                                            {window.API && typeof window.API.updateMatchTime === "function" && (
+                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Move this match to the end of the queue">Skip</button>
                                             )}
                                         </div>
                                         <div className="shiaijo-upnext__hint">
@@ -238,6 +256,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
                                     selectedKey={selectedMatch && matchKey(selectedMatch)}
                                     onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
+                                    onSkip={skipMatch}
                                 />
                             )}
 
@@ -256,7 +275,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             )}
                         </div>
 
-                        {/* ── Scoring + context (right) ───────────────── */}
+                        {/* ── Scoring / lineup + context (right) ──────── */}
                         <div className="shiaijo__main">
                             {allDone && (
                                 <div className="empty">
@@ -267,20 +286,33 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {!allDone && selectedMatch && isTeamMatch(selectedMatch) && MatchLineupPanel && (
+                            {/* Inline lineup editor (no popup). Replaces the scoring panel
+                                while open; editable at any time, even mid-match. */}
+                            {!allDone && lineupMatch && MatchLineupPanel && (
+                                <MatchLineupPanel
+                                    key={`lineup-${lineupMatch.compId}-${lineupMatch.id}`}
+                                    variant="inline"
+                                    allowDuringMatch
+                                    match={lineupMatch}
+                                    tournament={tournament}
+                                    password={password}
+                                    showToast={showToast}
+                                    onClose={() => setLineupMatch(null)}
+                                />
+                            )}
+
+                            {!allDone && !lineupMatch && selectedMatch && isTeamMatch(selectedMatch) && MatchLineupPanel && (
                                 <div className="shiaijo-lineup-bar">
                                     <span className="shiaijo-lineup-bar__label">
-                                        {selectedMatch.status === "running"
-                                            ? "Team match — review who fights each position (lineup locks once the match starts)."
-                                            : "Team match — set each side's lineup before you start scoring the bouts."}
+                                        Team match — set who fights each position. You can edit it any time, even mid-match.
                                     </span>
                                     <button className="btn btn--sm" onClick={() => setLineupMatch(selectedMatch)}>
-                                        {selectedMatch.status === "running" ? "View lineup" : "Set lineup"}
+                                        Edit lineup
                                     </button>
                                 </div>
                             )}
 
-                            {!allDone && selectedMatch && (
+                            {!allDone && !lineupMatch && selectedMatch && (
                                 <ScoreEditorModal
                                     key={matchKey(selectedMatch)}
                                     variant="inline"
@@ -312,16 +344,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
-                            {!allDone && !selectedMatch && (
+                            {!allDone && !lineupMatch && !selectedMatch && (
                                 <div className="empty shiaijo__placeholder">
                                     <h3>Ready when you are</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                                        Call the next match to the court, then start it to begin scoring here.
+                                        Pick a match from the queue to start scoring. Completed matches stay in the list — select one to correct its result.
                                     </p>
                                 </div>
                             )}
 
-                            {selectedMatch && (
+                            {!lineupMatch && selectedMatch && (
                                 <ShiaijoContext
                                     match={selectedMatch} tournament={tournament}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
@@ -330,24 +362,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         </div>
                     </div>
                 )}
-
-                {lineupMatch && MatchLineupPanel && (
-                    <MatchLineupPanel
-                        key={`${lineupMatch.compId}-${lineupMatch.id}`}
-                        match={lineupMatch}
-                        tournament={tournament}
-                        password={password}
-                        showToast={showToast}
-                        onClose={() => setLineupMatch(null)}
-                    />
-                )}
             </div>
         </div>
     );
 }
 
-// A queued match row with select + a three-dot reassign menu.
-function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMoveCourt }) {
+// A queued match row with select + court reassign (+ optional skip).
+function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMoveCourt, onSkip }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
@@ -355,7 +376,7 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
                 {matches.map((m) => (
                     <ShiaijoQueueRow
                         key={matchKey(m)} m={m} selected={selectedKey === matchKey(m)}
-                        onSelect={onSelect} courts={courts} onMoveCourt={onMoveCourt}
+                        onSelect={onSelect} courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip}
                     />
                 ))}
             </div>
@@ -363,7 +384,7 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
     );
 }
 
-function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt }) {
+function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip }) {
     const isRunning = m.status === "running";
     const isComplete = m.status === "completed";
     const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
@@ -397,13 +418,16 @@ function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt }) {
                 {isRunning && <span className="bc-running">● NOW</span>}
                 {isComplete && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>Final</span>}
             </div>
-            <div onClick={(e) => e.stopPropagation()}>
+            <div className="shiaijo-row__actions" onClick={(e) => e.stopPropagation()}>
                 {onMoveCourt && courts.length > 1 && !isComplete && (
                     <CourtPicker
                         value={m.court} courts={courts}
                         onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
                         btnClassName="score-edit-row__court score-edit-row__court--btn"
                     />
+                )}
+                {onSkip && m.status === "scheduled" && (
+                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Move to the end of the queue">Skip</button>
                 )}
             </div>
         </div>

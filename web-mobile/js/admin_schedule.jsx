@@ -685,7 +685,7 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
 // does not matter (safe in test/bundler contexts too).
-function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
+function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -783,7 +783,10 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
   // read as locked rather than show an editable form that 409s on save.
   const matchStarted = match?.status === "running" || match?.status === "completed";
-  const isLocked = !!lockedAt || matchStarted;
+  // allowDuringMatch is the operator override (officiated mode): a table
+  // operator running behind can edit the lineup even after the match starts.
+  // The save then sends force=true so the backend bypasses the same freeze.
+  const isLocked = !allowDuringMatch && (!!lockedAt || matchStarted);
 
   const save = async () => {
     setError("");
@@ -793,7 +796,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       Object.entries(values).forEach(([k, v]) => {
         if (v) positionsOut[k] = v;
       });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast("Match lineup saved");
@@ -844,7 +847,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         const v = (sourceLineup.positions || {})[p.key] || "";
         if (v) positionsOut[p.key] = v;
       });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, allowDuringMatch);
       // Apply cloned values into local state
       const next = {};
       positions.forEach(p => {
@@ -947,7 +950,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
 // MatchLineupPanel — modal overlay for per-match lineup editing. Renders
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
-function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
+function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal", allowDuringMatch = false }) {
   const m = match;
   // Find the competition this match belongs to so we can access teamSize,
   // players (roster), etc.
@@ -982,17 +985,8 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
   // All matches for this competition (needed for "Copy from previous" candidate search).
   const allMatches = typeof window.compMatches === "function" ? window.compMatches(comp) : [];
 
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 1000, padding: 16
-    }}>
-      <div style={{
-        background: "var(--bg, #fff)", borderRadius: 8,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
-        width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
-      }}>
+  const inner = (
+    <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
             <div className="overline">
@@ -1000,10 +994,12 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
             </div>
             <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-              Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then.
+              {allowDuringMatch
+                ? "Set who fights each position. You can change this even after the match has started."
+                : "Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then."}
             </div>
           </div>
-          <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+          <button className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
@@ -1020,6 +1016,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
@@ -1038,12 +1035,35 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
             )}
           </div>
         </div>
+    </>
+  );
+
+  // Inline (mp-c2yr): render in-flow inside the operator console's main
+  // column — no fixed overlay, no backdrop. The shiaijo page owns the
+  // surrounding card; here we just provide padding + scroll.
+  if (variant === "inline") {
+    return <div className="scoring-panel lineup-panel--inline" aria-label="Lineup for this match">{inner}</div>;
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000, padding: 16
+    }}>
+      <div style={{
+        background: "var(--bg, #fff)", borderRadius: 8,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
+        width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
+      }}>
+        {inner}
       </div>
     </div>
   );

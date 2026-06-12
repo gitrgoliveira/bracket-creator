@@ -715,7 +715,9 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const runningCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--running'));
+    // A running bout renders the same as a pending one in the scoreboard
+    // (no live marker), but its cell is still interactive.
+    const runningCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--pending'));
     expect(runningCell).toBeTruthy();
     runningCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);

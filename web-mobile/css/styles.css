@@ -5521,7 +5521,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
 .league-matrix__cell--empty { background: var(--bg-2); }
 .league-matrix__cell--pending { color: var(--ink-3); }
-.league-matrix__cell--running { color: var(--accent); }
 .league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }

@@ -6,6 +6,34 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
+// TestCreateTagsSheetQR verifies that when publicURL and player.Number are set,
+// AddPictureFromBytes is called and both tag copies (rows 1 and 2) contain an
+// embedded picture.
+func TestCreateTagsSheetQR(t *testing.T) {
+	f := excelize.NewFile()
+	pools := []Pool{
+		{
+			PoolName: "Pool A",
+			Players: []Player{
+				{Name: "Alice", PoolPosition: 1, Number: "K1"},
+			},
+		},
+	}
+	if err := CreateTagsSheet(f, pools, "https://example.com"); err != nil {
+		t.Fatalf("CreateTagsSheet: %v", err)
+	}
+	for _, cell := range []string{"A1", "A2"} {
+		pics, err := f.GetPictures(SheetTags, cell)
+		if err != nil {
+			t.Errorf("GetPictures(%s): %v", cell, err)
+			continue
+		}
+		if len(pics) == 0 {
+			t.Errorf("expected QR picture in cell %s, got none", cell)
+		}
+	}
+}
+
 func TestCreateTagsSheet(t *testing.T) {
 	// 1. Setup
 	f := excelize.NewFile()

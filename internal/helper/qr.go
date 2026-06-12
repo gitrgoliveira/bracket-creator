@@ -14,8 +14,18 @@ import (
 const qrSizePx = 200
 
 // playerTagURL builds the deep-link URL for a numbered competitor tag.
+// Composing via url.Parse avoids malformed output when publicURL contains a
+// path, query string, or fragment (e.g. "https://host/base?x=1" must not
+// have the viewer path appended to its query string component).
 func playerTagURL(publicURL, playerNumber string) string {
-	return strings.TrimRight(publicURL, "/") + "/viewer.html?playerNumber=" + url.QueryEscape(playerNumber)
+	base, err := url.Parse(publicURL)
+	if err != nil {
+		return ""
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/viewer.html"
+	base.RawQuery = url.Values{"playerNumber": {playerNumber}}.Encode()
+	base.Fragment = ""
+	return base.String()
 }
 
 // playerTagQRPNG returns a PNG-encoded QR code for the competitor deep-link.
@@ -26,6 +36,9 @@ func playerTagQRPNG(publicURL, playerNumber string) ([]byte, error) {
 		return nil, nil
 	}
 	link := playerTagURL(publicURL, playerNumber)
+	if link == "" {
+		return nil, fmt.Errorf("cannot build QR URL from %q", publicURL)
+	}
 	png, err := qrcode.Encode(link, qrcode.High, qrSizePx)
 	if err != nil {
 		return nil, fmt.Errorf("qr encode %q: %w", playerNumber, err)

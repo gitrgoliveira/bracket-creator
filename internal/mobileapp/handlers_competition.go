@@ -218,7 +218,8 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 // competitions may have no numbering. Called inside WithCompetitionRenameLock
 // so the check and any subsequent save are atomic with respect to renames.
 func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) error {
-	if strings.TrimSpace(prefix) == "" {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
 		return nil
 	}
 	ids, _ := store.ListCompetitions()
@@ -228,7 +229,7 @@ func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) error
 		}
 		existing, err := store.LoadCompetition(existingID)
 		if err == nil && existing != nil && existing.NumberPrefix != "" &&
-			strings.EqualFold(existing.NumberPrefix, prefix) {
+			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
 			return fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 		}
 	}

@@ -6315,6 +6315,27 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   }
 }
 
+/* --- Touch-target floor for the inline operator console (mp-c2yr) ------ *
+   The shiaijo console is the surface operators actually score on, on a
+   tablet, and its inline .scoring-panel reuses .ipt-btn / .tsm-fouls__btn
+   but was not covered by the compact-modal coarse rules above, so the
+   most-tapped controls stayed mouse-sized (20x18 / 22x22). Apply the same
+   DESIGN.md §6 coarse-pointer touch floor here. Width is held to 36px (not
+   the full 44) so the canonical 5-bout team scoresheet still fits both
+   sides across an iPad-portrait column without horizontal scroll; height
+   takes the full 44px. The .scoring-panel wrapper is the inline variant
+   only, so the desktop schedule modal (fine pointer) is untouched. */
+@media (pointer: coarse) {
+  .scoring-panel .ipt-btn {
+    min-width: 36px;
+    min-height: 44px;
+  }
+  .scoring-panel .tsm-fouls__btn {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
 /* --- Keyboard focus ring for ippon buttons ---------------------------- *
    Operators tab through the scoring grid; make the focused ippon button
    obvious with the accent ring language (DESIGN.md §6 / §3). Scoped to the

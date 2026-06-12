@@ -8,9 +8,9 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-// qrSizePx is the raw PNG size in pixels. At ScaleX/Y=0.5 in the sheet this
-// renders as ~2.5 cm on screen (100 px @ 96 DPI) while keeping enough modules
-// for High error-correction recovery level.
+// qrSizePx is the raw source PNG size in pixels. The embedding scale applied
+// in CreateTagsSheet determines the rendered size; keeping the source at 200 px
+// preserves enough QR modules for High error-correction at any reasonable scale.
 const qrSizePx = 200
 
 // playerTagURL builds the deep-link URL for a numbered competitor tag.

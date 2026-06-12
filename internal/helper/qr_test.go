@@ -69,6 +69,7 @@ func TestPlayerTagQRPNG(t *testing.T) {
 		png, err := playerTagQRPNG("https://kendo.example.com", "K1")
 		require.NoError(t, err)
 		require.NotNil(t, png)
+		require.GreaterOrEqual(t, len(png), 4, "PNG too short to contain magic bytes")
 		// PNG magic bytes: 0x89 P N G
 		assert.Equal(t, byte(0x89), png[0])
 		assert.Equal(t, byte('P'), png[1])

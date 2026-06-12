@@ -199,30 +199,41 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	return nil
 }
 
-func checkUniqueCompName(store *state.Store, name, excludeID string) error {
-	ids, _ := store.ListCompetitions()
+// checkUniqueCompName checks whether name is unique across all competitions
+// except excludeID. Returns (infraErr, validationErr): infraErr is non-nil when
+// the store cannot be queried (caller should 500); validationErr is non-nil when
+// the name already exists (caller should 400).
+func checkUniqueCompName(store *state.Store, name, excludeID string) (error, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return fmt.Errorf("list competitions: %w", err), nil
+	}
 	for _, existingID := range ids {
 		if existingID == excludeID {
 			continue
 		}
 		existing, err := store.LoadCompetition(existingID)
 		if err == nil && existing != nil && strings.EqualFold(existing.Name, name) {
-			return fmt.Errorf("competition name %q already exists", name)
+			return nil, fmt.Errorf("competition name %q already exists", name)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // checkUniqueNumberPrefix ensures no two competitions share the same
 // number prefix (case-insensitive). Empty prefixes are exempt — multiple
 // competitions may have no numbering. Called inside WithCompetitionRenameLock
 // so the check and any subsequent save are atomic with respect to renames.
-func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) error {
+// Returns (infraErr, validationErr) — see checkUniqueCompName.
+func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) (error, error) {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
-		return nil
+		return nil, nil
 	}
-	ids, _ := store.ListCompetitions()
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return fmt.Errorf("list competitions: %w", err), nil
+	}
 	for _, existingID := range ids {
 		if existingID == excludeID {
 			continue
@@ -230,10 +241,10 @@ func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) error
 		existing, err := store.LoadCompetition(existingID)
 		if err == nil && existing != nil && existing.NumberPrefix != "" &&
 			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
-			return fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
+			return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
@@ -432,10 +443,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
-			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
+			var infraErr error
+			infraErr, nameErr = checkUniqueCompName(store, comp.Name, "")
+			if infraErr != nil {
+				return infraErr
+			}
+			if nameErr != nil {
 				return nil
 			}
-			if nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, ""); nameErr != nil {
+			infraErr, nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, "")
+			if infraErr != nil {
+				return infraErr
+			}
+			if nameErr != nil {
 				return nil
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
@@ -784,10 +804,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// OTHER comp IDs that checkUniqueCompName performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
-				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
+				var infraErr error
+				infraErr, nameErr = checkUniqueCompName(store, comp.Name, id)
+				if infraErr != nil {
+					return nil, infraErr
+				}
+				if nameErr != nil {
 					return nil, nil
 				}
-				if nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id); nameErr != nil {
+				infraErr, nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id)
+				if infraErr != nil {
+					return nil, infraErr
+				}
+				if nameErr != nil {
 					return nil, nil
 				}
 				// Populate per-phase durations from legacy MatchDuration

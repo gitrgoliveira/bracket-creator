@@ -1171,7 +1171,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <div className="hero-running">
               <div className="hero-running__lbl"><span className="dot dot--running"></span> NOW · {pluralize(globalRunning.length, "match", "matches")}</div>
               <div className="vsched hero-running__vsched">
-                {globalRunning.slice(0, 3).map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+                {globalRunning.slice(0, 3).map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </div>
           )}
@@ -1273,7 +1273,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             <>
               <div className="section-title viewer__upnext-title">Up next · {upNext.length}</div>
               <div className="vsched">
-                {upNext.map((m) => <VSchedItem key={m.compId + m.id} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
+                {upNext.map((m) => <VSchedItem key={`${m.compId}:${m.id}`} m={m} tweaks={{ showDojo: true }} showCompetition onClick={() => setSelectedMatch(m)} />)}
               </div>
             </>
           )}
@@ -2937,7 +2937,7 @@ function ScheduleViewer({ tournament, tweaks }) {
                 {list.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches</div>
                 ) : list.map((m) => (
-                  <TWMatch key={m.compId + m.id} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={() => tweaks.onMatchClick && tweaks.onMatchClick(m)} />
+                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={() => tweaks.onMatchClick && tweaks.onMatchClick(m)} />
                 ))}
               </div>
             </div>

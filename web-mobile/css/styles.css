@@ -6809,7 +6809,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   padding-top: 2px;
 }
 .vsched--incard .vsched-item--running {
-  box-shadow: none;
   border-radius: 8px;
   margin: 2px 0;
 }

@@ -59,9 +59,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const mountedRef = useRefSh(true);
     useEffectSh(() => () => { mountedRef.current = false; }, []);
 
-    // Selected match for the inline scoring panel; "called" is local-only UI.
+    // Selected match for the inline scoring panel. `calledKey` marks the match
+    // the operator has announced this session (local cue only); `callingKey`
+    // guards the in-flight announce request.
     const [selectedKey, setSelectedKey] = useStateSh(null);
     const [calledKey, setCalledKey] = useStateSh(null);
+    const [callingKey, setCallingKey] = useStateSh(null);
     const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
     // Per-match lineup editor (team competitions only); null = closed.
@@ -111,6 +114,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!mountedRef.current) return;
             setSelectedKey(matchKey(m));
         } catch (_e) { /* eligibility gate etc.; surfaced via toast */ }
+    };
+
+    // Call to court — optional. Broadcasts a tournament announcement so the
+    // competitors (and anyone watching the public app) are notified they're
+    // being summoned to this shiaijo. It does NOT start the match; Start is
+    // always available on its own.
+    const callToCourt = async (m) => {
+        if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
+        const a = (m.sideA && m.sideA.name) || "Aka";
+        const b = (m.sideB && m.sideB.name) || "Shiro";
+        const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
+        setCallingKey(matchKey(m));
+        try {
+            await window.API.sendAnnouncement(msg, 5, password);
+            if (!mountedRef.current) return;
+            setCalledKey(matchKey(m));
+            if (showToast) showToast(`Called ${b} and ${a} to Shiaijo ${court}`);
+        } catch (e) {
+            if (showToast) showToast((e && e.message) || "Could not send the call announcement", "error");
+        } finally {
+            if (mountedRef.current) setCallingKey(null);
+        }
     };
 
     const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && scheduled.length === 0;
@@ -170,14 +195,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-upnext__time">{upNext.scheduledAt || "—"} · {upNext.compName}</div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
-                                            {calledKey === matchKey(upNext) ? (
-                                                <>
-                                                    <span className="shiaijo-called">● Called to court</span>
-                                                    <button className="btn btn--primary" onClick={() => startMatch(upNext)}>Start match</button>
-                                                </>
-                                            ) : (
-                                                <button className="btn btn--primary" onClick={() => setCalledKey(matchKey(upNext))}>
-                                                    {Icon && <Icon name="megaphone" />} Call to court
+                                            <button className="btn btn--primary" onClick={() => startMatch(upNext)}>Start match</button>
+                                            {/* Optional: announce the call to spectators/competitors.
+                                                Never required — Start match works on its own. */}
+                                            {window.API && typeof window.API.sendAnnouncement === "function" && (
+                                                <button
+                                                    className="btn btn--sm"
+                                                    disabled={callingKey === matchKey(upNext)}
+                                                    onClick={() => callToCourt(upNext)}
+                                                    title="Announce this match to spectators and competitors"
+                                                >
+                                                    {Icon && <Icon name="megaphone" />}{" "}
+                                                    {callingKey === matchKey(upNext) ? "Calling…" : (calledKey === matchKey(upNext) ? "Call again" : "Call to court")}
                                                 </button>
                                             )}
                                             {/* Team lineups lock the moment the match starts, so the
@@ -187,13 +216,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             )}
                                         </div>
                                         <div className="shiaijo-upnext__hint">
-                                            {isTeamMatch(upNext)
-                                                ? (calledKey === matchKey(upNext)
-                                                    ? "Set each side's lineup, then start the match — lineups lock once it starts."
-                                                    : "Summon both teams, set their lineups, then start scoring. Lineups lock at start.")
-                                                : (calledKey === matchKey(upNext)
-                                                    ? "Competitors summoned. Start the match when both are at the line."
-                                                    : "Summon both competitors to the shiaijo, then start scoring.")}
+                                            {calledKey === matchKey(upNext)
+                                                ? "Announced to spectators. Start the match when both are at the line."
+                                                : (isTeamMatch(upNext)
+                                                    ? "Set each side's lineup before you start — lineups lock at start. Call to court announces the match (optional)."
+                                                    : "Start when both competitors are at the line. Call to court announces the match to spectators (optional).")}
                                         </div>
                                     </div>
                                 </div>

@@ -7097,10 +7097,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .shiaijo-upnext__time { font-size: 11px; color: var(--ink-3); font-weight: 600; }
-.shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; }
+.shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .shiaijo-upnext__hint { font-size: 11px; color: var(--ink-3); line-height: 1.4; }
-.shiaijo-called { color: var(--accent); font-weight: 700; font-size: 12px; }
 
 /* Team-match lineup prompt above the inline scoring panel */
 .shiaijo-lineup-bar {

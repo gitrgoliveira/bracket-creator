@@ -9,8 +9,8 @@ import (
 
 // CreateTagsSheet adds a "Tags" sheet to f with one large competitor tag per
 // row (two per A4 page). When publicURL is non-empty and a player has a
-// Number, a QR code is embedded in the top-left corner of each tag linking to
-// the public viewer pre-filtered to that competitor.
+// Number, a QR code is embedded in the bottom-left corner of each tag linking
+// to the public viewer pre-filtered to that competitor.
 func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)

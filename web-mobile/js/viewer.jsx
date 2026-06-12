@@ -935,9 +935,12 @@ export function TournamentInfo({ tournament }) {
 }
 
 // Pure helper: resolve a ?player= / ?playerNumber= / ?name= deep link against
-// the participant roster. Resolution order: UUID (?player=) → number prefix
-// (?playerNumber=, mp-yin4 tag QR) → name (?name=). Returns null when no
-// participant matches, else { player: {id,name} }.
+// the participant roster. Resolution order:
+//   1. ?player= as exact id (UUID) match
+//   2. ?playerNumber= as exact number match (mp-yin4 tag QR)
+//   3. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
+//      name substring — allows legacy links that used ?player=<name> to keep working
+// Returns null when no participant matches, else { player: {id,name} }.
 export function resolveDeepLink(searchString, roster) {
   const params = new URLSearchParams(searchString || "");
   const qpPlayer = (params.get("player") || "").trim();

@@ -1943,21 +1943,24 @@ func TestCheckUniqueNumberPrefix(t *testing.T) {
 	t.Run("empty prefix is always exempt", func(t *testing.T) {
 		seed("pfx-empty-1", "EmptyPfx1", "")
 		seed("pfx-empty-2", "EmptyPfx2", "")
-		assert.NoError(t, checkUniqueNumberPrefix(store, "", ""))
+		_, valErr := checkUniqueNumberPrefix(store, "", "")
+		assert.NoError(t, valErr)
 	})
 
 	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
-		assert.NoError(t, checkUniqueNumberPrefix(store, "  ", ""))
+		_, valErr := checkUniqueNumberPrefix(store, "  ", "")
+		assert.NoError(t, valErr)
 	})
 
 	t.Run("no collision for distinct prefixes", func(t *testing.T) {
 		seed("pfx-k", "KendoComp", "K")
-		assert.NoError(t, checkUniqueNumberPrefix(store, "M", ""))
+		_, valErr := checkUniqueNumberPrefix(store, "M", "")
+		assert.NoError(t, valErr)
 	})
 
 	t.Run("collision detected (exact match)", func(t *testing.T) {
 		seed("pfx-collision", "CollisionComp", "X")
-		err := checkUniqueNumberPrefix(store, "X", "")
+		_, err := checkUniqueNumberPrefix(store, "X", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "CollisionComp")
@@ -1965,13 +1968,14 @@ func TestCheckUniqueNumberPrefix(t *testing.T) {
 
 	t.Run("collision detected (case-insensitive)", func(t *testing.T) {
 		seed("pfx-case", "CaseComp", "Y")
-		err := checkUniqueNumberPrefix(store, "y", "")
+		_, err := checkUniqueNumberPrefix(store, "y", "")
 		assert.Error(t, err)
 	})
 
 	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
 		seed("pfx-self", "SelfComp", "Z")
-		assert.NoError(t, checkUniqueNumberPrefix(store, "Z", "pfx-self"))
+		_, valErr := checkUniqueNumberPrefix(store, "Z", "pfx-self")
+		assert.NoError(t, valErr)
 	})
 }
 

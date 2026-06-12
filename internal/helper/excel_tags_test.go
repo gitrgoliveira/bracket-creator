@@ -44,13 +44,13 @@ func TestCreateTagsSheet(t *testing.T) {
 		t.Errorf("Expected orientation 'portrait', got '%s'", *opts.Orientation)
 	}
 
-	// 4. Verification - Row Height (~390 points = half A4 portrait)
+	// 4. Verification - Row Height (409pt = excelize max, ~half A4 portrait)
 	height, err := f.GetRowHeight(sheetName, 1)
 	if err != nil {
 		t.Fatalf("Failed to get row height: %v", err)
 	}
-	if height != 390 {
-		t.Errorf("Expected row height 390, got %f", height)
+	if height != 409 {
+		t.Errorf("Expected row height 409, got %f", height)
 	}
 
 	// 5. Verification - each tag appears twice consecutively (same A4 page)

@@ -47,7 +47,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		},
 		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
-			Size: 150,
+			Size: 200,
 		},
 	})
 	if err != nil {
@@ -81,8 +81,8 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				if err := f.SetCellStyle(sheetName, cell, cell, style); err != nil {
 					return fmt.Errorf("failed to set cell style: %w", err)
 				}
-				// Half of A4 portrait printable height (~146mm = ~390 points)
-				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 390))
+				// excelize max row height is 409pt (~144mm, ~half A4 portrait)
+				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
 					// Top-left corner: OffsetX/Y in px (96 DPI). At 390 pt row height

@@ -1369,6 +1369,259 @@ export function subBoutLabel(sub, index) {
   return `Match ${(sub && sub.position) || index + 1}`;
 }
 
+// WatchHeroCard — the rich "next match" hero for the PRIMARY watched entity
+// (mp-xhaa). Lifted from the former MyMatchPanel so the lone-competitor case
+// keeps its full treatment: AKA/SHIRO badge, queue position, opponent, court,
+// time. The subject is whichever side belongs to the primary — for a player
+// primary that's the player; for a dojo primary it's the member currently
+// competing (primaryIds covers all members).
+function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
+  if (!nextMatch) return null;
+  const ids = primaryIds || new Set();
+  const [aId, bId] = matchParticipantIds(nextMatch);
+  // Pick the side belonging to the primary; default to side A if neither id
+  // resolves (name-only legacy data).
+  const isOnSideA = aId && ids.has(aId) ? true : (bId && ids.has(bId) ? false : true);
+  const subject = isOnSideA ? nextMatch.sideA : nextMatch.sideB;
+  const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
+  const subjectName = (subject && subject.name) || entityLabel || "";
+  // Full-text Aka/Shiro badge (bc-color-badge), consistent with bracket.jsx;
+  // the compact 14×14 variant would clip "AKA"/"SHIRO".
+  const myBadgeClass = isOnSideA ? "bc-color-badge--aka" : "bc-color-badge--shiro";
+  const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
+  const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";
+  const oppBadgeLabel = isOnSideA ? "SHIRO" : "AKA";
+  const phaseLabel = nextMatch.phase === "pool" ? poolLabel(nextMatch) : (nextMatch.round || "Bracket");
+  // FR-025: 1-indexed queue position. Wording mirrors VSchedItem + display.jsx.
+  const queueLabel = mymatchQueueLabel(nextMatch);
+  const queueHighlight = queueLabel === "Next up";
+  // For a dojo primary, name the dojo above the competing member so the
+  // relationship is clear ("Hagane Dojo" → "Aoi" is up).
+  const showDojoEyebrow = entityLabel && entityLabel !== subjectName;
+
+  return (
+    <div className="my-match" data-testid="watch-hero">
+      <div className="my-match__lbl">{showDojoEyebrow ? `${entityLabel} · next up` : "Your next match"}</div>
+      <div className="my-match__name">
+        <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>
+        {subjectName}
+      </div>
+      <div className="my-match__round">
+        {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
+        {nextMatch.status === "running" ? " · NOW" : ""}
+      </div>
+      <div className="my-match__row">
+        <div className="my-match__chip">
+          <span className="l">Court</span>
+          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || "—"}</span>
+        </div>
+        <div className="my-match__chip">
+          <span className="l">Time</span>
+          <span className="v">{nextMatch.scheduledAt || "TBA"}</span>
+        </div>
+        {queueLabel && (
+          <div
+            className="my-match__chip"
+            data-testid="my-match-queue"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="l">Queue</span>
+            {/* The .my-match card background is var(--accent) (dark blue), so
+                colouring text with var(--accent) renders unreadable. The chip
+                inherits white from --accent-fg; emphasise the in-progress/up-next
+                state with full opacity + a Unicode bullet instead.
+                Wrap the decorative bullet in aria-hidden to keep screen reader
+                announcements clean and focused on the queue label text. */}
+            <span className="v" style={{ opacity: queueHighlight ? 1 : 0.92 }}>
+              {queueHighlight ? <span aria-hidden="true">{"• "}</span> : null}
+              {queueLabel}
+            </span>
+          </div>
+        )}
+      </div>
+      {opponent && (typeof opponent === "object") ? (
+        <button
+          className="my-match__opp"
+          onClick={() => onMatchClick && onMatchClick(nextMatch)}
+        >
+          <div className="l">
+            <span className={`bc-color-badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
+            vs Opponent
+          </div>
+          <div className="n">{opponent.name}</div>
+          {opponent.dojo ? <div className="d">{opponent.dojo}</div> : null}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+// WatchlistPanel — the unified personalisation panel (mp-xhaa). One card that
+// absorbs the former "Find my matches" hero and the multi-player watchlist:
+//   - chip list of watched entities (players + whole dojos), each removable,
+//     each pin-able when ≥2 entities exist;
+//   - a single unified picker (WatchPicker) that adds a player OR a dojo;
+//   - the hero card for the primary entity (implicit when 1, pinned when ≥2);
+//   - a bounded "watched upcoming" compact list when ≥2 entities are watched.
+function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, primaryNextMatch, upcoming, onMatchClick }) {
+  const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
+
+  // Dojos present in the roster, with current member counts.
+  const dojos = useMemo(() => {
+    const counts = new Map();
+    roster.forEach((p) => { if (p.dojo) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1); });
+    return Array.from(counts.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [roster]);
+
+  const watchedPlayerIds = useMemo(() => watchlist.filter((e) => e.type === "player").map((e) => e.id), [watchlist]);
+  const watchedDojos = useMemo(() => watchlist.filter((e) => e.type === "dojo").map((e) => e.dojo), [watchlist]);
+
+  const count = watchlist.length;
+  const multi = count >= 2;
+  const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
+
+  const addPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
+  const addDojo = (d) => {
+    if (!d || !d.name) return;
+    if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
+    setWatchlist([...watchlist, { type: "dojo", dojo: d.name }]);
+  };
+  const removeEntry = (entry) => {
+    const k = entryKey(entry);
+    setWatchlist(watchlist.filter((e) => entryKey(e) !== k));
+    if (primaryKey === k) setPrimaryKey(""); // clear a now-orphaned pin
+  };
+  const togglePin = (entry) => {
+    const k = entryKey(entry);
+    setPrimaryKey(primaryKey === k ? "" : k);
+  };
+
+  // Chip for one entry — player or dojo, with optional pin star (≥2 entries)
+  // and a remove button.
+  const renderChip = (entry) => {
+    const k = entryKey(entry);
+    // Only flag the primary chip visually when there's a choice to make (≥2
+    // entries). With a lone entry the navy fill is decorative and clashes with
+    // the navy hero directly below it.
+    const isPrimary = multi && effectiveKey === k;
+    if (entry.type === "dojo") {
+      const total = dojos.find((d) => d.name === entry.dojo)?.total ?? 0;
+      return (
+        <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""}`}>
+          {multi && (
+            <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
+              {isPrimary ? "★" : "☆"}
+            </button>
+          )}
+          <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
+          {entry.dojo} ({total})
+          <button onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
+        </span>
+      );
+    }
+    const pRecord = rosterById.get(entry.id);
+    const checkedIn = pRecord && pRecord.checkedIn;
+    const name = (pRecord && pRecord.name) || entry.name || "(unknown)";
+    const number = pRecord?.number || "";
+    return (
+      <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""}`} title={checkedIn ? "Checked in" : undefined}>
+        {multi && (
+          <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
+            {isPrimary ? "★" : "☆"}
+          </button>
+        )}
+        {number && <span className="num-prefix">{number}</span>}
+        {name}
+        {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
+        <button onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
+      </span>
+    );
+  };
+
+  const primaryLabel = primaryEntry
+    ? (primaryEntry.type === "dojo" ? primaryEntry.dojo : (rosterById.get(primaryEntry.id)?.name || primaryEntry.name || ""))
+    : "";
+
+  return (
+    <div className="card card--sm mymatch-card" data-testid="viewer-home-watchlist">
+      <div className="section-title section-title--inrow">
+        <span>Watchlist</span>
+        {count > 0 && <span className="watchlist-count">{pluralize(count, "entry", "entries")}</span>}
+      </div>
+
+      {count === 0 ? (
+        <div className="hint">
+          Track yourself, a few competitors, or a whole dojo — we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
+        </div>
+      ) : (
+        <div className="pmf__bar pmf__bar--standalone watchlist-chips">
+          {watchlist.map(renderChip)}
+        </div>
+      )}
+
+      {count >= WATCHLIST_MAX ? (
+        <div className="hint--sm">Watchlist full ({WATCHLIST_MAX}). Remove an entry to add more.</div>
+      ) : (
+        <WatchPicker
+          roster={roster}
+          dojos={dojos}
+          watchedPlayerIds={watchedPlayerIds}
+          watchedDojos={watchedDojos}
+          onPickPlayer={addPlayer}
+          onPickDojo={addDojo}
+          placeholder={count === 0 ? "Add a player or dojo to watch…" : "Add another player or dojo…"}
+        />
+      )}
+
+      {/* Hint when ≥2 entities are watched but none is pinned: no hero/chime
+          until the user picks a primary. */}
+      {multi && !primaryEntry && (
+        <div className="hint watchlist-pin-hint">
+          Tap ☆ on a chip to pin your primary — they get the big card and an on-deck chime.
+        </div>
+      )}
+
+      {/* Primary hero — implicit when 1 entity, pinned when ≥2. */}
+      {primaryEntry && primaryNextMatch && (
+        <WatchHeroCard
+          nextMatch={primaryNextMatch}
+          primaryIds={new Set(resolveEntryPlayerIds(primaryEntry, roster))}
+          entityLabel={primaryLabel}
+          onMatchClick={onMatchClick}
+        />
+      )}
+      {primaryEntry && !primaryNextMatch && (
+        <div className="hint--md watchlist-primary-done">
+          {primaryLabel ? `No upcoming matches for ${primaryLabel}.` : "No upcoming matches."}
+        </div>
+      )}
+
+      {/* Bounded compact list of upcoming watched matches — shown when ≥2
+          entities are watched so a coach sees the whole squad at a glance. */}
+      {multi && upcoming.length > 0 && (
+        <>
+          <div className="section-title section-title--sub">
+            Watched matches · upcoming {upcoming.length}
+          </div>
+          <div className="vsched">
+            {upcoming.map((m) => (
+              <VSchedItem
+                key={m.compId + m.id}
+                m={m}
+                tweaks={{ showDojo: true }}
+                showCompetition
+                onClick={() => onMatchClick && onMatchClick(m)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // DisplayModes — viewer-home section linking to the public /display routes.
 // Collapsed by default inside a <details> element. Contains one "all-courts
 // overview" link plus two compact inline rows (court displays, streaming

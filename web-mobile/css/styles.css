@@ -7197,8 +7197,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
 }
 .shiaijo-context__next-label { color: var(--ink-3); }
-/* Reused PoolsViewer in a narrow panel: single column, capped height. */
-.shiaijo-context__pools { overflow: auto; max-height: 420px; }
+/* Reused PoolsViewer in a narrow panel: single column, no inner scroll —
+   the current pool renders in full (the operator scrolls the page, not a
+   cramped box). */
 .shiaijo-context__pools .pools-grid { grid-template-columns: 1fr; gap: 12px; }
 
 .shiaijo__placeholder { margin: 0; }

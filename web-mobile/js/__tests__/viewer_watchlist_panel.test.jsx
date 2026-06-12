@@ -52,7 +52,11 @@ describe('WatchHeroCard', () => {
     global.window.pluralize = (count, singular, plural) =>
       count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
     vi.resetModules();
-    ({ WatchHeroCard } = await import('../viewer.jsx'));
+    // viewer.jsx populates window.* with the helpers WatchHeroCard reads at
+    // render (matchParticipantIds, poolLabel, mymatchQueueLabel, TermV);
+    // the component itself now lives in viewer_watchlist.jsx.
+    await import('../viewer.jsx');
+    ({ WatchHeroCard } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -98,7 +102,11 @@ describe('WatchlistPanel', () => {
     global.window.pluralize = (count, singular, plural) =>
       count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
     vi.resetModules();
-    ({ WatchlistPanel, WatchHeroCard } = await import('../viewer.jsx'));
+    // viewer.jsx populates window.* with the helpers the panel reads at render
+    // (effectivePrimaryKey, entryKey, resolveEntryPlayerIds, addPlayerToWatchlist,
+    // VSchedItem, WATCHLIST_MAX); the components live in viewer_watchlist.jsx.
+    await import('../viewer.jsx');
+    ({ WatchlistPanel, WatchHeroCard } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -184,7 +192,10 @@ describe('WatchPicker', () => {
     global.window.pluralize = (count, singular, plural) =>
       count === 1 ? `${count} ${singular}` : `${count} ${plural || singular + 's'}`;
     vi.resetModules();
-    ({ WatchPicker } = await import('../viewer.jsx'));
+    // WatchPicker now lives in viewer_watchlist.jsx (reads window.pluralize,
+    // set above, at module load).
+    await import('../viewer.jsx');
+    ({ WatchPicker } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 

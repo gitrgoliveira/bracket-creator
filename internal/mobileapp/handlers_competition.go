@@ -213,6 +213,28 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) error {
 	return nil
 }
 
+// checkUniqueNumberPrefix ensures no two competitions share the same
+// number prefix (case-insensitive). Empty prefixes are exempt — multiple
+// competitions may have no numbering. Called inside WithCompetitionRenameLock
+// so the check and any subsequent save are atomic with respect to renames.
+func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) error {
+	if strings.TrimSpace(prefix) == "" {
+		return nil
+	}
+	ids, _ := store.ListCompetitions()
+	for _, existingID := range ids {
+		if existingID == excludeID {
+			continue
+		}
+		existing, err := store.LoadCompetition(existingID)
+		if err == nil && existing != nil && existing.NumberPrefix != "" &&
+			strings.EqualFold(existing.NumberPrefix, prefix) {
+			return fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
+		}
+	}
+	return nil
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
@@ -410,6 +432,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return nil
 			}
 			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
+				return nil
+			}
+			if nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, ""); nameErr != nil {
 				return nil
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
@@ -759,6 +784,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
 				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
+					return nil, nil
+				}
+				if nameErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id); nameErr != nil {
 					return nil, nil
 				}
 				// Populate per-phase durations from legacy MatchDuration

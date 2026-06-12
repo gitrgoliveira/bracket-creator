@@ -7,7 +7,11 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
-func CreateTagsSheet(f *excelize.File, pools []Pool) error {
+// CreateTagsSheet adds a "Tags" sheet to f with one large competitor tag per
+// row (two per A4 page). When publicURL is non-empty and a player has a
+// Number, a QR code is embedded in the top-left corner of each tag linking to
+// the public viewer pre-filtered to that competitor.
+func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -50,6 +54,8 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 		return fmt.Errorf("failed to create style: %w", err)
 	}
 
+	printObj := true
+
 	row := 1
 	for _, pool := range pools {
 		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
@@ -58,6 +64,12 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 			tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
 			if player.Number != "" {
 				tag = player.Number
+			}
+
+			// Generate QR once per player; reuse PNG for both tag copies.
+			var qrPNG []byte
+			if player.Number != "" {
+				qrPNG, _ = playerTagQRPNG(publicURL, player.Number)
 			}
 
 			// Write the same tag twice (top half and bottom half of A4)
@@ -71,6 +83,28 @@ func CreateTagsSheet(f *excelize.File, pools []Pool) error {
 				}
 				// Half of A4 portrait printable height (~146mm = ~390 points)
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 390))
+
+				if len(qrPNG) > 0 {
+					// Top-left corner: OffsetX/Y in px (96 DPI). At 390 pt row height
+					// (≈520 px) the 150 pt centred number starts at ~160 px from the
+					// top, so a 100 px QR (200 px × ScaleX 0.5) at offset (5, 5)
+					// sits above the text without overlap.
+					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
+						Extension: ".png",
+						File:      qrPNG,
+						Format: &excelize.GraphicOptions{
+							PrintObject: &printObj,
+							OffsetX:     5,
+							OffsetY:     5,
+							ScaleX:      0.5,
+							ScaleY:      0.5,
+							Positioning: "oneCell",
+						},
+					}); err != nil {
+						return fmt.Errorf("failed to add QR picture at %s: %w", cell, err)
+					}
+				}
+
 				row++
 			}
 

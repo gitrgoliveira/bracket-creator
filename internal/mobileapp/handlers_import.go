@@ -336,6 +336,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 			res.Error = uniqueErr.Error()
 			return nil
 		}
+		if prefixErr := checkUniqueNumberPrefix(store, comp.NumberPrefix, comp.ID); prefixErr != nil {
+			res.Error = prefixErr.Error()
+			return nil
+		}
 		if len(parsedPlayers) > 0 {
 			// Mirror saveCompetitionWithPlayers semantics: when
 			// participants land, the config records that fact so

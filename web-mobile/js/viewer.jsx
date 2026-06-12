@@ -955,7 +955,9 @@ export function resolveDeepLink(searchString, roster) {
 function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSchedule, onRegister, onOpenResults, sseConnected = true }) {
   // WatchlistPanel lives in viewer_watchlist.jsx; read it at render time so the
   // viewer.jsx <-> viewer_watchlist.jsx runtime cycle is load-order independent.
-  const WatchlistPanel = window.WatchlistPanel;
+  // Fall back to a no-op if viewer_watchlist.js fails to load so the rest of
+  // the page still renders rather than crashing on an invalid element type.
+  const WatchlistPanel = window.WatchlistPanel ?? (() => null);
   const t = tournament;
   const comps = t.competitions || [];
   const compsByDate = useMemo(() => {

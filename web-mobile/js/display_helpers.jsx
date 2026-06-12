@@ -262,7 +262,7 @@ function StreamingQR({ url, label }) {
         if (!canvas || !url) return undefined;
         // renderQR may be available on window if qr.jsx has been imported
         // by another module (e.g. admin_shell.jsx exposes it). If not, skip.
-        const fn = window.renderQR || null;
+        const fn = (typeof window !== 'undefined' && window.renderQR) || null;
         if (!fn) return undefined;
         try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
         return undefined;

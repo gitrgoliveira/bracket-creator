@@ -346,8 +346,9 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
         </div>
       )}
 
-      {/* Bounded compact list of upcoming watched matches — shown when ≥2
-          entities are watched so a coach sees the whole squad at a glance. */}
+      {/* Bounded compact list of running and upcoming watched matches — shown when
+          ≥2 entities are watched so a coach sees the whole squad at a glance.
+          Includes running matches (buildWatchlistUpcoming returns both). */}
       {multi && upcoming.length > 0 && (
         <div className="vsched vsched--incard">
           {upcoming.map((m) => (

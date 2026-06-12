@@ -163,23 +163,14 @@ describe('TvDisplay empty state — "Scan for results" QR affordance', () => {
         expect(str).toContain('Scan for results');
     });
 
-    it('renders "Scan for results" in the no-matches sub-state too', () => {
-        // No matches at all on court A.
-        const comps = [makeComp('c1', [])];
-        const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
-        const str = treeStr(tree);
-        expect(str).toContain('Scan for results');
-        const el = findFirst(tree, n => n?.props?.['data-testid'] === 'display-no-matches');
-        expect(el).toBeTruthy();
-    });
-
-    it('renders "Scan for results" in the no-matches-at-all sub-state (empty comp)', () => {
-        // No matches anywhere on court A — cleanest path through the noMatches branch.
+    it('renders "Scan for results" and "No matches scheduled" headline in the no-matches sub-state', () => {
         const comps = [makeComp('c1', [])];
         const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
         const str = treeStr(tree);
         expect(str).toContain('Scan for results');
         expect(str).toContain('No matches scheduled');
+        const el = findFirst(tree, n => n?.props?.['data-testid'] === 'display-no-matches');
+        expect(el).toBeTruthy();
     });
 });
 

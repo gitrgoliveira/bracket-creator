@@ -19,7 +19,12 @@ const Breadcrumbs = window.Breadcrumbs;
 const ScoreEditorModal = window.ScoreEditorModal;
 const CourtPicker = window.CourtPicker;
 const BracketTree = window.BracketTree;
+const Icon = window.Icon;
 const hasBothSides = window.hasBothSides;
+
+// A team match needs a lineup (which player fills each position) before its
+// bouts can be scored. Mirrors the test used in the schedule score editor.
+const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize || 0) > 0);
 
 // Pure ordering/partition helpers (exported for unit tests). Matches sort
 // running → scheduled → completed, then by scheduled time within a group.
@@ -46,7 +51,7 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
-function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, onSwitchCourt }) {
+function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
     const court = (routeCourt || "").trim();
@@ -59,6 +64,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [calledKey, setCalledKey] = useStateSh(null);
     const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // Per-match lineup editor (team competitions only); null = closed.
+    const [lineupMatch, setLineupMatch] = useStateSh(null);
+    const MatchLineupPanel = window.MatchLineupPanel;
 
     const allMatches = useMemoSh(
         () => window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court),
@@ -164,12 +172,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-upnext__actions">
                                             {calledKey === matchKey(upNext) ? (
                                                 <>
-                                                    <span className="shiaijo-called">● Called</span>
-                                                    <button className="btn btn--primary" onClick={() => startMatch(upNext)}>▶ Start Match</button>
+                                                    <span className="shiaijo-called">● Called to court</span>
+                                                    <button className="btn btn--primary" onClick={() => startMatch(upNext)}>Start match</button>
                                                 </>
                                             ) : (
-                                                <button className="btn btn--primary" onClick={() => setCalledKey(matchKey(upNext))}>📣 Call to Court</button>
+                                                <button className="btn btn--primary" onClick={() => setCalledKey(matchKey(upNext))}>
+                                                    {Icon && <Icon name="megaphone" />} Call to court
+                                                </button>
                                             )}
+                                            {/* Team lineups lock the moment the match starts, so the
+                                                lineup must be set here, before Start match. */}
+                                            {isTeamMatch(upNext) && MatchLineupPanel && (
+                                                <button className="btn btn--sm" onClick={() => setLineupMatch(upNext)}>Set lineup</button>
+                                            )}
+                                        </div>
+                                        <div className="shiaijo-upnext__hint">
+                                            {isTeamMatch(upNext)
+                                                ? (calledKey === matchKey(upNext)
+                                                    ? "Set each side's lineup, then start the match — lineups lock once it starts."
+                                                    : "Summon both teams, set their lineups, then start scoring. Lineups lock at start.")
+                                                : (calledKey === matchKey(upNext)
+                                                    ? "Competitors summoned. Start the match when both are at the line."
+                                                    : "Summon both competitors to the shiaijo, then start scoring.")}
                                         </div>
                                     </div>
                                 </div>
@@ -213,6 +237,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                                         {completed.length} match{completed.length === 1 ? "" : "es"} scored. Nothing left to run on this court.
                                     </p>
+                                </div>
+                            )}
+
+                            {!allDone && selectedMatch && isTeamMatch(selectedMatch) && MatchLineupPanel && (
+                                <div className="shiaijo-lineup-bar">
+                                    <span className="shiaijo-lineup-bar__label">
+                                        {selectedMatch.status === "running"
+                                            ? "Team match — review who fights each position (lineup locks once the match starts)."
+                                            : "Team match — set each side's lineup before you start scoring the bouts."}
+                                    </span>
+                                    <button className="btn btn--sm" onClick={() => setLineupMatch(selectedMatch)}>
+                                        {selectedMatch.status === "running" ? "View lineup" : "Set lineup"}
+                                    </button>
                                 </div>
                             )}
 
@@ -265,6 +302,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             )}
                         </div>
                     </div>
+                )}
+
+                {lineupMatch && MatchLineupPanel && (
+                    <MatchLineupPanel
+                        key={`${lineupMatch.compId}-${lineupMatch.id}`}
+                        match={lineupMatch}
+                        tournament={tournament}
+                        password={password}
+                        showToast={showToast}
+                        onClose={() => setLineupMatch(null)}
+                    />
                 )}
             </div>
         </div>

@@ -622,6 +622,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}
+      showToast={showToast}
       onSwitchCourt={(court) => setView({ kind: "shiaijo", court })}
     />;
   }

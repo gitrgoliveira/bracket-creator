@@ -1604,6 +1604,9 @@ window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 window.filterMatchesByCourt = filterMatchesByCourt;
 window.startPatch = startPatch;
+// Reused by the shiaijo operator console so team-match lineups can be set
+// without leaving that page (mp-c2yr).
+window.MatchLineupPanel = MatchLineupPanel;
 
 // ES exports for the vitest suite. computeCourtPaceStats,
 // filterMatchesByCourt, and CourtPacePanel use `export function`

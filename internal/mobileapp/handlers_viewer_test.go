@@ -292,3 +292,31 @@ func TestShiaijoMatches_UnknownCourt(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Empty(t, resp.Matches)
 }
+
+// TestShiaijoSortHelpers covers the pure ordering helpers behind the shiaijo
+// aggregator: statusPriority (running → scheduled → completed → other) and
+// schedSortKey (untimed matches sort after timed ones).
+func TestShiaijoSortHelpers(t *testing.T) {
+	assert.Equal(t, 0, statusPriority("running"))
+	assert.Equal(t, 1, statusPriority("scheduled"))
+	assert.Equal(t, 2, statusPriority("completed"))
+	assert.Equal(t, 99, statusPriority(""))
+	assert.Equal(t, 99, statusPriority("bogus"))
+
+	// Timed keys sort before the untimed fallback.
+	assert.Equal(t, "09:00", schedSortKey("09:00"))
+	assert.Equal(t, "99:99", schedSortKey(""))
+	assert.Less(t, schedSortKey("09:05"), schedSortKey(""), "timed match sorts before untimed")
+}
+
+// TestMatchToMap confirms a match struct round-trips to a flat JSON object the
+// aggregator can decorate, and that an unmarshalable value returns an error.
+func TestMatchToMap(t *testing.T) {
+	m, err := matchToMap(state.MatchResult{ID: "m1", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"})
+	require.NoError(t, err)
+	assert.Equal(t, "m1", m["id"])
+	assert.Equal(t, "A", m["court"])
+
+	_, err = matchToMap(func() {}) // functions are not JSON-marshalable
+	assert.Error(t, err)
+}

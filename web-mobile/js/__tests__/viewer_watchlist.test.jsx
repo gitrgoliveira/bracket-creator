@@ -79,26 +79,44 @@ describe('buildWatchlistUpcoming', () => {
   });
 
   // mp-42rg: verifies the de-duplication contract — running matches in the
-  // watched-upcoming list carry stable `.id` values that the ViewerHome
-  // component uses to filter them out of the global NOW section. Without this,
+  // watched-upcoming list carry stable composite keys (compId:id) that
+  // ViewerHome uses to filter them out of the global NOW section. Without this,
   // the same match appears 3× on a 375px viewport.
-  it('running matches in upcoming have stable IDs for global-NOW de-duplication', () => {
+  it('running matches in upcoming have stable composite keys for global-NOW de-duplication', () => {
     const watched = [{ id: 'p1' }, { id: 'p2' }];
     const all = [
-      { id: 'r1', sideAId: 'p1', sideBId: 'x', status: 'running', scheduledAt: '09:00' },
-      { id: 'r2', sideAId: 'y', sideBId: 'z', status: 'running', scheduledAt: '09:05' },
-      { id: 's1', sideAId: 'p2', sideBId: 'w', status: 'scheduled', scheduledAt: '10:00' },
+      { id: 'r1', compId: 'comp-A', sideAId: 'p1', sideBId: 'x', status: 'running', scheduledAt: '09:00' },
+      { id: 'r2', compId: 'comp-A', sideAId: 'y', sideBId: 'z', status: 'running', scheduledAt: '09:05' },
+      { id: 's1', compId: 'comp-A', sideAId: 'p2', sideBId: 'w', status: 'scheduled', scheduledAt: '10:00' },
     ];
     const upcoming = buildWatchlistUpcoming(watched, all);
-    const upcomingIds = new Set(upcoming.map((m) => m.id));
+    const upcomingKeys = new Set(upcoming.map((m) => `${m.compId}:${m.id}`));
 
     // r1 involves watched p1 → in upcoming, should be excluded from global NOW
-    expect(upcomingIds.has('r1')).toBe(true);
+    expect(upcomingKeys.has('comp-A:r1')).toBe(true);
     // r2 involves no watched player → not in upcoming, stays in global NOW
-    expect(upcomingIds.has('r2')).toBe(false);
+    expect(upcomingKeys.has('comp-A:r2')).toBe(false);
 
-    // Simulates ViewerHome's globalRunning filter
-    const globalRunning = all.filter((m) => m.status === 'running' && !upcomingIds.has(m.id));
+    // Simulates ViewerHome's globalRunning filter (composite key)
+    const globalRunning = all.filter((m) => m.status === 'running' && !upcomingKeys.has(`${m.compId}:${m.id}`));
     expect(globalRunning.map((m) => m.id)).toEqual(['r2']);
+  });
+
+  it('cross-competition collision: same match id in different comps are not confused', () => {
+    // "Pool A-0" is a common id; comp-B has its own unrelated running match with
+    // the same id but a different compId — it must NOT be filtered out.
+    const watched = [{ id: 'p1' }];
+    const all = [
+      { id: 'Pool A-0', compId: 'comp-A', sideAId: 'p1', sideBId: 'x', status: 'running', scheduledAt: '09:00' },
+      { id: 'Pool A-0', compId: 'comp-B', sideAId: 'y', sideBId: 'z', status: 'running', scheduledAt: '09:00' },
+    ];
+    const upcoming = buildWatchlistUpcoming(watched, all);
+    const upcomingKeys = new Set(upcoming.map((m) => `${m.compId}:${m.id}`));
+
+    const globalRunning = all.filter((m) => m.status === 'running' && !upcomingKeys.has(`${m.compId}:${m.id}`));
+    // comp-A match is watched → excluded; comp-B match has the same id but
+    // a different compId → must remain visible in the global NOW section.
+    expect(globalRunning).toHaveLength(1);
+    expect(globalRunning[0].compId).toBe('comp-B');
   });
 });

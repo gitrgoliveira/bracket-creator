@@ -927,11 +927,11 @@ a:hover {
 
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(29, 53, 87, 0.18);
+    box-shadow: 0 0 0 4px var(--accent-soft);
   }
 
   50% {
-    box-shadow: 0 0 0 6px rgba(29, 53, 87, 0);
+    box-shadow: 0 0 0 6px transparent;
   }
 }
 

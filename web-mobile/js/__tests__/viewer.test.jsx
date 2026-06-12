@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
+import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin, VSchedItem } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
@@ -1171,3 +1171,96 @@ describe('isNonPublicOrigin', () => {
   });
 });
 
+
+// VSchedItem live score rendering — T217
+// Assertions: running match with ≥1 ippon renders score + .vsched-item__score--live;
+// running match with no score falls through to "vs".
+describe('VSchedItem live score rendering (mp-42rg)', () => {
+  const realReact = global.React;
+  let runtime;
+  let VSchedItemComp;
+  const savedGlobals = {};
+  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'pluralize', 'queueLabelCompact'];
+
+  function findNode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const k of node) { const f = findNode(k, pred); if (f) return f; }
+      return null;
+    }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  const mkMatch = (overrides) => ({
+    id: 'm1', compId: 'c1', status: 'running', court: 'A',
+    phase: 'bracket', round: 'QF',
+    sideA: { id: 'pA', name: 'Alice' },
+    sideB: { id: 'pB', name: 'Bob' },
+    ipponsA: [], ipponsB: [],
+    ...overrides,
+  });
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] } : { had: false };
+    });
+    global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.matchScoreStr = vi.fn(() => '');
+    global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
+    global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
+    global.window.queueLabelCompact = null;
+    vi.resetModules();
+    ({ VSchedItem: VSchedItemComp } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders .vsched-item--running class for a running match', () => {
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch(), tweaks: {} });
+    const btn = findNode(tree, n => n.type === 'button');
+    expect(btn?.props?.className).toMatch(/vsched-item--running/);
+  });
+
+  it('renders score + .vsched-item__score--live when running and matchScoreStr returns a non-empty string', () => {
+    global.window.matchScoreStr = vi.fn(() => 'M–·');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch({ ipponsA: ['M'], ipponsB: [] }), tweaks: {} });
+    const scoreSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__score'));
+    expect(scoreSpan).toBeTruthy();
+    expect(scoreSpan.props.className).toContain('vsched-item__score--live');
+    const scoreText = [].concat(scoreSpan.children ?? scoreSpan.props?.children ?? []).join('');
+    expect(scoreText).toBe('M–·');
+  });
+
+  it('renders "vs" when running but matchScoreStr returns empty (no ippon yet)', () => {
+    global.window.matchScoreStr = vi.fn(() => '');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch(), tweaks: {} });
+    const vsSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__vs'));
+    expect(vsSpan).toBeTruthy();
+    const text = [].concat(vsSpan.children ?? vsSpan.props?.children ?? []).join('');
+    expect(text).toBe('vs');
+  });
+
+  it('does NOT add .vsched-item__score--live for a completed match', () => {
+    global.window.matchScoreStr = vi.fn(() => 'MK–D');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch({ status: 'completed' }), tweaks: {} });
+    const scoreSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__score'));
+    expect(scoreSpan).toBeTruthy();
+    expect(scoreSpan.props.className).not.toContain('vsched-item__score--live');
+  });
+});

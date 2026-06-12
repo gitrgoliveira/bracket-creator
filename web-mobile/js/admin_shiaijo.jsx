@@ -87,7 +87,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
     // guards the in-flight announce request.
-    const [selectedKey, setSelectedKey] = useStateSh(null);
     const [calledKey, setCalledKey] = useStateSh(null);
     const [callingKey, setCallingKey] = useStateSh(null);
     const [completedOpen, setCompletedOpen] = useStateSh(false);
@@ -109,18 +108,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const courts = tournament.courts || [];
     const courtKnown = courts.includes(court);
 
-    // The scoring panel shows the running (NOW) match being officiated, or a
-    // completed match the operator picked to correct. Never a scheduled match:
-    // you start the next match from the Up Next card — you don't "score" a
-    // match that hasn't begun. A scheduled selection falls back to the running
-    // match so the panel always reflects what's actually on court.
-    const selectedMatch = useMemoSh(() => {
-        if (selectedKey) {
-            const found = sorted.find((m) => matchKey(m) === selectedKey);
-            if (found && (found.status === "running" || found.status === "completed")) return found;
-        }
-        return running[0] || null;
-    }, [selectedKey, sorted, running]);
+    // The scoring panel always shows the running (NOW) match being officiated
+    // on this court — nothing else. You start the next match from the Up Next
+    // card, and fixing a finished score is done in the competition's own admin
+    // view, so the console never opens an upcoming or completed match here.
+    const selectedMatch = useMemoSh(() => running[0] || null, [running]);
 
     // Up Next = the first non-completed, non-running match (the one to call).
     const upNext = scheduled[0] || null;
@@ -150,9 +142,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     const startMatch = async (m) => {
         try {
+            // Starting makes the match running; the scoring panel shows
+            // running[0], so it picks the match up on the next refetch.
             await onEditScore(m.compId, m.id, startPatch(), m);
-            if (!mountedRef.current) return;
-            setSelectedKey(matchKey(m));
         } catch (_e) { /* eligibility gate etc.; surfaced via toast */ }
     };
 
@@ -180,15 +172,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // Skip — defer a not-yet-started match to the end of this court's queue.
     // Clearing scheduledAt sinks it past the timed matches (backend
-    // updateMatchTime, persisted + broadcast). The operator goes back to it by
-    // selecting it from Upcoming later. No-op on running/completed matches.
+    // updateMatchTime, persisted + broadcast); it reappears in Upcoming. No-op
+    // on running/completed matches.
     const skipMatch = async (m) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
         try {
             await window.API.updateMatchTime(m.compId, m.id, "", password);
-            if (mountedRef.current && selectedKey === matchKey(m)) setSelectedKey(null);
             if (showToast) showToast(`Skipped ${label} — moved to the end of the queue`);
         } catch (e) {
             if (showToast) showToast((e && e.message) || "Could not skip the match", "error");
@@ -299,8 +290,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     </button>
                                     {completedOpen && (
                                         <ShiaijoQueueGroup
-                                            matches={completed} selectedKey={selectedMatch && matchKey(selectedMatch)}
-                                            onSelect={(m) => setSelectedKey(matchKey(m))} courts={courts} onMoveCourt={onMoveCourt}
+                                            matches={completed} selectable={false}
+                                            courts={courts} onMoveCourt={onMoveCourt}
                                         />
                                     )}
                                 </div>
@@ -323,27 +314,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     key={matchKey(selectedMatch)}
                                     variant="inline"
                                     match={selectedMatch}
-                                    onClose={() => setSelectedKey(null)}
-                                    canClose={!!selectedKey}
+                                    onClose={() => {}}
+                                    canClose={false}
                                     onSubmit={async (patch) => {
-                                        try {
-                                            await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
-                                            if (!mountedRef.current) return;
-                                            if (!(patch.status === "running" && !patch.winner)) setSelectedKey(null);
-                                        } catch (_e) { /* surfaced via toast */ }
+                                        try { await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch); }
+                                        catch (_e) { /* surfaced via toast */ }
                                     }}
                                     onSubmitAndNext={async (patch) => {
                                         const next = nextActiveAfter(selectedMatch);
                                         try {
                                             await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             if (!mountedRef.current) return;
-                                            if (next) {
-                                                setSelectedKey(matchKey(next));
-                                                if (next.status === "scheduled") {
-                                                    try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
-                                                }
-                                            } else {
-                                                setSelectedKey(null);
+                                            // Finish + start the next scheduled match, which then
+                                            // becomes the running match the panel shows.
+                                            if (next && next.status === "scheduled") {
+                                                try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
                                             }
                                         } catch (_e) { /* keep panel */ }
                                     }}
@@ -355,7 +340,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <div className="empty shiaijo__placeholder">
                                     <h3>Ready when you are</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                                        Pick a match from the queue to start scoring. Completed matches stay in the list — select one to correct its result.
+                                        Start the next match from the Up Next card to begin scoring on this court.
                                     </p>
                                 </div>
                             )}

@@ -69,7 +69,11 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			// Generate QR once per player; reuse PNG for both tag copies.
 			var qrPNG []byte
 			if player.Number != "" {
-				qrPNG, _ = playerTagQRPNG(publicURL, player.Number)
+				var qrErr error
+				qrPNG, qrErr = playerTagQRPNG(publicURL, player.Number)
+				if qrErr != nil {
+					return fmt.Errorf("QR for %s: %w", player.Number, qrErr)
+				}
 			}
 
 			// Write the same tag twice (top half and bottom half of A4)

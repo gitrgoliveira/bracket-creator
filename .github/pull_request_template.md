@@ -43,7 +43,7 @@ branch (never merged to main) and embed the raw URL:
 A real browser/MCP screenshot is MANDATORY — there is no textual / DOM /
 geometry substitute. If you have not captured one yet, the PR is not ready:
 capture it (Playwright or preview_screenshot), then fill this section. Never
-mark a UI PR ready with this section empty. Full recipe: `bd memories screenshot`.
+mark a UI PR ready with this section empty. Full recipe: the `/pr-screenshots` skill.
 -->
 
 ## Test plan

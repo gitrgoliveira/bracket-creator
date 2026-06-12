@@ -79,8 +79,12 @@ describe('WatchHeroCard', () => {
 
   it('uses a dojo eyebrow when the entity label differs from the competing member', () => {
     // Dojo primary "Hagane Dojo" → member p1 (Robert) is competing.
+    // MATCH is running, so the hero label is the bare dojo eyebrow — no
+    // "· next up" suffix (a running match is happening now, not next up).
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
-    expect(collectText(byClass(tree, 'my-match__lbl')[0])).toMatch(/Hagane Dojo · next up/i);
+    const lbl = collectText(byClass(tree, 'my-match__lbl')[0]);
+    expect(lbl).toContain('Hagane Dojo');
+    expect(lbl).not.toMatch(/next up/i);
     expect(collectText(byClass(tree, 'my-match__name')[0])).toContain('Robert Young');
   });
 });

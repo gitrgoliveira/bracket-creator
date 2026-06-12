@@ -2608,6 +2608,11 @@ a.vlist-item {
   font-family: var(--font-mono);
   font-weight: 700;
 }
+/* Live (in-progress) score on a running match: accent-tinted so it reads as
+   "current score, still climbing" rather than a settled final result. */
+.vsched-item__score--live {
+  color: var(--accent);
+}
 
 /* Button vsched-item: .vsched-item defines bg + border via CSS; just reset default
    browser button appearance without clobbering those values. */
@@ -2636,11 +2641,6 @@ button.vsched-item:not([data-clickable]) {
 .vsched-item__status {
   margin-left: auto;
   color: var(--ink-3);
-}
-
-/* Running "● NOW" label inside head row pushed right automatically */
-.vsched-item__head .bc-running {
-  margin-left: auto;
 }
 
 /* HANTEI badge */
@@ -6763,6 +6763,42 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* ---------- Mymatch / watchlist card spacing ---------- */
 .mymatch-card { margin-bottom: 16px; }
+
+/* ---------- Watchlist card heading (not an eyebrow — no uppercase) ---------- */
+.watchlist-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.watchlist-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+}
+
+/* vsched inside the watchlist card: flat row list, no nested card boxes.
+   Regular items become hairline-separated rows; running items keep their
+   accent ring since they carry meaningful live state. */
+.vsched--incard { gap: 0; margin-top: 12px; }
+.vsched--incard .vsched-item:not(.vsched-item--running) {
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 8px 2px;
+}
+.vsched--incard .vsched-item:not(.vsched-item--running):first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+.vsched--incard .vsched-item--running {
+  box-shadow: none;
+  border-radius: 8px;
+  margin: 2px 0;
+}
 
 /* ---------- Checked-in tick in watchlist chips ---------- */
 .pmf__chip-tick { margin-left: 4px; font-size: 10px; }

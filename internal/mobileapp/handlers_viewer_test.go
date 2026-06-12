@@ -293,6 +293,56 @@ func TestShiaijoMatches_UnknownCourt(t *testing.T) {
 	assert.Empty(t, resp.Matches)
 }
 
+// TestShiaijoMatches_FilterPlaceholders asserts that pool/bracket matches whose
+// sides are placeholder strings ("Winner of rX-mY", "Pool A-1st") or empty
+// (structural byes) are excluded from GET /shiaijo/:court/matches, while a
+// normal both-sides match on the same court is included. Regression guard for
+// the shiaijoPlayable / Fix A change (mirrors hasBothSides in the frontend).
+func TestShiaijoMatches_FilterPlaceholders(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "cx", Name: "Mixed", Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+
+	// Pool matches: one normal, one with placeholder side, one with empty side.
+	require.NoError(t, store.SavePoolMatches("cx", []state.MatchResult{
+		{ID: "real-pool", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+		{ID: "placeholder-pool", SideA: "Alice", SideB: "Pool A-1st", Status: state.MatchStatusScheduled, Court: "A"},
+		{ID: "empty-pool", SideA: "Charlie", SideB: "", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	// Bracket matches: one normal, one with winner-of placeholder.
+	require.NoError(t, store.SaveBracket("cx", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "real-bracket", SideA: "Dave", SideB: "Eve", Status: state.MatchStatusScheduled, Court: "A"},
+			{ID: "placeholder-bracket", SideA: "Winner of r1-m0", SideB: "Frank", Status: state.MatchStatusScheduled, Court: "A"},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/shiaijo/A/matches", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "resp: %s", w.Body.String())
+
+	var resp struct {
+		Matches []struct {
+			ID string `json:"id"`
+		} `json:"matches"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	ids := make([]string, len(resp.Matches))
+	for i, m := range resp.Matches {
+		ids[i] = m.ID
+	}
+	assert.Contains(t, ids, "real-pool", "normal pool match must be included")
+	assert.Contains(t, ids, "real-bracket", "normal bracket match must be included")
+	assert.NotContains(t, ids, "placeholder-pool", "pool match with placeholder side must be excluded")
+	assert.NotContains(t, ids, "placeholder-bracket", "bracket match with winner-of placeholder must be excluded")
+	assert.NotContains(t, ids, "empty-pool", "pool match with empty side must be excluded")
+}
+
 // TestShiaijoSortHelpers covers the pure ordering helpers behind the shiaijo
 // aggregator: statusPriority (running → scheduled → completed → other) and
 // schedSortKey (untimed matches sort after timed ones).

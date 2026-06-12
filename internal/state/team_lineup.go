@@ -42,6 +42,23 @@ type teamLineupFile struct {
 
 const teamLineupFilename = "lineups.yaml"
 
+// changesRecordedPosition reports whether `incoming` alters or removes any
+// position that `existing` has already filled (a substitution) — as opposed
+// to only adding players to previously-empty positions. Adds are always
+// allowed; only changes to a recorded position are blocked once the round
+// has started (they go through the force path + audit reason).
+func changesRecordedPosition(existing, incoming domain.TeamLineup) bool {
+	for pos, who := range existing.Positions {
+		if who == "" {
+			continue
+		}
+		if nw, ok := incoming.Positions[pos]; !ok || nw != who {
+			return true
+		}
+	}
+	return false
+}
+
 // teamLineupKey is the in-memory map key for a ROUND-scoped lineup. Two
 // lineups for the same team in different rounds coexist (a 5-person team
 // might rotate a kiken'd jiho between round 1 and round 2), so the round
@@ -162,7 +179,7 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	if err := lineup.Validate(teamSize); err != nil {
+	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
 	mu := s.getCompLock(compID)
@@ -181,7 +198,7 @@ func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, team
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	if err := lineup.Validate(teamSize); err != nil {
+	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
 	mu := s.getCompLock(compID)
@@ -199,7 +216,7 @@ func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, team
 // validate first. The write parameter routes the final save
 // (T211/T212).
 func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, force bool, write writeFn) error {
-	if err := lineup.Validate(teamSize); err != nil {
+	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
 	current, err := s.loadTeamLineupsLocked(compID)
@@ -220,30 +237,36 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 		current[key] = lineup
 		return s.saveTeamLineupsLocked(compID, current, write)
 	}
-	if existing, ok := current[key]; ok && existing.LockedAt != nil {
-		return ErrLineupLocked
-	}
-	// T128a race-condition guard: a concurrent score-save could have
-	// transitioned this lineup's match to running BETWEEN the caller's
-	// last GET and this PUT — without the lineup file yet recording
-	// LockedAt (the engine wires that as a follow-up). Re-check the
-	// relevant match status inside this lock and refuse the write if it
-	// is no longer mutable. Cheap pure-disk reads, both keyed to the
-	// same compPath we already cleaned.
-	//
-	// Match-scoped (mp-825): check only THIS match's status, so a live
-	// pool match 1 does not block editing the match-2 lineup.
-	// Round-scoped: keep the legacy round-wide check.
-	if lineup.MatchID != "" {
-		if locked, err := s.matchIsRunningOrCompletedLocked(compID, lineup.MatchID); err != nil {
+	existing, hasExisting := current[key]
+	// Only a change to an already-recorded position is blocked once the round
+	// has started; adding players to empty slots is always allowed (operators
+	// enter the order at the table while bouts run).
+	if hasExisting && changesRecordedPosition(existing, lineup) {
+		if existing.LockedAt != nil {
+			return ErrLineupLocked
+		}
+		// T128a race-condition guard: a concurrent score-save could have
+		// transitioned this lineup's match to running BETWEEN the caller's
+		// last GET and this PUT — without the lineup file yet recording
+		// LockedAt (the engine wires that as a follow-up). Re-check the
+		// relevant match status inside this lock and refuse the write if it
+		// is no longer mutable. Cheap pure-disk reads, both keyed to the
+		// same compPath we already cleaned.
+		//
+		// Match-scoped (mp-825): check only THIS match's status, so a live
+		// pool match 1 does not block editing the match-2 lineup.
+		// Round-scoped: keep the legacy round-wide check.
+		if lineup.MatchID != "" {
+			if locked, err := s.matchIsRunningOrCompletedLocked(compID, lineup.MatchID); err != nil {
+				return err
+			} else if locked {
+				return ErrLineupLocked
+			}
+		} else if locked, err := s.roundHasRunningOrCompletedMatchLocked(compID, lineup.Round); err != nil {
 			return err
 		} else if locked {
 			return ErrLineupLocked
 		}
-	} else if locked, err := s.roundHasRunningOrCompletedMatchLocked(compID, lineup.Round); err != nil {
-		return err
-	} else if locked {
-		return ErrLineupLocked
 	}
 	// Defensive: the persisted record carries CompetitionID so the file
 	// is self-describing even if the directory is moved.

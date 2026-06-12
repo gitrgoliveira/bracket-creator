@@ -1550,17 +1550,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   };
 
   // Submit an inline position change: builds the full positions map from the
-  // existing lineup + the changed key→value, then PUTs. force=true + reason
-  // when the match has already started.
-  const submitInlineLineup = async (teamId, lineup, posKey, value, reason) => {
+  // existing lineup + the changed key→value, then PUTs.
+  // force=true + reason only when the match is live AND we are changing an
+  // already-recorded player (a substitution). Adding to an empty slot saves
+  // directly with force=false — the backend now allows this at any time.
+  const submitInlineLineup = async (teamId, lineup, posKey, value, reason, force) => {
     setInlineLineupSaving(true);
     try {
       const existing = lineup?.positions || {};
       const updated = { ...existing };
       if (value) updated[posKey] = value;
       else delete updated[posKey];
-      const matchStarted = m.status === "running" || m.status === "completed";
-      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, matchStarted, reason);
+      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, force, reason);
       // Refresh lineup state from the response is deferred — on next open the
       // modal re-fetches. For immediate feedback we do a partial reload of
       // lineup state for the affected side.
@@ -1849,6 +1850,16 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     { key: "a", name: m.sideA?.name || m.sideA, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
   ];
 
+  // Compute whether each team's 5-person lineup is incomplete (any position
+  // empty). Used for the non-blocking UI warning; does NOT block scoring.
+  const isFivePersonLineupIncomplete = (lineup) => {
+    if (teamSize !== 5) return false;
+    const pos = lineup?.positions || {};
+    return !pos.senpo || !pos.jiho || !pos.chuken || !pos.fukusho || !pos.taisho;
+  };
+  const lineupIncompleteB = isFivePersonLineupIncomplete(lineupB);
+  const lineupIncompleteA = isFivePersonLineupIncomplete(lineupA);
+
   // a11y: label the dialog with the match/court context (mirrors the
   // individual ScoreEditorModal).
   const dialogLabel = `Team score editor — ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
@@ -1882,7 +1893,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             maxEnchoPeriods={maxEnchoPeriods}
           />
           {/* Team header */}
-          <div className="sb-match" style={{ marginBottom: 16 }}>
+          <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
@@ -1896,6 +1907,21 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               </React.Fragment>
             ))}
           </div>
+          {/* Non-blocking lineup-incomplete hints — one per team, shown only
+              for 5-person teams when Senpo or Taisho is unset or any position
+              is empty. Muted and informational: does NOT block scoring. */}
+          {teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {[
+                { incomplete: lineupIncompleteB, label: "SHIRO" },
+                { incomplete: lineupIncompleteA, label: "AKA" },
+              ].map(({ incomplete, label }) => incomplete ? (
+                <div key={label} className="tsm-lineup__incomplete">
+                  {label}: Lineup incomplete — add the remaining players
+                </div>
+              ) : null)}
+            </div>
+          )}
 
           {/* Individual match rows. T136: in kachinuki mode only the
               CURRENT bout is rendered (positions.slice(kachinukiIdx,
@@ -1984,8 +2010,17 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const rosterB = rosterForSide(m.sideB);
             const rosterA = rosterForSide(m.sideA);
             const pickPlayer = (teamId, lineup) => (value) => {
-              if (matchStartedForLineup) setInlineLineupPrompt({ teamId, posKey: lineupPosKey, value, lineup });
-              else submitInlineLineup(teamId, lineup, lineupPosKey, value, "");
+              const prev = (lineup?.positions || {})[lineupPosKey] || "";
+              // A mid-match substitution (changing or clearing an already-recorded
+              // player) needs an audit reason + the force override. Adding a name to an
+              // empty slot — the normal live-entry case — and any pre-match edit save
+              // directly.
+              const isChange = prev !== "" && value !== prev;
+              if (matchStartedForLineup && isChange) {
+                setInlineLineupPrompt({ teamId, posKey: lineupPosKey, value, lineup });
+              } else {
+                submitInlineLineup(teamId, lineup, lineupPosKey, value, "", false);
+              }
             };
 
             // Each row: [left side, center score, right side] — left=SHIRO, right=AKA
@@ -2059,7 +2094,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
                           {rs.roster && rs.roster.length > 0 ? (
                             <select
-                              className="tsm-name__select"
+                              className={`tsm-name__select${!rs.playerName ? " tsm-name__select--empty" : ""}`}
                               aria-label={`${posLabel} ${rs.label} player`}
                               disabled={inlineLineupSaving}
                               value={rs.playerName || ""}
@@ -2318,7 +2353,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               onConfirm={(r) => {
                 const { teamId, posKey, value, lineup } = inlineLineupPrompt;
                 setInlineLineupPrompt(null);
-                submitInlineLineup(teamId, lineup, posKey, value, r);
+                submitInlineLineup(teamId, lineup, posKey, value, r, true);
               }}
               onCancel={() => setInlineLineupPrompt(null)}
             />

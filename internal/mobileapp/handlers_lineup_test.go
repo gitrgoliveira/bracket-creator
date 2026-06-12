@@ -268,20 +268,19 @@ func TestLineupPUT_ZeroTeamSize(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestLineupPUT_ValidationError verifies that a PUT with an invalid lineup
-// (missing senpo for a 5-person team) returns 400.
+// TestLineupPUT_ValidationError verifies that a PUT with an invalid position
+// KEY (not a recognised FIK name) returns 400. Note: a partial lineup with
+// only valid keys (e.g. only jiho set, senpo missing) is accepted —
+// completeness is a non-blocking UI warning, not a write-time gate.
 func TestLineupPUT_ValidationError(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
-	// Submit 5 positions but missing senpo — should fail domain validation.
+	// "chudan" is not a valid FIK position name for a 5-person team — key validation must reject it.
 	body, _ := json.Marshal(map[string]any{
 		"positions": map[string]string{
-			"jiho":    "p2",
-			"chuken":  "p3",
-			"fukusho": "p4",
-			"taisho":  "p5",
+			"chudan": "p1",
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,

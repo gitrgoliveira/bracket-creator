@@ -74,7 +74,9 @@ func TestMatchLineupGET_404WhenAbsent(t *testing.T) {
 }
 
 // TestMatchLineupPUT_409WhenMatchLive: once the match is running, the
-// match-scoped PUT is refused with 409 (frozen).
+// match-scoped PUT is refused with 409 ONLY when it changes an already-recorded
+// position. A NEW lineup (no prior entry) while the match is running must
+// succeed — that is the normal "live table entry" flow.
 func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
@@ -83,16 +85,32 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
 	}))
 
+	// First PUT: no prior lineup — new lineup while running must succeed.
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code, "new lineup while match is running must succeed: "+w.Body.String())
+
+	// Second PUT: CHANGING a recorded position while running → 409.
+	changeBody, _ := json.Marshal(LineupRequest{Positions: map[domain.Position]string{
+		domain.PosSenpo:   "p1-substitute", // change recorded senpo
+		domain.PosJiho:    "p2",
+		domain.PosChuken:  "p3",
+		domain.PosFukusho: "p4",
+		domain.PosTaisho:  "p5",
+	}})
+	req2 := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(changeBody))
+	req2.Header.Set("X-Tournament-Password", "secret")
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusConflict, w2.Code, w2.Body.String())
 	// The 409 must use a match-accurate message, not the sentinel's
 	// "round has started" text.
-	assert.Contains(t, w.Body.String(), "match has started")
-	assert.NotContains(t, w.Body.String(), "round has started")
+	assert.Contains(t, w2.Body.String(), "match has started")
+	assert.NotContains(t, w2.Body.String(), "round has started")
 }
 
 // TestMatchLineupPUT_ForceOverridesLiveLock: with force=true and a changeReason
@@ -238,14 +256,17 @@ func TestMatchLineupPUT_ZeroTeamSize(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "team play")
 }
 
-// TestMatchLineupPUT_ValidationError: a structurally invalid lineup (missing
-// the mandatory Senpo/Taisho) → 400, even with force.
+// TestMatchLineupPUT_ValidationError: a lineup with an INVALID position key
+// (not a recognised FIK name for a 5-person team) → 400. Note: a partial
+// lineup with only valid keys (e.g. only Jiho set) is accepted — completeness
+// is not enforced at write time (non-blocking UI warning only).
 func TestMatchLineupPUT_ValidationError(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
-	body, _ := json.Marshal(LineupRequest{Positions: map[domain.Position]string{domain.PosJiho: "p2"}})
+	// "chudan" is not a valid FIK position name for a 5-person team.
+	body, _ := json.Marshal(LineupRequest{Positions: map[domain.Position]string{"chudan": "p2"}})
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret")

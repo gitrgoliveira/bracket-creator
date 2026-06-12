@@ -137,3 +137,34 @@ func (t TeamLineup) validateNumbered(teamSize int) error {
 	}
 	return nil
 }
+
+// ValidatePositions checks only that the position KEYS are valid for the team
+// size; it does NOT enforce the FIK completeness/vacancy rule. Lineups are
+// entered incrementally while bouts run, so a partial lineup must be
+// persistable — completeness is surfaced as a non-blocking UI warning, not
+// enforced at write time.
+func (t TeamLineup) ValidatePositions(teamSize int) error {
+	if teamSize <= 0 {
+		return ErrLineupTeamSizeInvalid
+	}
+	allowed := allowedPositionSet(teamSize)
+	for pos := range t.Positions {
+		if _, ok := allowed[pos]; !ok {
+			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)
+		}
+	}
+	return nil
+}
+
+// allowedPositionSet returns the valid position keys for a team size: the five
+// FIK names for 5-person teams, else numbered positions 1..teamSize.
+func allowedPositionSet(teamSize int) map[Position]struct{} {
+	if teamSize == 5 {
+		return map[Position]struct{}{PosSenpo: {}, PosJiho: {}, PosChuken: {}, PosFukusho: {}, PosTaisho: {}}
+	}
+	allowed := make(map[Position]struct{}, teamSize)
+	for i := 1; i <= teamSize; i++ {
+		allowed[PositionNumbered(i)] = struct{}{}
+	}
+	return allowed
+}

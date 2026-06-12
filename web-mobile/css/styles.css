@@ -4692,6 +4692,7 @@ button.pool-match-row {
   color: var(--ink-1);
 }
 .tsm-name__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tsm-name__select--empty { border-color: var(--red); opacity: 0.75; }
 .tsm-name__static {
   flex: 1 1 auto;
   min-width: 0;
@@ -4702,7 +4703,13 @@ button.pool-match-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.team-sub-match__side--right .tsm-name__static { text-align: right; }
+.team-sub-match__side--right .tsm-lineup__incomplete {
+  font-size: 11px;
+  color: var(--ink-3);
+  padding: 2px 0 4px;
+  font-style: italic;
+}
+.tsm-name__static {text-align: right; }
 .tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
 
 /* Compact (operator console inline) — tighter name row. */

@@ -541,7 +541,7 @@ func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	// into the staged map instead of the on-disk version. Otherwise
 	// the staged write would be discarded on the next save.
 	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		if err := l.Validate(teamSize); err != nil {
+		if err := l.ValidatePositions(teamSize); err != nil {
 			return err
 		}
 		current, perr := parseTeamLineupsBytes(pending)
@@ -550,7 +550,9 @@ func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		}
 		key := lineupStorageKey(l)
 		if existing, present := current[key]; present {
-			if existing.LockedAt != nil && !force {
+			// Only block on lock if this write actually changes a recorded
+			// position (adds to empty slots are always allowed).
+			if !force && changesRecordedPosition(existing, l) && existing.LockedAt != nil {
 				return ErrLineupLocked
 			}
 			// Preserve the stamp under a forced write so a later

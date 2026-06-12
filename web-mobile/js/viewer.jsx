@@ -1948,6 +1948,15 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const watchedNames = useMemo(() => new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)), [resolvedWatched]);
   const hasActiveFilter = watchedIds.size > 0;
 
+  // Restrict the filter bar chips to entries that are relevant to THIS competition:
+  // player entries only shown when the player is in compRoster; dojo entries only
+  // when at least one roster player belongs to that dojo.
+  const compDojos = useMemo(() => new Set(compRoster.map((p) => p.dojo).filter(Boolean)), [compRoster]);
+  const compWatchlist = useMemo(
+    () => watchlist.filter((e) => e.type === "dojo" ? compDojos.has(e.dojo) : rosterById.has(e.id)),
+    [watchlist, compDojos, rosterById],
+  );
+
   const primaryEntry = useMemo(() => findPrimaryEntry(watchlist, primaryKey), [watchlist, primaryKey]);
   const myPlayer = useMemo(() => {
     if (!primaryEntry || primaryEntry.type !== "player") return null;
@@ -2084,7 +2093,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
         {hasActiveFilter && (
           <div className="viewer__filter-bar">
             <span className="viewer__filter-label">Filter:</span>
-            {watchlist.map((entry) => {
+            {compWatchlist.map((entry) => {
               const k = entryKey(entry);
               if (entry.type === "dojo") {
                 return (
@@ -2106,7 +2115,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                 </span>
               );
             })}
-            {watchlist.length > 1 && (
+            {compWatchlist.length > 1 && (
               <button className="viewer__filter-clear" onClick={() => setWatchlist([])}>Clear all</button>
             )}
           </div>

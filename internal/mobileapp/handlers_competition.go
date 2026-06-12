@@ -199,11 +199,13 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	return nil
 }
 
-// checkUniqueCompName checks whether name is unique across all competitions
-// except excludeID. Returns (infraErr, validationErr): infraErr is non-nil when
-// the store cannot be queried (caller should 500); validationErr is non-nil when
-// the name already exists (caller should 400).
-func checkUniqueCompName(store *state.Store, name, excludeID string) (error, error) {
+// checkUniqueCompFields verifies that name and prefix are both unique across all
+// competitions except excludeID in a single store pass. Returns (infraErr,
+// validationErr): infraErr is non-nil when the store cannot be queried (caller
+// should 500); validationErr is non-nil when a collision is detected (caller
+// should 400). Empty prefix is exempt from the uniqueness check.
+func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (error, error) {
+	prefix = strings.TrimSpace(prefix)
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		return fmt.Errorf("list competitions: %w", err), nil
@@ -216,36 +218,13 @@ func checkUniqueCompName(store *state.Store, name, excludeID string) (error, err
 		if err != nil {
 			return fmt.Errorf("load competition %s: %w", existingID, err), nil
 		}
-		if existing != nil && strings.EqualFold(existing.Name, name) {
+		if existing == nil {
+			continue
+		}
+		if strings.EqualFold(existing.Name, name) {
 			return nil, fmt.Errorf("competition name %q already exists", name)
 		}
-	}
-	return nil, nil
-}
-
-// checkUniqueNumberPrefix ensures no two competitions share the same
-// number prefix (case-insensitive). Empty prefixes are exempt — multiple
-// competitions may have no numbering. Called inside WithCompetitionRenameLock
-// so the check and any subsequent save are atomic with respect to renames.
-// Returns (infraErr, validationErr) — see checkUniqueCompName.
-func checkUniqueNumberPrefix(store *state.Store, prefix, excludeID string) (error, error) {
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		return nil, nil
-	}
-	ids, err := store.ListCompetitions()
-	if err != nil {
-		return fmt.Errorf("list competitions: %w", err), nil
-	}
-	for _, existingID := range ids {
-		if existingID == excludeID {
-			continue
-		}
-		existing, err := store.LoadCompetition(existingID)
-		if err != nil {
-			return fmt.Errorf("load competition %s: %w", existingID, err), nil
-		}
-		if existing != nil && existing.NumberPrefix != "" &&
+		if prefix != "" && existing.NumberPrefix != "" &&
 			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
 			return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 		}
@@ -434,12 +413,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Atomic uniqueness-check + save under the global
 		// competition-rename mutex. Closes the AB-BA window where two
 		// concurrent POSTs (or PUT renames) to the same new name both
-		// passed checkUniqueCompName (each seeing the other still had
+		// passed checkUniqueCompFields (each seeing the other still had
 		// its old name) and both landed. See state.Store
 		// WithCompetitionRenameLock for full rationale.
 		//
 		// Also checks ID uniqueness: pre-fix, a POST with an existing
-		// `id` but different `name` passed checkUniqueCompName (the
+		// `id` but different `name` passed checkUniqueCompFields (the
 		// name was unique) and then SaveCompetitionChanged silently
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
@@ -450,14 +429,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return nil
 			}
 			var infraErr error
-			infraErr, validationErr = checkUniqueCompName(store, comp.Name, "")
-			if infraErr != nil {
-				return infraErr
-			}
-			if validationErr != nil {
-				return nil
-			}
-			infraErr, validationErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, "")
+			infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, "")
 			if infraErr != nil {
 				return infraErr
 			}
@@ -706,7 +678,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// 1. AB-BA rename race closure: two concurrent PUTs renaming
 		//    different competitions to the same new name both passed
-		//    checkUniqueCompName pre-fix (each seeing the other still
+		//    checkUniqueCompFields pre-fix (each seeing the other still
 		//    had its old name) and both landed. The dedicated rename
 		//    mutex (different from any per-comp lock) serializes the
 		//    check+save for uniqueness. An earlier attempt folded the
@@ -800,25 +772,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return nil, nil
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
-				// checkUniqueCompName BEFORE the transform, so a PUT to
+				// checkUniqueCompFields BEFORE the transform, so a PUT to
 				// a missing :id whose body Name happened to collide with
 				// an existing competition would 400 "name already exists"
 				// instead of the documented 404 missing. Folding the
 				// check into the transform — after current == nil — is
 				// safe under WithCompetitionRenameLock: the rename mutex
 				// serializes rename ops, so the LoadCompetition calls on
-				// OTHER comp IDs that checkUniqueCompName performs can't
+				// OTHER comp IDs that checkUniqueCompFields performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
 				var infraErr error
-				infraErr, validationErr = checkUniqueCompName(store, comp.Name, id)
-				if infraErr != nil {
-					return nil, infraErr
-				}
-				if validationErr != nil {
-					return nil, nil
-				}
-				infraErr, validationErr = checkUniqueNumberPrefix(store, comp.NumberPrefix, id)
+				infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}

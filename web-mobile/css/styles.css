@@ -66,15 +66,7 @@
   --fs-overline:   var(--fs-xs);
 
   /* Line-height tokens */
-  --lh-tight: 1.25;  /* headings, compact chips */
-  --lh-ui:    1.35;  /* buttons, labels, table cells */
   --lh-base:  1.5;   /* body prose, form hints */
-
-  /* Weight tokens (Archivo variable axis: 100–900) */
-  --fw-normal:   400;
-  --fw-medium:   500;
-  --fw-semibold: 600;
-  --fw-bold:     700;
 
   --r-sm: 6px;
   --r: 10px;
@@ -2394,7 +2386,7 @@ a:hover {
 }
 
 .viewer__filter-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--ink-3);
   text-transform: uppercase;
@@ -2408,7 +2400,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: 20px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
   cursor: pointer;
   white-space: nowrap;

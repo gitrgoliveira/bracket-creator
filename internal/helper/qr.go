@@ -22,6 +22,9 @@ func playerTagURL(publicURL, playerNumber string) string {
 	if err != nil {
 		return ""
 	}
+	if base.Scheme != "http" && base.Scheme != "https" {
+		return ""
+	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/"
 	base.RawQuery = url.Values{"playerNumber": {playerNumber}}.Encode()
 	base.Fragment = ""

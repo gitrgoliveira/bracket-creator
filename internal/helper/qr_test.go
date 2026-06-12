@@ -38,6 +38,18 @@ func TestPlayerTagURL(t *testing.T) {
 			number:    "K 1",
 			want:      "https://example.com/?playerNumber=K+1",
 		},
+		{
+			name:      "non-http scheme returns empty",
+			publicURL: "javascript:alert(1)",
+			number:    "K1",
+			want:      "",
+		},
+		{
+			name:      "file scheme returns empty",
+			publicURL: "file:///etc/passwd",
+			number:    "K1",
+			want:      "",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

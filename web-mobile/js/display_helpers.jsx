@@ -271,7 +271,7 @@ function StreamingQR({ url, label }) {
     return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4vh' }}>
             <canvas
-                data-testid="overlay-qr"
+                data-testid="qr-canvas"
                 ref={(el) => { canvasHolder.el = el; }}
                 style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
             />

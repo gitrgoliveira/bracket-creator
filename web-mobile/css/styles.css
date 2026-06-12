@@ -7072,6 +7072,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 
+/* Shiro/Aka badges run 7px across the console; bump them on the operator
+   console so they stay legible at arm's length in a bright hall (critique
+   P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
+.shiaijo .se-color-badge { font-size: 9px; padding: 2px 5px; }
+.shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
+
 .linklike {
   background: none; border: 0; padding: 0; font: inherit;
   color: var(--accent); text-decoration: underline; cursor: pointer;

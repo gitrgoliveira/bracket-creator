@@ -994,7 +994,9 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           return;
         }
         const patch = s.buildPatch("completed");
-        if (s.onSubmitAndNext) s.doSubmit(() => s.onSubmitAndNext(patch));
+        // A correction (completed match) saves the current match only — never
+        // auto-advance / start-next, even when onSubmitAndNext is wired.
+        if (s.onSubmitAndNext && !s.isComplete) s.doSubmit(() => s.onSubmitAndNext(patch));
         else s.doSubmit(() => s.onSubmit(patch));
         return;
       }
@@ -1276,7 +1278,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                 // updates are async — pass r inline via a local override
                 // so the patch is correct on the very first submit.
                 const patch = { ...buildPatch("completed"), correctionReason: r };
-                if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
+                // Correction (isComplete) saves the current match only.
+                if (onSubmitAndNext && !isComplete) doSubmit(() => onSubmitAndNext(patch));
                 else doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
@@ -1297,7 +1300,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
-                  doSubmit(() => onSubmitAndNext(buildPatch("completed")));
+                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
                   {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
                 </button>
@@ -2355,7 +2358,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 setCorrectionReason(r);
                 setShowCorrectionPrompt(false);
                 const patch = { ...buildPatch("completed"), correctionReason: r };
-                if (onSubmitAndNext) doSubmit(() => onSubmitAndNext(patch));
+                // Correction (isComplete) saves the current match only.
+                if (onSubmitAndNext && !isComplete) doSubmit(() => onSubmitAndNext(patch));
                 else doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
@@ -2373,7 +2377,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               {onSubmitAndNext ? (
                 <button className="btn btn--primary" onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
-                  doSubmit(() => onSubmitAndNext(buildPatch("completed")));
+                  doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting}>
                   {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
                 </button>

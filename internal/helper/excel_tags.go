@@ -7,10 +7,11 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
-// CreateTagsSheet adds a "Tags" sheet to f with one large competitor tag per
-// row (two per A4 page). When publicURL is non-empty and a player has a
-// Number, a QR code is embedded in the bottom-left corner of each tag linking
-// to the public viewer pre-filtered to that competitor.
+// CreateTagsSheet adds a "Tags" sheet to f with two large competitor tags per
+// A4 page (one tag per half-page, two copies per player). When publicURL is
+// non-empty and a player has a Number, a QR code is embedded in the
+// bottom-left corner of each tag linking to the public viewer pre-filtered to
+// that competitor.
 func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)
@@ -18,7 +19,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		return fmt.Errorf("failed to create sheet %s: %w", sheetName, err)
 	}
 
-	// A4 portrait, 2 labels per page (each label = half the page height)
+	// A4 portrait, 2 tags per page (each tag = one half-page row)
 	pageSize := 9 // A4
 	orientation := "portrait"
 	handleExcelError("SetPageLayout", f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
@@ -37,8 +38,8 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		Top:    &margin,
 	}))
 
-	// Column width to fill A4 portrait width
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 90))
+	// Column width to fill A4 portrait content width (~205 mm)
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 110))
 
 	style, err := f.NewStyle(&excelize.Style{
 		Alignment: &excelize.Alignment{
@@ -47,7 +48,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		},
 		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
-			Size: 200,
+			Size: 250,
 		},
 	})
 	if err != nil {
@@ -76,7 +77,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				}
 			}
 
-			// Write the same tag twice (top half and bottom half of A4)
+			// Write the same tag twice (top half and bottom half of A4 = 2 per page).
 			for range 2 {
 				cell := fmt.Sprintf("A%d", row)
 				if err := f.SetCellValue(sheetName, cell, tag); err != nil {
@@ -89,21 +90,18 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
-					// Bottom-left corner (OffsetX/Y in px at 96 DPI).
-					// Tags are worn on the competitor's leg and read from far away —
-					// the large centred number is primary. The QR is secondary: it
-					// lets the competitor scan their own public profile with a phone.
-					// At 409 pt row height (≈545 px), the 200 pt number occupies
-					// roughly the middle 400 px. A 60 px QR (200 px × ScaleX 0.3) at
-					// OffsetY 480 (= 545 − 60 − 5) sits in the bottom-left corner,
-					// well clear of the number and unambiguously secondary.
+					// Left of the number, vertically aligned with its centre (OffsetX/Y in px at 96 DPI).
+					// Column 110 units ≈ 770 px; "K1" at 250 pt ≈ 420 px wide, so the left white
+					// space is ≈175 px. A 60 px QR (200 px × ScaleX 0.3) centred in that gap:
+					// OffsetX = (175−60)/2 = 57 px.
+					// Row 409 pt ≈ 545 px; number centre at 272 px; QR at OffsetY 242 (= 272−30).
 					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
 						Extension: ".png",
 						File:      qrPNG,
 						Format: &excelize.GraphicOptions{
 							PrintObject: &printObj,
-							OffsetX:     5,
-							OffsetY:     480,
+							OffsetX:     57,
+							OffsetY:     242,
 							ScaleX:      0.3,
 							ScaleY:      0.3,
 							Positioning: "oneCell",
@@ -116,7 +114,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				row++
 			}
 
-			// Page break after each pair of identical labels
+			// Page break after each pair of identical labels.
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row)))
 		}
 	}

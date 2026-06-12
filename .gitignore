@@ -63,6 +63,9 @@ Thumbs.db
 !web/package.json
 !web/package-lock.json
 node_modules/
+# worktree convenience symlink (web-mobile/node_modules -> main repo); the
+# bare node_modules/ rule above matches real dirs, not the symlink.
+web-mobile/node_modules
 specs/*
 specs/*/*
 !specs/openapi.yaml

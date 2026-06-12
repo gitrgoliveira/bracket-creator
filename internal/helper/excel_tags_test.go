@@ -21,7 +21,7 @@ func TestCreateTagsSheet(t *testing.T) {
 	}
 
 	// 2. Execution
-	err := CreateTagsSheet(f, pools)
+	err := CreateTagsSheet(f, pools, "")
 	if err != nil {
 		t.Fatalf("CreateTagsSheet failed: %v", err)
 	}

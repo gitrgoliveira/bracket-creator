@@ -934,16 +934,20 @@ export function TournamentInfo({ tournament }) {
   );
 }
 
-// Pure helper: resolve a ?player= / ?name= deep link against the participant
-// roster. Returns null when no participant matches, else { player: {id,name} }.
-// Adding the resolved player to the watchlist is non-destructive (dedup-add),
-// so there is no overwrite-confirmation concept here any more (mp-xhaa).
+// Pure helper: resolve a ?player= / ?playerNumber= / ?name= deep link against
+// the participant roster. Resolution order: UUID (?player=) → number prefix
+// (?playerNumber=, mp-yin4 tag QR) → name (?name=). Returns null when no
+// participant matches, else { player: {id,name} }.
 export function resolveDeepLink(searchString, roster) {
   const params = new URLSearchParams(searchString || "");
   const qpPlayer = (params.get("player") || "").trim();
+  const qpNumber = (params.get("playerNumber") || "").trim();
   const qpName = (params.get("name") || "").trim();
-  if (!qpPlayer && !qpName) return null;
+  if (!qpPlayer && !qpNumber && !qpName) return null;
   let hit = qpPlayer ? roster.find((p) => p.id === qpPlayer) : null;
+  if (!hit && qpNumber) {
+    hit = roster.find((p) => (p.number || "") === qpNumber);
+  }
   if (!hit) {
     const needle = (qpName || qpPlayer).toLowerCase();
     if (needle) hit = roster.find((p) => (p.name || "").toLowerCase().includes(needle));

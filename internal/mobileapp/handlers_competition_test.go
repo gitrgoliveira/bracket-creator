@@ -1930,3 +1930,108 @@ func TestDiscardDrawHandler(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
+
+// TestCheckUniqueNumberPrefix tests the checkUniqueNumberPrefix helper directly.
+func TestCheckUniqueNumberPrefix(t *testing.T) {
+	_, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	seed := func(id, name, prefix string) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: name, NumberPrefix: prefix}))
+	}
+
+	t.Run("empty prefix is always exempt", func(t *testing.T) {
+		seed("pfx-empty-1", "EmptyPfx1", "")
+		seed("pfx-empty-2", "EmptyPfx2", "")
+		assert.NoError(t, checkUniqueNumberPrefix(store, "", ""))
+	})
+
+	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
+		assert.NoError(t, checkUniqueNumberPrefix(store, "  ", ""))
+	})
+
+	t.Run("no collision for distinct prefixes", func(t *testing.T) {
+		seed("pfx-k", "KendoComp", "K")
+		assert.NoError(t, checkUniqueNumberPrefix(store, "M", ""))
+	})
+
+	t.Run("collision detected (exact match)", func(t *testing.T) {
+		seed("pfx-collision", "CollisionComp", "X")
+		err := checkUniqueNumberPrefix(store, "X", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "number prefix")
+		assert.Contains(t, err.Error(), "CollisionComp")
+	})
+
+	t.Run("collision detected (case-insensitive)", func(t *testing.T) {
+		seed("pfx-case", "CaseComp", "Y")
+		err := checkUniqueNumberPrefix(store, "y", "")
+		assert.Error(t, err)
+	})
+
+	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
+		seed("pfx-self", "SelfComp", "Z")
+		assert.NoError(t, checkUniqueNumberPrefix(store, "Z", "pfx-self"))
+	})
+}
+
+// TestNumberPrefixUniquenessHandlers tests POST and PUT validation via HTTP.
+func TestNumberPrefixUniquenessHandlers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed an existing competition with prefix "K".
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "K",
+	}))
+
+	post := func(id, name, prefix string) *httptest.ResponseRecorder {
+		comp := state.Competition{ID: id, Name: name, NumberPrefix: prefix}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("POST with duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-post", "Another Kendo", "K")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+		stored, _ := store.LoadCompetition("pfx-dup-post")
+		assert.Nil(t, stored, "duplicate-prefix competition must not be persisted")
+	})
+
+	t.Run("POST with case-insensitive duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-case", "Lower Kendo", "k")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST with unique prefix succeeds", func(t *testing.T) {
+		w := post("pfx-unique", "Men Open", "M")
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+
+	t.Run("PUT can keep own prefix", func(t *testing.T) {
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open Updated", NumberPrefix: "K"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT with another competition's prefix is rejected 400", func(t *testing.T) {
+		// pfx-unique has prefix "M"; try to update pfx-existing to "M".
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "M"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+	})
+}

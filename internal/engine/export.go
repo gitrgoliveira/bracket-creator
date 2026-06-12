@@ -69,8 +69,16 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 5. Names to Print sheet
 	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, len(comp.Courts), playerCoords)
 
-	// 6. Tags sheet
-	if err := helper.CreateTagsSheet(f, pools); err != nil {
+	// 6. Tags sheet — pass publicURL so numbered tags get an embedded QR code.
+	t, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, fmt.Errorf("load tournament for tags QR: %w", err)
+	}
+	var publicURL string
+	if t != nil {
+		publicURL = t.PublicURL
+	}
+	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
 		return nil, err
 	}
 

@@ -1354,7 +1354,6 @@ const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => St
 // independently and admin_lineup.jsx may not be present in older
 // builds). The mapping mirrors POS_LABELS_5 in admin_lineup.jsx.
 const POS_LABELS_BY_INDEX_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
-const POS_TERM_BY_LABEL_5 = { Senpo: "senpo", Jiho: "jiho", Chuken: "chuken", Fukusho: "fukusho", Taisho: "taisho" };
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
     // Backend may emit a name string in Position for non-5 sizes once
@@ -1363,15 +1362,6 @@ function positionLabelFor(teamSize, index, sub) {
   }
   if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_BY_INDEX_5[index];
   return `Match ${index + 1}`;
-}
-
-// renderPositionLabel — wrap a known FIK position label in <Term> so
-// the team scoring modal's bout headings carry the gloss. Falls back to
-// the plain string for non-FIK labels ("Match 3", etc.).
-function renderPositionLabel(label) {
-  const termId = POS_TERM_BY_LABEL_5[label];
-  if (termId) return React.createElement(TermAS, { name: termId }, label);
-  return label;
 }
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
@@ -2052,11 +2042,12 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
             return (
               <div key={idx} className="team-sub-match">
-                <div className="team-sub-match__pos">
-                  {/* Just the bout position (Senpo/Jiho/…). Player names now
-                      live with each side's score controls below, so every
-                      bout's columns line up down the sheet. */}
-                  <span style={{ fontWeight: 700 }}>{renderPositionLabel(posLabel)}</span>
+                <div className="team-sub-match__pos" title={posLabel}>
+                  {/* Bout number, not the FIK position name (Senpo/Jiho/…) —
+                      a number is compact and scales to any team size. The
+                      canonical position name stays available as the title
+                      tooltip. Daihyosen (the rep bout) shows "DH". */}
+                  <span style={{ fontWeight: 700 }}>{isDaihyoRow ? "DH" : idx + 1}</span>
                 </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (

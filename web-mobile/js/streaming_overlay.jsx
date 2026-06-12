@@ -1,7 +1,7 @@
 // streaming_overlay.jsx — OBS/vMix streaming overlay (StreamingOverlay).
 // Transparent-background lower-third for broadcast integrations. T066, T067, mp-13y.
 
-import { findRunningOnCourt, sideLabel, TermD } from './display_helpers.jsx';
+import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup } from './lineup_resolver.jsx';
 
@@ -50,38 +50,6 @@ function findCurrentBoutIndex(subResults) {
         if (!hasIppon && !hasFoul && !hasHantei && !hasOutcome && !isDraw) return i;
     }
     return regular.length;
-}
-
-// StreamingQR — minimal canvas QR code for the streaming overlay.
-// Renders using renderQR from qr.jsx when available via window.renderQR.
-// Falls back gracefully (blank canvas) if QR rendering is unavailable.
-function StreamingQR({ url, label }) {
-    // Use a stable object as the ref container so the useEffect dependency
-    // doesn't change on every render. The canvas element is stored in
-    // canvasHolder.el after the JSX ref callback fires.
-    const canvasHolder = useMD(() => ({ el: null }), []);
-
-    useED(() => {
-        const canvas = canvasHolder.el;
-        if (!canvas || !url) return undefined;
-        // renderQR may be available on window if qr.jsx has been imported
-        // by another module (e.g. admin_shell.jsx exposes it). If not, skip.
-        const fn = window.renderQR || null;
-        if (!fn) return undefined;
-        try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
-        return undefined;
-    }, [url]);
-
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4vh' }}>
-            <canvas
-                data-testid="overlay-qr"
-                ref={(el) => { canvasHolder.el = el; }}
-                style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
-            />
-            {label && <div style={{ fontSize: '1.2vh', opacity: 0.75, textAlign: 'center' }}>{label}</div>}
-        </div>
-    );
 }
 
 // <StreamingOverlay court="A" position="bottom"> — transparent-background

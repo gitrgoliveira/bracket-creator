@@ -1,8 +1,16 @@
 // display_helpers.jsx — shared data/label layer for display surfaces.
-// Pure functions and the TermD wrapper used by TvDisplay, LobbyDisplay,
-// and StreamingOverlay. No React hooks; safe to import from any module.
+// Pure functions, the TermD wrapper, and StreamingQR used by TvDisplay,
+// LobbyDisplay, and StreamingOverlay. No module-level side-effects.
 
 import { withNumber } from './match_scoreboard.jsx';
+
+// NOTE: this module is the shared *leaf* in the display graph — presentation
+// modules (scoreboard, lobby, streaming) import from here, not vice versa.
+// Within this file, hooks are NOT destructured off `React` at module-eval time;
+// StreamingQR and TermD call React.* lazily at render time instead.
+// The import of `withNumber` from `match_scoreboard.jsx` is a transitive
+// dependency on `React` being global, which every display surface already
+// requires before mounting — this is not a new constraint introduced here.
 
 // TermD — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and display.jsx doesn't matter.
@@ -240,6 +248,40 @@ function poolNameOf(id) {
     return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
 }
 
+// StreamingQR — minimal canvas QR code for the streaming overlay and TV
+// empty-state. Renders using renderQR from qr.jsx when available via
+// window.renderQR. Falls back gracefully (blank canvas) if QR rendering
+// is unavailable. Moved here from streaming_overlay.jsx (mp-s99q) so both
+// StreamingOverlay and TvDisplay can share the same component.
+function StreamingQR({ url, label }) {
+    // Use a stable object as the ref container so the useEffect dependency
+    // doesn't change on every render. The canvas element is stored in
+    // canvasHolder.el after the JSX ref callback fires.
+    const canvasHolder = React.useMemo(() => ({ el: null }), []);
+
+    React.useEffect(() => {
+        const canvas = canvasHolder.el;
+        if (!canvas || !url) return undefined;
+        // renderQR may be available on window if qr.jsx has been imported
+        // by another module (e.g. admin_shell.jsx exposes it). If not, skip.
+        const fn = (typeof window !== 'undefined' && window.renderQR) || null;
+        if (!fn) return undefined;
+        try { fn(canvas, url, { moduleSize: 2, quietZone: 2 }); } catch (_e) { /* skip */ }
+        return undefined;
+    }, [url]);
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.4vh' }}>
+            <canvas
+                data-testid="qr-canvas"
+                ref={(el) => { canvasHolder.el = el; }}
+                style={{ display: 'block', imageRendering: 'pixelated', borderRadius: 4 }}
+            />
+            {label && <div style={{ fontSize: '1.2vh', opacity: 0.75, textAlign: 'center' }}>{label}</div>}
+        </div>
+    );
+}
+
 export {
     DISPLAY_PLACEHOLDER_RE,
     bracketSidesReady,
@@ -253,4 +295,5 @@ export {
     poolNameOf,
     sideLabel,
     TermD,
+    StreamingQR,
 };

@@ -4285,5 +4285,7 @@ window.isNonPublicOrigin = isNonPublicOrigin;
 // mp-koqh: public results page.
 window.buildAllWinnersPublic = buildAllWinnersPublic;
 window.AllWinnersView = AllWinnersView;
+// Reused read-only on the shiaijo operator console (pool standings + results).
+window.PoolsViewer = PoolsViewer;
 export { shouldShowRegister };
 

@@ -7187,6 +7187,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-context__body { padding: 0 14px 14px; }
 .shiaijo-context__bracket { overflow: auto; max-height: 360px; }
 
+/* "Which pool is next" banner above the pool standings. */
+.shiaijo-context__next {
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.shiaijo-context__next-label { color: var(--ink-3); }
+/* Reused PoolsViewer in a narrow panel: single column, capped height. */
+.shiaijo-context__pools { overflow: auto; max-height: 420px; }
+.shiaijo-context__pools .pools-grid { grid-template-columns: 1fr; gap: 12px; }
+
 .shiaijo__placeholder { margin: 0; }
 
 @media (max-width: 900px) {

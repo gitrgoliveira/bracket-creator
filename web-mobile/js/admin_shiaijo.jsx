@@ -47,7 +47,7 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
-function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, onSwitchCourt }) {
+function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
     const court = (routeCourt || "").trim();
@@ -87,6 +87,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // Up Next = the first non-completed, non-running match (the one to call).
     const upNext = scheduled[0] || null;
+
+    // "Which pool is next" for the context panel: the first upcoming pool on
+    // this court whose pool differs from the one currently being scored.
+    const nextPoolName = useMemoSh(() => {
+        const cur = (selectedMatch && selectedMatch.phase === "pool") ? (selectedMatch.poolName || "") : "";
+        for (const m of scheduled) {
+            const pn = m.poolName || "";
+            if (m.phase === "pool" && pn && pn !== cur) return pn;
+        }
+        return null;
+    }, [selectedMatch, scheduled]);
 
     // Auto-advance target after a submit: next non-completed match.
     const nextActiveAfter = (m) => {
@@ -317,6 +328,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {selectedMatch && (
                                 <ShiaijoContext
                                     match={selectedMatch} tournament={tournament}
+                                    court={court} nextPoolName={nextPoolName} tweaks={tweaks}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />
                             )}
@@ -413,28 +425,85 @@ function MatchSides({ m, large }) {
     );
 }
 
-// Collapsible context: the current match's competition + phase, plus a bracket
-// fragment for elimination matches when bracket data is available on the comp.
-function ShiaijoContext({ match, tournament, open, onToggle }) {
+// Collapsible context for the match being scored:
+//   • pool phase  → live standings + results for the current pool (the shared
+//     read-only window.PoolsViewer), plus which pool is next on this court.
+//   • bracket phase → a bracket fragment with the current match highlighted.
+function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, onToggle }) {
     const comp = (tournament.competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
-    const phaseLabel = match.phase === "pool" ? (match.poolName || "Pool") : (match.round || "Elimination");
+    const isPool = match.phase === "pool";
+    const phaseLabel = isPool ? (match.poolName || "Pool") : (match.round || "Elimination");
+    const PoolsViewer = window.PoolsViewer;
+
+    // Pools/standings aren't on the console's competition list payload — fetch
+    // the competition detail on demand. Refetch whenever this comp's pool
+    // matches change (a scored bout), so standings stay current. poolSig is the
+    // change key; it's cheap and keyed only to this comp.
+    const poolSig = useMemoSh(() => {
+        const pms = (comp && comp.poolMatches) || [];
+        return pms.map((m) => `${m.id}:${m.status}:${m.scoreA || ""}:${m.scoreB || ""}`).join("|");
+    }, [comp]);
+    const [detail, setDetail] = useStateSh(null);
+    const [detailErr, setDetailErr] = useStateSh(false);
+    useEffectSh(() => {
+        if (!isPool || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
+            setDetail(null);
+            return;
+        }
+        let cancelled = false;
+        setDetailErr(false);
+        window.API.fetchCompetitionDetails(match.compId)
+            .then((d) => { if (!cancelled) setDetail(d); })
+            .catch(() => { if (!cancelled) { setDetail(null); setDetailErr(true); } });
+        return () => { cancelled = true; };
+    }, [match.compId, isPool, poolSig]);
+
+    const currentPool = detail && Array.isArray(detail.pools)
+        ? detail.pools.find((p) => p.poolName === match.poolName)
+        : null;
+
     return (
         <div className="shiaijo-context">
             <button className="section-title shiaijo-context__toggle" onClick={onToggle}>
-                {open ? "▾" : "▸"} Context · {match.compName} · {phaseLabel}
+                {open ? "▾" : "▸"} {isPool ? "Standings" : "Context"} · {match.compName} · {phaseLabel}
             </button>
             {open && (
                 <div className="shiaijo-context__body">
-                    {match.phase === "bracket" && BracketTree && bracket && bracket.rounds ? (
+                    {isPool ? (
+                        <>
+                            <div className="shiaijo-context__next">
+                                {nextPoolName
+                                    ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
+                                    : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
+                            </div>
+                            {PoolsViewer && currentPool ? (
+                                <div className="shiaijo-context__pools">
+                                    <PoolsViewer
+                                        pools={[currentPool]}
+                                        standings={detail.standings}
+                                        poolMatches={detail.poolMatches}
+                                        competition={comp || detail}
+                                        tweaks={tweaks || { showDojo: true }}
+                                        onMatchClick={null}
+                                        highlightPlayers={[]}
+                                    />
+                                </div>
+                            ) : (
+                                <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
+                                    {detailErr
+                                        ? "Couldn't load pool standings — they'll appear once the connection recovers."
+                                        : "Loading pool standings…"}
+                                </p>
+                            )}
+                        </>
+                    ) : (match.phase === "bracket" && BracketTree && bracket && bracket.rounds) ? (
                         <div className="shiaijo-context__bracket">
                             <BracketTree rounds={bracket.rounds} highlightId={match.id} />
                         </div>
                     ) : (
                         <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                            {match.compName} — {phaseLabel}. {match.phase === "pool"
-                                ? "Pool standings update as bouts are scored."
-                                : "Bracket context appears here for elimination matches."}
+                            {match.compName} — {phaseLabel}. Bracket context appears here for elimination matches.
                         </p>
                     )}
                 </div>

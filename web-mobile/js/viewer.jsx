@@ -2100,7 +2100,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                   <span key={k} className="pmf__chip pmf__chip--dojo">
                     <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
                     {entry.dojo}
-                    <button onClick={() => { setWatchlist(watchlist.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
+                    <button onClick={() => { setWatchlist((prev) => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
                   </span>
                 );
               }
@@ -2111,7 +2111,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                 <span key={k} className="pmf__chip">
                   {number && <span className="num-prefix">{number}</span>}
                   {name}
-                  <button onClick={() => { setWatchlist(watchlist.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
+                  <button onClick={() => { setWatchlist((prev) => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
                 </span>
               );
             })}

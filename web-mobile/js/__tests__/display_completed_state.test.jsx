@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TvDisplay } from '../display.jsx';
+import { emptyStateHeadline } from '../display_scoreboard.jsx';
 
 // mp-s99q: TvDisplay empty-state redesign tests.
 // Covers the three empty-state sub-states, the IN PROGRESS wayfinding strip,
@@ -203,5 +204,29 @@ describe('TvDisplay empty state — headline text per sub-state', () => {
         const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
         expect(treeStr(tree)).toContain('No matches scheduled');
         expect(treeStr(tree)).not.toContain('on Shiaijo');
+    });
+});
+
+// ─── emptyStateHeadline pure helper — all three sub-states ─────────────────────
+// The "between-matches" branch is unreachable through TvDisplay's own logic
+// (counts and the promote path share bracketSidesReady), so it is covered here
+// at the pure-function level to guard the headline mapping against regression
+// (PR #274 review request).
+
+describe('emptyStateHeadline — headline-per-state mapping', () => {
+    it('allCompleted → "All matches completed"', () => {
+        expect(emptyStateHeadline(true, false)).toBe('All matches completed');
+    });
+
+    it('noMatches → "No matches scheduled"', () => {
+        expect(emptyStateHeadline(false, true)).toBe('No matches scheduled');
+    });
+
+    it('between-matches (defensive fallback) → "No match in progress"', () => {
+        expect(emptyStateHeadline(false, false)).toBe('No match in progress');
+    });
+
+    it('allCompleted takes precedence over noMatches', () => {
+        expect(emptyStateHeadline(true, true)).toBe('All matches completed');
     });
 });

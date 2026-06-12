@@ -4,11 +4,13 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 
-// NOTE: this module is the shared *leaf* — other modules import its pure
-// functions (findRunningOnCourt, sideLabel, …). Do NOT destructure hooks off
-// `React` at module-evaluation time: that would throw if the leaf is imported
-// before React loads or in a non-React context, taking the pure helpers down
-// with it. StreamingQR/TermD reference `React.*` lazily, at call time instead.
+// NOTE: this module is the shared *leaf* in the display graph — presentation
+// modules (scoreboard, lobby, streaming) import from here, not vice versa.
+// Within this file, hooks are NOT destructured off `React` at module-eval time;
+// StreamingQR and TermD call React.* lazily at render time instead.
+// The import of `withNumber` from `match_scoreboard.jsx` is a transitive
+// dependency on `React` being global, which every display surface already
+// requires before mounting — this is not a new constraint introduced here.
 
 // TermD — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and display.jsx doesn't matter.

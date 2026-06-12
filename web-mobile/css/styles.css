@@ -4908,12 +4908,17 @@ button.pool-match-row {
   margin-left: auto;
 }
 
-/* Decision outcome chips and encho marker in bracket meta row */
+/* Decision outcome chips and encho marker in bracket meta row.
+   text-transform: none overrides the uppercasing inherited from
+   .bc-match-meta so chips render their authored case — the hantei
+   mark must read "Ht" (decides the match), never "HT", and stay
+   distinct from the "H" hansoku ippon; likewise Kiken / Fus. / DH. */
 .bc-decision-chip,
 .bc-encho {
   font-size: 10px;
   font-weight: 700;
   color: var(--accent);
+  text-transform: none;
 }
 
 /* ---------- Multi-day schedule tabs ---------- */

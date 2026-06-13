@@ -50,11 +50,23 @@
   --bg-2: #f1f5f9;
   --surface-2: #f1f5f9;
 
-  /* Heading type scale (mp-p1tw) — one size per heading role so components
-     stop inventing their own. page title / card-or-section title / overline. */
-  --fs-title-page: 26px;
-  --fs-title-card: 14px;
-  --fs-overline: 11px;
+  /* Type scale — rem-based so user browser font-size preference is respected.
+     Named by semantic role, not by pixel size. 1rem = browser default (16px).
+     --fs-title-* are aliases kept for backward compatibility. */
+  --fs-xs:   0.6875rem;  /* 11px — overline, badge labels           */
+  --fs-sm:   0.8125rem;  /* 13px — table cells, secondary labels     */
+  --fs-base: 1rem;       /* 16px — body text                         */
+  --fs-md:   1.125rem;   /* 18px — prominent labels, input hints     */
+  --fs-lg:   1.375rem;   /* 22px — section headings                  */
+  --fs-xl:   1.625rem;   /* 26px — page title                        */
+
+  /* Backward-compat aliases */
+  --fs-title-page: var(--fs-xl);
+  --fs-title-card: var(--fs-sm);
+  --fs-overline:   var(--fs-xs);
+
+  /* Line-height tokens */
+  --lh-base:  1.5;   /* body prose, form hints */
 
   --r-sm: 6px;
   --r: 10px;
@@ -64,9 +76,25 @@
   --shadow: 0 1px 2px rgba(20, 25, 40, 0.05), 0 8px 20px -12px rgba(20, 25, 40, 0.18);
   --shadow-lg: 0 12px 32px -16px rgba(20, 25, 40, 0.25);
 
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Focus ring (DESIGN.md §6): the soft 3px ring on text-entry controls
+     (.input/.textarea/.select, .radio-pill, .lined-textarea, .ipt-btn).
+     Buttons use the solid `outline: 2px solid var(--accent)` convention instead. */
+  --focus-ring: 0 0 0 3px var(--accent-soft);
+  /* Active/highlight card ring (DESIGN.md §5 "Running signal"): the navy
+     running/highlight halo on cards (.bc-match--running/--highlight,
+     .sched-row--running, .vsched-item--running). Same value as --focus-ring
+     today, separate token by intent so the two can diverge independently. */
+  --ring-active: 0 0 0 3px var(--accent-soft);
+
+  /* Standard ease-out curve — the project's default entrance/transition
+     easing (DESIGN.md Motion). Decelerates hard, no overshoot. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Archivo is self-hosted (always available via @font-face above), so it leads
+     the body stack — consistent cross-platform rendering, variable weight axis. */
+  --font: "Archivo", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Archivo", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* Aka/Shiro distinction system (DESIGN.md §4 "Aka/Shiro side treatment").
      Opt-in: existing components keep --font / --font-display untouched. */
   --font-impact: "Anton", "Archivo", var(--font-display); /* scoreboard numerals, big side labels */
@@ -94,8 +122,8 @@ body {
   font-family: var(--font);
   color: var(--ink);
   background: var(--bg);
-  font-size: 15px;
-  line-height: 1.4;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -605,7 +633,7 @@ a:hover {
 .running-strip__chip:focus-visible,
 .radio-pill:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .score-btn:disabled {
@@ -697,7 +725,7 @@ a:hover {
 .textarea:focus,
 .select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .textarea {
@@ -719,7 +747,7 @@ a:hover {
 
 .lined-textarea:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .lined-textarea__nums {
@@ -927,11 +955,11 @@ a:hover {
 
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+    box-shadow: 0 0 0 4px var(--accent-soft);
   }
 
   50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 6px transparent;
   }
 }
 
@@ -1114,12 +1142,12 @@ a:hover {
 
 .bc-match--highlight {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .bc-match--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .bc-match--done {
@@ -1705,7 +1733,7 @@ a:hover {
 
 .sched-row--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
 .sched-row--done {
@@ -2361,6 +2389,42 @@ a:hover {
   border-radius: 1px 1px 0 0;
 }
 
+.viewer__filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.viewer__filter-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
 .viewer__body {
   padding: 14px 16px 80px;
   flex: 1;
@@ -2387,10 +2451,14 @@ a:hover {
   overflow: hidden;
 }
 
+.my-match--running {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
 .my-match__lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.7;
 }
@@ -2523,7 +2591,8 @@ a.vlist-item {
 
 .vsched-item--running {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
+  background-color: var(--accent-soft);
 }
 
 .vsched-item__head {
@@ -2617,6 +2686,11 @@ a.vlist-item {
   font-family: var(--font-mono);
   font-weight: 700;
 }
+/* Live (in-progress) score on a running match: accent-tinted so it reads as
+   "current score, still climbing" rather than a settled final result. */
+.vsched-item__score--live {
+  color: var(--accent);
+}
 
 /* Button vsched-item: .vsched-item defines bg + border via CSS; just reset default
    browser button appearance without clobbering those values. */
@@ -2645,11 +2719,6 @@ button.vsched-item:not([data-clickable]) {
 .vsched-item__status {
   margin-left: auto;
   color: var(--ink-3);
-}
-
-/* Running "● NOW" label inside head row pushed right automatically */
-.vsched-item__head .bc-running {
-  margin-left: auto;
 }
 
 /* HANTEI badge */
@@ -2969,18 +3038,18 @@ button.pool-match-row {
 
 .hero-running {
   background: var(--surface);
-  border: 1px solid var(--red);
+  border: 1px solid var(--accent);
   border-radius: var(--r-lg);
   padding: 12px 14px 14px;
   margin-bottom: 16px;
-  box-shadow: 0 0 0 4px var(--red-soft);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
 .hero-running__lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--red);
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -6054,9 +6123,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   text-transform: uppercase;
   cursor: pointer;
   min-height: 24px;
-  transition: border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out),
+              background-color 120ms var(--ease-out);
 }
 .encho-pill:hover,
 .encho-pill:focus-visible {
@@ -6074,7 +6143,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -6174,9 +6243,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   height: 38px;
   font-size: 16px;
   border-radius: 6px;
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: background-color 120ms var(--ease-out),
+              border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out);
 }
 /* Drop the heavy scale+shadow on filled slots; use an inset 2px border in
    the side colour for a "value locked in" instrument-readout feel. */
@@ -6349,9 +6418,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   place-items: center;
   cursor: pointer;
   color: var(--ink-3);
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: background-color 120ms var(--ease-out),
+              border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out);
   padding: 0;
 }
 .editor-modal--compact .editor-side__pt--filled {
@@ -6519,12 +6588,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .ipt-btn:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 /* --- Decision prompt motion (compact + roomy) -------------------------- */
 .decision-prompt {
-  animation: decision-prompt-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: decision-prompt-in 160ms var(--ease-out) both;
 }
 @keyframes decision-prompt-in {
   from { opacity: 0; transform: translateY(12px); }
@@ -6988,8 +7057,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ---------- Section-title modifiers ---------- */
 .section-title--flush { margin-top: 0; }
 .section-title--inrow { margin-top: 0; display: flex; align-items: center; gap: 8px; }
-/* Slightly smaller sub-section label with top spacing */
-.section-title--sub { margin-top: 14px; font-size: 13px; }
 
 /* ---------- Hint text utilities (inline note, muted) ---------- */
 .hint    { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
@@ -7003,6 +7070,41 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* ---------- Mymatch / watchlist card spacing ---------- */
 .mymatch-card { margin-bottom: 16px; }
+
+/* ---------- Watchlist card heading (not an eyebrow — no uppercase) ---------- */
+.watchlist-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.watchlist-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+}
+
+/* vsched inside the watchlist card: flat row list, no nested card boxes.
+   Regular items become hairline-separated rows; running items keep their
+   accent ring since they carry meaningful live state. */
+.vsched--incard { gap: 0; margin-top: 12px; }
+.vsched--incard .vsched-item:not(.vsched-item--running) {
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 8px 2px;
+}
+.vsched--incard .vsched-item:not(.vsched-item--running):first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+.vsched--incard .vsched-item--running {
+  border-radius: 8px;
+  margin: 2px 0;
+}
 
 /* ---------- Checked-in tick in watchlist chips ---------- */
 .pmf__chip-tick { margin-left: 4px; font-size: 10px; }

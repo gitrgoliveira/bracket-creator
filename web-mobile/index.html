@@ -65,6 +65,10 @@
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
+    <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
+         viewer.jsx. Reads its viewer.jsx helper deps from window at render time,
+         so load order relative to viewer.js does not matter. -->
+    <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>

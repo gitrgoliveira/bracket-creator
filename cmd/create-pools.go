@@ -288,7 +288,7 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 
-	if err := helper.CreateTagsSheet(f, pools); err != nil {
+	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 

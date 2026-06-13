@@ -334,7 +334,9 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
 			return nil
 		}
-		if uniqueErr := checkUniqueCompName(store, comp.Name, comp.ID); uniqueErr != nil {
+		if infraErr, uniqueErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, comp.ID); infraErr != nil {
+			return infraErr
+		} else if uniqueErr != nil {
 			res.Error = uniqueErr.Error()
 			return nil
 		}

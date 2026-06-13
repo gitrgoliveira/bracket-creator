@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, addMinuteHHMM, deferTimeFor } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, addMinuteHHMM, deferTimeFor, isTeamMatch } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number — it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -211,5 +211,17 @@ describe('deferTimeFor — Defer means run the next match, then come right back'
 
   it('returns null when the match is not in the queue', () => {
     expect(deferTimeFor({ compId: 'c', id: 'ghost' }, queue)).toBeNull();
+  });
+});
+
+describe('isTeamMatch — gates the "Enter lineup" affordance', () => {
+  it('true for team encounters (by compKind or teamSize)', () => {
+    expect(isTeamMatch({ compKind: 'team' })).toBe(true);
+    expect(isTeamMatch({ teamSize: 5 })).toBe(true);
+  });
+  it('false for individual bouts and missing matches', () => {
+    expect(isTeamMatch({ compKind: 'individual', teamSize: 0 })).toBe(false);
+    expect(isTeamMatch({})).toBe(false);
+    expect(isTeamMatch(null)).toBe(false);
   });
 });

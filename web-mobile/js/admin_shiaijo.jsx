@@ -53,6 +53,11 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
+// A team encounter (vs an individual bout) — team matches carry a lineup the
+// operator can set before the bout starts. Exported for unit tests (it gates
+// the "Enter lineup" affordance).
+export const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize || 0) > 0);
+
 // addMinuteHHMM — bump an "HH:MM" clock string by one minute, wrapping past
 // midnight. Used to slot a deferred match one tick after its successor.
 export function addMinuteHHMM(t) {
@@ -118,6 +123,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
     const [pendingMove, setPendingMove] = useStateSh(null);
     const [movingCourt, setMovingCourt] = useStateSh(false);
+    // A scheduled team match whose lineup the operator is entering before start.
+    // Opens the team scoresheet as a modal; positions persist via putMatchLineup
+    // independent of scoring, so the operator can set the lineup and close
+    // without starting (or hit Start from inside the modal).
+    const [lineupMatch, setLineupMatch] = useStateSh(null);
     // Short-circuit to [] for a blank/unknown court so an accidental landing
     // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
     // Same condition as courtKnown below.
@@ -319,6 +329,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             <button className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => startMatch(upNext)}>
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
+                                            {isTeamMatch(upNext) && (
+                                                <button className="btn btn--sm" onClick={() => setLineupMatch(upNext)}
+                                                    title="Set the team lineup before starting">
+                                                    Enter lineup
+                                                </button>
+                                            )}
                                             {/* Optional: announce the call to spectators/competitors.
                                                 Never required — Start match works on its own. */}
                                             {window.API && typeof window.API.sendAnnouncement === "function" && (
@@ -354,7 +370,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onSkip={skipMatch}
+                                    onSkip={skipMatch} onEnterLineup={setLineupMatch}
                                 />
                             )}
 
@@ -469,6 +485,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     </div>
                 </div>
             )}
+
+            {/* Pre-start lineup entry for a team match. Opens the team scoresheet
+                as a modal: the per-position name pickers persist via putMatchLineup
+                independent of scoring, so the operator can set the lineup and close
+                without starting — or hit "Start match" from inside. */}
+            {lineupMatch && (
+                <ScoreEditorModal
+                    key={`lineup:${matchKey(lineupMatch)}`}
+                    variant="modal"
+                    match={lineupMatch}
+                    canClose={true}
+                    onClose={() => setLineupMatch(null)}
+                    onSubmit={async (patch) => {
+                        try { await onEditScore(lineupMatch.compId, lineupMatch.id, patch, lineupMatch); }
+                        catch (_e) { /* surfaced via toast */ }
+                        if (mountedRef.current) setLineupMatch(null);
+                    }}
+                    password={password}
+                />
+            )}
         </div>
     );
 }
@@ -478,7 +514,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 // match from the Up Next card, not by clicking it. The console never shows a
 // running match in these groups (the running bout is officiated in the scoring
 // panel on the right), so only scheduled/completed states render here.
-function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip }) {
+function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip, onEnterLineup }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
@@ -486,7 +522,7 @@ function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip }) {
                 {matches.map((m) => (
                     <ShiaijoQueueRow
                         key={matchKey(m)} m={m}
-                        courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip}
+                        courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip} onEnterLineup={onEnterLineup}
                     />
                 ))}
             </div>
@@ -494,7 +530,7 @@ function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip }) {
     );
 }
 
-function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
+function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     return (
@@ -528,6 +564,9 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
                         onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
                         btnClassName="score-edit-row__court score-edit-row__court--btn"
                     />
+                )}
+                {onEnterLineup && isTeamMatch(m) && m.status === "scheduled" && (
+                    <button className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
                 )}
                 {onSkip && m.status === "scheduled" && (
                     <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Run the next match first, then return here">Defer</button>

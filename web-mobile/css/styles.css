@@ -4695,6 +4695,17 @@ button.pool-match-row {
 .team-bouts-scroll .team-sub-match__side,
 .team-bouts-scroll .team-sub-match__side--right {
   align-items: center;
+  min-width: 0;
+}
+/* The name row must take its side column's width, not its content's
+   max-content width — otherwise a selected name floors the row wider than
+   the minmax(0,1fr) track and overflows the panel's edge (the right-aligned
+   AKA side clips visibly). width:100% + the input's existing min-width:0 lets
+   the name shrink to an ellipsis when the two-column split is tight (e.g. a
+   ~575px scoring panel on a 1024px landscape iPad). */
+.team-bouts-scroll .tsm-name {
+  width: 100%;
+  min-width: 0;
 }
 /* Scored ippon letters live in the centre, between the two competitors:
    [shiro letters] [result] [aka letters]. Each side block is buttons-only. */

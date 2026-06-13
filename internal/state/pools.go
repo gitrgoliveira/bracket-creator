@@ -302,6 +302,20 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	return parsePoolMatchesRecords(records), nil
 }
 
+// splitIppons parses a "|"-joined ippon field into a slice, mapping an
+// EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
+// one-element slice holding the empty string), which len() then counts as a
+// phantom ippon — inflating points-won/lost in standings and corrupting
+// individual pool tie detection (two players who actually tied read as
+// differing by a phantom point). Returning nil for an empty field keeps
+// len() == 0 across every consumer.
+func splitIppons(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "|")
+}
+
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
 // rec-shape→struct mapping verbatim (no drift between the two).
@@ -323,8 +337,8 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			SideA:    rec[2],
 			SideB:    rec[3],
 			Winner:   rec[4],
-			IpponsA:  strings.Split(rec[5], "|"),
-			IpponsB:  strings.Split(rec[6], "|"),
+			IpponsA:  splitIppons(rec[5]),
+			IpponsB:  splitIppons(rec[6]),
 			HansokuA: hansokuA,
 			HansokuB: hansokuB,
 			Decision: rec[9],

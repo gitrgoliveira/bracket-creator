@@ -322,7 +322,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {!allDone && selectedMatch && (
                                 <ScoreEditorModal
-                                    key={matchKey(selectedMatch)}
+                                    key={`${matchKey(selectedMatch)}:${(selectedMatch.subResults || []).length}`}
                                     variant="inline"
                                     match={selectedMatch}
                                     onClose={() => {}}

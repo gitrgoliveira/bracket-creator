@@ -4615,11 +4615,42 @@ button.pool-match-row {
    Scoped to .scoring-panel so the (always-compact) schedule modal, which
    uses the tsm-row strip layout, is untouched. */
 .scoring-panel .team-sub-match__row {
-  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 160px minmax(0, 1fr);
 }
 .scoring-panel .team-sub-match__side,
 .scoring-panel .team-sub-match__side--right {
   align-items: center;
+}
+/* Scored ippon letters live in the centre, between the two competitors:
+   [shiro letters] [result] [aka letters]. Each side block is buttons-only. */
+.scoring-panel .team-sub-match__center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.scoring-panel .tsm-center-pts {
+  display: flex;
+  gap: 3px;
+}
+.scoring-panel .team-sub-match__center .editor-side__pt {
+  width: 26px;
+  height: 26px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 5px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  color: var(--ink-1);
+}
+.scoring-panel .team-sub-match__center .editor-side__pt--filled {
+  border-color: var(--ink-3);
+}
+.scoring-panel .team-sub-match__score {
+  min-width: 34px;
 }
 
 /* Compact bout-number gutter replaces the wide Senpo/Jiho label column, and
@@ -4639,7 +4670,7 @@ button.pool-match-row {
   margin-bottom: 0;
 }
 .scoring-panel--team .sb-match {
-  grid-template-columns: minmax(0, 1fr) 80px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
   margin-left: 46px;
   margin-right: 10px;
 }
@@ -4744,6 +4775,9 @@ button.pool-match-row {
   background: var(--surface-2);
   border-radius: 8px;
   margin-top: 4px;
+  /* Override the legacy dark-scoreboard `color: white` above — this is the
+     light variant, so text must be dark ink to stay readable on surface-2. */
+  color: var(--ink-1);
 }
 
 .team-summary__side {
@@ -4757,6 +4791,8 @@ button.pool-match-row {
 
 .team-summary__label {
   font-size: 12px;
+  color: var(--ink-3);
+  opacity: 1;
 }
 
 .team-summary__result {
@@ -4764,6 +4800,7 @@ button.pool-match-row {
   font-size: 13px;
   text-align: center;
   white-space: nowrap;
+  color: var(--accent);
 }
 
 /* ---------- Aka/Shiro color badges ---------- */

@@ -2070,7 +2070,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               }
               if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               if (t.winner === null) return <span className="tsm-draw">X</span>;
-              return <span>{`${t.bTotal}–${t.aTotal}`}</span>;
+              // Decided bout: the centred ippon letters already show who won —
+              // the numeric tally was redundant, so the centre stays clear.
+              return null;
             })();
 
             return (
@@ -2114,16 +2116,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                             in roomy mode the wrapper is display:contents so the
                             legacy column stack is preserved. */}
                         <div className="tsm-row-1">
-                          {/* Point slots */}
-                          <div className="team-sub-match__pts">
-                            {[0, 1].map(i => (
-                              <button key={i} className={`editor-side__pt ${rs.pts[i] ? "editor-side__pt--filled" : ""}`}
-                                onClick={() => rs.setPts(rs.pts.filter((_, j) => j !== i))} title="Click to remove">
-                                {rs.pts[i] || "·"}
-                              </button>
-                            ))}
-                          </div>
-                          {/* Point buttons incl. H */}
+                          {/* Buttons only — the scored ippon letters show in the
+                              centre column (between the two competitors), like an
+                              individual bout. H (hansoku point) renders as △ there. */}
                           <div className="team-sub-match__btns">
                             {getIpponButtons(isNaginataTeam).map(cc => (
                               <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
@@ -2169,8 +2164,29 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         </div>
                       </div>
                       {rsIdx === 0 && (
-                        <div className={`team-sub-match__score ${t.winner === "b" ? "team-sub-match__score--a-win" : t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
-                          {scoreDisplay}
+                        <div className="team-sub-match__center">
+                          <div className="tsm-center-pts tsm-center-pts--shiro">
+                            {[0, 1].map(i => (
+                              <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
+                                onClick={() => rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i))} title="Click to remove">
+                                {rowSides[0].pts[i] || "·"}
+                              </button>
+                            ))}
+                          </div>
+                          <div className={`team-sub-match__score ${scoreDisplay && t.winner === "b" ? "team-sub-match__score--a-win" : scoreDisplay && t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
+                            {scoreDisplay}
+                          </div>
+                          <div className="tsm-center-pts tsm-center-pts--aka">
+                            {/* Aka fills outside-in: its first ippon sits on the
+                                outer (right) edge nearest the Aka name, so render
+                                the slots in reverse (pts[1] then pts[0]). */}
+                            {[1, 0].map(i => (
+                              <button key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
+                                onClick={() => rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i))} title="Click to remove">
+                                {rowSides[1].pts[i] || "·"}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </React.Fragment>
@@ -2186,7 +2202,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               many bout rows (especially relevant on small screens / when
               every sub-match has been scored). zIndex: 5 keeps it under
               the modal head (10) but above the bout cells. */}
-          <div className="team-summary" style={{ position: "sticky", top: 0, background: "var(--bg, white)", zIndex: 5, borderBottom: "1px solid var(--line, #ddd)", paddingBottom: 8 }}>
+          <div className="team-summary" style={{ position: "sticky", top: 0, zIndex: 5 }}>
             {teamSides.map((ts, idx) => (
               <React.Fragment key={ts.key}>
                 <div className="team-summary__side">

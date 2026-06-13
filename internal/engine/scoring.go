@@ -775,6 +775,12 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if result.ResultSource != "" {
 						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
 					}
+					// Twin parity with recordBracketMatchResultTx (scoring_tx.go):
+					// carry the operator correction note when set, so the non-tx
+					// write path doesn't silently drop it for a future caller.
+					if result.CorrectionReason != "" {
+						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
+					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults

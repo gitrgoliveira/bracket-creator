@@ -124,13 +124,10 @@ func (t TeamLineup) validateFive() error {
 }
 
 func (t TeamLineup) validateNumbered(teamSize int) error {
-	allowed := allowedPositionSet(teamSize)
-	for pos := range t.Positions {
-		if _, ok := allowed[pos]; !ok {
-			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)
-		}
-	}
-	return nil
+	// Identical to ValidatePositions on the reachable path (Validate already
+	// rejected teamSize <= 0 and dispatched teamSize == 5 to validateFive), so
+	// delegate rather than keep a second copy of the key-check loop.
+	return t.ValidatePositions(teamSize)
 }
 
 // ValidatePositions checks only that the position KEYS are valid for the team

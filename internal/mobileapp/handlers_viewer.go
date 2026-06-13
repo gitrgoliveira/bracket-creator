@@ -223,6 +223,15 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			c.JSON(http.StatusBadRequest, gin.H{"error": "court is required"})
 			return
 		}
+		// Court labels are single letters (A–Z, capped at 26 — see the import
+		// manifest validator). Reject oversized/garbage court values up front so
+		// an unauthenticated caller can't amplify the cross-competition disk
+		// sweep across unbounded distinct keys; a >2-char court never matches a
+		// real match anyway.
+		if len([]rune(court)) > 2 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid court"})
+			return
+		}
 		// P2 (mp-c2yr): collapse concurrent identical-court queue builds to
 		// O(1) per in-flight window. SSE fan-out can trigger many simultaneous
 		// refetches for one court; the key includes the court so different

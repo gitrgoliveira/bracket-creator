@@ -35,6 +35,31 @@ func setupDaihyosenTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.
 	return r, store, eng, hub, dir
 }
 
+// findMatchForDaihyosen / countEligibleForSides are thin test wrappers that run
+// the (production) Tx-aware helpers inside a transaction, so the existing unit
+// tests can exercise them directly without each constructing a StoreTx.
+func findMatchForDaihyosen(store *state.Store, compID, matchID string) (m *state.MatchResult, found bool, err error) {
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		m, found, err = findMatchForDaihyosenTx(tx, compID, matchID)
+		return err
+	})
+	if err == nil && txErr != nil {
+		return nil, false, txErr
+	}
+	return m, found, err
+}
+
+func countEligibleForSides(store *state.Store, compID, sideA, sideB string) (a int, b int, err error) {
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		a, b, err = countEligibleForSidesTx(tx, compID, sideA, sideB)
+		return err
+	})
+	if err == nil && txErr != nil {
+		return 0, 0, txErr
+	}
+	return a, b, err
+}
+
 // TestFindMatchForDaihyosen_PoolFound verifies that a pool match is located
 // when searched by its "Pool *" ID.
 func TestFindMatchForDaihyosen_PoolFound(t *testing.T) {

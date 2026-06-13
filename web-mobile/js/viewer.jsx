@@ -2115,7 +2115,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
               );
             })}
             {compWatchlist.length > 1 && (
-              <button className="viewer__filter-clear" onClick={() => { setWatchlist([]); setPrimaryKey(""); }}>Clear all</button>
+              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist((prev) => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
             )}
           </div>
         )}

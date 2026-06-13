@@ -823,7 +823,6 @@ window.LINEUP_PRESETS = LINEUP_PRESETS;
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
   MAX_IPPONS_PER_SIDE,
-  IPPON_LETTER_LEGEND,
   isBoutDecided,
   getIpponButtons,
   getValidPointKeys,

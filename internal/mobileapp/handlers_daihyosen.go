@@ -108,9 +108,16 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return nil
 			}
 			// Guard (re-checked under the lock): refuse removal once the DH
-			// bout carries any score.
+			// bout carries any score. "Scored" means more than the initial
+			// placeholder: ippons, a winner, a hantei flag, recorded hansoku
+			// penalties, OR a sub-Decision that is no longer the bare
+			// "daihyosen" placeholder (e.g. a withdrawal recorded on the rep
+			// bout) — validateSubBout does not validate sub.Decision, so an
+			// acted-on bout can carry a decision without a winner.
 			dh := match.SubResults[dhIdx]
-			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.DecidedByHantei {
+			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.DecidedByHantei ||
+				dh.HansokuA > 0 || dh.HansokuB > 0 ||
+				(dh.Decision != "" && dh.Decision != string(domain.DecisionDaihyosen)) {
 				scored = true
 				return nil
 			}

@@ -342,6 +342,44 @@ func TestRemoveDaihyosen(t *testing.T) {
 		assert.Equal(t, "daihyosen_scored", resp["error"])
 	})
 
+	t.Run("409 when daihyosen carries hansoku or a non-placeholder decision", func(t *testing.T) {
+		// The scored-guard must treat an acted-on bout as scored even when
+		// no winner/ippon is set yet: recorded hansoku penalties, or a
+		// sub-Decision that is no longer the bare "daihyosen" placeholder
+		// (validateSubBout does not validate sub.Decision).
+		cases := []struct {
+			name string
+			id   string
+			sub  state.SubMatchResult
+		}{
+			{"hansoku on side A", "rm-dh-hansokuA", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", HansokuA: 1, Decision: "daihyosen"}},
+			{"hansoku on side B", "rm-dh-hansokuB", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", HansokuB: 1, Decision: "daihyosen"}},
+			{"withdrawal decision, no winner", "rm-dh-withdrawal", state.SubMatchResult{Position: -1, SideA: "RepA", SideB: "RepB", Decision: "kiken-voluntary"}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				r, store, _, _, _ := setupDaihyosenTestRouter(t)
+				compID := tc.id
+				require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+				require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+					Rounds: [][]state.BracketMatch{
+						{{ID: "B4", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning,
+							SubResults: []state.SubMatchResult{tc.sub}}},
+					},
+				}))
+
+				req := httptest.NewRequest(http.MethodDelete,
+					"/api/competitions/"+compID+"/matches/B4/daihyosen", nil)
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusConflict, w.Code)
+				var resp map[string]string
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, "daihyosen_scored", resp["error"])
+			})
+		}
+	})
+
 	t.Run("404 when match not found", func(t *testing.T) {
 		r, store, _, _, _ := setupDaihyosenTestRouter(t)
 		compID := "rm-dh-nomatch"

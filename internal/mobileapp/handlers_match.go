@@ -280,9 +280,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// already-completed result is a correction and must carry a non-empty
 		// CorrectionReason. Without this, bulk-score is a silent bypass of the
 		// single-score gate — a finalized result could be rewritten with no
-		// audit trail. Snapshot statuses once before the loop; bulk-score is
-		// admin-only and not self-reported, so the single-path TOCTOU concern
-		// (concurrent anonymous submissions) does not apply here.
+		// audit trail. The status is snapshotted once before the loop rather
+		// than read under each write's lock, so a narrow TOCTOU remains: if a
+		// concurrent admin PUT /score finalizes a match between this snapshot
+		// and our RecordMatchResult call, the reason can be stripped. This is
+		// audit-trail only (the write itself is atomic and authenticated) and
+		// closes the common single-admin case; the per-result-transaction fix
+		// for the concurrent-admin window is tracked in bead mp-ic5b.
 		statusBefore := matchStatusSnapshot(store, id)
 
 		for i := range results {

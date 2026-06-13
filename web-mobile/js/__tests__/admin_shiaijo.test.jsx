@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, addMinuteHHMM, deferTimeFor } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number — it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -164,5 +164,52 @@ describe('partitionShiaijoMatches', () => {
   it('returns empty groups for an empty input', () => {
     const out = partitionShiaijoMatches([]);
     expect(out).toEqual({ sorted: [], running: [], scheduled: [], completed: [] });
+  });
+});
+
+describe('addMinuteHHMM', () => {
+  it('bumps a clock string by one minute', () => {
+    expect(addMinuteHHMM('09:10')).toBe('09:11');
+    expect(addMinuteHHMM('09:59')).toBe('10:00');
+  });
+  it('wraps past midnight', () => {
+    expect(addMinuteHHMM('23:59')).toBe('00:00');
+  });
+  it('returns null for an unusable time', () => {
+    expect(addMinuteHHMM('')).toBeNull();
+    expect(addMinuteHHMM(null)).toBeNull();
+    expect(addMinuteHHMM('—')).toBeNull();
+  });
+});
+
+describe('deferTimeFor — Defer means run the next match, then come right back', () => {
+  // Sorted, scheduled-only court queue (the shape partitionShiaijoMatches yields).
+  const queue = [
+    { compId: 'c', id: 'm1', scheduledAt: '09:05' },
+    { compId: 'c', id: 'm2', scheduledAt: '09:10' },
+    { compId: 'c', id: 'm3', scheduledAt: '09:15' },
+  ];
+
+  it('slots the Up Next match one minute after its successor (down exactly one)', () => {
+    // Defer m1: it must land at 09:11 — after m2 (09:10), before m3 (09:15) —
+    // so m2 runs next and m1 is Up Next again right after.
+    expect(deferTimeFor(queue[0], queue)).toBe('09:11');
+  });
+
+  it('moves a mid-queue match down one, not to the end', () => {
+    expect(deferTimeFor(queue[1], queue)).toBe('09:16'); // after m3 (09:15)
+  });
+
+  it('returns null for the last match (already at the back)', () => {
+    expect(deferTimeFor(queue[2], queue)).toBeNull();
+  });
+
+  it('returns null when the successor has no usable time', () => {
+    const q = [{ compId: 'c', id: 'm1', scheduledAt: '09:05' }, { compId: 'c', id: 'm2', scheduledAt: '' }];
+    expect(deferTimeFor(q[0], q)).toBeNull();
+  });
+
+  it('returns null when the match is not in the queue', () => {
+    expect(deferTimeFor({ compId: 'c', id: 'ghost' }, queue)).toBeNull();
   });
 });

@@ -1847,6 +1847,34 @@ a:hover {
   .modal-backdrop { backdrop-filter: blur(2px); }
 }
 
+/* Court-reassignment confirmation — a small, centred confirm card. Moving a
+   match to another shiaijo takes it off this court, so it's gated here. */
+.shiaijo-move-confirm {
+  width: min(380px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(15, 20, 35, 0.28);
+  padding: 20px;
+}
+.shiaijo-move-confirm__title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+.shiaijo-move-confirm__body {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.shiaijo-move-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .modal {
   background: var(--surface);
   border-radius: var(--r-lg);

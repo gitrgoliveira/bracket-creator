@@ -53,6 +53,26 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
+// addMinuteHHMM — bump an "HH:MM" clock string by one minute, wrapping past
+// midnight. Used to slot a deferred match one tick after its successor.
+export function addMinuteHHMM(t) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(t || "");
+    if (!m) return null;
+    const total = (Number(m[1]) * 60 + Number(m[2]) + 1) % (24 * 60);
+    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// deferTimeFor — "Defer" means run the next match, then come right back: move
+// this match down exactly one slot in the court's scheduled queue. We place it
+// one minute after its immediate successor (only this match's time changes; the
+// next match keeps its advertised slot). Returns the new "HH:MM", or null when
+// there's no successor (already last) or the successor has no usable time.
+export function deferTimeFor(m, scheduled) {
+    const i = (scheduled || []).findIndex((x) => matchKey(x) === matchKey(m));
+    if (i < 0 || i >= scheduled.length - 1) return null;
+    return addMinuteHHMM(scheduled[i + 1].scheduledAt);
+}
+
 // shiaijoScoreCell — decide what the queue row's middle score column shows.
 // Exported so the team-vs-individual routing is unit-testable. A team
 // encounter's headline number is Individual Victories (IV); it must always
@@ -93,6 +113,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [startError, setStartError] = useStateSh("");
     const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // Pending court reassignment, awaiting operator confirmation. Moving a match
+    // off this shiaijo is disruptive (it leaves the court and joins another's
+    // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
+    const [pendingMove, setPendingMove] = useStateSh(null);
+    const [movingCourt, setMovingCourt] = useStateSh(false);
     // Short-circuit to [] for a blank/unknown court so an accidental landing
     // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
     // Same condition as courtKnown below.
@@ -191,19 +216,46 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // Skip — defer a not-yet-started match to the end of this court's queue.
-    // Clearing scheduledAt sinks it past the timed matches (backend
-    // updateMatchTime, persisted + broadcast); it reappears in Upcoming. No-op
-    // on running/completed matches.
+    // Defer — run the next match, then come right back: move this match down one
+    // slot (its time is set one minute after its successor; backend
+    // updateMatchTime, persisted + broadcast). No-op on running/completed, or
+    // when it's already last in the queue. The match stays in Upcoming and
+    // returns to Up Next as soon as the one match ahead of it finishes.
     const skipMatch = async (m) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
+        const newTime = deferTimeFor(m, scheduled);
+        if (!newTime) {
+            if (showToast) showToast(`${label} is already last in the queue`);
+            return;
+        }
         try {
-            await window.API.updateMatchTime(m.compId, m.id, "", password);
-            if (showToast) showToast(`Deferred ${label} to the end of the queue`);
+            await window.API.updateMatchTime(m.compId, m.id, newTime, password);
+            if (showToast) showToast(`Deferred ${label} — it returns after the next match`);
         } catch (e) {
             if (showToast) showToast((e && e.message) || "Could not defer the match", "error");
+        }
+    };
+
+    // Court reassignment is gated behind a confirm: a CourtPicker change opens a
+    // confirmation rather than moving immediately, because the match leaves this
+    // shiaijo for another court's queue. `onMoveCourt` (the real move) only runs
+    // once the operator confirms.
+    const requestMoveCourt = (compId, matchId, toCourt) => {
+        const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
+        const label = mm ? ((mm.sideB && mm.sideB.name) || (mm.sideA && mm.sideA.name) || "this match") : "this match";
+        setPendingMove({ compId, matchId, to: toCourt, label, from: (mm && mm.court) || court });
+    };
+    const confirmMoveCourt = async () => {
+        if (!pendingMove || movingCourt) return;
+        const { compId, matchId, to } = pendingMove;
+        setMovingCourt(true);
+        try {
+            await onMoveCourt(compId, matchId, to);
+            if (mountedRef.current) setPendingMove(null);
+        } finally {
+            if (mountedRef.current) setMovingCourt(false);
         }
     };
 
@@ -281,7 +333,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 </button>
                                             )}
                                             {window.API && typeof window.API.updateMatchTime === "function" && (
-                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Move to the end of the queue">Defer</button>
+                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Run the next match first, then return here">Defer</button>
                                             )}
                                         </div>
                                         {startError && <div className="shiaijo-upnext__error" role="alert">{startError}</div>}
@@ -301,7 +353,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {scheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
-                                    courts={courts} onMoveCourt={onMoveCourt}
+                                    courts={courts} onMoveCourt={requestMoveCourt}
                                     onSkip={skipMatch}
                                 />
                             )}
@@ -314,7 +366,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     {completedOpen && (
                                         <ShiaijoQueueGroup
                                             matches={completed}
-                                            courts={courts} onMoveCourt={onMoveCourt}
+                                            courts={courts} onMoveCourt={requestMoveCourt}
                                         />
                                     )}
                                 </div>
@@ -394,6 +446,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     </div>
                 )}
             </div>
+
+            {pendingMove && (
+                <div className="modal-backdrop" onClick={() => !movingCourt && setPendingMove(null)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                        aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
+                        <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
+                            Move to Shiaijo {pendingMove.to}?
+                        </h3>
+                        <p className="shiaijo-move-confirm__body">
+                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
+                            the queue on Shiaijo {pendingMove.to}.
+                        </p>
+                        <div className="shiaijo-move-confirm__actions">
+                            <button className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
+                                Cancel
+                            </button>
+                            <button className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
+                                {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -455,7 +530,7 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
                     />
                 )}
                 {onSkip && m.status === "scheduled" && (
-                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Move to the end of the queue">Defer</button>
+                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Run the next match first, then return here">Defer</button>
                 )}
             </div>
         </div>

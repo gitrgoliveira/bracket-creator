@@ -6622,6 +6622,49 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: contents;
 }
 
+/* --- Daihyosen (representative-bout) affordance ------------------------- */
+/* An always-available manual control on knockout team matches. Quiet by
+   default (ghost button, neutral frame); when a tie on IV+PW is detected it
+   gains an accent frame + a soft attention pulse so the operator's eye lands
+   on the path forward. The default copy stays >=4.5:1 on --bg-2 and the tied
+   copy on --accent-soft by using --ink-2 for the hint. mp-c2yr. */
+.daihyosen-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border, #d8dee9);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.daihyosen-controls__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.daihyosen-controls__hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.daihyosen-controls__err {
+  font-size: 12px;
+  color: var(--danger);
+}
+.daihyosen-controls--tied {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: daihyosen-tied-pulse 1.8s ease-out infinite;
+}
+.daihyosen-controls--tied .daihyosen-controls__title {
+  color: var(--accent-strong);
+}
+@keyframes daihyosen-tied-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 53, 87, 0.28); }
+  50%      { box-shadow: 0 0 0 6px rgba(29, 53, 87, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dot--running,
   .topbar__conn--down .topbar__conn__dot,
@@ -6629,6 +6672,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .spinner,
   .toast,
   .decision-prompt,
+  .daihyosen-controls--tied,
   .announcement-banner {
     animation: none;
   }

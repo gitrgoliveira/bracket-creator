@@ -1803,53 +1803,80 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             );
           })()}
 
-          {/* T141: daihyosen (representative bout) affordance. Visible
-              when the match is in the knockout stage AND all positions
-              have been scored AND IV/PW tie. Click POSTs to /daihyosen;
-              server validates and appends a new SubMatchResult with
-              decision="daihyosen" that the operator then scores via the
-              regular bout flow. Error responses are mapped to user-
-              visible strings per the contract in handlers_daihyosen.go. */}
+          {/* mp-c2yr: daihyosen (representative bout) affordance — an
+              always-available manual control for any unfinished knockout
+              team match. The operator decides when a tie needs a
+              representative bout, so the button is never gated behind
+              auto-detection (the old `allComplete && tied` gate silently
+              hid it whenever the tie involved a drawn 0–0 bout, which a
+              5-person tie always does). It is *highlighted* when a tie on
+              IV+PW is detected locally; otherwise it sits quietly as a
+              ghost button. Clicking it flushes the current bout scores
+              (the backend recomputes the tie from the PERSISTED SubResults,
+              so an unsaved tie would otherwise read as not_tied) and then
+              POSTs to /daihyosen; the server appends a SubMatchResult with
+              decision="daihyosen" that the operator scores via the regular
+              bout flow. Errors map to user-visible strings per the contract
+              in handlers_daihyosen.go. Once a daihyosen exists it renders as
+              a scoreable row above (mp-4pc), so don't offer a second. */}
           {(() => {
-            const allComplete = subTotals.every(t => t.aTotal > 0 || t.bTotal > 0 || t.winner !== null);
-            const tied = ivA === ivB && pwA === pwB && (ivA + pwA + ivB + pwB) > 0;
-            // mp-4pc: once a daihyosen exists, it is rendered as a scoreable
-            // row above — don't offer to add a second one.
-            if (hasDaihyosen || !isKnockoutPhase || !allComplete || !tied) return null;
+            if (hasDaihyosen || !isKnockoutPhase) return null;
+            // Local tie detection drives the highlight + helper copy only —
+            // the backend is the source of truth and re-validates on submit.
+            // A bout is "decided" once it carries any ippon or is a draw; a
+            // 5-person tie reaches even IV only via at least one drawn bout,
+            // so draws MUST count here (the bug the old gate had).
+            const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
+            const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
             const onDaihyosen = async () => {
               setDaihyosenErr("");
               setDaihyosenBusy(true);
               try {
+                // Persist the operator's current bout scores first (status
+                // stays "running"); the backend derives the tie from the
+                // saved SubResults, so a freshly-scored-but-unsaved tie
+                // would otherwise be rejected as not_tied.
+                await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
                 await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
                 if (!mountedRef.current) return;
-                // Reload the modal data via parent: closing + reopening
-                // is the cleanest cross-cutting refresh path. The parent
-                // listens for SSE match_updated and will push the new
-                // bout when re-opened.
+                // Closing + reopening is the cleanest cross-cutting refresh
+                // path. The parent listens for SSE match_updated and pushes
+                // the new bout when re-opened.
                 onClose();
               } catch (e) {
                 if (!mountedRef.current) return;
                 const msg = String(e?.message || "");
                 let userMsg = msg;
-                if (msg === "not_tied") userMsg = "Daihyosen requires a tied result on IV and PW";
+                if (msg === "not_tied") userMsg = "Daihyosen needs a tie on IV and PW (this encounter already has a winner)";
                 else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
                 else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
+                else if (!userMsg) userMsg = "Could not add a representative bout";
                 setDaihyosenErr(userMsg);
               } finally {
                 if (mountedRef.current) setDaihyosenBusy(false);
               }
             };
             return (
-              <div className="daihyosen-controls" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12, padding: 12, border: "1px dashed var(--accent, #888)", borderRadius: 6, background: "var(--bg-2, #fafafa)" }}>
-                <div style={{ fontSize: 12, fontWeight: 700 }}>Match tied on IV and PW</div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break the tie. Each side picks one eligible competitor; the bout is scored like any other sub-match.</div>
+              <div className={`daihyosen-controls${teamTied ? " daihyosen-controls--tied" : ""}`}>
+                <div className="daihyosen-controls__title">
+                  {teamTied ? "Match tied on IV and PW" : <>Tie-breaker (<TermAS name="daihyosen">daihyosen</TermAS>)</>}
+                </div>
+                <div className="daihyosen-controls__hint">
+                  {teamTied
+                    ? <>This encounter is tied. Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to decide it. Each side picks one eligible competitor, scored like any other sub-match.</>
+                    : <>A knockout encounter must have a winner. If the bouts end tied, add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break it.</>}
+                </div>
+                {/* Plain-text label only: a glossary <TermAS> inside the
+                    button would swallow the tap via stopPropagation (the
+                    term's own click handler), leaving a dead-zone over the
+                    word. The term is taught in the title/hint above instead. */}
                 <div>
-                  <button data-testid="scoring-modal-daihyosen-button" type="button" className="btn btn--primary btn--sm" onClick={onDaihyosen} disabled={daihyosenBusy}>
-                    {daihyosenBusy ? "Adding…" : <>Add <TermAS name="daihyosen">daihyosen</TermAS></>}
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy}>
+                    {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
                 </div>
                 {daihyosenErr && (
-                  <div style={{ color: "var(--danger, #c00)", fontSize: 12 }}>{daihyosenErr}</div>
+                  <div className="daihyosen-controls__err">{daihyosenErr}</div>
                 )}
               </div>
             );

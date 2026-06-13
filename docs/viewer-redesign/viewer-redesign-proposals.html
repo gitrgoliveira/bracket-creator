@@ -178,7 +178,97 @@ table.qw td{padding:9px 10px;border-top:1px solid var(--line-2);vertical-align:t
 
   <!-- ===================== GROUP 1 ===================== -->
   <h2><span class="gtag">Group 1</span><br>Unify the pools + knockout competition</h2>
-  <div class="finding">Today one logical event is split into a mixed “pools” card <i>and</i> a separate “… - Playoffs” card. That split causes: a <b>Completed</b> comp showing “UP NEXT” preview placeholders, empty <b>0-player “Pending”</b> playoff shells sorted to the top, and a Bracket tab that shows a dead placeholder while the real bracket lives in the other card.</div>
+  <!-- impeccable-variants-start 0ea18ff3 -->
+  <div data-impeccable-variants="0ea18ff3" data-impeccable-variant-count="3" style="display: contents">
+    <!-- Original -->
+    <div data-impeccable-variant="original">
+      <div class="finding">Today one logical event is split into a mixed “pools” card <i>and</i> a separate “… - Playoffs” card. That split causes: a <b>Completed</b> comp showing “UP NEXT” preview placeholders, empty <b>0-player “Pending”</b> playoff shells sorted to the top, and a Bracket tab that shows a dead placeholder while the real bracket lives in the other card.</div>
+    </div>
+    <!-- Variants: insert below this line -->
+  </div>
+  <!-- impeccable-variants-end 0ea18ff3 -->
+
+  <!-- ===================== GROUP 2 ===================== -->
+  <h2><span class="gtag">Group 2</span><br>Distill the Notifications card — watchlist-only context</h2>
+  <div class="finding">The "Notifications" card uses a generic heading and describes notifications as announcements, but the feature only serves one purpose: alerting a viewer when their watchlisted competitor is up next. The heading, label copy, and two-toggle split all obscure that focus.</div>
+
+  <!-- V1: bare rows, no card chrome -->
+  <h3>Option A — No card, bare rows</h3>
+  <div class="cols">
+    <div class="col">
+      <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current</div>
+      <div class="frame frame--bad" style="max-width:380px">
+        <div class="card" style="padding:14px;margin-bottom:0">
+          <div class="sectitle" style="margin-top:0">Notifications</div>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px"><input type="checkbox"> Enable browser notifications for announcements<span style="margin-left:6px;font-size:11px;color:var(--ink-3)">(permission not yet requested)</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;margin-top:10px"><input type="checkbox"> Play a sound when your match is up next</label>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="lbl lbl--new"><span class="dot dot--new"></span>Option A — inline rows under "Watchlist alerts" eyebrow</div>
+      <div class="frame frame--good" style="max-width:380px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);margin-bottom:8px">Watchlist alerts</div>
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--ink-1)"><input type="checkbox"> <span>Browser notification when up next</span></label>
+        <label style="display:flex;align-items:center;gap:10px;padding:8px 0;font-size:13px;color:var(--ink-1)"><input type="checkbox"> <span>Sound alert when up next</span></label>
+      </div>
+      <p class="note">Card chrome dropped. "Watchlist alerts" eyebrow ties the section to its context. Copy shortened to action-only.</p>
+    </div>
+  </div>
+
+  <!-- V2: single compound toggle -->
+  <h3>Option B — One compound toggle</h3>
+  <div class="cols">
+    <div class="col">
+      <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current — two separate toggles</div>
+      <div class="frame frame--bad" style="max-width:380px">
+        <div class="card" style="padding:14px;margin-bottom:0">
+          <div class="sectitle" style="margin-top:0">Notifications</div>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px"><input type="checkbox"> Enable browser notifications for announcements</label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;margin-top:10px"><input type="checkbox"> Play a sound when your match is up next</label>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="lbl lbl--new"><span class="dot dot--new"></span>Option B — one gesture enables both alerts</div>
+      <div class="frame frame--good" style="max-width:380px">
+        <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer">
+          <input type="checkbox" style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--ink-1)">Alert me when my match is up next</div>
+            <div style="font-size:11px;color:var(--ink-3);margin-top:3px;line-height:1.4">Browser notification + sound. Only fires for matches on your watchlist.</div>
+          </div>
+        </label>
+      </div>
+      <p class="note">One intent, one toggle. Card wrapper and heading dropped — "your watchlist" in the sub-label carries the context.</p>
+    </div>
+  </div>
+
+  <!-- V3: reframed heading, tightened copy, card kept -->
+  <h3>Option C — Reframed heading, card kept</h3>
+  <div class="cols">
+    <div class="col">
+      <div class="lbl lbl--cur"><span class="dot dot--cur"></span>Current — "Notifications", verbose labels</div>
+      <div class="frame frame--bad" style="max-width:380px">
+        <div class="card" style="padding:14px;margin-bottom:0">
+          <div class="sectitle" style="margin-top:0">Notifications</div>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px"><input type="checkbox"> Enable browser notifications for announcements</label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;margin-top:10px"><input type="checkbox"> Play a sound when your match is up next</label>
+        </div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="lbl lbl--new"><span class="dot dot--new"></span>Option C — "Watchlist alerts", tightened labels</div>
+      <div class="frame frame--good" style="max-width:380px">
+        <div class="card" style="padding:14px;margin-bottom:0">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin:0 0 10px">Watchlist alerts</div>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--ink-1)"><input type="checkbox"> <span>Sound when up next</span></label>
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--ink-1);margin-top:9px"><input type="checkbox"> <span>Browser notification when up next</span></label>
+        </div>
+      </div>
+      <p class="note">Card kept for visual grouping. "Notifications" renamed to "Watchlist alerts". Parentheticals removed; sound listed first (no permission prompt needed).</p>
+    </div>
+  </div>
 
   <div class="cols">
     <div class="col">

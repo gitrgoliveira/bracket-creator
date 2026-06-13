@@ -560,17 +560,22 @@ function buildRoster(competitions) {
 const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 
 // Hook: chime-muted preference backed by localStorage.
-// Multiple instances (ViewerHome + NotificationSettings) stay in sync via
+// useChimeMuted syncs across multiple ViewerHome mounts via
 // a custom DOM event dispatched on toggle — the native `storage` event only
 // fires across tabs, not within the same page.
 const CHIME_SYNC_EVENT = "chimeMutedSync";
+// Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
+// instances and the watchlist bell stay visually in sync within one page.
+const NOTIF_SYNC_EVENT = "notifEnabledSync";
 
 function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined") return true;
     try {
-      return window.localStorage.getItem(LS_CHIME_MUTED) === "true";
-    } catch (_e) { return false; }
+      // Default muted until the user explicitly enables via the bell.
+      // A stored "false" means the user turned it on; anything else → muted.
+      return window.localStorage.getItem(LS_CHIME_MUTED) !== "false";
+    } catch (_e) { return true; }
   });
   // Sync across same-page instances via custom event.
   useEffect(() => {
@@ -1081,7 +1086,30 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
-  const [chimeMuted] = useChimeMuted();
+  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
+  // Bell button: toggle chime and keep browser-notification opt-in in sync.
+  const handleBellToggle = async () => {
+    const willEnable = chimeMuted; // currently muted → about to enable
+    toggleChimeMuted();
+    if (!notificationSupported()) return;
+    if (!willEnable) {
+      // Muting: disable browser notifications too so they don't keep firing.
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+      return;
+    }
+    // Enabling: request permission if not yet decided, then write the opt-in.
+    // fireNotification() gates on this flag at fire time (app.jsx:193).
+    const perm = Notification.permission;
+    if (perm === "denied") return; // user blocked — chime only
+    if (perm === "default") {
+      const result = await Notification.requestPermission();
+      if (result !== "granted") return;
+    }
+    // "granted" (now or previously): persist the opt-in flag.
+    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
+    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
+  };
   const [alertMatch, setAlertMatch] = useState(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [secondaryAlert, setSecondaryAlert] = useState(null);
@@ -1172,6 +1200,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             primaryNextMatch={primaryNextMatch}
             upcoming={watchedUpcoming}
             onMatchClick={setSelectedMatch}
+            chimeMuted={chimeMuted}
+            toggleChimeMuted={handleBellToggle}
+            onFirstAdd={watchlist.length === 0 && chimeMuted ? handleBellToggle : undefined}
           />
 
           {globalRunning.length > 0 && (
@@ -1183,33 +1214,29 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </div>
           )}
 
-          <button
-            className="vlist-item vlist-item--row"
-            onClick={onOpenSchedule}
-          >
-            <span className="vlist-item__icon">🗓</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize((tournament.courts || []).length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </button>
-
-          {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
-          {onOpenResults && comps.some((c) => c.status === "completed") && (
-            <button
-              className="vlist-item vlist-item--row"
-              onClick={onOpenResults}
-              data-testid="open-results-btn"
-            >
-              <span className="vlist-item__icon">🏅</span>
-              <div className="vlist-item__rowbody">
-                <div className="vlist-item__rowtitle">Results</div>
-                <div className="vlist-item__rowsub">All competition placings</div>
+          <div className="viewer-nav-row">
+            <button className="viewer-nav-card" onClick={onOpenSchedule}>
+              <span className="viewer-nav-card__icon">🗓</span>
+              <div className="viewer-nav-card__text">
+                <div className="viewer-nav-card__title">Full schedule</div>
+                <div className="viewer-nav-card__sub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} · {pluralize((tournament.courts || []).length, "court", "courts")}</div>
               </div>
-              <span className="vlist-item__rowchev">→</span>
+              <span className="viewer-nav-card__chev">→</span>
             </button>
-          )}
+
+            {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
+            {onOpenResults && comps.some((c) => c.status === "completed") && (
+              <button className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
+                <span className="viewer-nav-card__icon">🏅</span>
+                <div className="viewer-nav-card__text">
+                  <div className="viewer-nav-card__title">Results</div>
+                  <div className="viewer-nav-card__sub">All placings</div>
+                </div>
+                <span className="viewer__results-badge">{comps.filter(c => c.status === "completed").length}</span>
+                <span className="viewer-nav-card__chev">→</span>
+              </button>
+            )}
+          </div>
 
           {dates.length === 0 ? (
             <>
@@ -1316,9 +1343,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               (viewer) keeps its tab and stays interactive. Collapsed by
               default (mp-mjaq) since most viewers are spectators; only
               tournament operators need these links. */}
-          {/* mp-cw1: Browser push notification opt-in toggle — settings belong at the
-              bottom of the page, not between the watchlist and live-match signals. */}
-          <NotificationSettings />
 
           <DisplayModes tournament={t} />
           {window.VersionFooter && <window.VersionFooter />}
@@ -3798,6 +3822,63 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
 // AnnouncementCard — renders a single announcement card with its own
 // independent per-card countdown and auto-dismiss timer.
 // Exported for unit testing; consumed only by AnnouncementBanner below.
+function AnnBellBtn() {
+  const supported = notificationSupported();
+  const [state, setState] = useState(() => {
+    if (!supported) return "unsupported";
+    if (Notification.permission === "denied") return "denied";
+    try {
+      const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+      return (optIn && Notification.permission === "granted") ? "on" : "off";
+    } catch (_e) { return "off"; }
+  });
+
+  // Sync with the watchlist bell and other AnnBellBtn instances on the page.
+  useEffect(() => {
+    if (!supported) return;
+    const onSync = (e) => {
+      if (Notification.permission === "denied") { setState("denied"); return; }
+      setState(e.detail ? "on" : "off");
+    };
+    window.addEventListener(NOTIF_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
+  }, [supported]);
+
+  if (state === "unsupported") return null;
+
+  const toggle = async () => {
+    if (state === "on") {
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+      setState("off");
+      return;
+    }
+    if (state === "denied") return;
+    // Re-check live permission — user may have revoked it in browser settings.
+    if (Notification.permission === "denied") { setState("denied"); return; }
+    if (Notification.permission === "default") {
+      const result = await Notification.requestPermission();
+      if (result !== "granted") { setState("denied"); return; }
+    }
+    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
+    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
+    setState("on");
+  };
+
+  const BellIcon = window.BellIcon;
+  return (
+    <button
+      className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
+      onClick={toggle}
+      disabled={state === "denied"}
+      aria-label={state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
+      title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
+    >
+      <BellIcon muted={state !== "on"} size={13} />
+    </button>
+  );
+}
+
 function AnnouncementCard({ ann, onDismiss }) {
   const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(ann.expiresAt));
 
@@ -3832,6 +3913,7 @@ function AnnouncementCard({ ann, onDismiss }) {
       </div>
       <div className="announcement-banner__meta">
         <span className="announcement-banner__badge">{timeLeft}</span>
+        <AnnBellBtn />
         <button
           className="announcement-banner__dismiss"
           onClick={() => onDismiss(ann.id)}

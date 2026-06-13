@@ -68,7 +68,11 @@ const (
 	MaxLenMatchSide        = 100 // sideA / sideB / winner
 	MaxLenMatchScheduledAt = 32
 
-	MaxLenDecisionReason    = 200
+	MaxLenDecisionReason = 200
+	// Operator audit free-text (correction note, lineup-change note) shares the
+	// same human-readable purpose and bound as DecisionReason.
+	MaxLenCorrectionReason  = MaxLenDecisionReason
+	MaxLenChangeReason      = MaxLenDecisionReason
 	MaxLenEligibilityReason = 200
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
 
@@ -219,6 +223,9 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
 	}
+	if err := validateMaxLen("correctionReason", r.CorrectionReason, MaxLenCorrectionReason); err != nil {
+		return err
+	}
 	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
@@ -360,6 +367,9 @@ func (r *ScoreRequest) Validate() error {
 		return err
 	}
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
+		return err
+	}
+	if err := validateMaxLen("correctionReason", r.CorrectionReason, MaxLenCorrectionReason); err != nil {
 		return err
 	}
 	// Winner, when supplied, must name one of the two sides. Empty

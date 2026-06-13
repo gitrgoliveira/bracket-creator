@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -80,6 +81,38 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 		}
 	}
 	return group
+}
+
+// applyTiebreakSort re-orders each tied group in `sorted` (in place) by per-group
+// win count from the supplementary bouts whose ID satisfies isSupplementaryID
+// (TB ippon-shobu or DH representative). Tied groups are located via
+// detectPoolTies — the single source of the Points-equality walk — so the two
+// callers (TB, DH) share one implementation. Win counts are scoped to bouts
+// between members of the same tied group, so an unrelated group's results never
+// bleed across; a group with no decided supplementary bouts is left untouched.
+func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) {
+	for _, positions := range detectPoolTies(sorted) {
+		i := positions[0]
+		j := positions[len(positions)-1] + 1
+		groupNames := make(map[string]bool, j-i)
+		for k := i; k < j; k++ {
+			groupNames[sorted[k].Player.Name] = true
+		}
+		groupWins := map[string]int{}
+		for _, m := range matches {
+			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+				continue
+			}
+			if groupNames[m.SideA] && groupNames[m.SideB] {
+				groupWins[m.Winner]++
+			}
+		}
+		if len(groupWins) > 0 {
+			sort.SliceStable(sorted[i:j], func(a, b int) bool {
+				return groupWins[sorted[i+a].Player.Name] > groupWins[sorted[i+b].Player.Name]
+			})
+		}
+	}
 }
 
 // tiebreakerPairKey returns a canonical (order-independent) key for a

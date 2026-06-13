@@ -326,6 +326,15 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
+			// Bound the audit free-text (same cap as every other reason field) so
+			// a 1MB changeReason can't land in the lineup YAML. Only force writes
+			// persist it (see below), so this only matters on the force path.
+			if req.Force {
+				if err := validateMaxLen("changeReason", req.ChangeReason, MaxLenChangeReason); err != nil {
+					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+					return nil
+				}
+			}
 			// force is a mid-match override: only valid once the match has
 			// actually started (running or completed). Reject a pre-match force
 			// so a client can't use the override path — or persist an audit

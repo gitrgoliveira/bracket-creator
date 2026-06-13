@@ -242,6 +242,87 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
   return window.API.recordDecision(compId, matchId, body, resolveDecisionPassword(password));
 }
 
+// makeSubmitDecision builds the kiken/fusenpai decision submit handler shared by
+// ScoreEditorModal and TeamScoreEditorModal. The two modals had byte-identical
+// copies of this (the only difference was the "competitors"/"teams" wording in
+// the decision_locked confirm), so it lives here once. The returned closure:
+//   - POSTs the decision, then on a kiken result resolves the loser side and
+//     opens the withdrawn-player panel; other kinds close the modal;
+//   - on 409 decision_locked / max_encho_exceeded, confirms then retries with
+//     force (recursing into itself).
+// Call it fresh each render so it captures the current enchoPeriodCount/password.
+function makeSubmitDecision({
+  match,
+  enchoPeriodCount,
+  password,
+  mountedRef,
+  setDecisionSubmitting,
+  setDecisionErr,
+  setWithdrawnPlayer,
+  setDecisionPromptKind,
+  onClose,
+  entityLabel = 'competitors',
+}) {
+  const submit = async (kind, { decisionBy, decisionReason }, opts = {}) => {
+    setDecisionSubmitting(true);
+    setDecisionErr('');
+    try {
+      const updated = await submitDecisionRequest(
+        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
+      );
+      if (!mountedRef.current) return;
+      if (window.isKikenDecision(kind)) {
+        // The loser is the side != Winner. SideA/SideB on MatchResult are names;
+        // resolve back to the normalized {id,name} via the original match for the
+        // remaining-matches lookup.
+        const winnerName = (updated?.winner || '').trim();
+        const loserName = winnerName === (updated?.sideA || '') ? (updated?.sideB || '') : (updated?.sideA || '');
+        const loser =
+          (match.sideA?.name === loserName) ? match.sideA :
+          (match.sideB?.name === loserName) ? match.sideB :
+          { id: '', name: loserName };
+        setWithdrawnPlayer(loser);
+        setDecisionPromptKind('');
+      } else {
+        onClose();
+      }
+    } catch (e) {
+      const msg = e?.message || 'Failed to record decision';
+      // T103: server returns "decision_locked" when a kiken-undo would
+      // invalidate a downstream match — confirm and retry with force.
+      if (!opts.force && /decision_locked/i.test(msg)) {
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            `A subsequent match for one of these ${entityLabel} has already started.\n\n` +
+            'Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?',
+          confirmLabel: 'Proceed anyway',
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
+        setDecisionErr('Override cancelled.');
+      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
+        // T104/CHK029: encho-cap override, same confirm-and-retry shape.
+        const ok = mountedRef.current && await window.confirmDialog({
+          message:
+            'This decision would exceed the configured maximum encho periods.\n\n' +
+            'Record it anyway?',
+          confirmLabel: 'Record anyway',
+          danger: true,
+        });
+        if (!mountedRef.current) return;
+        if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
+        setDecisionErr('Override cancelled.');
+      } else if (mountedRef.current) {
+        setDecisionErr(msg);
+      }
+    } finally {
+      if (mountedRef.current) setDecisionSubmitting(false);
+    }
+  };
+  return submit;
+}
+
 // T104/CHK029: encho-period clamp + banner predicates. maxEnchoPeriods === 0
 // (or nullish) means unlimited per the FIK default
 // (state.CompetitionConfig.MaxEnchoPeriods). shouldShowEnchoMaxBanner
@@ -757,6 +838,7 @@ export {
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,
+  makeSubmitDecision,
   shouldShowEnchoMaxBanner,
   canIncrementEncho,
   nextEnchoPeriod,

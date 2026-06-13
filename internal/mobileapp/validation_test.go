@@ -453,6 +453,11 @@ func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 			req:       ScoreRequest{DecisionReason: strings.Repeat("r", 201)},
 			wantField: "decisionReason",
 		},
+		{
+			name:      "correctionReason over 200 chars",
+			req:       ScoreRequest{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -496,6 +501,11 @@ func TestValidateBulkScoreLengths(t *testing.T) {
 			name:      "decisionReason over cap",
 			mr:        state.MatchResult{DecisionReason: strings.Repeat("r", 201)},
 			wantField: "decisionReason",
+		},
+		{
+			name:      "correctionReason over cap",
+			mr:        state.MatchResult{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
 		},
 		{
 			name: "subResult sideB over cap",

@@ -88,7 +88,7 @@ export function shiaijoScoreCell(m) {
     if (!m) return { kind: "none" };
     if (m.status === "scheduled") return { kind: "vs" };
     if (m.status !== "completed" && m.status !== "running") return { kind: "none" };
-    const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
+    const isTeam = isTeamMatch(m);
     if (isTeam) {
         const iv = window.teamIVScore ? window.teamIVScore(m) : null;
         return iv ? { kind: "team", iv } : { kind: "none" };

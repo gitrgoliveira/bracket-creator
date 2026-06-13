@@ -22,6 +22,7 @@ import {
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,
+  makeSubmitDecision,
   shouldShowEnchoMaxBanner,
   canIncrementEncho,
   nextEnchoPeriod,
@@ -136,80 +137,13 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   //   prior kiken on this match can't be safely overwritten because a
   //   subsequent match for either side has started), prompt the
   //   operator to confirm and re-send with force=true.
-  const submitDecision = async (kind, { decisionBy, decisionReason }, opts = {}) => {
-    setDecisionSubmitting(true);
-    setDecisionErr("");
-    try {
-      const updated = await submitDecisionRequest(
-        m.compId,
-        m.id,
-        kind,
-        { decisionBy, decisionReason },
-        enchoPeriodCount,
-        password,
-        opts,
-      );
-      if (!mountedRef.current) return;
-      if (window.isKikenDecision(kind)) {
-        // The loser is the side != Winner. SideA/SideB on MatchResult are
-        // names; resolve back to {id, name} via the original match for the
-        // remaining-matches lookup.
-        const winnerName = (updated?.winner || "").trim();
-        const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
-        // m.sideA / m.sideB are normalized player objects with id+name.
-        const loser =
-          (m.sideA?.name === loserName) ? m.sideA :
-          (m.sideB?.name === loserName) ? m.sideB :
-          { id: "", name: loserName };
-        setWithdrawnPlayer(loser);
-        setDecisionPromptKind("");
-      } else {
-        // fusenpai (and any future kinds that don't need a follow-up panel)
-        // collapses straight back to the parent's onClose/onScored flow.
-        onClose();
-      }
-    } catch (e) {
-      const msg = e?.message || "Failed to record decision";
-      // T103: the server returns the literal "decision_locked" string
-      // as the error body when the kiken-undo would invalidate a
-      // downstream match. Re-prompt the operator and retry with force.
-      if (!opts.force && /decision_locked/i.test(msg)) {
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            "A subsequent match for one of these competitors has already started.\n\n" +
-            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
-          confirmLabel: "Proceed anyway",
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) {
-          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
-          return;
-        }
-        setDecisionErr("Override cancelled.");
-      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
-        // T104/CHK029: the server caps encho periods per competition.
-        // Same confirm-and-retry-with-force shape as decision_locked.
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            "This decision would exceed the configured maximum encho periods.\n\n" +
-            "Record it anyway?",
-          confirmLabel: "Record anyway",
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) {
-          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
-          return;
-        }
-        setDecisionErr("Override cancelled.");
-      } else if (mountedRef.current) {
-        setDecisionErr(msg);
-      }
-    } finally {
-      if (mountedRef.current) setDecisionSubmitting(false);
-    }
-  };
+  // Shared factory (admin_scoring_shared.jsx) — the individual + team modals had
+  // byte-identical copies; "competitors" is the only per-modal wording.
+  const submitDecision = makeSubmitDecision({
+    match: m, enchoPeriodCount, password, mountedRef,
+    setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
+    onClose, entityLabel: "competitors",
+  });
 
   // Hansoku Hs are now physically present in the opponent's pts array
   // (folded in at the 2-foul boundary by applyFoulIncrement). The counter
@@ -1051,75 +985,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     }
   };
 
-  // Mirror of submitDecision in ScoreEditorModal — kept inline rather than
-  // hoisted to a shared hook because the two modals own different "after
-  // success" semantics (the individual modal doesn't have per-bout state to
-  // preserve, but the wiring is identical otherwise). T103/CHK024:
-  // 409 decision_locked triggers a confirm-and-retry-with-force loop.
-  const submitDecision = async (kind, { decisionBy, decisionReason }, opts = {}) => {
-    setDecisionSubmitting(true);
-    setDecisionErr("");
-    try {
-      const updated = await submitDecisionRequest(
-        m.compId,
-        m.id,
-        kind,
-        { decisionBy, decisionReason },
-        enchoPeriodCount,
-        password,
-        opts,
-      );
-      if (!mountedRef.current) return;
-      if (window.isKikenDecision(kind)) {
-        const winnerName = (updated?.winner || "").trim();
-        const loserName = winnerName === (updated?.sideA || "") ? (updated?.sideB || "") : (updated?.sideA || "");
-        const loser =
-          (m.sideA?.name === loserName) ? m.sideA :
-          (m.sideB?.name === loserName) ? m.sideB :
-          { id: "", name: loserName };
-        setWithdrawnPlayer(loser);
-        setDecisionPromptKind("");
-      } else {
-        onClose();
-      }
-    } catch (e) {
-      const msg = e?.message || "Failed to record decision";
-      if (!opts.force && /decision_locked/i.test(msg)) {
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            "A subsequent match for one of these teams has already started.\n\n" +
-            "Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?",
-          confirmLabel: "Proceed anyway",
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) {
-          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
-          return;
-        }
-        setDecisionErr("Override cancelled.");
-      } else if (!opts.force && /max_encho_exceeded/i.test(msg)) {
-        // T104/CHK029: encho-cap override, same shape as decision_locked.
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            "This decision would exceed the configured maximum encho periods.\n\n" +
-            "Record it anyway?",
-          confirmLabel: "Record anyway",
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) {
-          await submitDecision(kind, { decisionBy, decisionReason }, { force: true });
-          return;
-        }
-        setDecisionErr("Override cancelled.");
-      } else if (mountedRef.current) {
-        setDecisionErr(msg);
-      }
-    } finally {
-      if (mountedRef.current) setDecisionSubmitting(false);
-    }
-  };
+  // Shared factory (admin_scoring_shared.jsx) — same handler as ScoreEditorModal;
+  // "teams" is the only per-modal wording (in the decision_locked confirm).
+  const submitDecision = makeSubmitDecision({
+    match: m, enchoPeriodCount, password, mountedRef,
+    setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
+    onClose, entityLabel: "teams",
+  });
 
   const existingSub = m.subResults || [];
   // T096/FR-031: round-trip per-bout fusensho. SubMatchResult.decision is
@@ -2045,6 +1917,7 @@ export {
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,
+  makeSubmitDecision,
   shouldShowEnchoMaxBanner,
   canIncrementEncho,
   nextEnchoPeriod,

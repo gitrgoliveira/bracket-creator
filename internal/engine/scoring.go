@@ -611,69 +611,15 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			return sorted[i].Points > sorted[j].Points
 		})
 
-		// Apply tiebreaker results as a secondary sort within tied groups.
-		// Win counts are scoped per group: only TB matches between the players
-		// in the same tied group influence that group's ordering, preventing
-		// wins from an unrelated tied group from bleeding into another.
-		for i := 0; i < len(sorted); {
-			j := i + 1
-			for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-				j++
-			}
-			if j-i >= 2 {
-				groupNames := make(map[string]bool, j-i)
-				for k := i; k < j; k++ {
-					groupNames[sorted[k].Player.Name] = true
-				}
-				groupTBWins := map[string]int{}
-				for _, m := range matches {
-					if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-						continue
-					}
-					if groupNames[m.SideA] && groupNames[m.SideB] {
-						groupTBWins[m.Winner]++
-					}
-				}
-				if len(groupTBWins) > 0 {
-					sort.SliceStable(sorted[i:j], func(a, b int) bool {
-						return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
-					})
-				}
-			}
-			i = j
-		}
-
-		// Apply pool-daihyosen results as a secondary sort within tied groups
-		// for team competitions. Mirrors the TB block above: DH wins are scoped
-		// per tied group to prevent cross-group bleed.
+		// Apply supplementary-bout results as a secondary sort within each tied
+		// group (groups located by the single detectPoolTies Points-equality
+		// walk). Win counts are scoped per group — only bouts between members of
+		// the same tied group count — so results from an unrelated tied group
+		// never bleed across. TB (ippon-shobu) applies to all formats; DH
+		// (representative) only to team competitions.
+		applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
 		if isTeam {
-			for i := 0; i < len(sorted); {
-				j := i + 1
-				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-					j++
-				}
-				if j-i >= 2 {
-					groupNames := make(map[string]bool, j-i)
-					for k := i; k < j; k++ {
-						groupNames[sorted[k].Player.Name] = true
-					}
-					groupDHWins := map[string]int{}
-					for _, m := range matches {
-						if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-							continue
-						}
-						if groupNames[m.SideA] && groupNames[m.SideB] {
-							groupDHWins[m.Winner]++
-						}
-					}
-					if len(groupDHWins) > 0 {
-						sort.SliceStable(sorted[i:j], func(a, b int) bool {
-							return groupDHWins[sorted[i+a].Player.Name] > groupDHWins[sorted[i+b].Player.Name]
-						})
-					}
-				}
-				i = j
-			}
+			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
 		// Apply manual rank overrides

@@ -203,7 +203,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             await window.API.updateMatchTime(m.compId, m.id, "", password);
             if (showToast) showToast(`Deferred ${label} to the end of the queue`);
         } catch (e) {
-            if (showToast) showToast((e && e.message) || "Could not skip the match", "error");
+            if (showToast) showToast((e && e.message) || "Could not defer the match", "error");
         }
     };
 

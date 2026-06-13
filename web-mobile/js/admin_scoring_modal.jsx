@@ -329,7 +329,20 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // AKA buttons (which route through submitHantei). Disable the regular
   // Finish/Enter so the patch can't accidentally mark an ippon-decided match
   // as hantei-decided. Keyboard Enter is also gated on canFinish.
+  // A knockout match can't end in a draw (it's decided by encho then hantei),
+  // so the hikiwake toggle is suppressed in the bracket phase — m.phase ===
+  // "bracket" is the in-modal KO signal (see TeamScoreEditorModal).
+  const isKnockoutPhase = m.phase === "bracket";
   const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
+
+  // Finish guard (see TeamScoreEditorModal): one tap arms + shows the result on
+  // the button, a second commits. Disarms on any score change so a stale result
+  // can't be confirmed. Keyboard Enter stays direct (deliberate, not an
+  // accidental tablet brush). a-vs-b is AKA-vs-SHIRO; show SHIRO–AKA order.
+  const [finishArmed, setFinishArmed] = useStateA(false);
+  const finishVerdict = isDrawToggled ? "DRAW" : (aTotal > bTotal ? "AKA WIN" : bTotal > aTotal ? "SHIRO WIN" : "");
+  const finishSummary = isDrawToggled ? "DRAW" : `${finishVerdict} ${bTotal}–${aTotal}`.trim();
+  useEffectA(() => { setFinishArmed(false); }, [aTotal, bTotal, isDrawToggled]);
 
   const isDirty =
     !window.arraysEqual(aPts, initialAPts) ||
@@ -359,7 +372,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt };
+  kbRef.current = { submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -412,6 +425,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
       }
       if (k === "x" || k === "X") {
         ev.preventDefault();
+        // No hikiwake in a knockout match — leave the key inert there.
+        if (s.isKnockoutPhase && !s.isDrawToggled) return;
         const r = decideDrawToggle({ isDrawToggled: s.isDrawToggled, aTotal: s.aTotal, bTotal: s.bTotal });
         if (r.action === "cancel") setIsDrawToggled(false);
         else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
@@ -558,8 +573,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                             if (r.action === "cancel") setIsDrawToggled(false);
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
                           }}
-                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0))}
-                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)"))}
+                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
+                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw — decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
@@ -684,23 +699,25 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
                 <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
-                  ▶ Start Match
+                  ▶ Start match
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className="btn btn--primary" onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className="btn btn--primary" onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
                 }} disabled={submitting || !canFinish}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? `Confirm · ${finishSummary}` : "Finish"}
                 </button>
               )}
             </div>
@@ -745,6 +762,7 @@ const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => St
 // independently and admin_lineup.jsx may not be present in older
 // builds). The mapping mirrors POS_LABELS_5 in admin_lineup.jsx.
 const POS_LABELS_BY_INDEX_5 = ["Senpo", "Jiho", "Chuken", "Fukusho", "Taisho"];
+const POS_ABBREV_BY_INDEX_5 = ["Sen", "Ji", "Chu", "Fuk", "Tai"];
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
     // Backend may emit a name string in Position for non-5 sizes once
@@ -753,6 +771,18 @@ function positionLabelFor(teamSize, index, sub) {
   }
   if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_BY_INDEX_5[index];
   return `Match ${index + 1}`;
+}
+// Short position handle shown beside the bout number. Operators think in
+// positions ("Taisho's up"), so for 5-person teams we surface the abbreviation
+// in the row itself rather than hiding the full name in a title tooltip
+// (unreachable on a touch tablet). Returns "" for sizes/rows with no canonical
+// position, where the number alone is the right label.
+function positionAbbrevFor(teamSize, index, sub) {
+  if (sub && sub.position && typeof sub.position === "string" && /[a-z]/i.test(sub.position)) {
+    return sub.position.slice(0, 3);
+  }
+  if (teamSize === 5 && index >= 0 && index < 5) return POS_ABBREV_BY_INDEX_5[index];
+  return "";
 }
 
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
@@ -1150,6 +1180,30 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     ? (daihyosenWinner || null)
     : (ivA > ivB ? "a" : ivB > ivA ? "b" : pwA > pwB ? "a" : pwB > pwA ? "b" : null);
 
+  // Finish guard: recording a team result is the highest-stakes action here, so
+  // it gets the same deliberate gate Cancel already has (the dirty-discard
+  // confirm). One tap arms and surfaces the computed verdict on the button; a
+  // second tap commits. Any score change disarms so the operator can never
+  // confirm a stale verdict. Keyboard Enter is left direct — it's deliberate,
+  // unlike an accidental brush on a tablet. (a-vs-b is AKA-vs-SHIRO; the band
+  // and this label read SHIRO–AKA to match the sheet's left-right order.)
+  const [finishArmed, setFinishArmed] = useStateA(false);
+  // A knockout encounter cannot end in a draw — a tie is resolved by a
+  // representative bout (daihyosen), not recorded as hikiwake. So in a KO phase
+  // a null teamWinner is never "DRAW": it's "DAIHYOSEN" once there's a scored
+  // tie to break, or simply pending ("—") before any bout lands. Only pool
+  // matches read a null winner as a true draw.
+  const teamHasAnyScore = (ivA + ivB + pwA + pwB) > 0;
+  const teamVerdictText = teamWinner === "a" ? "AKA WIN"
+    : teamWinner === "b" ? "SHIRO WIN"
+    : isKnockoutPhase ? (teamHasAnyScore ? "DAIHYOSEN" : "—")
+    : "DRAW";
+  // Block Finish while a KO encounter has no winner: the operator must add and
+  // score a daihyosen first (the affordance below). Pool draws stay finishable.
+  const koTieBlocked = isKnockoutPhase && teamWinner === null && !isComplete;
+  const finishSummary = `${teamVerdictText} · IV ${ivB}–${ivA} · PW ${pwB}–${pwA}`;
+  useEffectA(() => { setFinishArmed(false); }, [ivA, ivB, pwA, pwB, teamWinner]);
+
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
   // encho to avoid duplicate/ambiguous semantics on the team match.
@@ -1405,6 +1459,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const isDaihyoRow = idx === daihyosenIdx;
             const existingSubAtIdx = (m.subResults || []).find(sr => sr.position === (isDaihyoRow ? -1 : idx + 1));
             const posLabel = isDaihyoRow ? "Daihyosen" : positionLabelFor(teamSize, idx, existingSubAtIdx);
+            const posAbbrev = isDaihyoRow ? "" : positionAbbrevFor(teamSize, idx, existingSubAtIdx);
             // Resolve the player name occupying this position on each
             // side: lineup data first (canonical when present), then the
             // SubMatchResult.SideA/SideB strings from a prior score.
@@ -1508,11 +1563,16 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             return (
               <div key={idx} className="team-sub-match">
                 <div className="team-sub-match__pos" title={posLabel}>
-                  {/* Bout number, not the FIK position name (Senpo/Jiho/…) —
-                      a number is compact and scales to any team size. The
-                      canonical position name stays available as the title
-                      tooltip. Daihyosen (the rep bout) shows "DH". */}
-                  <span style={{ fontWeight: 700 }}>{isDaihyoRow ? "DH" : idx + 1}</span>
+                  {/* Bout number AND the FIK position handle (Sen/Ji/Chu/Fuk/Tai
+                      for 5-person teams) — operators think in positions, so the
+                      abbreviation rides in the row instead of hiding in the
+                      title tooltip (unreachable on touch). The number stays as
+                      the size-agnostic anchor; >5-person teams show it alone.
+                      Daihyosen (the rep bout) shows "DH". */}
+                  <span className="team-sub-match__pos-num">{isDaihyoRow ? "DH" : idx + 1}</span>
+                  {!isDaihyoRow && posAbbrev && (
+                    <span className="team-sub-match__pos-name">{posAbbrev}</span>
+                  )}
                 </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (
@@ -1668,7 +1728,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 {idx === 0 && (
                   <div className="team-summary__side team-summary__side--center">
                     <div className="team-summary__label">RESULT</div>
-                    <div className="team-summary__verdict">{teamWinner === "a" ? "AKA WIN" : teamWinner === "b" ? "SHIRO WIN" : "DRAW"}</div>
+                    <div className="team-summary__verdict">{teamVerdictText}</div>
                   </div>
                 )}
               </React.Fragment>
@@ -1879,22 +1939,26 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start</button>
+                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start match</button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className="btn btn--primary" onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
-                }} disabled={submitting}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish + Start Next →"}
+                }} disabled={submitting || koTieBlocked}
+                  title={koTieBlocked ? "A knockout match can't be a draw — add and score a daihyosen to decide a winner" : undefined}>
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className="btn btn--primary" onClick={() => {
+                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
+                  if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting}>
-                  {submitting ? "Saving…" : isComplete ? "Save correction" : "Finish"}
+                }} disabled={submitting || koTieBlocked}
+                  title={koTieBlocked ? "A knockout match can't be a draw — add and score a daihyosen to decide a winner" : undefined}>
+                  {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? `Confirm · ${finishSummary}` : "Finish"}
                 </button>
               )}
             </div>

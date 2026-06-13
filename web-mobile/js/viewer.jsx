@@ -2238,8 +2238,13 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
     ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
     : null;
 
+  // Render a non-interactive <div> when there's no click handler (read-only
+  // reuse, e.g. the operator console passes onClick=null) so we don't leave a
+  // focusable button that does nothing for keyboard/screen-reader users.
+  const Tag = onClick ? "button" : "div";
+  const interactiveProps = onClick ? { type: "button", onClick } : {};
   return (
-    <button className="pool-match-row" onClick={onClick}>
+    <Tag className="pool-match-row" {...interactiveProps}>
       <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__name">{bName}</span>
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
@@ -2251,7 +2256,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
         <span className="pool-match-row__name">{aName}</span>
       </div>
-    </button>
+    </Tag>
   );
 });
 PoolMatchRow.displayName = "PoolMatchRow";
@@ -2457,8 +2462,12 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
+  // Non-interactive <div> when there's no handler (read-only reuse) so the row
+  // isn't a focusable control that does nothing.
+  const Tag = handleClick ? "button" : "div";
+  const interactiveProps = handleClick ? { type: "button", onClick: handleClick } : {};
   return (
-    <button type="button" className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} onClick={handleClick}>
+    <Tag className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} {...interactiveProps}>
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
@@ -2471,7 +2480,7 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
         <span className="sr-only">Aka: </span>
         <span className="pool-match-numbered-row__name">{aName || "—"}</span>
       </div>
-    </button>
+    </Tag>
   );
 });
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";

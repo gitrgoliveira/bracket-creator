@@ -124,9 +124,17 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u := *match
 			u.SubResults = filtered
 			u.Status = state.MatchStatusRunning
-			// Clear any DH-derived match-level decision fields.
+			// Clear ALL DH-derived match-level result/decision metadata so the
+			// match returns to a clean running state. MatchResult.Decision has no
+			// omitempty, so leaving Decision/DecisionBy/DecisionReason/Encho set
+			// would let a removed daihyosen still present as decided-by-daihyosen
+			// (or carry stale overtime) while Status is back to running.
 			u.Winner = ""
 			u.DecidedByHantei = nil
+			u.Decision = ""
+			u.DecisionBy = ""
+			u.DecisionReason = ""
+			u.Encho = nil
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				return err
 			}

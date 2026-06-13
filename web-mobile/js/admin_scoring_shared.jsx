@@ -656,7 +656,7 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">{label} Fouls</div>
       <div className="foul-counter__controls">
-        <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(f => Math.max(0, f - 1))} disabled={fouls === 0}>−</button>
+        <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>

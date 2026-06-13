@@ -22,9 +22,14 @@ import (
 // handlers_viewer.go where the tournament password is zeroed before public
 // serialization.
 //
-// All of these mutate in place. Callers pass either post-persistence locals or
-// the deep copies returned by store.Load* (LoadPoolMatches/LoadBracket copy),
-// so stripping here never corrupts stored or cached state.
+// Two flavours, both safe against corrupting stored/cached state:
+//   - COPY helpers take the value by value and return a redacted copy:
+//     matchForBroadcast, matchPtrForBroadcast, matchesForBroadcast,
+//     lineupForPublic. Use these for SSE payloads built from a caller's local.
+//   - IN-PLACE helpers clear fields on the passed slice/pointer:
+//     stripMatchesAudit, stripBracketAudit. Pass the deep copies returned by
+//     store.Load* (LoadPoolMatches/LoadBracket already copy), so the on-disk /
+//     cached state is never touched.
 
 // matchForBroadcast returns a copy of m with audit fields cleared, for use as a
 // PUBLIC SSE payload. m is taken by value so the caller's original (and its

@@ -211,9 +211,11 @@ func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, team
 // WITHOUT acquiring the per-competition lock. Caller MUST already hold
 // it (typically via WithTransaction).
 //
-// Validate() is re-run here so the lock-free path is as safe as the
-// public method — transaction bodies don't have to remember to
-// validate first. The write parameter routes the final save
+// ValidatePositions() is re-run here so the lock-free path is as safe as
+// the public method — transaction bodies don't have to remember to
+// validate first. (Only position KEYS are checked, not FIK completeness:
+// lineups are entered incrementally while bouts run, so a partial lineup
+// must stay persistable.) The write parameter routes the final save
 // (T211/T212).
 func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, force bool, write writeFn) error {
 	if err := lineup.ValidatePositions(teamSize); err != nil {

@@ -794,7 +794,10 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to remove daihyosen");
         }
-        return res.json();
+        // The handler responds with an envelope ({ result: MatchResult }); unwrap
+        // it so the return value matches the docstring ("the updated MatchResult").
+        const body = await res.json().catch(() => ({}));
+        return body.result ?? body;
     },
     // T190-T193 (US13 — Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

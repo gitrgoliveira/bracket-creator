@@ -262,7 +262,7 @@ func TestRemoveDaihyosen(t *testing.T) {
 						ID: "B1", SideA: "TeamA", SideB: "TeamB",
 						Status: state.MatchStatusRunning,
 						SubResults: []state.SubMatchResult{
-							{Position: 1, SideA: "Alice", SideB: "Bob", Winner: "a"},
+							{Position: 1, SideA: "Alice", SideB: "Bob", Winner: "Alice"},
 							{Position: -1, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
 						},
 					},

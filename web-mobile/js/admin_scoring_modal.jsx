@@ -592,7 +592,7 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
 function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
-  const [active, setActive] = useStateA(0);
+  const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
   const ref = useRefA(null);
   const q = query.trim();
   const ql = q.toLowerCase();
@@ -607,14 +607,25 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(0); };
+  const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
   const onKeyDown = (e) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive(a => Math.min(a + 1, Math.max(0, optionCount - 1))); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(a => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
-      if (active < matches.length) commit(matches[active]);
-      else if (canAddNew) commit(q);
+      // First ArrowDown opens the list highlighting the FIRST option (index 0);
+      // subsequent presses move down. Without the open-guard the first row is
+      // skipped (jumps straight to index 1).
+      if (!open) { setOpen(true); setActive(0); }
+      else setActive(a => Math.min(a + 1, Math.max(0, optionCount - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(a => Math.max(a - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      // Commit only on an explicit choice: a navigated list row, the add-row,
+      // or a typed query. A bare focus + Enter (active === -1, empty query)
+      // must NOT overwrite the current slot.
+      if (active >= 0 && active < matches.length) commit(matches[active]);
+      else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
     } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
   };
@@ -628,8 +639,8 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
           aria-label={ariaLabel}
           disabled={disabled}
           value={open ? query : (value || "")}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
-          onFocus={() => { setOpen(true); setQuery(""); setActive(0); }}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(-1); }}
+          onFocus={() => { setOpen(true); setQuery(""); setActive(-1); }}
           onKeyDown={onKeyDown}
         />
         {value && !disabled && (

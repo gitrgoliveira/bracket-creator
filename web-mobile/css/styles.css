@@ -4864,7 +4864,9 @@ button.pool-match-row {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.team-sub-match__side--right .tsm-lineup__incomplete {
+/* Rendered as a standalone hint in the team header block (not inside a
+   bout side), so target the class directly. */
+.tsm-lineup__incomplete {
   font-size: 11px;
   color: var(--ink-3);
   padding: 2px 0 4px;

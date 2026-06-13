@@ -23,9 +23,8 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
-  // mp-13y #8: "Round N" (drop the "of"), where N is the round's bracket size
-  // = 2^(fromEnd+1). Computed generically so 128/256-player brackets read
-  // "Round 128" / "Round 256" instead of falling back to "Round 1".
+  // mp-13y #8: abbreviated column header — R{N} where N is the bracket size
+  // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
   if (fromEnd >= 3) return `R${2 ** (fromEnd + 1)}`;
   return `Round ${roundIdx + 1}`;
 }

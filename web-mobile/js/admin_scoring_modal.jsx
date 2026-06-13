@@ -1684,6 +1684,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
         aFouls: reconA.outstandingFouls,
         bFouls: reconB.outstandingFouls,
         fusensho,
+        // Operator-marked hikiwake for this bout (live display only — a 0–0
+        // bout already serialises to hikiwake on finish, so this just lets the
+        // centre show X/△ during scoring instead of the pending dash).
+        draw: false,
       };
     });
   }
@@ -1699,14 +1703,21 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // still restores the genuine prior state, not the intermediate 2-0.
   const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
 
+  // Toggle an operator-marked hikiwake (draw) for a sub-bout. Marking a draw
+  // clears any fusensho; editing scores/fouls later clears the draw flag (see
+  // rowSides setters), mirroring how fusensho behaves.
+  const setDrawFor = (idx) => updateSub(idx, prev => ({ ...prev, draw: !prev.draw, fusensho: "", _preFusensho: undefined }));
+
   // Hansoku Hs are already in the pts arrays (folded in by
   // applyFoulIncrement at the 2-foul boundary), so totals are just the
   // pts length. No separate hansoku tally is needed in the live view.
+  // A bout the operator marked as a draw has no winner, so it counts as a
+  // hikiwake for IV/PW and serialises with decision="hikiwake".
   const subTotals = subs.map(s => {
     const aT = s.aPts.length;
     const bT = s.bPts.length;
-    const winner = aT > bT ? "a" : bT > aT ? "b" : null;
-    return { aTotal: aT, bTotal: bT, winner };
+    const winner = s.draw ? null : aT > bT ? "a" : bT > aT ? "b" : null;
+    return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
 
   // mp-4pc: the daihyosen row (when present) is excluded from IV/PW — it
@@ -2037,22 +2048,22 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             const rowSides = [
               {
                 key: "b", pts: s.bPts, fouls: s.bFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, bPts: pts, fusensho: "", _preFusensho: undefined, draw: false })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, bFouls: f, fusensho: "", _preFusensho: undefined, draw: false })),
                 onIncrement: () => updateSub(idx, prev => {
                   const r = applyFoulIncrement(prev.bFouls, prev.aPts, prev.bPts);
-                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
+                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
                 }),
                 color: "shiro", label: "SHIRO",
                 playerName: playerBName, roster: rosterB, onSelectName: pickPlayer(teamIdB, lineupB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
-                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined })),
-                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined })),
+                setPts: (pts) => updateSub(idx, prev => ({ ...prev, aPts: pts, fusensho: "", _preFusensho: undefined, draw: false })),
+                setFouls: (f) => updateSub(idx, prev => ({ ...prev, aFouls: f, fusensho: "", _preFusensho: undefined, draw: false })),
                 onIncrement: () => updateSub(idx, prev => {
                   const r = applyFoulIncrement(prev.aFouls, prev.bPts, prev.aPts);
-                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined };
+                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
                 }),
                 color: "aka", label: "AKA",
                 playerName: playerAName, roster: rosterA, onSelectName: pickPlayer(teamIdA, lineupA),
@@ -2068,8 +2079,13 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               if (isDaihyoRow && daihyosenTied && daihyosenHantei) {
                 return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
               }
-              if (t.winner === null && t.aTotal === 0 && t.bTotal === 0) return <span style={{ color: "var(--ink-3)" }}>–</span>;
-              if (t.winner === null) return <span className="tsm-draw">X</span>;
+              // Draw: either an operator-marked tie, or equal non-zero scores
+              // (the tie-marking rule). Canonical display: 0–0 → X, scored → △.
+              const scored = t.aTotal > 0 || t.bTotal > 0;
+              const isDraw = s.draw || (t.winner === null && scored);
+              if (isDraw) return <span className="tsm-draw">{scored ? "△" : "X"}</span>;
+              // Pending bout (0–0, not yet marked) — a quiet placeholder.
+              if (t.winner === null) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               // Decided bout: the centred ippon letters already show who won —
               // the numeric tally was redundant, so the centre stays clear.
               return null;
@@ -2172,11 +2188,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                                 {rowSides[0].pts[i] || "·"}
                               </button>
                             ))}
+                            {/* Outstanding hansoku → red △ on the inner edge,
+                                toward the result (a 2nd foul discharges to an H
+                                ippon for the opponent and clears this). */}
+                            {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                           </div>
                           <div className={`team-sub-match__score ${scoreDisplay && t.winner === "b" ? "team-sub-match__score--a-win" : scoreDisplay && t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
                             {scoreDisplay}
                           </div>
                           <div className="tsm-center-pts tsm-center-pts--aka">
+                            {/* Hansoku △ sits on Aka's inner edge (toward the
+                                result), so render it before the reversed slots. */}
+                            {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                             {/* Aka fills outside-in: its first ippon sits on the
                                 outer (right) edge nearest the Aka name, so render
                                 the slots in reverse (pts[1] then pts[0]). */}
@@ -2192,6 +2215,23 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                     </React.Fragment>
                   ))}
                 </div>
+                {/* Per-bout tie toggle: lets the operator mark a hikiwake
+                    (e.g. a 0–0 time-out) so the centre shows X/△ during
+                    scoring. Hidden once a side has decided the bout, and on
+                    the daihyosen (which resolves via its own hantei flow). */}
+                {!isDaihyoRow && !subBoutDecided && (
+                  <div className="team-sub-match__tie">
+                    <button
+                      type="button"
+                      data-testid="scoring-modal-tie-button"
+                      className={`btn btn--sm ${s.draw ? "btn--primary" : ""}`}
+                      onClick={() => setDrawFor(idx)}
+                      title={s.draw ? "Undo tie" : "Mark this bout a draw (hikiwake)"}
+                    >
+                      {s.draw ? <>✓ Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</> : <>Mark tie (<TermAS name="hikiwake">hikiwake</TermAS>)</>}
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}

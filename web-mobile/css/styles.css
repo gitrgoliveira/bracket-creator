@@ -4652,6 +4652,22 @@ button.pool-match-row {
 .scoring-panel .team-sub-match__score {
   min-width: 34px;
 }
+/* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
+   with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
+   it to an H ippon for the opponent. */
+.scoring-panel .tsm-foul-tri {
+  color: var(--danger, #c0392b);
+  font-size: 13px;
+  line-height: 1;
+  align-self: center;
+}
+/* Per-bout tie toggle, centred under the bout in the 1fr content column. */
+.scoring-panel .team-sub-match__tie {
+  grid-column: 2;
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
 
 /* Compact bout-number gutter replaces the wide Senpo/Jiho label column, and
    the team-name header band is given a matching gutter + the same centre

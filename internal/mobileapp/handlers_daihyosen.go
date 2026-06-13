@@ -124,7 +124,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
-			"result":        &updated,
+			"result":        matchForBroadcast(updated),
 		})
 
 		c.JSON(http.StatusOK, gin.H{"result": &updated})
@@ -198,7 +198,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
-			"result":        &updated,
+			"result":        matchForBroadcast(updated),
 		})
 
 		// Inline auto-complete check (same pattern as tryAutoCompletePools).

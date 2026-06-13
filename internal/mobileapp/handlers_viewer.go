@@ -174,6 +174,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					annotateQueuePositions(poolMatches)
 					annotateBracketQueuePositions(bracket)
 
+					// Redact operator-only audit fields before this PUBLIC payload.
+					stripMatchesAudit(poolMatches)
+					stripBracketAudit(bracket)
+
 					results[idx] = gin.H{
 						"config":      comp,
 						"poolMatches": poolMatches,
@@ -325,6 +329,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// on the TV display, streaming overlay, and viewer card.
 			mergePoolNumbersIntoPlayers(comp, pools)
 
+			// Redact operator-only audit fields before this PUBLIC payload.
+			stripMatchesAudit(poolMatches)
+			stripBracketAudit(bracket)
+
 			return json.Marshal(gin.H{
 				"config":      comp,
 				"pools":       pools,
@@ -443,6 +451,10 @@ func buildShiaijoQueueJSON(store *state.Store, court string) ([]byte, error) {
 		}
 		annotateQueuePositions(poolMatches)
 		annotateBracketQueuePositions(bracket)
+
+		// Redact operator-only audit fields before this PUBLIC payload.
+		stripMatchesAudit(poolMatches)
+		stripBracketAudit(bracket)
 
 		meta := func(m map[string]any, phase string, roundIndex int) map[string]any {
 			m["compId"] = id

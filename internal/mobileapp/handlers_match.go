@@ -299,7 +299,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		if len(successful) > 0 {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
-				"results":       successful,
+				"results":       matchesForBroadcast(successful),
 			})
 			tryAutoCompletePools(c, eng, hub, id)
 		}
@@ -887,7 +887,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
-			"result":        result,
+			"result":        matchPtrForBroadcast(result),
 		})
 		// T085/T092 — when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface

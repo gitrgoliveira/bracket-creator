@@ -94,7 +94,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and round"})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, lineupForPublic(lineup))
 	})
 
 	// Match-scoped read (mp-825). 404 lets the caller fall back to the
@@ -114,7 +114,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and match"})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, lineupForPublic(lineup))
 	})
 }
 

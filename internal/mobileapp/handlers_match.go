@@ -276,6 +276,15 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		force := c.Query("force") == "true"
 
+		// Correction-reason audit gate (parity with PUT /score): overwriting an
+		// already-completed result is a correction and must carry a non-empty
+		// CorrectionReason. Without this, bulk-score is a silent bypass of the
+		// single-score gate — a finalized result could be rewritten with no
+		// audit trail. Snapshot statuses once before the loop; bulk-score is
+		// admin-only and not self-reported, so the single-path TOCTOU concern
+		// (concurrent anonymous submissions) does not apply here.
+		statusBefore := matchStatusSnapshot(store, id)
+
 		for i := range results {
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
 			// (top-level and each sub-bout independently).
@@ -287,6 +296,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if err := validateBulkScoreLengths(&results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
+			}
+
+			// Normalize + gate the audit reason exactly as the single-score path
+			// does. A reason is meaningful only on a correction (completed →
+			// completed); drop it on any non-correction write.
+			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
+			if results[i].Status == state.MatchStatusCompleted {
+				if statusBefore[results[i].ID] == state.MatchStatusCompleted {
+					if results[i].CorrectionReason == "" {
+						errs = append(errs, scoreError{MatchID: results[i].ID, Error: "correcting a completed match result requires a non-empty correctionReason"})
+						continue
+					}
+				} else {
+					results[i].CorrectionReason = "" // first finalization — not a correction
+				}
+			} else {
+				results[i].CorrectionReason = ""
 			}
 
 			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
@@ -665,6 +691,30 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 		}
 	}
 	return ""
+}
+
+// matchStatusSnapshot returns a matchID→status map for every pool and bracket
+// match in compID. It is the bulk-score equivalent of lookupMatchStatusUnderTx:
+// the bulk handler reads it once before its write loop to enforce the
+// correction-reason audit gate (an overwrite of an already-completed result
+// must carry a reason). Read errors are best-effort — a missing entry reads as
+// "" (not completed), so a transient load failure relaxes the gate rather than
+// rejecting an otherwise-valid batch, matching lookupMatchStatusUnderTx.
+func matchStatusSnapshot(store CompetitionStore, compID string) map[string]state.MatchStatus {
+	snapshot := map[string]state.MatchStatus{}
+	if poolMatches, err := store.LoadPoolMatches(compID); err == nil {
+		for i := range poolMatches {
+			snapshot[poolMatches[i].ID] = poolMatches[i].Status
+		}
+	}
+	if bracket, err := store.LoadBracket(compID); err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				snapshot[round[i].ID] = round[i].Status
+			}
+		}
+	}
+	return snapshot
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`

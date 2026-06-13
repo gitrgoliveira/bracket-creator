@@ -51,8 +51,10 @@ func TestBulkScoreHandler(t *testing.T) {
 	})
 
 	t.Run("partial failure", func(t *testing.T) {
+		// PoolA-1 was finalized by the previous subtest; re-scoring it is a
+		// correction and must carry a reason to pass the audit gate.
 		body, _ := json.Marshal([]state.MatchResult{
-			{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted},
+			{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted, CorrectionReason: "re-score after review"},
 			{ID: "not-exists", SideA: "P1", SideB: "P2", Winner: "P1"},
 		})
 		w := httptest.NewRecorder()
@@ -80,6 +82,90 @@ func TestBulkScoreHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// TestBulkScoreHandler_CorrectionGate verifies bulk-score enforces the same
+// correction-reason audit gate as PUT /score: overwriting an already-completed
+// result without a reason is rejected (per-item error, original preserved),
+// while a first completion and a reason-carrying correction both succeed.
+func TestBulkScoreHandler_CorrectionGate(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "cg"})
+	store.SavePoolMatches("cg", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P1", Status: state.MatchStatusCompleted},
+		{ID: "PoolA-2", SideA: "P3", SideB: "P4"},
+	})
+
+	post := func(t *testing.T, payload []state.MatchResult) (int, struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/cg/matches/bulk-score", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var resp struct {
+			Succeeded int `json:"succeeded"`
+			Errors    []struct {
+				MatchID string `json:"matchId"`
+				Error   string `json:"error"`
+			} `json:"errors"`
+		}
+		assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		return w.Code, resp
+	}
+
+	loadWinner := func(t *testing.T, id string) string {
+		t.Helper()
+		ms, err := store.LoadPoolMatches("cg")
+		assert.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == id {
+				return m.Winner
+			}
+		}
+		t.Fatalf("match %s not found", id)
+		return ""
+	}
+
+	t.Run("overwrite completed without reason is rejected, original preserved", func(t *testing.T) {
+		code, resp := post(t, []state.MatchResult{
+			{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P2", Status: state.MatchStatusCompleted},
+		})
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, 0, resp.Succeeded)
+		assert.Len(t, resp.Errors, 1)
+		assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+		assert.Contains(t, resp.Errors[0].Error, "correctionReason")
+		assert.Equal(t, "P1", loadWinner(t, "PoolA-1"), "rejected correction must not overwrite the finalized result")
+	})
+
+	t.Run("first completion does not require a reason", func(t *testing.T) {
+		code, resp := post(t, []state.MatchResult{
+			{ID: "PoolA-2", SideA: "P3", SideB: "P4", Winner: "P3", Status: state.MatchStatusCompleted},
+		})
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, 1, resp.Succeeded)
+		assert.Empty(t, resp.Errors)
+		assert.Equal(t, "P3", loadWinner(t, "PoolA-2"))
+	})
+
+	t.Run("correction with reason succeeds", func(t *testing.T) {
+		code, resp := post(t, []state.MatchResult{
+			{ID: "PoolA-1", SideA: "P1", SideB: "P2", Winner: "P2", Status: state.MatchStatusCompleted, CorrectionReason: "scores recorded in wrong columns"},
+		})
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, 1, resp.Succeeded)
+		assert.Empty(t, resp.Errors)
+		assert.Equal(t, "P2", loadWinner(t, "PoolA-1"))
 	})
 }
 

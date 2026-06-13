@@ -7532,6 +7532,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .shiaijo__placeholder { margin: 0; }
 
+/* Heads-up when a second bout is running on this court (operator started one
+   from another competition's admin view). The console officiates one bout at a
+   time, so the others are surfaced here rather than stranded. Navy = running
+   signal (Principle 3), never red. */
+.shiaijo-also-running {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink-1);
+}
+.shiaijo-also-running__title { font-weight: 700; font-size: 13px; }
+.shiaijo-also-running__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.shiaijo-also-running__comp { color: var(--ink-3); }
+.shiaijo-also-running__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
 @media (max-width: 900px) {
   .shiaijo { grid-template-columns: 1fr; }
   /* Scoring on top, queue below (brief: tablet portrait = stacked). */

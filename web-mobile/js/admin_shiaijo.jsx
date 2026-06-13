@@ -288,7 +288,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {scheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
-                                    selectable={false}
                                     courts={courts} onMoveCourt={onMoveCourt}
                                     onSkip={skipMatch}
                                 />
@@ -301,7 +300,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     </button>
                                     {completedOpen && (
                                         <ShiaijoQueueGroup
-                                            matches={completed} selectable={false}
+                                            matches={completed}
                                             courts={courts} onMoveCourt={onMoveCourt}
                                         />
                                     )}
@@ -317,6 +316,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                                         {completed.length} match{completed.length === 1 ? "" : "es"} scored. Nothing left to run on this court.
                                     </p>
+                                </div>
+                            )}
+
+                            {!allDone && running.length > 1 && (
+                                <div className="shiaijo-also-running" role="alert">
+                                    <div className="shiaijo-also-running__title">Another bout is running on Shiaijo {court}</div>
+                                    <ul className="shiaijo-also-running__list">
+                                        {running.slice(1).map((m) => (
+                                            <li key={matchKey(m)}>
+                                                {m.sideB?.name || "?"} vs {m.sideA?.name || "?"}
+                                                {m.compName ? <span className="shiaijo-also-running__comp"> · {m.compName}</span> : null}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                    <div className="shiaijo-also-running__hint">A court runs one bout at a time. Score or correct these from their competition's admin view.</div>
                                 </div>
                             )}
 
@@ -371,20 +385,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     );
 }
 
-// A queued match row with select + court reassign (+ optional skip).
-// selectable=false renders rows as plain info (Upcoming): the court reassign
-// and Skip controls still work, but the row itself can't be opened in the
-// scoring panel (you start a match from the Up Next card, not by clicking it).
-function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMoveCourt, onSkip, selectable = true }) {
+// A queued match row: plain info (the court reassign and Skip controls still
+// work) but the row itself can't be opened in the scoring panel — you start a
+// match from the Up Next card, not by clicking it. The console never shows a
+// running match in these groups (the running bout is officiated in the scoring
+// panel on the right), so only scheduled/completed states render here.
+function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
             <div className="score-editor__list">
                 {matches.map((m) => (
                     <ShiaijoQueueRow
-                        key={matchKey(m)} m={m} selected={selectedKey === matchKey(m)}
-                        onSelect={onSelect} courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip}
-                        selectable={selectable}
+                        key={matchKey(m)} m={m}
+                        courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip}
                     />
                 ))}
             </div>
@@ -392,21 +406,11 @@ function ShiaijoQueueGroup({ label, matches, selectedKey, onSelect, courts, onMo
     );
 }
 
-function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip, selectable = true }) {
-    const isRunning = m.status === "running";
+function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
-    const selectProps = selectable
-        ? {
-            onClick: () => onSelect(m), role: "button", tabIndex: 0,
-            onKeyDown: (e) => { if (e.target !== e.currentTarget) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(m); } },
-        }
-        : {};
     return (
-        <div
-            className={`score-edit-row shiaijo-row ${isRunning ? "score-edit-row--running" : ""} ${isComplete ? "score-edit-row--complete" : ""} ${selected ? "is-selected" : ""} ${selectable ? "" : "shiaijo-row--static"}`}
-            {...selectProps}
-        >
+        <div className={`score-edit-row shiaijo-row shiaijo-row--static ${isComplete ? "score-edit-row--complete" : ""}`}>
             <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div className="shiaijo-row__comp">{m.compName}</div>
@@ -427,7 +431,6 @@ function ShiaijoQueueRow({ m, selected, onSelect, courts, onMoveCourt, onSkip, s
                 </div>
             </div>
             <div className="shiaijo-row__status">
-                {isRunning && <span className="bc-running">● NOW</span>}
                 {isComplete && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>Final</span>}
             </div>
             <div className="shiaijo-row__actions" onClick={(e) => e.stopPropagation()}>

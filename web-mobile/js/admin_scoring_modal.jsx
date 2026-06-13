@@ -785,6 +785,25 @@ function positionAbbrevFor(teamSize, index, sub) {
   return "";
 }
 
+// teamResultLabel — the RESULT-band / Finish-button verdict text for a team
+// encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
+// FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
+// "DAIHYOSEN" once a scored tie exists to break, or "—" before any bout lands.
+// Only a pool encounter reads a null winner as a true draw. (a = Aka, b = Shiro.)
+export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore }) {
+  if (teamWinner === "a") return "AKA WIN";
+  if (teamWinner === "b") return "SHIRO WIN";
+  if (isKnockoutPhase) return hasAnyScore ? "DAIHYOSEN" : "—";
+  return "DRAW";
+}
+
+// isKoTieBlocked — Finish must be blocked while a knockout encounter has no
+// winner: the operator has to add and score a daihyosen first. Pool draws stay
+// finishable, and an already-completed match (correction flow) is never blocked.
+export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
+  return !!isKnockoutPhase && teamWinner === null && !isComplete;
+}
+
 // mp-bkg / mp-13y: resolveMatchLineup and resolveLineupTeamId are now shared
 // across all consumer surfaces (admin scoring modal, viewer, TvDisplay,
 // StreamingOverlay). The implementations live in lineup_resolver.js;
@@ -1194,13 +1213,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // tie to break, or simply pending ("—") before any bout lands. Only pool
   // matches read a null winner as a true draw.
   const teamHasAnyScore = (ivA + ivB + pwA + pwB) > 0;
-  const teamVerdictText = teamWinner === "a" ? "AKA WIN"
-    : teamWinner === "b" ? "SHIRO WIN"
-    : isKnockoutPhase ? (teamHasAnyScore ? "DAIHYOSEN" : "—")
-    : "DRAW";
+  const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.
-  const koTieBlocked = isKnockoutPhase && teamWinner === null && !isComplete;
+  const koTieBlocked = isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete });
   const finishSummary = `${teamVerdictText} · IV ${ivB}–${ivA} · PW ${pwB}–${pwA}`;
   useEffectA(() => { setFinishArmed(false); }, [ivA, ivB, pwA, pwB, teamWinner]);
 

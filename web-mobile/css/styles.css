@@ -30,6 +30,11 @@
   --accent-fg: #ffffff;
   --red: #c1121f;
   --red-soft: #fde7e8;
+  /* Danger/error — semantic alias of the Aka red (non-overlapping per
+     Principle 3). Use --danger for error/destructive intent so the meaning
+     reads at the call site; it resolves to the canonical palette red. */
+  --danger: var(--red);
+  --danger-soft: var(--red-soft);
   --white-side: #f6f7fb;
 
   --ink: #1a1d24;
@@ -1669,7 +1674,7 @@ a:hover {
 }
 
 .phase-chip--pending {
-  background: var(--surface-2, #f1f5f9);
+  background: var(--surface-2);
   color: var(--ink-3);
 }
 
@@ -4725,7 +4730,7 @@ button.pool-match-row {
    with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
    it to an H ippon for the opponent. */
 .scoring-panel .tsm-foul-tri {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   font-size: 13px;
   line-height: 1;
   align-self: center;
@@ -4751,10 +4756,10 @@ button.pool-match-row {
   flex-wrap: nowrap;
 }
 .scoring-panel .lineup-name--empty .pmf__bar {
-  border-color: rgba(192, 57, 43, 0.5);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
 }
 .scoring-panel .lineup-name--empty .pmf__input::placeholder {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
   opacity: 0.75;
 }
 .scoring-panel .lineup-name__clear {
@@ -4776,7 +4781,7 @@ button.pool-match-row {
   overflow-y: auto;
 }
 .scoring-panel .pmf__option--active {
-  background: var(--surface-2, #f1f5f9);
+  background: var(--surface-2);
 }
 .scoring-panel .lineup-name__add .pmf__opt-name {
   color: var(--accent);
@@ -4849,7 +4854,7 @@ button.pool-match-row {
   padding: 2px 6px;
   border: 1px solid var(--line-2);
   border-radius: 6px;
-  background: var(--surface, #fff);
+  background: var(--surface);
   color: var(--ink-1);
 }
 .tsm-name__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -7429,7 +7434,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border: 1px solid var(--accent-soft);
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.06));
+  box-shadow: var(--shadow-sm);
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 12px;
 }

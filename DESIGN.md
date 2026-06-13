@@ -58,6 +58,8 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 | `--accent-fg` | `#ffffff` | Text on `--accent` |
 | `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only — never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
+| `--danger` | `var(--red)` | **Semantic alias of `--red`** for error/destructive intent (error text/borders, the hansoku ▲, invalid-input outlines). Prefer `--danger` over `--red` when the meaning is "error", not "Aka side" — it reads at the call site and keeps the value single-sourced. Never use for running state. |
+| `--danger-soft` | `var(--red-soft)` | Soft danger tint — faint error backgrounds. Alias of `--red-soft`. |
 | `--shiro-edge` | `#2a3346` | Shiro framing on dark surfaces (rare; most Shiro frames use `--accent`) |
 | `--shiro-hatch` | `rgba(42,51,70,0.07)` | 45° diagonal hatch on the Shiro side |
 | `--aka-bright` | `#ff3b3b` | Luminous Aka red for dark TV/overlay surfaces (scoreboard glow) |

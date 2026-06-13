@@ -568,6 +568,26 @@ const CHIME_SYNC_EVENT = "chimeMutedSync";
 // instances and the watchlist bell stay visually in sync within one page.
 const NOTIF_SYNC_EVENT = "notifEnabledSync";
 
+// Shared notification opt-in helpers used by both handleBellToggle and
+// AnnBellBtn to avoid duplicating the permission-check + localStorage +
+// sync-event sequence. Return values for notifEnable: "on" (granted),
+// "off" (dismissed / failed / threw), "denied" (permanently blocked).
+async function notifEnable() {
+  if (Notification.permission === "denied") return "denied";
+  if (Notification.permission === "default") {
+    let r;
+    try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }
+    if (r !== "granted") return Notification.permission === "denied" ? "denied" : "off";
+  }
+  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
+  return "on";
+}
+function notifDisable() {
+  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+}
+
 function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -1090,23 +1110,35 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = async () => {
     const willEnable = chimeMuted; // currently muted → about to enable
-    toggleChimeMuted();
+    toggleChimeMuted(); // optimistic flip
     if (!notificationSupported()) return;
     if (!willEnable) {
       // Muting: disable browser notifications too so they don't keep firing.
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
+      notifDisable();
+      return;
+    }
+    // Enabling: request permission if needed. fireNotification() gates on the
+    // localStorage flag at fire time (app.jsx:193).
+    const perm = Notification.permission;
+    if (perm === "denied") {
+      // Browser already blocked — chime stays enabled ("chime only" mode).
+      // Sync any AnnBellBtn instances so they show the denied state.
       try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
       return;
     }
-    // Enabling: request permission if not yet decided, then write the opt-in.
-    // fireNotification() gates on this flag at fire time (app.jsx:193).
-    const perm = Notification.permission;
-    if (perm === "denied") return; // user blocked — chime only
     if (perm === "default") {
-      const result = await Notification.requestPermission();
-      if (result !== "granted") return;
+      let result;
+      try { result = await Notification.requestPermission(); } catch (_e) {
+        // requestPermission() threw (rare) — revert the optimistic chime flip.
+        toggleChimeMuted();
+        return;
+      }
+      if (result !== "granted") {
+        // Dismissed or denied after prompt — chime stays, sync AnnBellBtn.
+        try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+        return;
+      }
     }
-    // "granted" (now or previously): persist the opt-in flag.
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
     try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
   };
@@ -3819,9 +3851,7 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-// AnnouncementCard — renders a single announcement card with its own
-// independent per-card countdown and auto-dismiss timer.
-// Exported for unit testing; consumed only by AnnouncementBanner below.
+// AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
 function AnnBellBtn() {
   const supported = notificationSupported();
   const [state, setState] = useState(() => {
@@ -3842,30 +3872,23 @@ function AnnBellBtn() {
     };
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);
     return () => window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-  }, [supported]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- supported is a static boolean
 
   if (state === "unsupported") return null;
 
   const toggle = async () => {
     if (state === "on") {
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+      notifDisable();
       setState("off");
       return;
     }
     if (state === "denied") return;
-    // Re-check live permission — user may have revoked it in browser settings.
-    if (Notification.permission === "denied") { setState("denied"); return; }
-    if (Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      if (result !== "granted") { setState("denied"); return; }
-    }
-    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
-    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
-    setState("on");
+    const result = await notifEnable();
+    setState(result); // "on", "off" (dismissed), or "denied" (blocked)
   };
 
   const BellIcon = window.BellIcon;
+  if (!BellIcon) return null;
   return (
     <button
       className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
@@ -3879,6 +3902,9 @@ function AnnBellBtn() {
   );
 }
 
+// AnnouncementCard — renders a single announcement card with its own
+// independent per-card countdown and auto-dismiss timer.
+// Exported for unit testing; consumed only by AnnouncementBanner below.
 function AnnouncementCard({ ann, onDismiss }) {
   const [timeLeft, setTimeLeft] = useState(() => formatAnnouncementTimeLeft(ann.expiresAt));
 

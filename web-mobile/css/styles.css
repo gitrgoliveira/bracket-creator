@@ -4872,7 +4872,9 @@ button.pool-match-row {
   padding: 2px 0 4px;
   font-style: italic;
 }
-.tsm-name__static {text-align: right; }
+/* Only the AKA (right) static name aligns toward its right-hand badge; the
+   SHIRO (left) name keeps the default left alignment with its own badge. */
+.team-sub-match__side--right .tsm-name__static { text-align: right; }
 .tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
 
 /* Compact (operator console inline) — tighter name row. */

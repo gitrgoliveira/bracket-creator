@@ -9,13 +9,16 @@ import (
 // match and lineup data before it leaves the server on a PUBLIC
 // (unauthenticated) channel — the viewer REST endpoints and the SSE stream.
 //
-// CorrectionReason (MatchResult/BracketMatch) and ChangeReason (TeamLineup) are
-// free-text fields an operator types to justify a score correction or a forced
-// mid-match lineup change; the example copy ("Substitution: injury to jiho")
-// shows they can name competitors and carry medical detail. They exist solely
-// for the admin audit trail, persisted to disk (pool-matches.csv / bracket.json
-// / lineup YAML), and no frontend ever reads them back over the wire. They must
-// never reach spectators. This mirrors the existing redaction at
+// CorrectionReason and DecisionReason (MatchResult/BracketMatch) and ChangeReason
+// (TeamLineup) are free-text fields an operator types to justify a score
+// correction, a kiken/fusenpai decision, or a forced mid-match lineup change; the
+// example copy ("Substitution: injury to jiho") shows they can name competitors
+// and carry medical detail (DecisionReason in particular records FIK Art. 30
+// kiken-injury notes). They exist solely for the admin audit trail, persisted to
+// disk (pool-matches.csv / bracket.json / lineup YAML), and no frontend ever
+// reads them back over the wire (the SPA only WRITES decisionReason; decisionBy,
+// an enum, is what drives viewer rendering and is deliberately preserved). They
+// must never reach spectators. This mirrors the existing redaction at
 // handlers_viewer.go where the tournament password is zeroed before public
 // serialization.
 //
@@ -28,6 +31,7 @@ import (
 // already-persisted disk record) is untouched.
 func matchForBroadcast(m state.MatchResult) state.MatchResult {
 	m.CorrectionReason = ""
+	m.DecisionReason = ""
 	return m
 }
 
@@ -52,17 +56,19 @@ func matchesForBroadcast(ms []state.MatchResult) []state.MatchResult {
 	return out
 }
 
-// stripMatchesAudit clears CorrectionReason on each pool match in place, for a
-// PUBLIC viewer projection. Pass the deep copy from LoadPoolMatches.
+// stripMatchesAudit clears the audit free-text (CorrectionReason, DecisionReason)
+// on each pool match in place, for a PUBLIC viewer projection. Pass the deep copy
+// from LoadPoolMatches.
 func stripMatchesAudit(ms []state.MatchResult) {
 	for i := range ms {
 		ms[i].CorrectionReason = ""
+		ms[i].DecisionReason = ""
 	}
 }
 
-// stripBracketAudit clears CorrectionReason on every bracket match in place, for
-// a PUBLIC viewer projection. Pass the deep copy from LoadBracket; nil is a
-// no-op.
+// stripBracketAudit clears the audit free-text (CorrectionReason, DecisionReason)
+// on every bracket match in place, for a PUBLIC viewer projection. Pass the deep
+// copy from LoadBracket; nil is a no-op.
 func stripBracketAudit(b *state.Bracket) {
 	if b == nil {
 		return
@@ -70,6 +76,7 @@ func stripBracketAudit(b *state.Bracket) {
 	for ri := range b.Rounds {
 		for j := range b.Rounds[ri] {
 			b.Rounds[ri][j].CorrectionReason = ""
+			b.Rounds[ri][j].DecisionReason = ""
 		}
 	}
 }

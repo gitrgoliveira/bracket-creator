@@ -183,10 +183,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return sorted.slice(idx + 1).find((x) => x.status !== "completed") || null;
     };
 
-    const startPatch = () => (window.startPatch ? window.startPatch() : {
-        status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
-        score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
-    });
+    // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
+    // than re-declaring its shape — a second copy could silently drift. Both
+    // modules ship in the same admin bundle, so the global is always present;
+    // fail loudly if that ever stops being true instead of forking behaviour.
+    const startPatch = () => {
+        if (typeof window.startPatch !== "function") {
+            throw new Error("startPatch factory unavailable — admin_schedule.jsx not loaded");
+        }
+        return window.startPatch();
+    };
 
     const startMatch = async (m) => {
         if (startingKey) return;

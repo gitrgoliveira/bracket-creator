@@ -82,9 +82,7 @@ func (t TeamLineup) Validate(teamSize int) error {
 }
 
 func (t TeamLineup) validateFive() error {
-	allowed := map[Position]struct{}{
-		PosSenpo: {}, PosJiho: {}, PosChuken: {}, PosFukusho: {}, PosTaisho: {},
-	}
+	allowed := allowedPositionSet(5)
 	for pos := range t.Positions {
 		if _, ok := allowed[pos]; !ok {
 			return fmt.Errorf("team_lineup: position %q not allowed in 5-person team", pos)
@@ -126,10 +124,7 @@ func (t TeamLineup) validateFive() error {
 }
 
 func (t TeamLineup) validateNumbered(teamSize int) error {
-	allowed := make(map[Position]struct{}, teamSize)
-	for i := 1; i <= teamSize; i++ {
-		allowed[PositionNumbered(i)] = struct{}{}
-	}
+	allowed := allowedPositionSet(teamSize)
 	for pos := range t.Positions {
 		if _, ok := allowed[pos]; !ok {
 			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)

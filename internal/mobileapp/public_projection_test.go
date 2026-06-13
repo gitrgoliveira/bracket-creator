@@ -10,17 +10,27 @@ import (
 )
 
 // These guard the public-projection redaction: operator-only audit free-text
-// (CorrectionReason / ChangeReason) must be stripped before any payload leaves
-// the server on an unauthenticated channel (viewer REST + SSE), while the
-// caller's original (already persisted) value is left untouched.
+// (CorrectionReason / DecisionReason / ChangeReason) must be stripped before any
+// payload leaves the server on an unauthenticated channel (viewer REST + SSE),
+// while the caller's original (already persisted) value is left untouched.
+// DecisionBy (an enum) is NOT audit free-text — it drives viewer winner/label
+// rendering and must be preserved.
 
 func TestMatchForBroadcast_StripsAuditAndCopies(t *testing.T) {
-	orig := state.MatchResult{ID: "Pool A-0", SideA: "x", CorrectionReason: "wrong waza entered"}
+	orig := state.MatchResult{
+		ID: "Pool A-0", SideA: "x",
+		CorrectionReason: "wrong waza entered",
+		DecisionReason:   "kiken: medial knee injury to Tanaka",
+		DecisionBy:       "aka",
+	}
 	got := matchForBroadcast(orig)
 
-	assert.Empty(t, got.CorrectionReason, "broadcast copy must not carry the audit reason")
+	assert.Empty(t, got.CorrectionReason, "broadcast copy must not carry the correction reason")
+	assert.Empty(t, got.DecisionReason, "broadcast copy must not carry the decision reason (can name competitors / carry medical detail)")
+	assert.Equal(t, "aka", got.DecisionBy, "DecisionBy is an enum that drives rendering — must be preserved")
 	assert.Equal(t, "Pool A-0", got.ID, "non-audit fields preserved")
 	assert.Equal(t, "wrong waza entered", orig.CorrectionReason, "caller's original must be untouched")
+	assert.Equal(t, "kiken: medial knee injury to Tanaka", orig.DecisionReason, "caller's original must be untouched")
 }
 
 func TestMatchPtrForBroadcast_NilStaysNil(t *testing.T) {
@@ -50,9 +60,14 @@ func TestMatchesForBroadcast_StripsEachAndCopies(t *testing.T) {
 }
 
 func TestStripMatchesAudit_InPlace(t *testing.T) {
-	ms := []state.MatchResult{{ID: "a", CorrectionReason: "r1"}, {ID: "b"}}
+	ms := []state.MatchResult{
+		{ID: "a", CorrectionReason: "r1", DecisionReason: "d1", DecisionBy: "shiro"},
+		{ID: "b"},
+	}
 	stripMatchesAudit(ms)
 	assert.Empty(t, ms[0].CorrectionReason)
+	assert.Empty(t, ms[0].DecisionReason)
+	assert.Equal(t, "shiro", ms[0].DecisionBy, "DecisionBy preserved")
 	assert.Empty(t, ms[1].CorrectionReason)
 	assert.Equal(t, "a", ms[0].ID, "non-audit fields preserved")
 }
@@ -63,13 +78,16 @@ func TestStripBracketAudit(t *testing.T) {
 	})
 	t.Run("clears every match across all rounds", func(t *testing.T) {
 		b := &state.Bracket{Rounds: [][]state.BracketMatch{
-			{{ID: "r0-m0", CorrectionReason: "x"}, {ID: "r0-m1", CorrectionReason: "y"}},
-			{{ID: "r1-m0", CorrectionReason: "z"}},
+			{{ID: "r0-m0", CorrectionReason: "x", DecisionReason: "dx", DecisionBy: "aka"}, {ID: "r0-m1", CorrectionReason: "y"}},
+			{{ID: "r1-m0", CorrectionReason: "z", DecisionReason: "dz"}},
 		}}
 		stripBracketAudit(b)
 		assert.Empty(t, b.Rounds[0][0].CorrectionReason)
+		assert.Empty(t, b.Rounds[0][0].DecisionReason)
+		assert.Equal(t, "aka", b.Rounds[0][0].DecisionBy, "DecisionBy preserved")
 		assert.Empty(t, b.Rounds[0][1].CorrectionReason)
 		assert.Empty(t, b.Rounds[1][0].CorrectionReason)
+		assert.Empty(t, b.Rounds[1][0].DecisionReason)
 		assert.Equal(t, "r0-m0", b.Rounds[0][0].ID, "non-audit fields preserved")
 	})
 }

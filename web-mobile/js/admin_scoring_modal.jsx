@@ -583,6 +583,82 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   );
 }
 
+// LineupNameInput — typeable player picker/writer for a team lineup slot.
+// Type to filter the team roster (matches show in a dropdown); click one or
+// press Enter to pick. Unlike a plain picker, a name not on the roster can be
+// ADDED as-is via the "+ Add …" row — the lineup stores a free name string,
+// which is what an operator needs when entering a late substitute while bouts
+// are running. The × clears the slot. Keyboard: ↑/↓ move, Enter picks, Esc closes.
+function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
+  const [query, setQuery] = useStateA("");
+  const [open, setOpen] = useStateA(false);
+  const [active, setActive] = useStateA(0);
+  const ref = useRefA(null);
+  const q = query.trim();
+  const ql = q.toLowerCase();
+  const matches = (roster || []).filter(n => !ql || n.toLowerCase().includes(ql)).slice(0, 12);
+  const exact = (roster || []).some(n => n.toLowerCase() === ql);
+  const canAddNew = q.length > 0 && !exact;
+  const optionCount = matches.length + (canAddNew ? 1 : 0);
+
+  useEffectA(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setQuery(""); } };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(0); };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setOpen(true); setActive(a => Math.min(a + 1, Math.max(0, optionCount - 1))); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(a => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      if (active < matches.length) commit(matches[active]);
+      else if (canAddNew) commit(q);
+      else if (q) commit(q);
+    } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
+  };
+
+  return (
+    <div className={`pmf lineup-name lineup-name--${color}${!value ? " lineup-name--empty" : ""}`} ref={ref}>
+      <div className="pmf__bar lineup-name__bar">
+        <input
+          className="pmf__input"
+          placeholder={value || "Add player…"}
+          aria-label={ariaLabel}
+          disabled={disabled}
+          value={open ? query : (value || "")}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); setActive(0); }}
+          onFocus={() => { setOpen(true); setQuery(""); setActive(0); }}
+          onKeyDown={onKeyDown}
+        />
+        {value && !disabled && (
+          <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
+            onMouseDown={(e) => { e.preventDefault(); commit(""); }}>×</button>
+        )}
+      </div>
+      {open && optionCount > 0 && (
+        <div className="pmf__dropdown lineup-name__dropdown">
+          {matches.map((n, i) => (
+            <button type="button" key={n}
+              className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
+              onMouseDown={(e) => { e.preventDefault(); commit(n); }}>
+              <span className="pmf__opt-name">{n}</span>
+            </button>
+          ))}
+          {canAddNew && (
+            <button type="button"
+              className={`pmf__option lineup-name__add ${active === matches.length ? "pmf__option--active" : ""}`}
+              onMouseDown={(e) => { e.preventDefault(); commit(q); }}>
+              <span className="pmf__opt-name">+ Add “{q}”</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ReasonPrompt — inline form for collecting a mandatory audit justification
 // when an operator corrects a completed match or edits a lineup mid-match.
 //
@@ -2104,23 +2180,23 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
                       <div className={`team-sub-match__side ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
-                        {/* Name select grouped with this side's score controls.
-                            SHIRO chip + dropdown (or static name when there's
-                            no roster metadata). Mid-match changes gate through
-                            the audit ReasonPrompt; pre-match are saved direct. */}
+                        {/* Name picker grouped with this side's score controls.
+                            SHIRO chip + a typeable picker (filter the roster as
+                            you type, or write a name) so operators can set the
+                            order live; falls back to a static name when there's
+                            no roster metadata. Mid-match changes gate through the
+                            audit ReasonPrompt; pre-match are saved direct. */}
                         <div className="tsm-name">
                           <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
                           {rs.roster && rs.roster.length > 0 ? (
-                            <select
-                              className={`tsm-name__select${!rs.playerName ? " tsm-name__select--empty" : ""}`}
-                              aria-label={`${posLabel} ${rs.label} player`}
-                              disabled={inlineLineupSaving}
+                            <LineupNameInput
                               value={rs.playerName || ""}
-                              onChange={(e) => rs.onSelectName(e.target.value)}
-                            >
-                              <option value="">Add player…</option>
-                              {rs.roster.map(r => <option key={r} value={r}>{r}</option>)}
-                            </select>
+                              roster={rs.roster}
+                              color={rs.color}
+                              disabled={inlineLineupSaving}
+                              ariaLabel={`${posLabel} ${rs.label} player`}
+                              onSelect={(name) => rs.onSelectName(name)}
+                            />
                           ) : (
                             rs.playerName
                               ? <span className="tsm-name__static">{rs.playerName}</span>
@@ -2250,9 +2326,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   <div className="team-summary__stats">IV: {ts.iv} · PW: {ts.pw}</div>
                 </div>
                 {idx === 0 && (
-                  <div className="team-summary__result">
-                    {teamWinner === "a" ? "AKA WIN" : teamWinner === "b" ? "SHIRO WIN" : "DRAW"}
-                    <div style={{ fontSize: 14, opacity: 0.6, marginTop: 4 }}>RESULT</div>
+                  <div className="team-summary__side team-summary__side--center">
+                    <div className="team-summary__label">RESULT</div>
+                    <div className="team-summary__verdict">{teamWinner === "a" ? "AKA WIN" : teamWinner === "b" ? "SHIRO WIN" : "DRAW"}</div>
                   </div>
                 )}
               </React.Fragment>

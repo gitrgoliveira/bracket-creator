@@ -4669,6 +4669,51 @@ button.pool-match-row {
   margin-top: 4px;
 }
 
+/* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
+   but sized for the narrow bout row; the dropdown floats above sibling rows. */
+.scoring-panel .lineup-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+.scoring-panel .lineup-name__bar {
+  min-height: 36px;
+  padding: 4px 6px;
+  flex-wrap: nowrap;
+}
+.scoring-panel .lineup-name--empty .pmf__bar {
+  border-color: rgba(192, 57, 43, 0.5);
+}
+.scoring-panel .lineup-name--empty .pmf__input::placeholder {
+  color: var(--danger, #c0392b);
+  opacity: 0.75;
+}
+.scoring-panel .lineup-name__clear {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--ink-3);
+  padding: 0 2px;
+}
+.scoring-panel .lineup-name__clear:hover {
+  color: var(--ink-1);
+}
+.scoring-panel .lineup-name__dropdown {
+  z-index: 60;
+  min-width: 200px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.scoring-panel .pmf__option--active {
+  background: var(--surface-2, #f1f5f9);
+}
+.scoring-panel .lineup-name__add .pmf__opt-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Compact bout-number gutter replaces the wide Senpo/Jiho label column, and
    the team-name header band is given a matching gutter + the same centre
    region width so "Osaka Dojo / VS / Tokyo" line up with each bout's
@@ -4815,6 +4860,20 @@ button.pool-match-row {
   font-weight: 700;
   font-size: 13px;
   text-align: center;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+/* Centre cell mirrors the side cells (label on top, value below) so the
+   verdict word sits on the same baseline as the IV/PW stats either side. */
+.team-summary__side--center {
+  align-items: center;
+  text-align: center;
+}
+.team-summary__verdict {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.04em;
   white-space: nowrap;
   color: var(--accent);
 }

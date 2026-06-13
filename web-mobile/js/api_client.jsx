@@ -782,6 +782,20 @@ const API = {
         }
         return res.json();
     },
+    // T141: remove an unscored daihyosen placeholder from a knockout team match.
+    // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
+    // match not found) or 409 (daihyosen already scored — clear scores first).
+    async removeDaihyosen(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to remove daihyosen");
+        }
+        return res.json();
+    },
     // T190-T193 (US13 — Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current
     // round must be completed; swissCurrentRound must be < swissRounds.

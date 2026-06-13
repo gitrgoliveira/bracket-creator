@@ -59,12 +59,77 @@ type DaihyosenStore interface {
 	CompetitorStatusStore
 }
 
-// RegisterDaihyosenHandlers wires the POST /daihyosen endpoint. The
-// caller in server.go passes `*engine.Engine` and `*state.Store` which
+// RegisterDaihyosenHandlers wires the POST and DELETE /daihyosen endpoints.
+// The caller in server.go passes `*engine.Engine` and `*state.Store` which
 // satisfy the local interfaces by structural match.
 //
 // T140, FR-046.
 func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store DaihyosenStore, hub Broadcaster) {
+	r.DELETE("/competitions/:id/matches/:mid/daihyosen", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+
+		match, found, err := findMatchForDaihyosen(store, id, mid)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+			return
+		}
+
+		// Locate the daihyosen sub (Position == -1).
+		dhIdx := -1
+		for i := range match.SubResults {
+			if match.SubResults[i].Position == -1 {
+				dhIdx = i
+				break
+			}
+		}
+		if dhIdx < 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no_daihyosen"})
+			return
+		}
+
+		// Guard: refuse removal when the DH bout has already been scored.
+		dh := match.SubResults[dhIdx]
+		if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.DecidedByHantei {
+			c.JSON(http.StatusConflict, gin.H{"error": "daihyosen_scored"})
+			return
+		}
+
+		// Build an updated match with the DH sub filtered out.
+		filtered := make([]state.SubMatchResult, 0, len(match.SubResults)-1)
+		for i := range match.SubResults {
+			if i != dhIdx {
+				filtered = append(filtered, match.SubResults[i])
+			}
+		}
+		updated := *match
+		updated.SubResults = filtered
+		updated.Status = state.MatchStatusRunning
+		// Clear any DH-derived match-level decision fields.
+		updated.Winner = ""
+		updated.DecidedByHantei = nil
+
+		if _, err := eng.RecordMatchResultWithIneligibility(id, mid, &updated); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+			"result":        &updated,
+		})
+
+		c.JSON(http.StatusOK, gin.H{"result": &updated})
+	})
+
 	r.POST("/competitions/:id/matches/:mid/daihyosen", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

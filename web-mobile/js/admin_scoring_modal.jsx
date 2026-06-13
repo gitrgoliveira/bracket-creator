@@ -1508,6 +1508,27 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // Same teardown-race guard as ScoreEditorModal — covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
+
+  // T141: remove an unscored daihyosen placeholder. Defined at component
+  // level so both the hantei row and any other affordance can call it.
+  const onRemoveDaihyosen = async () => {
+    setDaihyosenErr("");
+    setDaihyosenBusy(true);
+    try {
+      await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
+      if (!mountedRef.current) return;
+      onClose();
+    } catch (e) {
+      if (!mountedRef.current) return;
+      const msg = String(e?.message || "");
+      let userMsg = msg;
+      if (msg === "daihyosen_scored") userMsg = "Clear the daihyosen score before removing it";
+      else if (msg === "no_daihyosen") userMsg = "No daihyosen to remove";
+      setDaihyosenErr(userMsg);
+    } finally {
+      if (mountedRef.current) setDaihyosenBusy(false);
+    }
+  };
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Fetch lineup + competition data on mount. Both endpoints are
@@ -2348,6 +2369,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               <div className="hantei-row" data-testid="team-daihyosen-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 12, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
                 <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Daihyosen hantei</span>
                 <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+                {dt.aTotal === 0 && dt.bTotal === 0 && !daihyosenHanteiArmed && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    data-testid="team-daihyosen-remove"
+                    title="Remove the representative bout"
+                    onClick={onRemoveDaihyosen}
+                    disabled={daihyosenBusy || submitting || decisionSubmitting}
+                  >
+                    Remove daihyosen
+                  </button>
+                )}
                 {!daihyosenHanteiArmed && (
                   <button
                     type="button"

@@ -13,11 +13,43 @@ func IsTiebreakerMatchID(matchID string) bool {
 	return strings.Contains(matchID, "-TB-")
 }
 
-// detectPoolTies walks a sorted (descending Points) standings slice and
-// returns all groups of 2+ competitors that share the same Points value.
-// The caller must pass standings already sorted by Points descending.
-func detectPoolTies(standings []state.PlayerStanding) [][]state.PlayerStanding {
-	var groups [][]state.PlayerStanding
+// teamStandingPoints and individualStandingPoints compute the single packed
+// ranking score for a standing. The packing encodes the full ORDERED tiebreak
+// chain into one integer, so comparing the score is equivalent to comparing
+// each criterion in priority order: two competitors with equal scores are tied
+// on every official criterion (and a difference in any criterion, however far
+// down the chain, produces different scores). This is the single source of
+// truth for both the standings sort (scoring.go) and tie detection
+// (detectPoolTies), so the two can never disagree on what "tied" means.
+//
+// Team chain (CLAUDE.md): W, L, T, IV (individual victories), IL, IT,
+// PW (points won), PL (points lost).
+func teamStandingPoints(s state.PlayerStanding) int {
+	return s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
+		s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
+		s.PointsWon*100 - s.PointsLost
+}
+
+// individualStandingPoints packs the individual chain: W, L, D, ippons given,
+// ippons taken.
+func individualStandingPoints(s state.PlayerStanding) int {
+	return s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+}
+
+// detectPoolTies walks a sorted (descending Points) standings slice and returns
+// the POSITIONS of every group of 2+ competitors that share the same Points
+// value. Each inner slice holds the 0-based positions (indices into the passed
+// sorted standings) of one tied group, top-to-bottom; e.g. [][]int{{1,2}} means
+// the 2nd- and 3rd-placed competitors are tied, and [][]int{{0,1},{3,4}} means
+// two separate tied groups. The result is empty (len 0) when there are no ties.
+//
+// Points encodes the full ordered tiebreak chain (see teamStandingPoints /
+// individualStandingPoints), so equal Points means genuinely tied on every
+// official criterion — for both team and individual competitions. The caller
+// MUST pass standings already sorted by Points descending; the returned indices
+// point straight back into that slice.
+func detectPoolTies(standings []state.PlayerStanding) [][]int {
+	var groups [][]int
 	i := 0
 	for i < len(standings) {
 		j := i + 1
@@ -25,13 +57,29 @@ func detectPoolTies(standings []state.PlayerStanding) [][]state.PlayerStanding {
 			j++
 		}
 		if j-i >= 2 {
-			g := make([]state.PlayerStanding, j-i)
-			copy(g, standings[i:j])
+			g := make([]int, 0, j-i)
+			for k := i; k < j; k++ {
+				g = append(g, k)
+			}
 			groups = append(groups, g)
 		}
 		i = j
 	}
 	return groups
+}
+
+// standingsAt resolves a position group from detectPoolTies back into the
+// standings it indexes, preserving order. Out-of-range positions are skipped
+// defensively (the caller always passes indices straight from detectPoolTies
+// over the same slice, so this is a guard, not an expected path).
+func standingsAt(standings []state.PlayerStanding, positions []int) []state.PlayerStanding {
+	group := make([]state.PlayerStanding, 0, len(positions))
+	for _, idx := range positions {
+		if idx >= 0 && idx < len(standings) {
+			group = append(group, standings[idx])
+		}
+	}
+	return group
 }
 
 // tiebreakerPairKey returns a canonical (order-independent) key for a
@@ -149,7 +197,8 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			existingPairs = info.existingPairs
 		}
 
-		for _, group := range detectPoolTies(poolStandings) {
+		for _, positions := range detectPoolTies(poolStandings) {
+			group := standingsAt(poolStandings, positions)
 			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)

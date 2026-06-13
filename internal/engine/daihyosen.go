@@ -232,7 +232,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			existingPairs = info.existingPairs
 		}
 
-		for _, group := range detectPoolTies(poolStandings) {
+		for _, positions := range detectPoolTies(poolStandings) {
+			group := standingsAt(poolStandings, positions)
 			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)

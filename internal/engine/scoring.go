@@ -590,21 +590,17 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		var sorted []state.PlayerStanding
 		for _, s := range playerStandings {
 			if isTeam {
-				// Team weighted score (Excel formula):
-				// W × 1B − L × 10M + T × 100K + IV × 1000 − IL × 100 + IT × 10 + PW − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
-					s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
-					s.PointsWon*100 - s.PointsLost
+				// Single packed ranking score over the full team tiebreak chain
+				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
+				s.Points = teamStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
 					s.Wins, s.Losses, s.Draws,
 					s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
 					s.PointsWon, s.PointsLost)
 			} else {
-				// Individual weighted score (Excel formula):
-				// W × 1,000,000 − L × 10,000 + D × 100 + PW × 1 − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+				// Single packed ranking score over the individual chain
+				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
+				s.Points = individualStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
 					s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
 			}

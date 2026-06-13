@@ -301,7 +301,8 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // explicitly ranked them, so the cycle no longer blocks completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
-		for _, group := range detectPoolTies(poolStandings) {
+		for _, positions := range detectPoolTies(poolStandings) {
+			group := standingsAt(poolStandings, positions)
 			// If the operator has manually ranked every member of this
 			// tied group, treat the cycle as resolved.
 			if overrides := poolRanks[poolName]; len(overrides) > 0 {

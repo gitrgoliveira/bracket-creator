@@ -7421,7 +7421,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Shiro/Aka badges run 7px across the console; bump them on the operator
    console so they stay legible at arm's length in a bright hall (critique
    P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
-.shiaijo .se-color-badge { font-size: 9px; padding: 2px 5px; }
+.shiaijo .se-color-badge { font-size: 10px; padding: 2px 5px; }
 .shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
 
 .linklike {
@@ -7442,10 +7442,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-.shiaijo-upnext__time { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+.shiaijo-upnext__time { font-size: 12px; color: var(--ink-2); font-weight: 600; }
 .shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
-.shiaijo-upnext__hint { font-size: 11px; color: var(--ink-3); line-height: 1.4; }
+.shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
 
 /* Team-match lineup prompt above the inline scoring panel */
 .shiaijo-lineup-bar {
@@ -7476,12 +7477,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Fixed status + actions columns (not auto) so the "Final" badge and the
    court-picker / Skip controls line up vertically across every queue row
    regardless of each row's content width. */
-.shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; cursor: pointer; }
+.shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; }
 /* Upcoming rows are informational (start via Up Next, manage via the row's
    own controls) — not openable in the scoring panel, so no button affordance. */
 .shiaijo-row--static { cursor: default; }
-.shiaijo-row.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
-.shiaijo-row__comp { font-size: 10px; color: var(--ink-3); margin-top: 2px; }
+.shiaijo-row__comp { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
 .shiaijo-row__status { display: flex; align-items: center; justify-content: flex-end; }
 .shiaijo-row__actions { justify-content: flex-end; }
 

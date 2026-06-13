@@ -89,6 +89,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // guards the in-flight announce request.
     const [calledKey, setCalledKey] = useStateSh(null);
     const [callingKey, setCallingKey] = useStateSh(null);
+    const [startingKey, setStartingKey] = useStateSh(null);
+    const [startError, setStartError] = useStateSh("");
     const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
     // Short-circuit to [] for a blank/unknown court so an accidental landing
@@ -152,11 +154,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     });
 
     const startMatch = async (m) => {
+        if (startingKey) return;
+        setStartError("");
+        setStartingKey(matchKey(m));
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
             await onEditScore(m.compId, m.id, startPatch(), m);
-        } catch (_e) { /* eligibility gate etc.; surfaced via toast */ }
+        } catch (e) {
+            if (mountedRef.current) setStartError((e && e.message) || "Could not start the match — check eligibility and try again.");
+            if (showToast) showToast((e && e.message) || "Could not start the match", "error");
+        } finally {
+            if (mountedRef.current) setStartingKey(null);
+        }
     };
 
     // Call to court — optional. Broadcasts a tournament announcement so the
@@ -191,7 +201,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
         try {
             await window.API.updateMatchTime(m.compId, m.id, "", password);
-            if (showToast) showToast(`Skipped ${label} — moved to the end of the queue`);
+            if (showToast) showToast(`Deferred ${label} to the end of the queue`);
         } catch (e) {
             if (showToast) showToast((e && e.message) || "Could not skip the match", "error");
         }
@@ -207,7 +217,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 <div className="page-head">
                     <div>
                         <h1 className="page-head__title">Shiaijo {court}</h1>
-                        <div className="page-head__sub">Table operator view — run every match on this court without leaving the page.</div>
+                        <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
                     </div>
                     {courts.length > 1 && (
                         <div className="page-head__actions">
@@ -254,7 +264,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-upnext__time">{upNext.scheduledAt || "—"} · {upNext.compName}</div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
-                                            <button className="btn btn--primary" onClick={() => startMatch(upNext)}>Start match</button>
+                                            <button className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => startMatch(upNext)}>
+                                                {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
+                                            </button>
                                             {/* Optional: announce the call to spectators/competitors.
                                                 Never required — Start match works on its own. */}
                                             {window.API && typeof window.API.sendAnnouncement === "function" && (
@@ -269,9 +281,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 </button>
                                             )}
                                             {window.API && typeof window.API.updateMatchTime === "function" && (
-                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Move this match to the end of the queue">Skip</button>
+                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Move to the end of the queue">Defer</button>
                                             )}
                                         </div>
+                                        {startError && <div className="shiaijo-upnext__error" role="alert">{startError}</div>}
                                         <div className="shiaijo-upnext__hint">
                                             {calledKey === matchKey(upNext)
                                                 ? "Announced to spectators. Start the match when both are at the line."
@@ -296,7 +309,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             {completed.length > 0 && (
                                 <div className="shiaijo-completed">
                                     <button className="section-title shiaijo-completed__toggle" onClick={() => setCompletedOpen((v) => !v)}>
-                                        {completedOpen ? "▾" : "▸"} Completed <span className="shiaijo-count">{completed.length}</span>
+                                        {completedOpen ? "−" : "+"} Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
                                     </button>
                                     {completedOpen && (
                                         <ShiaijoQueueGroup
@@ -416,7 +429,7 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
                 <div className="shiaijo-row__comp">{m.compName}</div>
             </div>
             <div className="score-edit-row__sides">
-                <div className="score-edit-row__side" style={{ textAlign: "right" }}>
+                <div className="score-edit-row__side" style={{ textAlign: "right" }} aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                     <div className="name">{m.sideB?.name}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 </div>
@@ -425,7 +438,7 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
                     {scoreCell.kind === "vs" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
                 </div>
-                <div className="score-edit-row__side">
+                <div className="score-edit-row__side" aria-label={`Aka: ${m.sideA?.name || ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
                     <div className="name">{m.sideA?.name}</div>
                 </div>
@@ -442,7 +455,7 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
                     />
                 )}
                 {onSkip && m.status === "scheduled" && (
-                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Move to the end of the queue">Skip</button>
+                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Move to the end of the queue">Defer</button>
                 )}
             </div>
         </div>
@@ -452,13 +465,13 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip }) {
 function MatchSides({ m, large }) {
     return (
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
-            <div className="shiaijo-sides__side">
+            <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 <div className="name">{m.sideB?.name}</div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
             <div className="shiaijo-sides__vs">vs</div>
-            <div className="shiaijo-sides__side" style={{ textAlign: "right" }}>
+            <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
                 <div className="name">{m.sideA?.name}</div>
                 <div className="dojo">{m.sideA?.dojo}</div>
@@ -508,7 +521,7 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
     return (
         <div className="shiaijo-context">
             <button className="section-title shiaijo-context__toggle" onClick={onToggle}>
-                {open ? "▾" : "▸"} {isPool ? "Standings" : "Context"} · {match.compName} · {phaseLabel}
+                {open ? "−" : "+"} {isPool ? "Standings" : "Context"} · {match.compName} · {phaseLabel}
             </button>
             {open && (
                 <div className="shiaijo-context__body">

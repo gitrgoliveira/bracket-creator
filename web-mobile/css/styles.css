@@ -4618,7 +4618,7 @@ button.pool-match-row {
 
 /* Team Score Editor */
 .editor-modal--team {
-  width: min(640px, calc(100vw - 32px));
+  width: min(760px, 96vw);
 }
 
 .team-header {
@@ -4679,41 +4679,42 @@ button.pool-match-row {
   align-items: flex-end;
 }
 
-/* Operator console (inline) team scoresheet alignment (mp-c2yr).
+/* Canonical team scoresheet alignment — shared by both the shiaijo inline
+   panel (.scoring-panel > .team-bouts-scroll) and the admin modal
+   (.editor-modal--team > … > .team-bouts-scroll).
    The bare rules above size the two side columns to content (1fr ==
    minmax(min-content, 1fr)), so a side with a selected name floors wider
    than the empty side and the AKA stack is right-justified while SHIRO is
    centred — the name, mark slots, ippon row and fouls then sit on three
    different axes. Pin both sides to an equal minmax(0,1fr) column and
    centre both stacks so every element shares one axis down the sheet.
-   Scoped to .scoring-panel so the (always-compact) schedule modal, which
-   uses the tsm-row strip layout, is untouched. */
-.scoring-panel .team-sub-match__row {
+   Owned by .team-bouts-scroll so both rendering contexts inherit it. */
+.team-bouts-scroll .team-sub-match__row {
   grid-template-columns: minmax(0, 1fr) 160px minmax(0, 1fr);
 }
-.scoring-panel .team-sub-match__side,
-.scoring-panel .team-sub-match__side--right {
+.team-bouts-scroll .team-sub-match__side,
+.team-bouts-scroll .team-sub-match__side--right {
   align-items: center;
 }
 /* Scored ippon letters live in the centre, between the two competitors:
    [shiro letters] [result] [aka letters]. Each side block is buttons-only. */
-.scoring-panel .team-sub-match__center {
+.team-bouts-scroll .team-sub-match__center {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
 }
-.scoring-panel .tsm-center-marks {
+.team-bouts-scroll .tsm-center-marks {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-.scoring-panel .tsm-center-pts {
+.team-bouts-scroll .tsm-center-pts {
   display: flex;
   gap: 3px;
 }
-.scoring-panel .team-sub-match__center .editor-side__pt {
+.team-bouts-scroll .team-sub-match__center .editor-side__pt {
   width: 26px;
   height: 26px;
   font-family: var(--font-mono);
@@ -4726,16 +4727,16 @@ button.pool-match-row {
   place-items: center;
   color: var(--ink-1);
 }
-.scoring-panel .team-sub-match__center .editor-side__pt--filled {
+.team-bouts-scroll .team-sub-match__center .editor-side__pt--filled {
   border-color: var(--ink-3);
 }
-.scoring-panel .team-sub-match__score {
+.team-bouts-scroll .team-sub-match__score {
   min-width: 34px;
 }
 /* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
    with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
    it to an H ippon for the opponent. */
-.scoring-panel .tsm-foul-tri {
+.team-bouts-scroll .tsm-foul-tri {
   color: var(--danger);
   font-size: 13px;
   line-height: 1;
@@ -4743,11 +4744,11 @@ button.pool-match-row {
 }
 /* Per-bout tie toggle, now inside the centre column directly under the marks
    (the X it produces sits on that centre line). */
-.scoring-panel .team-sub-match__tie {
+.team-bouts-scroll .team-sub-match__tie {
   display: flex;
   justify-content: center;
 }
-.scoring-panel .team-sub-match__tie .btn {
+.team-bouts-scroll .team-sub-match__tie .btn {
   padding: 2px 10px;
   font-size: 11px;
   line-height: 1.4;
@@ -4756,24 +4757,24 @@ button.pool-match-row {
 
 /* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
    but sized for the narrow bout row; the dropdown floats above sibling rows. */
-.scoring-panel .lineup-name {
+.team-bouts-scroll .lineup-name {
   min-width: 0;
   flex: 1 1 auto;
   margin-bottom: 0;
 }
-.scoring-panel .lineup-name__bar {
+.team-bouts-scroll .lineup-name__bar {
   min-height: 36px;
   padding: 4px 6px;
   flex-wrap: nowrap;
 }
-.scoring-panel .lineup-name--empty .pmf__bar {
+.team-bouts-scroll .lineup-name--empty .pmf__bar {
   border-color: color-mix(in srgb, var(--danger) 50%, transparent);
 }
-.scoring-panel .lineup-name--empty .pmf__input::placeholder {
+.team-bouts-scroll .lineup-name--empty .pmf__input::placeholder {
   color: var(--danger);
   opacity: 0.75;
 }
-.scoring-panel .lineup-name__clear {
+.team-bouts-scroll .lineup-name__clear {
   border: none;
   background: transparent;
   cursor: pointer;
@@ -4782,19 +4783,19 @@ button.pool-match-row {
   color: var(--ink-3);
   padding: 0 2px;
 }
-.scoring-panel .lineup-name__clear:hover {
+.team-bouts-scroll .lineup-name__clear:hover {
   color: var(--ink-1);
 }
-.scoring-panel .lineup-name__dropdown {
+.team-bouts-scroll .lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
   max-height: 240px;
   overflow-y: auto;
 }
-.scoring-panel .pmf__option--active {
+.team-bouts-scroll .pmf__option--active {
   background: var(--surface-2);
 }
-.scoring-panel .lineup-name__add .pmf__opt-name {
+.team-bouts-scroll .lineup-name__add .pmf__opt-name {
   color: var(--accent);
   font-weight: 600;
 }
@@ -4803,11 +4804,11 @@ button.pool-match-row {
    the team-name header band is given a matching gutter + the same centre
    region width so "Osaka Dojo / VS / Tokyo" line up with each bout's
    SHIRO / dash / AKA columns down the sheet. Values verified in-browser. */
-.scoring-panel .team-sub-match {
+.team-bouts-scroll .team-sub-match {
   grid-template-columns: 28px 1fr;
   gap: 8px;
 }
-.scoring-panel .team-sub-match__pos {
+.team-bouts-scroll .team-sub-match__pos {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4893,9 +4894,7 @@ button.pool-match-row {
 .team-sub-match__side--right .tsm-name__static { text-align: right; }
 .tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
 
-/* Compact (operator console inline) — tighter name row. */
-.editor-modal--compact .tsm-name { margin-bottom: 4px; }
-.editor-modal--compact .tsm-name__select { height: 28px; font-size: 11px; }
+/* (compact team tsm-name overrides removed — canonical layout via .team-bouts-scroll) */
 
 .team-sub-match__score--a-win {
   background: var(--white-side);
@@ -6317,8 +6316,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* --- Compact mode: team header ------------------------------------------ */
 .editor-modal--compact.editor-modal--team {
-  /* Slightly wider in compact mode to keep the two-row tsm__side comfy. */
-  width: min(720px, calc(100vw - 32px));
+  /* Same width as the base .editor-modal--team — canonical layout applies to both. */
+  width: min(760px, 96vw);
 }
 /* Scope to the team modal only — the individual modal has its own .sb-match
    rule above (line ~4652) with a wider 120px centre column. Without this
@@ -6348,157 +6347,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   letter-spacing: 0.2em;
 }
 
-/* --- Compact mode: team-sub-match 2-row layout --------------------------- */
-.editor-modal--compact .team-sub-match {
-  padding: 3px 8px;
-  border-bottom: 1px solid var(--line); /* fallback */
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 0;
-  background: transparent;
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match:last-child {
-  border-bottom: none;
-}
-.editor-modal--compact .team-sub-match__pos {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  color: var(--ink-3);
-  margin-bottom: 0;
-  text-transform: uppercase;
-}
-.editor-modal--compact .team-sub-match__pos > span:first-child {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-.editor-modal--compact .team-sub-match__row {
-  display: grid;
-  grid-template-columns: 1fr 50px 1fr;
-  gap: 6px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match__side {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.editor-modal--compact .team-sub-match__side--right {
-  align-items: stretch;
-}
+/* --- Compact mode: team-sub-match layout (removed — canonical layout via
+   .team-bouts-scroll now applies to both the inline panel and the modal) --- */
 /* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible so the
-   legacy column stack is preserved exactly. Compact mode then overrides to
-   display: flex to get the 2-row strip layout. */
+   canonical column stack is preserved exactly. */
 .tsm-row-1,
 .tsm-row-2 {
   display: contents;
-}
-.editor-modal--compact .tsm-row-1 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-1 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-row-2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: space-between;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-2 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-side-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  min-width: 38px;
-}
-.editor-modal--compact .team-sub-match__pts {
-  display: flex;
-  gap: 4px;
-}
-.editor-modal--compact .editor-side__pt {
-  width: 28px;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: 5px;
-  border: 1.5px solid var(--line);
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  color: var(--ink-3);
-  transition: background-color 120ms var(--ease-out),
-              border-color 120ms var(--ease-out),
-              color 120ms var(--ease-out);
-  padding: 0;
-}
-.editor-modal--compact .editor-side__pt--filled {
-  box-shadow: inset 0 0 0 2px currentColor;
-}
-.editor-modal--compact .team-sub-match__side--right .editor-side__pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-.editor-modal--compact .team-sub-match__side:not(.team-sub-match__side--right) .editor-side__pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-.editor-modal--compact .team-sub-match__btns {
-  display: flex;
-  gap: 3px;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .team-sub-match__btns .ipt-btn {
-  min-width: 26px;
-  min-height: 32px;
-  padding: 4px 4px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.editor-modal--compact .tsm-fouls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 0;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .tsm-fouls__label {
-  font-size: 9px;
-  letter-spacing: 0.05em;
-}
-.editor-modal--compact .tsm-fouls__btn {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  font-size: 14px;
-}
-.editor-modal--compact .tsm-fouls__count {
-  font-size: 13px;
-}
-.editor-modal--compact .tsm-fusensho .btn {
-  padding: 2px 8px;
-  font-size: 11px;
-  min-height: 28px;
-}
-.editor-modal--compact .team-sub-match__score {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 16px;
-  min-width: 50px;
-  padding: 2px;
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
@@ -6564,38 +6419,34 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Touch-target floor for compact ippon buttons --------------------- *
-   The compact rules above (.editor-modal--compact .sb-points-grid .ipt-btn
-   and .editor-modal--compact .team-sub-match__btns .ipt-btn) set a 34px/32px
-   min-height for fine pointers (laptop scoring). On the tablets operators
-   actually score on, those out-specified the generic
+   The compact rule above (.editor-modal--compact .sb-points-grid .ipt-btn)
+   sets a 34px min-height for fine pointers (laptop scoring). On the tablets
+   operators actually score on, those out-specified the generic
    `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
    the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
    Restore the floor at equal-or-greater specificity, placed AFTER the compact
-   blocks so source order also favours it. Fine pointers keep the dense 34px. */
+   blocks so source order also favours it. Fine pointers keep the dense 34px.
+   (Team sub-match button floor is now handled by .team-bouts-scroll context.) */
 @media (pointer: coarse) {
-  .editor-modal--compact .sb-points-grid .ipt-btn,
-  .editor-modal--compact .team-sub-match__btns .ipt-btn {
+  .editor-modal--compact .sb-points-grid .ipt-btn {
     min-width: 44px;
     min-height: 44px;
   }
 }
 
-/* --- Touch-target floor for the inline operator console (mp-c2yr) ------ *
+/* --- Touch-target floor for the inline operator console and team modal --- *
    The shiaijo console is the surface operators actually score on, on a
-   tablet, and its inline .scoring-panel reuses .ipt-btn / .tsm-fouls__btn
-   but was not covered by the compact-modal coarse rules above, so the
-   most-tapped controls stayed mouse-sized (20x18 / 22x22). Apply the same
-   DESIGN.md §6 coarse-pointer touch floor here. Width is held to 36px (not
-   the full 44) so the canonical 5-bout team scoresheet still fits both
-   sides across an iPad-portrait column without horizontal scroll; height
-   takes the full 44px. The .scoring-panel wrapper is the inline variant
-   only, so the desktop schedule modal (fine pointer) is untouched. */
+   tablet, and both .scoring-panel and the team modal .team-bouts-scroll
+   reuse .ipt-btn / .tsm-fouls__btn. Apply the DESIGN.md §6 coarse-pointer
+   touch floor for both contexts. Width is held to 36px (not the full 44)
+   so the canonical 5-bout team scoresheet still fits both sides across an
+   iPad-portrait column without horizontal scroll; height takes the full 44px. */
 @media (pointer: coarse) {
   .scoring-panel .ipt-btn {
     min-width: 36px;
     min-height: 44px;
   }
-  .scoring-panel .tsm-fouls__btn {
+  .team-bouts-scroll .tsm-fouls__btn {
     min-width: 40px;
     min-height: 40px;
   }

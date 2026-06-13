@@ -1169,6 +1169,11 @@ a:hover {
   font-weight: 600;
 }
 
+.bc-match-num {
+  color: var(--ink-4);
+  margin-right: 2px;
+}
+
 .bc-court {
   color: var(--ink-2);
 }
@@ -1185,6 +1190,42 @@ a:hover {
 .bc-bye-tag {
   color: var(--ink-4);
   margin-left: auto;
+}
+
+/* Structural-bye placeholder rendered in the upstream bracket column so the
+   tree gap is visible — matches the Excel Tree sheet's empty-slot treatment. */
+.bc-bye-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 13px;
+  min-height: 44px;
+  border: 1.5px dashed var(--line-strong, #c7cdd9);
+  border-radius: var(--r);
+  background: var(--line, #f0f2f5);
+  pointer-events: none;
+  user-select: none;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-bye-slot__name {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-bye-slot__tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  flex-shrink: 0;
 }
 
 .bc-side {
@@ -1252,22 +1293,6 @@ a:hover {
   margin: 0 12px;
 }
 
-.bc-seed {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ink-3);
-  background: var(--line-2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  min-width: 20px;
-  text-align: center;
-}
-
-.bc-seed--empty {
-  background: transparent;
-  color: transparent;
-}
 
 .bc-name-wrap {
   flex: 1;
@@ -1348,11 +1373,6 @@ a:hover {
   color: white;
 }
 
-.bc-match--v2 .bc-side--winner.bc-side--a .bc-seed {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-}
-
 .bc-match--v2 .bc-side--winner.bc-side--b {
   background: var(--accent);
   color: var(--accent-fg);
@@ -1362,11 +1382,6 @@ a:hover {
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-name,
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-dojo,
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-score {
-  color: var(--accent-fg);
-}
-
-.bc-match--v2 .bc-side--winner.bc-side--b .bc-seed {
-  background: rgba(255, 255, 255, 0.2);
   color: var(--accent-fg);
 }
 
@@ -2835,6 +2850,19 @@ button.vsched-item:not([data-clickable]) {
 .viewer-bracket-bleed {
   margin-left: -16px;
   margin-right: -16px;
+  position: relative;
+}
+
+.viewer-bracket-bleed--overflow-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 56px;
+  background: linear-gradient(to right, transparent, var(--bg));
+  pointer-events: none;
+  z-index: 2;
 }
 @media (min-width: 768px) {
   .viewer-bracket-bleed {

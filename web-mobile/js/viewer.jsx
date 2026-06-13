@@ -1701,12 +1701,25 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
+  const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   React.useEffect(() => {
     if (tab === "bracket" && currentMatch) {
       setBracketScrollTarget(currentMatch.id + "::" + Date.now());
     }
   }, [tab, currentMatch?.id]);
+
+  React.useEffect(() => {
+    if (tab !== "bracket") return;
+    const el = bracketScrollRef.current;
+    if (!el) return;
+    const check = () => setBracketOverflowRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
+  }, [tab]);
 
   return (
     <div className="viewer">
@@ -1792,7 +1805,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             />
           )}
           {tab === "bracket" && derivedBracket && (
-            <div className="viewer-bracket-bleed">
+            <div className={`viewer-bracket-bleed${bracketOverflowRight ? " viewer-bracket-bleed--overflow-right" : ""}`}>
               <div ref={bracketScrollRef} className="bracket-canvas" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree

@@ -1709,8 +1709,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     }
   }, [tab, currentMatch?.id]);
 
+  const hasBracketEl = tab === "bracket" && !!derivedBracket;
   React.useEffect(() => {
-    if (tab !== "bracket") return;
+    if (!hasBracketEl) return;
     const el = bracketScrollRef.current;
     if (!el) return;
     const check = () => setBracketOverflowRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
@@ -1719,7 +1720,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
-  }, [tab]);
+  }, [hasBracketEl]);
 
   return (
     <div className="viewer">

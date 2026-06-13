@@ -25,8 +25,7 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 2) return "Quarterfinals";
   // mp-13y #8: abbreviated column header — R{N} where N is the bracket size
   // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
-  if (fromEnd >= 3) return `R${2 ** (fromEnd + 1)}`;
-  return `Round ${roundIdx + 1}`;
+  return `R${2 ** (fromEnd + 1)}`;
 }
 
 const DECISION_CHIPS = {
@@ -353,7 +352,7 @@ function buildDisplayModel(rounds) {
     // communicates the skip spatially — mirroring the Excel Tree sheet output.
     // Leaf-round matches (displayRound === maxDR) always have "" feeders for real
     // players; those don't need placeholders.
-    const byeSlots = [];
+    const feedersById = {};
     real.forEach((m) => {
       if (m.displayRound >= maxDR) return;
       (m.feeders || []).forEach((feederId, idx) => {
@@ -361,13 +360,12 @@ function buildDisplayModel(rounds) {
           const playerObj = idx === 0 ? m.sideA : m.sideB;
           const playerName = typeof playerObj === "object" ? (playerObj?.name || "") : (playerObj || "");
           const slot = { id: `bye-${m.id}-${idx}`, isByeSlot: true, displayRound: m.displayRound + 1, playerName };
-          byeSlots.push(slot);
+          feedersById[slot.id] = [];
           const colIdx = maxDR - slot.displayRound;
           if (colIdx >= 0 && colIdx < columns.length) columns[colIdx].push(slot);
         }
       });
     });
-    const feedersById = {};
     real.forEach((m) => {
       const hasUpstream = m.displayRound < maxDR;
       feedersById[m.id] = (m.feeders || []).map((feederId, idx) => {
@@ -375,7 +373,6 @@ function buildDisplayModel(rounds) {
         return feederId;
       }).filter(Boolean);
     });
-    byeSlots.forEach((slot) => { feedersById[slot.id] = []; });
     // Match numbers: earliest round first (highest displayRound), then by position
     // extracted from the id suffix — mirrors the Excel FillInMatches order so
     // card labels ("M 1", "M 2") match what referees see on the printed sheet.
@@ -594,7 +591,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                       aria-label={`${m.playerName || "Bye"} — advances without an opponent`}
                       ref={(el) => { if (el) refMap.current[m.id] = el; }}
                     >
-                      <span className="bc-bye-slot__name">{m.playerName || "BYE"}</span>
+                      <span className="bc-bye-slot__name">{m.playerName}</span>
                       {m.playerName ? null : <span className="bc-bye-slot__tag">BYE</span>}
                     </div>
                   </div>
@@ -610,7 +607,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
                     onClick={() => onMatchClick && onMatchClick(m, ci, mi)}
                     highlightPlayers={highlightPlayers}
-                    matchNum={matchNumById ? matchNumById[m.id] : undefined}
+                    matchNum={matchNumById[m.id]}
                   />
                 </div>
               );

@@ -6000,6 +6000,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.45;
   letter-spacing: normal;
   text-transform: none;
+  /* Reset text layout that may be inherited from the anchor's context. A
+     glossary term inside a nowrap row (e.g. the team scoresheet tie toggle,
+     which keeps its marks on one line) would otherwise pass nowrap into the
+     tooltip body, so the definition runs off in a single line and clips past
+     the max-width instead of wrapping. */
+  white-space: normal;
   cursor: default;
   visibility: hidden;
   opacity: 0;

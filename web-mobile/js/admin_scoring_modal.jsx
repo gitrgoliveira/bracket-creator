@@ -1493,10 +1493,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 return <span>{`${t.bTotal}–${t.aTotal}`} <span style={{ fontSize: 11, opacity: 0.7 }}>(Ht)</span></span>;
               }
               // Draw: either an operator-marked tie, or equal non-zero scores
-              // (the tie-marking rule). Canonical display: 0–0 → X, scored → △.
+              // (the tie-marking rule). Canonical display: a hikiwake is an X on
+              // the centre line (running_a_kendo_tournament.md), scored or not.
               const scored = t.aTotal > 0 || t.bTotal > 0;
               const isDraw = s.draw || (t.winner === null && scored);
-              if (isDraw) return <span className="tsm-draw">{scored ? "△" : "X"}</span>;
+              if (isDraw) return <span className="tsm-draw">X</span>;
               // Pending bout (0–0, not yet marked) — a quiet placeholder.
               if (t.winner === null) return <span style={{ color: "var(--ink-3)" }}>–</span>;
               // Decided bout: the centred ippon letters already show who won —
@@ -1594,6 +1595,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                       </div>
                       {rsIdx === 0 && (
                         <div className="team-sub-match__center">
+                          <div className="tsm-center-marks">
                           <div className="tsm-center-pts tsm-center-pts--shiro">
                             {[0, 1].map(i => (
                               <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
@@ -1623,28 +1625,29 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                               </button>
                             ))}
                           </div>
+                          </div>
+                          {/* Per-bout tie toggle, directly beneath the centre
+                              marks: pressing it puts an X on the centre line
+                              (hikiwake). Hidden once a side has decided the bout,
+                              and on the daihyosen (its own hantei flow). */}
+                          {!isDaihyoRow && !subBoutDecided && (
+                            <div className="team-sub-match__tie">
+                              <button
+                                type="button"
+                                data-testid="scoring-modal-tie-button"
+                                className={`btn btn--sm ${s.draw ? "btn--primary" : ""}`}
+                                onClick={() => setDrawFor(idx)}
+                                title={s.draw ? "Undo tie" : "Mark this bout a draw (hikiwake)"}
+                              >
+                                {s.draw ? <>✓ Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</> : <>Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</>}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </React.Fragment>
                   ))}
                 </div>
-                {/* Per-bout tie toggle: lets the operator mark a hikiwake
-                    (e.g. a 0–0 time-out) so the centre shows X/△ during
-                    scoring. Hidden once a side has decided the bout, and on
-                    the daihyosen (which resolves via its own hantei flow). */}
-                {!isDaihyoRow && !subBoutDecided && (
-                  <div className="team-sub-match__tie">
-                    <button
-                      type="button"
-                      data-testid="scoring-modal-tie-button"
-                      className={`btn btn--sm ${s.draw ? "btn--primary" : ""}`}
-                      onClick={() => setDrawFor(idx)}
-                      title={s.draw ? "Undo tie" : "Mark this bout a draw (hikiwake)"}
-                    >
-                      {s.draw ? <>✓ Tie (<TermAS name="hikiwake">hikiwake</TermAS>)</> : <>Mark tie (<TermAS name="hikiwake">hikiwake</TermAS>)</>}
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}

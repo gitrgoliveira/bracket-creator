@@ -4699,6 +4699,12 @@ button.pool-match-row {
    [shiro letters] [result] [aka letters]. Each side block is buttons-only. */
 .scoring-panel .team-sub-match__center {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.scoring-panel .tsm-center-marks {
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -4735,12 +4741,17 @@ button.pool-match-row {
   line-height: 1;
   align-self: center;
 }
-/* Per-bout tie toggle, centred under the bout in the 1fr content column. */
+/* Per-bout tie toggle, now inside the centre column directly under the marks
+   (the X it produces sits on that centre line). */
 .scoring-panel .team-sub-match__tie {
-  grid-column: 2;
   display: flex;
   justify-content: center;
-  margin-top: 4px;
+}
+.scoring-panel .team-sub-match__tie .btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 
 /* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)

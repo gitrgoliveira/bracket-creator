@@ -50,6 +50,18 @@ func TestPlayerTagURL(t *testing.T) {
 			number:    "K1",
 			want:      "",
 		},
+		{
+			name:      "empty host returns empty",
+			publicURL: "https://",
+			number:    "K1",
+			want:      "",
+		},
+		{
+			name:      "userinfo in URL returns empty",
+			publicURL: "https://user:pass@kendo.example.com",
+			number:    "K1",
+			want:      "",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

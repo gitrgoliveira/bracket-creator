@@ -78,7 +78,7 @@ function ipponsFromScore(scoreStr) {
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
-// Returns something like "MM–K", "M–·", "△", "X", "BYE".
+// Returns something like "MM–K", "M–·", "X" (hikiwake, scored or not), "BYE".
 // Hantei (judges' decision after tied encho) is NOT a separate return value;
 // it surfaces as an "Ht" suffix appended by decisionSuffix when
 // decidedByHantei=true — e.g. "M–K (E) Ht".
@@ -104,8 +104,10 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
-    // No-score draw → X; with scores → △
-    return ((!aStr && !bStr) ? "X" : "△") + suffix;
+    // A hikiwake is always X — scored or not — to match the canonical team
+    // scoresheet (X on the centre line). This is the draw glyph, not the
+    // hansoku marker: fouls render separately as the reserved red triangle.
+    return "X" + suffix;
   }
   if (!aStr && !bStr) {
     // Fall back when the per-side ippon arrays are absent but a score object
@@ -218,7 +220,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {running ? <span className="bc-running">● NOW</span> : null}
         {isBye ? <span className="bc-bye-tag">BYE</span> : null}
-        {match.score?.type === "hikiwake" ? <span className="bc-draw">△</span> : null}
+        {match.score?.type === "hikiwake" ? <span className="bc-draw">X</span> : null}
         {match.encho?.periodCount > 0 ? <span className="bc-encho"><TermBC name="encho">(E)</TermBC></span> : null}
         {match.decidedByHantei ? <span className="bc-decision-chip">Ht</span> : null}
         {isKikenDecisionBC(match.decision) ? (

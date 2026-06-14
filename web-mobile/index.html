@@ -86,6 +86,9 @@
          (which embeds it inside the Edit Tournament page) — mp-scf. -->
     <script type="module" src="/dist/admin_branding.js?v=5"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
+    <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
+         admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->
+    <script type="module" src="/dist/admin_shiaijo.js?v=5"></script>
     <script type="module" src="/dist/admin.js?v=5"></script>
     <script type="module" src="/dist/app.js?v=5"></script>
 </body>

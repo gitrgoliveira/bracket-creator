@@ -253,6 +253,44 @@ func TestParsePoolMatchesBytes_WithData(t *testing.T) {
 	assert.Equal(t, "Alice", results[0].SideA)
 }
 
+// TestParsePoolMatches_EmptyIpponsAreZeroLength is a regression guard: an
+// empty ippon CSV field must parse to a zero-length slice, NOT [""]. The bug
+// was strings.Split("", "|") returning a one-element slice holding "", whose
+// len() == 1 then counted as a phantom point in individual standings —
+// inflating points-lost and breaking pool tie detection (two players who
+// actually tied read as differing by one phantom ippon, so no tiebreaker
+// match was injected).
+func TestParsePoolMatches_EmptyIpponsAreZeroLength(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-ippon-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ippon-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "T"}))
+
+	// A completed hikiwake (no ippons either side) and a 1-0 win.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "Pool A-0", SideA: "P", SideB: "R", Winner: "", Decision: "hikiwake", Status: MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "P", SideB: "T", Winner: "P", IpponsA: []string{"M"}, Status: MatchStatusCompleted},
+	}))
+
+	got, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	byID := map[string]MatchResult{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	// Empty fields must be zero-length, not [""].
+	assert.Len(t, byID["Pool A-0"].IpponsA, 0, "empty IpponsA must parse to len 0, not [\"\"]")
+	assert.Len(t, byID["Pool A-0"].IpponsB, 0)
+	assert.Len(t, byID["Pool A-1"].IpponsB, 0, "loser's empty ippons must be len 0")
+	// Non-empty field still parses correctly.
+	assert.Equal(t, []string{"M"}, byID["Pool A-1"].IpponsA)
+}
+
 // TestParsePoolMatchesBytes_MalformedCSV covers the csv.ReadAll error path
 // in parsePoolMatchesBytes: a bare-quote in a field forces csv.ErrBareQuote.
 func TestParsePoolMatchesBytes_MalformedCSV(t *testing.T) {

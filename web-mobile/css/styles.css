@@ -30,6 +30,11 @@
   --accent-fg: #ffffff;
   --red: #c1121f;
   --red-soft: #fde7e8;
+  /* Danger/error — semantic alias of the Aka red (non-overlapping per
+     Principle 3). Use --danger for error/destructive intent so the meaning
+     reads at the call site; it resolves to the canonical palette red. */
+  --danger: var(--red);
+  --danger-soft: var(--red-soft);
   --white-side: #f6f7fb;
 
   --ink: #1a1d24;
@@ -527,6 +532,17 @@ a:hover {
   border-color: var(--accent-strong);
 }
 
+/* Armed "Finish" state: the commit button has been tapped once and now shows
+   the computed verdict, awaiting a confirming second tap. Deepen the fill and
+   add the accent ring so it reads as "armed, tap again to record" — navy, not
+   red (red is reserved for Aka/danger; this is a confirm, not a warning). */
+.btn--confirm,
+.btn--confirm:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .btn--danger {
   background: var(--red);
   color: white;
@@ -724,6 +740,17 @@ a:hover {
 .input:focus,
 .textarea:focus,
 .select:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* Bare <input> elements inside the scoring surfaces (e.g. inline name/score
+   fields without the .input class) had no visible focus state — keyboard and
+   the M/K/D/T/H shortcut operators couldn't see where focus landed. Give them
+   the same accent ring as classed inputs (DESIGN.md §6). */
+.scoring-panel input:focus-visible,
+.editor-modal input:focus-visible {
+  outline: none;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
 }
@@ -1683,7 +1710,7 @@ a:hover {
 }
 
 .phase-chip--pending {
-  background: var(--surface-2, #f1f5f9);
+  background: var(--surface-2);
   color: var(--ink-3);
 }
 
@@ -1832,6 +1859,34 @@ a:hover {
 }
 @supports (backdrop-filter: blur(2px)) {
   .modal-backdrop { backdrop-filter: blur(2px); }
+}
+
+/* Court-reassignment confirmation — a small, centred confirm card. Moving a
+   match to another shiaijo takes it off this court, so it's gated here. */
+.shiaijo-move-confirm {
+  width: min(380px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(15, 20, 35, 0.28);
+  padding: 20px;
+}
+.shiaijo-move-confirm__title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+.shiaijo-move-confirm__body {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.shiaijo-move-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .modal {
@@ -2350,6 +2405,20 @@ a:hover {
 .viewer__admin-pill:hover {
   border-color: var(--ink-4);
   color: var(--ink);
+}
+
+/* Status badge in the scoring panel head (CORRECTION / ● NOW / PRE-MATCH).
+   Same pill shape as .viewer__admin-pill but it is NOT interactive — no
+   pointer cursor or hover, so operators don't read it as a control. */
+.editor-head-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .viewer__tabs {
@@ -3629,6 +3698,15 @@ button.pool-match-row {
     min-width: 44px;
     min-height: 44px;
   }
+  /* Shiaijo console court controls: the per-row reassign picker (A▾) and the
+     header court switcher. The Defer button already forces the queue row to
+     44px tall under coarse pointer, so flooring the picker costs no row height. */
+  .score-edit-row__court--btn {
+    min-height: 44px;
+  }
+  .page-head__actions .input {
+    min-height: 44px;
+  }
 }
 
 .seed-row__input:focus {
@@ -4159,6 +4237,21 @@ button.pool-match-row {
   box-shadow: var(--shadow-lg);
 }
 
+/* Inline scoring variant (shiaijo operator view, mp-c2yr): ScoreEditorModal /
+   TeamScoreEditorModal rendered with variant="inline" — same head/body/foot
+   markup, but flowing in the page's right column instead of an overlay. No
+   backdrop, no fixed sizing; the surrounding card supplies the frame. */
+.scoring-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.scoring-panel .editor-modal__foot--nav {
+  position: static;
+}
+
 .editor-modal__head {
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
@@ -4270,6 +4363,16 @@ button.pool-match-row {
   display: flex;
   gap: 12px;
   margin: 12px 0;
+}
+
+/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
+   the slot nearest that competitor's name (the board's outer edge) and fills
+   inward toward the centre. Shiro (left column) packs its slots to the left
+   (outer) by default; Aka (right column) must mirror it — pack to the right and
+   render pts[0] at the outer (right) edge. See running_a_kendo_tournament.md →
+   Individual Match Scoreboard. */
+.sb-side--aka .sb-slots {
+  flex-direction: row-reverse;
 }
 
 .sb-slot {
@@ -4679,7 +4782,7 @@ button.pool-match-row {
 
 /* Team Score Editor */
 .editor-modal--team {
-  width: min(640px, calc(100vw - 32px));
+  width: min(760px, 96vw);
 }
 
 .team-header {
@@ -4740,6 +4843,179 @@ button.pool-match-row {
   align-items: flex-end;
 }
 
+/* Canonical team scoresheet alignment — shared by both the shiaijo inline
+   panel (.scoring-panel > .team-bouts-scroll) and the admin modal
+   (.editor-modal--team > … > .team-bouts-scroll).
+   The bare rules above size the two side columns to content (1fr ==
+   minmax(min-content, 1fr)), so a side with a selected name floors wider
+   than the empty side and the AKA stack is right-justified while SHIRO is
+   centred — the name, mark slots, ippon row and fouls then sit on three
+   different axes. Pin both sides to an equal minmax(0,1fr) column and
+   centre both stacks so every element shares one axis down the sheet.
+   Owned by .team-bouts-scroll so both rendering contexts inherit it. */
+.team-bouts-scroll .team-sub-match__row {
+  grid-template-columns: minmax(0, 1fr) 160px minmax(0, 1fr);
+  /* Tighter than the bare 12px so each side column has room to fit all three
+     top-row ippon marks (3 × 44px) on one wrap line — keeps the 5 marks to two
+     rows (3 + 2) instead of three at a ~1024 landscape split. */
+  gap: 8px;
+}
+.team-bouts-scroll .team-sub-match__side,
+.team-bouts-scroll .team-sub-match__side--right {
+  align-items: center;
+  min-width: 0;
+}
+/* The name row must take its side column's width, not its content's
+   max-content width — otherwise a selected name floors the row wider than
+   the minmax(0,1fr) track and overflows the panel's edge (the right-aligned
+   AKA side clips visibly). width:100% + the input's existing min-width:0 lets
+   the name shrink to an ellipsis when the two-column split is tight (e.g. a
+   ~575px scoring panel on a 1024px landscape iPad). */
+.team-bouts-scroll .tsm-name {
+  width: 100%;
+  min-width: 0;
+}
+/* Scored ippon letters live in the centre, between the two competitors:
+   [shiro letters] [result] [aka letters]. Each side block is buttons-only. */
+.team-bouts-scroll .team-sub-match__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.team-bouts-scroll .tsm-center-marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.team-bouts-scroll .tsm-center-pts {
+  display: flex;
+  gap: 3px;
+}
+.team-bouts-scroll .team-sub-match__center .editor-side__pt {
+  width: 26px;
+  height: 26px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 5px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  color: var(--ink-1);
+}
+.team-bouts-scroll .team-sub-match__center .editor-side__pt--filled {
+  border-color: var(--ink-3);
+}
+.team-bouts-scroll .team-sub-match__score {
+  min-width: 34px;
+}
+/* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
+   with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
+   it to an H ippon for the opponent. */
+.team-bouts-scroll .tsm-foul-tri {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1;
+  align-self: center;
+}
+/* Per-bout tie toggle, now inside the centre column directly under the marks
+   (the X it produces sits on that centre line). */
+.team-bouts-scroll .team-sub-match__tie {
+  display: flex;
+  justify-content: center;
+}
+.team-bouts-scroll .team-sub-match__tie .btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
+   but sized for the narrow bout row; the dropdown floats above sibling rows. */
+.team-bouts-scroll .lineup-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+.team-bouts-scroll .lineup-name__bar {
+  min-height: 36px;
+  padding: 4px 6px;
+  flex-wrap: nowrap;
+}
+.team-bouts-scroll .lineup-name--empty .pmf__bar {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+}
+.team-bouts-scroll .lineup-name--empty .pmf__input::placeholder {
+  color: var(--danger);
+  opacity: 0.75;
+}
+.team-bouts-scroll .lineup-name__clear {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--ink-3);
+  padding: 0 2px;
+}
+.team-bouts-scroll .lineup-name__clear:hover {
+  color: var(--ink-1);
+}
+.team-bouts-scroll .lineup-name__dropdown {
+  z-index: 60;
+  min-width: 200px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.team-bouts-scroll .pmf__option--active {
+  background: var(--surface-2);
+}
+.team-bouts-scroll .lineup-name__add .pmf__opt-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Compact bout-number gutter replaces the wide Senpo/Jiho label column, and
+   the team-name header band is given a matching gutter + the same centre
+   region width so "Osaka Dojo / VS / Tokyo" line up with each bout's
+   SHIRO / dash / AKA columns down the sheet. Values verified in-browser. */
+.team-bouts-scroll .team-sub-match {
+  grid-template-columns: 34px 1fr;
+  gap: 8px;
+}
+.team-bouts-scroll .team-sub-match__pos {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  margin-bottom: 0;
+}
+.team-sub-match__pos-num {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.team-sub-match__pos-name {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+.scoring-panel--team .sb-match {
+  grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
+  margin-left: 46px;
+  margin-right: 10px;
+}
+
 .team-sub-match__pts {
   display: flex;
   gap: 3px;
@@ -4747,8 +5023,9 @@ button.pool-match-row {
 
 .team-sub-match__btns {
   display: flex;
-  gap: 3px;
+  gap: 6px;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .team-sub-match__fouls {
@@ -4766,6 +5043,53 @@ button.pool-match-row {
   padding: 4px;
   border-radius: 4px;
 }
+
+/* Per-side player name, grouped with that side's score controls so every
+   bout's columns align down the sheet (the physical kendo scoresheet). */
+.tsm-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.team-sub-match__side--right .tsm-name { flex-direction: row-reverse; }
+.tsm-name__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-1);
+}
+.tsm-name__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tsm-name__select--empty { border-color: var(--red); opacity: 0.75; }
+.tsm-name__static {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Rendered as a standalone hint in the team header block (not inside a
+   bout side), so target the class directly. */
+.tsm-lineup__incomplete {
+  font-size: 11px;
+  color: var(--ink-3);
+  padding: 2px 0 4px;
+  font-style: italic;
+}
+/* Only the AKA (right) static name aligns toward its right-hand badge; the
+   SHIRO (left) name keeps the default left alignment with its own badge. */
+.team-sub-match__side--right .tsm-name__static { text-align: right; }
+.tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
+
+/* (compact team tsm-name overrides removed — canonical layout via .team-bouts-scroll) */
 
 .team-sub-match__score--a-win {
   background: var(--white-side);
@@ -4795,6 +5119,9 @@ button.pool-match-row {
   background: var(--surface-2);
   border-radius: 8px;
   margin-top: 4px;
+  /* Override the legacy dark-scoreboard `color: white` above — this is the
+     light variant, so text must be dark ink to stay readable on surface-2. */
+  color: var(--ink-1);
 }
 
 .team-summary__side {
@@ -4808,6 +5135,11 @@ button.pool-match-row {
 
 .team-summary__label {
   font-size: 12px;
+  /* --ink-2, not --ink-3: at 12px/600 on the slate summary band --ink-3 lands
+     at 4.41:1, just under WCAG AA. This is the verdict caption the operator
+     glances at under hall glare, so hold it above the line. */
+  color: var(--ink-2);
+  opacity: 1;
 }
 
 .team-summary__result {
@@ -4815,6 +5147,21 @@ button.pool-match-row {
   font-size: 13px;
   text-align: center;
   white-space: nowrap;
+  color: var(--accent);
+}
+
+/* Centre cell mirrors the side cells (label on top, value below) so the
+   verdict word sits on the same baseline as the IV/PW stats either side. */
+.team-summary__side--center {
+  align-items: center;
+  text-align: center;
+}
+.team-summary__verdict {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--accent);
 }
 
 /* ---------- Aka/Shiro color badges ---------- */
@@ -5579,7 +5926,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
 .league-matrix__cell--empty { background: var(--bg-2); }
 .league-matrix__cell--pending { color: var(--ink-3); }
-.league-matrix__cell--running { color: var(--accent); }
 .league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
@@ -5841,6 +6187,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   line-height: 1.45;
   letter-spacing: normal;
   text-transform: none;
+  /* Reset text layout that may be inherited from the anchor's context. A
+     glossary term inside a nowrap row (e.g. the team scoresheet tie toggle,
+     which keeps its marks on one line) would otherwise pass nowrap into the
+     tooltip body, so the definition runs off in a single line and clips past
+     the max-width instead of wrapping. */
+  white-space: normal;
   cursor: default;
   visibility: hidden;
   opacity: 0;
@@ -6005,6 +6357,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft);
   outline: none;
 }
+/* :hover and :focus-visible shared the border/bg change, so a keyboard tab
+   looked identical to a mouse hover. Add the accent ring on focus only so it's
+   distinct and matches the rest of the control vocabulary (DESIGN.md §6). */
+.encho-pill:focus-visible {
+  box-shadow: var(--focus-ring);
+}
 
 /* Encho row (expanded) — full counter UI; preserves earlier layout. */
 .encho-row--expanded {
@@ -6168,8 +6526,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* --- Compact mode: team header ------------------------------------------ */
 .editor-modal--compact.editor-modal--team {
-  /* Slightly wider in compact mode to keep the two-row tsm__side comfy. */
-  width: min(720px, calc(100vw - 32px));
+  /* Same width as the base .editor-modal--team — canonical layout applies to both. */
+  width: min(760px, 96vw);
 }
 /* Scope to the team modal only — the individual modal has its own .sb-match
    rule above (line ~4652) with a wider 120px centre column. Without this
@@ -6199,157 +6557,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   letter-spacing: 0.2em;
 }
 
-/* --- Compact mode: team-sub-match 2-row layout --------------------------- */
-.editor-modal--compact .team-sub-match {
-  padding: 3px 8px;
-  border-bottom: 1px solid var(--line); /* fallback */
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 0;
-  background: transparent;
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match:last-child {
-  border-bottom: none;
-}
-.editor-modal--compact .team-sub-match__pos {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  color: var(--ink-3);
-  margin-bottom: 0;
-  text-transform: uppercase;
-}
-.editor-modal--compact .team-sub-match__pos > span:first-child {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-.editor-modal--compact .team-sub-match__row {
-  display: grid;
-  grid-template-columns: 1fr 50px 1fr;
-  gap: 6px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match__side {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.editor-modal--compact .team-sub-match__side--right {
-  align-items: stretch;
-}
+/* --- Compact mode: team-sub-match layout (removed — canonical layout via
+   .team-bouts-scroll now applies to both the inline panel and the modal) --- */
 /* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible so the
-   legacy column stack is preserved exactly. Compact mode then overrides to
-   display: flex to get the 2-row strip layout. */
+   canonical column stack is preserved exactly. */
 .tsm-row-1,
 .tsm-row-2 {
   display: contents;
-}
-.editor-modal--compact .tsm-row-1 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-1 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-row-2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: space-between;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-2 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-side-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  min-width: 38px;
-}
-.editor-modal--compact .team-sub-match__pts {
-  display: flex;
-  gap: 4px;
-}
-.editor-modal--compact .editor-side__pt {
-  width: 28px;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: 5px;
-  border: 1.5px solid var(--line);
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  color: var(--ink-3);
-  transition: background-color 120ms var(--ease-out),
-              border-color 120ms var(--ease-out),
-              color 120ms var(--ease-out);
-  padding: 0;
-}
-.editor-modal--compact .editor-side__pt--filled {
-  box-shadow: inset 0 0 0 2px currentColor;
-}
-.editor-modal--compact .team-sub-match__side--right .editor-side__pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-.editor-modal--compact .team-sub-match__side:not(.team-sub-match__side--right) .editor-side__pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-.editor-modal--compact .team-sub-match__btns {
-  display: flex;
-  gap: 3px;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .team-sub-match__btns .ipt-btn {
-  min-width: 26px;
-  min-height: 32px;
-  padding: 4px 4px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.editor-modal--compact .tsm-fouls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 0;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .tsm-fouls__label {
-  font-size: 9px;
-  letter-spacing: 0.05em;
-}
-.editor-modal--compact .tsm-fouls__btn {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  font-size: 14px;
-}
-.editor-modal--compact .tsm-fouls__count {
-  font-size: 13px;
-}
-.editor-modal--compact .tsm-fusensho .btn {
-  padding: 2px 8px;
-  font-size: 11px;
-  min-height: 28px;
-}
-.editor-modal--compact .team-sub-match__score {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 16px;
-  min-width: 50px;
-  padding: 2px;
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
@@ -6415,17 +6629,46 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Touch-target floor for compact ippon buttons --------------------- *
-   The compact rules above (.editor-modal--compact .sb-points-grid .ipt-btn
-   and .editor-modal--compact .team-sub-match__btns .ipt-btn) set a 34px/32px
-   min-height for fine pointers (laptop scoring). On the tablets operators
-   actually score on, those out-specified the generic
+   The compact rule above (.editor-modal--compact .sb-points-grid .ipt-btn)
+   sets a 34px min-height for fine pointers (laptop scoring). On the tablets
+   operators actually score on, those out-specified the generic
    `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
    the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
    Restore the floor at equal-or-greater specificity, placed AFTER the compact
-   blocks so source order also favours it. Fine pointers keep the dense 34px. */
+   blocks so source order also favours it. Fine pointers keep the dense 34px.
+   (Team sub-match button floor is now handled by .team-bouts-scroll context.) */
 @media (pointer: coarse) {
-  .editor-modal--compact .sb-points-grid .ipt-btn,
-  .editor-modal--compact .team-sub-match__btns .ipt-btn {
+  .editor-modal--compact .sb-points-grid .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Touch-target floor for the inline operator console and team modal --- *
+   The shiaijo console is the surface operators actually score on, on a
+   tablet, so every in-bout control takes the DESIGN.md §6 ≥44px coarse-pointer
+   floor. Scoped to .team-bouts-scroll so BOTH the inline .scoring-panel and the
+   .editor-modal team modal inherit it. The ippon mark row (.team-sub-match__btns)
+   is already flex-wrap, so at full 44px width the 5 marks wrap to two rows
+   (3 + 2) when a side column is tight (≈147px on a 1024 landscape iPad) and
+   stay on one row when there's room — container-driven, no viewport query.
+   The centre score slots can't take 44px WIDTH (the centre column is a fixed
+   160px shared by both sides' 2 slots + the result; 4×34 already overflows),
+   so they keep their fitting 26px width and take the full 44px height —
+   vertical room is free, which roughly doubles the tap area. */
+@media (pointer: coarse) {
+  .team-bouts-scroll .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .team-bouts-scroll .tsm-fouls__btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .team-bouts-scroll .team-sub-match__center .editor-side__pt {
+    min-height: 44px;
+  }
+  .team-bouts-scroll .lineup-name__clear {
     min-width: 44px;
     min-height: 44px;
   }
@@ -6484,6 +6727,49 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: contents;
 }
 
+/* --- Daihyosen (representative-bout) affordance ------------------------- */
+/* An always-available manual control on knockout team matches. Quiet by
+   default (ghost button, neutral frame); when a tie on IV+PW is detected it
+   gains an accent frame + a soft attention pulse so the operator's eye lands
+   on the path forward. The default copy stays >=4.5:1 on --bg-2 and the tied
+   copy on --accent-soft by using --ink-2 for the hint. mp-c2yr. */
+.daihyosen-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border, #d8dee9);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.daihyosen-controls__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.daihyosen-controls__hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.daihyosen-controls__err {
+  font-size: 12px;
+  color: var(--danger);
+}
+.daihyosen-controls--tied {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: daihyosen-tied-pulse 1.8s ease-out infinite;
+}
+.daihyosen-controls--tied .daihyosen-controls__title {
+  color: var(--accent-strong);
+}
+@keyframes daihyosen-tied-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 53, 87, 0.28); }
+  50%      { box-shadow: 0 0 0 6px rgba(29, 53, 87, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dot--running,
   .topbar__conn--down .topbar__conn__dot,
@@ -6491,6 +6777,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .spinner,
   .toast,
   .decision-prompt,
+  .daihyosen-controls--tied,
   .announcement-banner {
     animation: none;
   }
@@ -7283,3 +7570,160 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .branding__logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .branding__logo-actions { display: flex; justify-content: flex-end; }
 
+
+/* ── Shiaijo operator console (Direction C, mp-c2yr) ──────────────────────
+   Two-column: queue (left ~40%) + inline scoring & context (right). Stacks
+   below 900px so tablet-portrait gets scoring-on-top, queue-below. */
+.shiaijo {
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* Shiro/Aka badges run 7px across the console; bump them on the operator
+   console so they stay legible at arm's length in a bright hall (critique
+   P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
+.shiaijo .se-color-badge { font-size: 10px; padding: 2px 5px; }
+.shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
+
+.linklike {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+}
+
+/* Up Next — elevated call-to-court card */
+.shiaijo-upnext__card {
+  border: 1px solid var(--accent-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.shiaijo-upnext__card.is-called {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.shiaijo-upnext__time { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+.shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
+
+/* Team-match lineup prompt above the inline scoring panel */
+.shiaijo-lineup-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px; border: 1px solid var(--accent-soft); border-radius: 10px;
+  background: var(--accent-soft);
+}
+.shiaijo-lineup-bar__label { font-size: 12px; color: var(--ink-2); min-width: 0; }
+
+/* Inline lineup editor (no popup) — lives in the main column where the
+   scoring panel would be. */
+.lineup-panel--inline { padding: 16px 18px; }
+
+/* Queue-row action cell: court picker + skip, kept compact. */
+.shiaijo-row__actions { display: flex; align-items: center; gap: 6px; }
+.shiaijo-row__skip { padding: 2px 8px; font-size: 11px; }
+
+/* Big sides block for the Up Next card */
+.shiaijo-sides { display: flex; align-items: center; gap: 12px; }
+.shiaijo-sides__side { flex: 1; min-width: 0; }
+.shiaijo-sides__side .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-3); }
+.shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
+.shiaijo-sides--lg .name { font-size: 18px; }
+
+/* Queue rows: 4-column variant of score-edit-row (no standalone court cell). */
+/* Fixed status + actions columns (not auto) so the "Final" badge and the
+   court-picker / Skip controls line up vertically across every queue row
+   regardless of each row's content width. */
+.shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; }
+/* Upcoming rows are informational (start via Up Next, manage via the row's
+   own controls) — not openable in the scoring panel, so no button affordance. */
+.shiaijo-row--static { cursor: default; }
+.shiaijo-row__comp { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+.shiaijo-row__status { display: flex; align-items: center; justify-content: flex-end; }
+.shiaijo-row__actions { justify-content: flex-end; }
+
+/* Team encounter score in the queue row: always carries an IV label so a
+   bare figure is never shown out of context (a team number could read as
+   wins / points otherwise). */
+.shiaijo-row__teamscore { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+.shiaijo-row__iv {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+  text-decoration: none;
+  border: 0;
+}
+
+.shiaijo-completed__toggle,
+.shiaijo-context__toggle {
+  background: none; border: 0; cursor: pointer; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 6px;
+}
+.shiaijo-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
+}
+
+/* Context panel (collapsible) */
+.shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.shiaijo-context__toggle { padding: 12px 14px; }
+.shiaijo-context__body { padding: 0 14px 14px; }
+.shiaijo-context__bracket { overflow: auto; max-height: 360px; }
+
+/* "Which pool is next" banner above the pool standings. */
+.shiaijo-context__next {
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.shiaijo-context__next-label { color: var(--ink-3); }
+/* Reused PoolsViewer in a narrow panel: single column, no inner scroll —
+   the current pool renders in full (the operator scrolls the page, not a
+   cramped box). */
+.shiaijo-context__pools .pools-grid { grid-template-columns: 1fr; gap: 12px; }
+
+.shiaijo__placeholder { margin: 0; }
+
+/* Heads-up when a second bout is running on this court (operator started one
+   from another competition's admin view). The console officiates one bout at a
+   time, so the others are surfaced here rather than stranded. Navy = running
+   signal (Principle 3), never red. */
+.shiaijo-also-running {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink-1);
+}
+.shiaijo-also-running__title { font-weight: 700; font-size: 13px; }
+.shiaijo-also-running__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.shiaijo-also-running__comp { color: var(--ink-3); }
+.shiaijo-also-running__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 900px) {
+  .shiaijo { grid-template-columns: 1fr; }
+  /* Scoring on top, queue below (brief: tablet portrait = stacked). */
+  .shiaijo__main { order: 0; }
+  .shiaijo__queue { order: 1; }
+}

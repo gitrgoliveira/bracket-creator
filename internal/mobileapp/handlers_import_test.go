@@ -868,3 +868,33 @@ func TestParseSeedsBytes(t *testing.T) {
 		assert.Equal(t, 2, seeds[1].SeedRank)
 	})
 }
+
+// TestImportCompetition_InheritsTournamentCourts locks in that the manifest
+// importer applies the same court invariant as the POST/PUT handlers: a row
+// that omits courts inherits the tournament's courts via
+// resolveCompetitionCourts (it used to hardcode a single "A").
+func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A", "B"},
+	}))
+
+	t.Run("omitted courts inherit the tournament's courts", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-no-courts", Name: "No Courts", Date: "11-06-2026"}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-no-courts")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B"}, comp.Courts)
+	})
+
+	t.Run("explicit manifest courts are preserved", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-one-court", Name: "One Court", Date: "11-06-2026", Courts: []string{"B"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-one-court")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"B"}, comp.Courts)
+	})
+}

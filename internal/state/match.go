@@ -2,6 +2,74 @@ package state
 
 import "sort"
 
+// CourtOccupancy carries the first running match found on a given court.
+type CourtOccupancy struct {
+	CompID  string
+	MatchID string
+}
+
+// RunningMatchOnCourt scans every competition for a match with the given
+// court that is currently in MatchStatusRunning. It returns the first
+// occupant found, or nil if the court is free. An empty court string is
+// never considered busy (unassigned matches don't block anything).
+//
+// Lock discipline: each competition's data is loaded under its own
+// per-comp READ lock (via the public Load* methods). The caller MUST NOT
+// already hold the write lock for any competition that this method
+// scans — that would deadlock the non-reentrant RWMutex. On the
+// StartMatchTx path the caller holds compID_X's write lock, so
+// skipCompID must be set to compID_X; that competition is checked by
+// the caller via StoreTx instead.
+func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, error) {
+	if court == "" {
+		return nil, nil
+	}
+	ids, err := s.ListCompetitions()
+	if err != nil {
+		return nil, err
+	}
+	for _, compID := range ids {
+		if compID == skipCompID {
+			continue
+		}
+		if occ := runningOnCourtInPoolMatches(s, compID, court); occ != nil {
+			return occ, nil
+		}
+		if occ, err := runningOnCourtInBracket(s, compID, court); err == nil && occ != nil {
+			return occ, nil
+		}
+	}
+	return nil, nil
+}
+
+func runningOnCourtInPoolMatches(s *Store, compID, court string) *CourtOccupancy {
+	matches, err := s.LoadPoolMatches(compID)
+	if err != nil {
+		return nil
+	}
+	for _, m := range matches {
+		if m.Status == MatchStatusRunning && m.Court == court {
+			return &CourtOccupancy{CompID: compID, MatchID: m.ID}
+		}
+	}
+	return nil
+}
+
+func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, error) {
+	bracket, err := s.LoadBracket(compID)
+	if err != nil || bracket == nil {
+		return nil, err
+	}
+	for _, round := range bracket.Rounds {
+		for _, bm := range round {
+			if bm.Status == MatchStatusRunning && bm.Court == court {
+				return &CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // DeriveQueuePositions assigns a 1-indexed queue position to each
 // scheduled match per court. Live (running) and completed matches
 // receive 0.

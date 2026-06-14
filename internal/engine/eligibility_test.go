@@ -1036,3 +1036,145 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 		assert.Contains(t, ineligErr.Reason, "already fighting")
 	})
 }
+
+// TestStartMatch_CourtExclusivity verifies mp-95mg: StartMatch and
+// StartMatchTx must reject starting a match on a court that already
+// has a running match, across ALL competitions sharing the tournament.
+func TestStartMatch_CourtExclusivity(t *testing.T) {
+	t.Run("court busy in same competition blocks new match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "court-same-comp"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.StartMatch(compID, "m2")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, err, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "m1", courtErr.MatchID)
+	})
+
+	t.Run("court busy in different competition blocks new match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		// comp1 has a running match on court A.
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		// comp2 wants to start a match on court A.
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.StartMatch("comp2", "m2")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, err, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "m1", courtErr.MatchID)
+		assert.Equal(t, "comp1", courtErr.CompID)
+	})
+
+	t.Run("free court allows match to start", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "court-free"
+		createTestCompetition(t, store, compID, "league", 3)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "m2", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		// m2 is on court A which is free — but Alice is also in m1.
+		// Court check passes, but player simultaneity blocks it.
+		err := eng.StartMatch(compID, "m2")
+		// Error should be IneligibleCompetitor (player already fighting), not CourtBusy.
+		assert.False(t, errors.Is(err, ErrCourtBusy), "court A is free; should not get CourtBusy")
+	})
+
+	t.Run("match with no court assigned is never blocked by court exclusivity", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "no-court"
+		createTestCompetition(t, store, compID, "league", 3)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: ""},
+		}))
+
+		err := eng.StartMatch(compID, "m2")
+		// No court assigned → court check skipped; other checks may pass or fail
+		// but ErrCourtBusy must not appear.
+		assert.False(t, errors.Is(err, ErrCourtBusy), "unassigned-court match must not trigger ErrCourtBusy")
+	})
+}
+
+func TestStartMatchTx_CourtExclusivity(t *testing.T) {
+	t.Run("court busy in same competition blocks via tx path", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "tx-court-same"
+		createTestCompetition(t, store, compID, "league", 3)
+		// IDs must be hyphenated (PoolName-MatchIdx) so they survive the CSV
+		// round-trip that LoadPoolMatchesLocked uses inside a transaction.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "P-1", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		var engErr error
+		txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+			engErr = eng.StartMatchTx(tx, compID, "P-1")
+			return nil
+		})
+		require.NoError(t, txErr)
+		require.Error(t, engErr)
+		assert.True(t, errors.Is(engErr, ErrCourtBusy), "want ErrCourtBusy, got %v", engErr)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, engErr, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "P-0", courtErr.MatchID)
+	})
+
+	t.Run("court busy in different competition blocks via tx path", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		var engErr error
+		txErr := store.WithTransaction("comp2", func(tx state.StoreTx) error {
+			engErr = eng.StartMatchTx(tx, "comp2", "P-0")
+			return nil
+		})
+		require.NoError(t, txErr)
+		require.Error(t, engErr)
+		assert.True(t, errors.Is(engErr, ErrCourtBusy), "want ErrCourtBusy, got %v", engErr)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, engErr, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "comp1", courtErr.CompID)
+	})
+}

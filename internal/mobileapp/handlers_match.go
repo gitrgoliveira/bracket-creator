@@ -916,6 +916,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				})
 				return
 			}
+			var courtBusyErr *engine.CourtBusyError
+			if errors.As(engErr, &courtBusyErr) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "court_busy",
+					"court":   courtBusyErr.Court,
+					"matchId": courtBusyErr.MatchID,
+					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
+				})
+				return
+			}
 			var downstreamKnockoutErr *engine.DownstreamKnockoutScoredError
 			if errors.As(engErr, &downstreamKnockoutErr) {
 				c.JSON(http.StatusConflict, gin.H{

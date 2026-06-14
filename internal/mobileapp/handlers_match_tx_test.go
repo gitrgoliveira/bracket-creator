@@ -284,10 +284,12 @@ func TestBulkScore_CorrectionGateRaceproof(t *testing.T) {
 				ch <- result{code: w.Code, body: w.Body.String()}
 			}
 
+			ready := make(chan struct{})
 			var wg sync.WaitGroup
 			wg.Add(2)
-			go func() { defer wg.Done(); putScore() }()
-			go func() { defer wg.Done(); bulkScore() }()
+			go func() { defer wg.Done(); <-ready; putScore() }()
+			go func() { defer wg.Done(); <-ready; bulkScore() }()
+			close(ready) // release both goroutines simultaneously
 			done := make(chan struct{})
 			go func() { wg.Wait(); close(done) }()
 			select {

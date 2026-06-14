@@ -245,16 +245,18 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const multi = count >= 2;
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
-  const maybeFirstAdd = () => { if (watchlist.length === 0 && onFirstAdd) onFirstAdd(); };
   const addPlayer = (p) => {
-    maybeFirstAdd(); // inside gesture handler — permission prompt can fire
-    setWatchlist(prev => addPlayerToWatchlist(prev, p));
+    setWatchlist(prev => {
+      const next = addPlayerToWatchlist(prev, p);
+      if (prev.length === 0 && next.length > 0 && onFirstAdd) onFirstAdd();
+      return next;
+    });
   };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    maybeFirstAdd();
     setWatchlist(prev => {
       if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
+      if (prev.length === 0 && onFirstAdd) onFirstAdd();
       return [...prev, { type: "dojo", dojo: d.name }];
     });
   };

@@ -578,7 +578,10 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 // "storage-failed" (granted but localStorage write threw — firing path won't fire).
 export async function notifEnable() {
   if (typeof Notification === "undefined") return "off";
-  if (Notification.permission === "denied") return "denied";
+  if (Notification.permission === "denied") {
+    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+    return "denied";
+  }
   if (Notification.permission === "default") {
     let r;
     try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }

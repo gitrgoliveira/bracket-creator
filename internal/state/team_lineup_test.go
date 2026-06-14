@@ -143,32 +143,56 @@ func TestLineupLockOtherRoundUnaffected(t *testing.T) {
 	assert.Nil(t, got[teamLineupKey("team-alpha", 1)].LockedAt, "round 1 still open")
 }
 
-// TestLineupSetValidatesShape proves that SetTeamLineup runs
-// TeamLineup.Validate before persisting — a malformed lineup must
-// never reach disk. Reuses the FIK back-fill rule the domain test
-// already covers (3+ missing positions disqualifies a 5-person team).
+// TestLineupSetValidatesShape proves that SetTeamLineup rejects INVALID
+// position keys — a lineup with an unrecognised position must never reach
+// disk. Under the new partial-lineup contract, a lineup that has only valid
+// keys but is incomplete (e.g. only Senpo + Taisho, missing the three middle
+// positions) MUST be accepted — completeness is a non-blocking UI warning,
+// not a write-time gate.
 func TestLineupSetValidatesShape(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
 
 	const compID = "team-comp-4"
-	bad := domain.TeamLineup{
-		TeamID: "team-alpha",
-		Round:  0,
-		Positions: map[domain.Position]string{
-			domain.PosSenpo:  "p1",
-			domain.PosTaisho: "p5",
-			// Jiho, Chuken, Fukusho all missing → 3+ vacancies → DQ.
-		},
-	}
-	err := store.SetTeamLineup(compID, bad, 5)
-	require.ErrorIs(t, err, domain.ErrLineupTooManyMissing,
-		"shape errors must propagate from Validate so the handler returns 400")
 
-	// Nothing on disk.
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.Empty(t, got, "rejected Set must not leave a partial file")
+	t.Run("invalid position key is rejected", func(t *testing.T) {
+		bad := domain.TeamLineup{
+			TeamID: "team-alpha",
+			Round:  0,
+			Positions: map[domain.Position]string{
+				"chudan": "p1", // not a valid FIK position name
+			},
+		}
+		err := store.SetTeamLineup(compID, bad, 5)
+		require.Error(t, err, "an invalid position key must be rejected")
+		assert.NotErrorIs(t, err, domain.ErrLineupTooManyMissing,
+			"key validation must fire before the completeness check")
+
+		got, err := store.LoadTeamLineups(compID)
+		require.NoError(t, err)
+		assert.Empty(t, got, "rejected Set must not leave a partial file")
+	})
+
+	t.Run("partial lineup with valid keys is accepted", func(t *testing.T) {
+		partial := domain.TeamLineup{
+			TeamID: "team-alpha",
+			Round:  0,
+			Positions: map[domain.Position]string{
+				domain.PosSenpo:  "p1",
+				domain.PosTaisho: "p5",
+				// Jiho, Chuken, Fukusho missing — partial, but keys are valid.
+			},
+		}
+		require.NoError(t, store.SetTeamLineup(compID, partial, 5),
+			"a partial lineup with valid position keys must persist — completeness is not enforced at write time")
+
+		got, err := store.LoadTeamLineups(compID)
+		require.NoError(t, err)
+		require.Len(t, got, 1, "partial lineup must be on disk")
+		key := teamLineupKey("team-alpha", 0)
+		assert.Equal(t, "p1", got[key].Positions[domain.PosSenpo])
+		assert.Equal(t, "p5", got[key].Positions[domain.PosTaisho])
+	})
 }
 
 // TestLineupLockIdempotent locks the same round twice; the second call
@@ -255,9 +279,11 @@ func TestDeleteTeamLineup_Success(t *testing.T) {
 	assert.Empty(t, got, "lineup must be absent after successful delete")
 }
 
-// TestSetTeamLineup_RoundHasLiveBracketMatch verifies the T128a guard:
-// when a bracket match for the same round is already running, SetTeamLineup
-// must refuse with ErrLineupLocked even if no LockedAt stamp exists yet.
+// TestSetTeamLineup_RoundHasLiveBracketMatch verifies the new partial-lineup
+// contract: saving a NEW lineup (no prior entry) while the round is live
+// SUCCEEDS — the lock only applies to writes that CHANGE an already-recorded
+// position. Adding the first lineup at the table while bouts run is the
+// normal live-entry case.
 func TestSetTeamLineup_RoundHasLiveBracketMatch(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -272,13 +298,14 @@ func TestSetTeamLineup_RoundHasLiveBracketMatch(t *testing.T) {
 		}},
 	}))
 
-	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
-	require.ErrorIs(t, err, ErrLineupLocked,
-		"running bracket match in round 0 must block SetTeamLineup with ErrLineupLocked")
+	// NEW lineup (no prior entry) while the round is live → must succeed.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5),
+		"saving a new lineup while the round is live must succeed — lock only blocks changing a recorded position")
 }
 
-// TestSetTeamLineup_RoundHasLivePoolMatch verifies the T128a guard for pool
-// matches: running pool matches collapse to round 0.
+// TestSetTeamLineup_RoundHasLivePoolMatch verifies the new partial-lineup
+// contract for pool matches: saving a NEW lineup while a pool match is running
+// must SUCCEED. The lock only blocks changing an already-recorded position.
 func TestSetTeamLineup_RoundHasLivePoolMatch(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -286,18 +313,18 @@ func TestSetTeamLineup_RoundHasLivePoolMatch(t *testing.T) {
 	const compID = "team-live-pool"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
-	// Pool match running → should block round 0 lineup submissions.
+	// Pool match running → NEW lineup (no prior) must still succeed.
 	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
 		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
 	}))
 
-	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
-	require.ErrorIs(t, err, ErrLineupLocked,
-		"running pool match must block round 0 SetTeamLineup with ErrLineupLocked")
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5),
+		"saving a new lineup while a pool match is live must succeed — only changing a recorded position is blocked")
 }
 
-// TestSetTeamLineup_RoundHasCompletedMatch verifies that a COMPLETED bracket
-// match in the round also blocks the lineup submission.
+// TestSetTeamLineup_RoundHasCompletedMatch verifies the new partial-lineup
+// contract: a completed bracket match does NOT block a NEW lineup submission
+// (no prior entry). Only changing an already-recorded position is blocked.
 func TestSetTeamLineup_RoundHasCompletedMatch(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -311,6 +338,90 @@ func TestSetTeamLineup_RoundHasCompletedMatch(t *testing.T) {
 		}},
 	}))
 
-	err := store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
-	require.ErrorIs(t, err, ErrLineupLocked)
+	// NEW lineup (no prior) while the round is completed → must succeed.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5),
+		"saving a new lineup while the round is completed must succeed — lock only blocks changing a recorded position")
+}
+
+// TestSetTeamLineup_PartialAllowedWhileLive verifies that a partial lineup
+// (only senpo set, other positions empty) persists successfully while a pool
+// match is running — the normal "enter the order at the table" flow.
+func TestSetTeamLineup_PartialAllowedWhileLive(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-partial-live"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+
+	partial := domain.TeamLineup{
+		TeamID: "team-alpha",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1",
+		},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, partial, 5),
+		"partial {senpo:X} save while the match is running must succeed")
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	key := teamLineupKey("team-alpha", 0)
+	require.Contains(t, got, key)
+	assert.Equal(t, "p1", got[key].Positions[domain.PosSenpo])
+}
+
+// TestSetTeamLineup_ChangeRecordedWhileLiveLocked verifies that changing an
+// already-recorded position while the round is live returns ErrLineupLocked
+// (non-force path). Adding to empty slots is allowed; only substitutions are
+// blocked.
+func TestSetTeamLineup_ChangeRecordedWhileLiveLocked(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-change-live-locked"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	// Pre-live: save a partial lineup while the match is scheduled.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusScheduled},
+	}))
+	initial := domain.TeamLineup{
+		TeamID: "team-alpha",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1",
+		},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, initial, 5))
+
+	// Match goes live.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+
+	// Changing the already-recorded senpo must be blocked.
+	change := domain.TeamLineup{
+		TeamID: "team-alpha",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1-substitute", // CHANGE to a recorded position
+		},
+	}
+	require.ErrorIs(t, store.SetTeamLineup(compID, change, 5), ErrLineupLocked,
+		"changing a recorded position while live must return ErrLineupLocked")
+
+	// Adding jiho to the empty slot must still succeed.
+	add := domain.TeamLineup{
+		TeamID: "team-alpha",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo: "p1",     // unchanged
+			domain.PosJiho:  "p2-new", // ADD to empty slot
+		},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, add, 5),
+		"adding a player to an empty slot while live must succeed")
 }

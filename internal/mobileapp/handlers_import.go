@@ -163,10 +163,6 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		SwissRounds:    entry.SwissRounds,
 		Status:         state.CompStatusSetup,
 	}
-	if len(comp.Courts) == 0 {
-		comp.Courts = []string{"A"}
-	}
-
 	// Cross-file guard symmetry with handlers_competition.go (POST + PUT):
 	// reject oversized string fields before they land on disk. Without
 	// this an imported manifest could persist a 1MB Name where the REST
@@ -182,10 +178,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// import path bypassed this check and could land a Competition with
 	// court labels that no other write path would accept — e.g. a manifest
 	// row with 30 courts or court="AA" would persist via SaveCompetition
-	// here while the same value via the REST API would 400. Apply the
-	// same validator AFTER the empty-courts fallback above so the explicit
-	// default "A" passes trivially. Per-row res.Error to match the other
-	// validation patterns.
+	// here while the same value via the REST API would 400. Empty courts
+	// are permitted here — resolveCompetitionCourts (below, once the
+	// tournament is loaded) inherits the tournament's courts, matching the
+	// POST/PUT handlers. Per-row res.Error to match the other patterns.
 	if err := validateCompetitionCourts(comp.Courts); err != nil {
 		res.Error = "courts: " + err.Error()
 		return res
@@ -214,6 +210,12 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		res.Error = err.Error()
 		return res
 	}
+
+	// Guarantee >=1 court: a manifest row that omits courts inherits the
+	// tournament's courts, identical to the POST /competitions and PUT
+	// settings handlers (resolveCompetitionCourts). Keeps all three write
+	// paths on one rule instead of a special-case "A" default for imports.
+	comp.Courts = resolveCompetitionCourts(comp.Courts, importTourn)
 
 	// Cross-file guard symmetry with POST /competitions and PUT
 	// /competitions/:id (handlers_competition.go): reject unknown formats

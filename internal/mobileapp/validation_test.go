@@ -453,6 +453,11 @@ func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 			req:       ScoreRequest{DecisionReason: strings.Repeat("r", 201)},
 			wantField: "decisionReason",
 		},
+		{
+			name:      "correctionReason over 200 chars",
+			req:       ScoreRequest{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -463,6 +468,25 @@ func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}
+}
+
+// TestReasonCaps_ValidateTrimmedValue verifies the audit free-text length caps
+// are applied to the TRIMMED value, matching the write path which persists
+// strings.TrimSpace(reason). A reason that is within the cap once normalized
+// must not be rejected for surrounding whitespace.
+func TestReasonCaps_ValidateTrimmedValue(t *testing.T) {
+	atCap := strings.Repeat("c", MaxLenCorrectionReason)
+	padded := "  " + atCap + "   " // over the cap raw, within it once trimmed
+
+	t.Run("ScoreRequest.Validate correctionReason", func(t *testing.T) {
+		req := ScoreRequest{CorrectionReason: padded}
+		require.NoError(t, req.Validate(),
+			"correctionReason within cap after trim must not be rejected")
+	})
+	t.Run("validateBulkScoreLengths correctionReason", func(t *testing.T) {
+		require.NoError(t, validateBulkScoreLengths(&state.MatchResult{CorrectionReason: padded}),
+			"bulk correctionReason within cap after trim must not be rejected")
+	})
 }
 
 // TestValidateBulkScoreLengths covers the bulk-score helper. The
@@ -496,6 +520,11 @@ func TestValidateBulkScoreLengths(t *testing.T) {
 			name:      "decisionReason over cap",
 			mr:        state.MatchResult{DecisionReason: strings.Repeat("r", 201)},
 			wantField: "decisionReason",
+		},
+		{
+			name:      "correctionReason over cap",
+			mr:        state.MatchResult{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
 		},
 		{
 			name: "subResult sideB over cap",

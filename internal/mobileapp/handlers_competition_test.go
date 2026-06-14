@@ -1931,6 +1931,67 @@ func TestDiscardDrawHandler(t *testing.T) {
 	})
 }
 
+// TestCompetitionCourtsInvariant verifies that every competition resolves to at
+// least one court: empty competition courts inherit the tournament's courts so
+// generated matches carry a real court label (otherwise the per-court Shiaijo
+// operator view at /admin/shiaijo/:court cannot surface them). See
+// resolveCompetitionCourts in handlers_tournament.go.
+func TestCompetitionCourtsInvariant(t *testing.T) {
+	// readBackCourts POSTs/loads a competition and returns its persisted courts.
+	postComp := func(t *testing.T, r *gin.Engine, body map[string]any) map[string]any {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusCreated, w.Code, "resp: %s", w.Body.String())
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got
+	}
+	courtsOf := func(comp map[string]any) []string {
+		raw, _ := comp["courts"].([]any)
+		out := make([]string, 0, len(raw))
+		for _, v := range raw {
+			out = append(out, v.(string))
+		}
+		return out
+	}
+
+	t.Run("empty courts inherit the tournament's courts", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "No Courts Comp"})
+		assert.Equal(t, []string{"A", "B", "C"}, courtsOf(comp),
+			"a competition created without courts must inherit the tournament's courts")
+
+		// Confirm it is persisted, not just echoed in the response.
+		reloaded, err := store.LoadCompetition(comp["id"].(string))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B", "C"}, reloaded.Courts)
+	})
+
+	t.Run("explicit competition courts are preserved", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "One Court Comp", "courts": []string{"B"}})
+		assert.Equal(t, []string{"B"}, courtsOf(comp),
+			"an explicit court selection must not be overridden by the tournament's courts")
+	})
+
+	t.Run("no tournament falls back to a single default court", func(t *testing.T) {
+		r, _, _, _, _ := setupTestRouter(t) // setupTestRouter saves no tournament
+		comp := postComp(t, r, map[string]any{"name": "Bootstrap Comp"})
+		assert.Equal(t, []string{"A"}, courtsOf(comp),
+			"with no tournament configured, an empty-courts competition defaults to court A")
+	})
+}
+
 // TestCheckUniqueCompFields tests the checkUniqueCompFields helper directly.
 func TestCheckUniqueCompFields(t *testing.T) {
 	_, store, _, _, tempDir := setupTestRouter(t)

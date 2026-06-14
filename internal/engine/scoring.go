@@ -590,21 +590,17 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		var sorted []state.PlayerStanding
 		for _, s := range playerStandings {
 			if isTeam {
-				// Team weighted score (Excel formula):
-				// W × 1B − L × 10M + T × 100K + IV × 1000 − IL × 100 + IT × 10 + PW − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
-					s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
-					s.PointsWon*100 - s.PointsLost
+				// Single packed ranking score over the full team tiebreak chain
+				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
+				s.Points = teamStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
 					s.Wins, s.Losses, s.Draws,
 					s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
 					s.PointsWon, s.PointsLost)
 			} else {
-				// Individual weighted score (Excel formula):
-				// W × 1,000,000 − L × 10,000 + D × 100 + PW × 1 − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+				// Single packed ranking score over the individual chain
+				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
+				s.Points = individualStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
 					s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
 			}
@@ -615,69 +611,15 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			return sorted[i].Points > sorted[j].Points
 		})
 
-		// Apply tiebreaker results as a secondary sort within tied groups.
-		// Win counts are scoped per group: only TB matches between the players
-		// in the same tied group influence that group's ordering, preventing
-		// wins from an unrelated tied group from bleeding into another.
-		for i := 0; i < len(sorted); {
-			j := i + 1
-			for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-				j++
-			}
-			if j-i >= 2 {
-				groupNames := make(map[string]bool, j-i)
-				for k := i; k < j; k++ {
-					groupNames[sorted[k].Player.Name] = true
-				}
-				groupTBWins := map[string]int{}
-				for _, m := range matches {
-					if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-						continue
-					}
-					if groupNames[m.SideA] && groupNames[m.SideB] {
-						groupTBWins[m.Winner]++
-					}
-				}
-				if len(groupTBWins) > 0 {
-					sort.SliceStable(sorted[i:j], func(a, b int) bool {
-						return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
-					})
-				}
-			}
-			i = j
-		}
-
-		// Apply pool-daihyosen results as a secondary sort within tied groups
-		// for team competitions. Mirrors the TB block above: DH wins are scoped
-		// per tied group to prevent cross-group bleed.
+		// Apply supplementary-bout results as a secondary sort within each tied
+		// group (groups located by the single detectPoolTies Points-equality
+		// walk). Win counts are scoped per group — only bouts between members of
+		// the same tied group count — so results from an unrelated tied group
+		// never bleed across. TB (ippon-shobu) applies to all formats; DH
+		// (representative) only to team competitions.
+		applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
 		if isTeam {
-			for i := 0; i < len(sorted); {
-				j := i + 1
-				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-					j++
-				}
-				if j-i >= 2 {
-					groupNames := make(map[string]bool, j-i)
-					for k := i; k < j; k++ {
-						groupNames[sorted[k].Player.Name] = true
-					}
-					groupDHWins := map[string]int{}
-					for _, m := range matches {
-						if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-							continue
-						}
-						if groupNames[m.SideA] && groupNames[m.SideB] {
-							groupDHWins[m.Winner]++
-						}
-					}
-					if len(groupDHWins) > 0 {
-						sort.SliceStable(sorted[i:j], func(a, b int) bool {
-							return groupDHWins[sorted[i+a].Player.Name] > groupDHWins[sorted[i+b].Player.Name]
-						})
-					}
-				}
-				i = j
-			}
+			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
 		// Apply manual rank overrides
@@ -778,6 +720,12 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
 					if result.ResultSource != "" {
 						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
+					}
+					// Twin parity with recordBracketMatchResultTx (scoring_tx.go):
+					// carry the operator correction note when set, so the non-tx
+					// write path doesn't silently drop it for a future caller.
+					if result.CorrectionReason != "" {
+						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
 					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {

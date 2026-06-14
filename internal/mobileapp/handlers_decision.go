@@ -188,7 +188,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
-			"result":        result,
+			"result":        matchPtrForBroadcast(result),
 		})
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{

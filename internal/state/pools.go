@@ -302,6 +302,22 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	return parsePoolMatchesRecords(records), nil
 }
 
+// splitIppons parses a "|"-joined ippon field into a slice, mapping an
+// EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
+// one-element slice holding the empty string), which len() then counts as a
+// phantom ippon — inflating points-won/lost in standings and corrupting
+// individual pool tie detection (two players who actually tied read as
+// differing by a phantom point). An empty field maps to a zero-length slice
+// across every consumer; we return a non-nil empty slice (not nil) so the
+// JSON projection stays a stable array ([]), not null — the viewer endpoints
+// serialize IpponsA/IpponsB and an array field should never flip to null.
+func splitIppons(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, "|")
+}
+
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
 // rec-shape→struct mapping verbatim (no drift between the two).
@@ -323,8 +339,8 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			SideA:    rec[2],
 			SideB:    rec[3],
 			Winner:   rec[4],
-			IpponsA:  strings.Split(rec[5], "|"),
-			IpponsB:  strings.Split(rec[6], "|"),
+			IpponsA:  splitIppons(rec[5]),
+			IpponsB:  splitIppons(rec[6]),
 			HansokuA: hansokuA,
 			HansokuB: hansokuB,
 			Decision: rec[9],
@@ -362,6 +378,9 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 18 {
 			m.WinnerID = rec[18]
 		}
+		if len(rec) > 19 {
+			m.CorrectionReason = rec[19]
+		}
 
 		results = append(results, m)
 	}
@@ -398,7 +417,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason"}); err != nil {
 		return err
 	}
 
@@ -436,6 +455,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.SideAID,
 			r.SideBID,
 			r.WinnerID,
+			r.CorrectionReason,
 		}); err != nil {
 			return err
 		}

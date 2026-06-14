@@ -343,14 +343,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
-		// the tournament version — empty courts is allowed because the
-		// engine applies a 1-court default and the import handler has
-		// the same fallback). Defense against direct API callers
+		// the tournament version: empty courts are allowed here because
+		// they are immediately resolved to the tournament's courts via
+		// resolveCompetitionCourts on the next line, so every match ends
+		// up with a real court label). Defense against direct API callers
 		// sending multi-character labels.
 		if err := validateCompetitionCourts(comp.Courts); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
 		}
+
+		// Guarantee >=1 court: empty competition courts inherit the
+		// tournament's courts so every match carries a real court label
+		// (otherwise the per-court Shiaijo operator view can't surface them).
+		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
 
 		// Reject negative per-phase or legacy durations.
 		if err := validateCompetitionDurations(&comp); err != nil {
@@ -632,6 +638,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
+			// Guarantee >=1 court: a settings PUT that clears courts (or a
+			// direct API caller sending none) inherits the tournament's
+			// courts so every match carries a real court label. The transform
+			// below copies comp.Courts onto current for settings-only PUTs.
+			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
+
 			// Reject negative per-phase or legacy durations.
 			if err := validateCompetitionDurations(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -810,6 +822,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolSize = comp.PoolSize
 				current.PoolWinners = comp.PoolWinners
 				current.PoolSizeMode = comp.PoolSizeMode
+				// comp.Courts was already defaulted to >=1 court (tournament
+				// fallback) in the settings-validation block above.
 				current.Courts = comp.Courts
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName

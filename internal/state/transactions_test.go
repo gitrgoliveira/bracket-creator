@@ -1605,21 +1605,20 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 			if err := tx.SetTeamLineup(cid, good, 5); err != nil {
 				return err
 			}
-			// Pending bytes now exist; a bad lineup must fail Validate.
-			// Jiho + Chuken + Fukusho all missing = 3 vacancies → DQ.
+			// Pending bytes now exist; a bad lineup must fail ValidatePositions.
+			// "chudan" is not a valid FIK position key for a 5-person team.
 			bad := domain.TeamLineup{
 				TeamID: "team-bad",
 				Round:  0,
 				Positions: map[domain.Position]string{
-					domain.PosSenpo:  "p1",
-					domain.PosTaisho: "p5",
-					// Jiho, Chuken, Fukusho all missing → 3+ vacancies → DQ
+					"chudan": "p1", // invalid position key
 				},
 			}
 			return tx.SetTeamLineup(cid, bad, 5)
 		})
-		require.ErrorIs(t, err, domain.ErrLineupTooManyMissing,
-			"pending-path Validate must propagate shape errors")
+		require.Error(t, err, "pending-path ValidatePositions must propagate invalid-key errors")
+		require.NotErrorIs(t, err, domain.ErrLineupTooManyMissing,
+			"completeness check must NOT fire from ValidatePositions")
 	})
 
 	t.Run("SetCompetitorStatus pending-path: invalid status", func(t *testing.T) {

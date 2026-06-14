@@ -99,3 +99,4 @@ mp-*/
 # Session/process state (Claude Code) — never commit
 .claude/scheduled_tasks.lock
 .claude/*.lock
+.impeccable/

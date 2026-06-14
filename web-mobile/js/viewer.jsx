@@ -1146,6 +1146,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         return;
       }
     }
+    // perm is now "granted" (either pre-existing or just obtained above).
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
     try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
   };

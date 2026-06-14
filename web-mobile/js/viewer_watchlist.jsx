@@ -246,19 +246,15 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
   const addPlayer = (p) => {
-    setWatchlist(prev => {
-      const next = addPlayerToWatchlist(prev, p);
-      if (prev.length === 0 && next.length > 0 && onFirstAdd) onFirstAdd();
-      return next;
-    });
+    const next = addPlayerToWatchlist(watchlist, p);
+    if (watchlist.length === 0 && next.length > 0 && onFirstAdd) onFirstAdd();
+    setWatchlist(next);
   };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    setWatchlist(prev => {
-      if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
-      if (prev.length === 0 && onFirstAdd) onFirstAdd();
-      return [...prev, { type: "dojo", dojo: d.name }];
-    });
+    if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
+    if (watchlist.length === 0 && onFirstAdd) onFirstAdd();
+    setWatchlist([...watchlist, { type: "dojo", dojo: d.name }]);
   };
   const removeEntry = (entry) => {
     const k = entryKey(entry);

@@ -282,7 +282,7 @@ function useWatchlist() {
     // Same reliance as useChimeMuted.toggle — revisit if upgrading Preact beyond v10.
     let normalized;
     setList(prevList => {
-      const resolved = typeof next === 'function' ? next(prevList) : next;
+      const resolved = typeof next === "function" ? next(prevList) : next;
       normalized = normalizeWatchlist(resolved);
       return normalized;
     });
@@ -1282,7 +1282,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               <span className="viewer-nav-card__icon">🗓</span>
               <div className="viewer-nav-card__text">
                 <div className="viewer-nav-card__title">Full schedule</div>
-                <div className="viewer-nav-card__sub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} · {pluralize((tournament.courts || []).length, "court", "courts")}</div>
+                <div className="viewer-nav-card__sub">{pluralize(bothSidesMatches.length, "match", "matches")} · {pluralize((tournament.courts || []).length, "court", "courts")}</div>
               </div>
               <span className="viewer-nav-card__chev">→</span>
             </button>
@@ -3831,7 +3831,16 @@ export function NotificationSettings() {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      if (enabled) { notifDisable(); setEnabled(false); setPermission(Notification.permission); return; }
+      if (enabled) {
+        notifDisable();
+        // Re-read LS to match the actual persisted state (notifDisable dispatches
+        // the real state; if both setItem and removeItem failed, key stays "true").
+        let nowEnabled = false;
+        try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+        setEnabled(nowEnabled);
+        setPermission(Notification.permission);
+        return;
+      }
       // notifEnable() handles the permission prompt, persists the flag, and
       // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
       const outcome = await notifEnable();
@@ -3939,13 +3948,13 @@ function AnnBellBtn() {
     navigator.permissions?.query({ name: "notifications" })?.then((s) => {
       if (cancelled) return;
       permStatus = s;
-      s.addEventListener("change", onPermChange);
+      s.addEventListener?.("change", onPermChange);
     })?.catch(() => {});
 
     return () => {
       cancelled = true;
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-      if (permStatus) permStatus.removeEventListener("change", onPermChange);
+      if (permStatus) permStatus.removeEventListener?.("change", onPermChange);
     };
   }, []); // supported is a static boolean; the effect only wires up listeners once
 
@@ -3957,8 +3966,17 @@ function AnnBellBtn() {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      if (state === "on") { notifDisable(); return; }
-      await notifEnable();
+      if (state === "on") {
+        notifDisable();
+        // Direct state update in case dispatchNotif's try/catch swallowed the event.
+        let nowEnabled = false;
+        try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+        setState(nowEnabled ? "on" : "off");
+        return;
+      }
+      const outcome = await notifEnable();
+      // Mirror state directly so the button updates even if event dispatch failed.
+      setState(outcome === "on" ? "on" : outcome === "denied" ? "denied" : "off");
     } finally {
       inFlight.current = false;
     }

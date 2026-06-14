@@ -223,7 +223,10 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
 	}
-	if err := validateMaxLen("correctionReason", r.CorrectionReason, MaxLenCorrectionReason); err != nil {
+	// Cap the TRIMMED value: the write path persists strings.TrimSpace(reason),
+	// so a reason within the cap once normalized must not be rejected for
+	// trailing/leading whitespace.
+	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
 	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
@@ -369,7 +372,10 @@ func (r *ScoreRequest) Validate() error {
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
 	}
-	if err := validateMaxLen("correctionReason", r.CorrectionReason, MaxLenCorrectionReason); err != nil {
+	// Cap the TRIMMED value: the write path persists strings.TrimSpace(reason),
+	// so a reason within the cap once normalized must not be rejected for
+	// trailing/leading whitespace.
+	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
 	// Winner, when supplied, must name one of the two sides. Empty

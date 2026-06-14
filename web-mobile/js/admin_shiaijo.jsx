@@ -382,7 +382,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {completed.length > 0 && (
                                 <div className="shiaijo-completed">
-                                    <button className="section-title shiaijo-completed__toggle" onClick={() => setCompletedOpen((v) => !v)}>
+                                    <button type="button" className="section-title shiaijo-completed__toggle" aria-expanded={completedOpen} onClick={() => setCompletedOpen((v) => !v)}>
                                         {completedOpen ? "−" : "+"} Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
                                     </button>
                                     {completedOpen && (
@@ -640,7 +640,7 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
 
     return (
         <div className="shiaijo-context">
-            <button className="section-title shiaijo-context__toggle" onClick={onToggle}>
+            <button type="button" className="section-title shiaijo-context__toggle" aria-expanded={open} onClick={onToggle}>
                 {open ? "−" : "+"} {isPool ? "Standings" : "Context"} · {match.compName} · {phaseLabel}
             </button>
             {open && (

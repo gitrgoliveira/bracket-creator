@@ -219,6 +219,53 @@ func TestSetTeamLineupForce_BypassesMatchFreeze(t *testing.T) {
 		ErrLineupLocked, "non-force that changes a recorded position still refuses after a forced write")
 }
 
+// TestSetTeamLineup_InTxPendingForGuardsLiveMatch is the in-transaction twin
+// of TestMatchLineup_SetGuardedByOwnMatchStatus: when lineups.yaml is already
+// staged earlier in the SAME transaction (the pendingFor branch of
+// storeTx.setTeamLineup), a later non-force write that CHANGES a recorded
+// position while the match is running with no persisted LockedAt must still be
+// refused with ErrLineupLocked. Regression guard for the T128a TOCTOU: the
+// in-tx pendingFor path previously checked only LockedAt and skipped the
+// match-status re-check that Store.setTeamLineupLocked performs.
+func TestSetTeamLineup_InTxPendingForGuardsLiveMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-tx-toctou"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
+	}))
+
+	err := store.WithTransaction(compID, func(tx StoreTx) error {
+		// 1. NEW lineup on the running match — stages lineups.yaml, so every
+		//    subsequent write in this tx hits the pendingFor branch.
+		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5); e != nil {
+			return e
+		}
+		// 2. A scheduled match's lineup is still freely settable via pendingFor.
+		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-1"), 5); e != nil {
+			return e
+		}
+		// 3. CHANGING a recorded position on the RUNNING match must be refused,
+		//    even though no LockedAt is persisted (the match-status re-check).
+		changed := fiveStarterForMatch("team-alpha", "PoolA-0")
+		changed.Positions[domain.PosJiho] = "p2-substitute"
+		require.ErrorIs(t, tx.SetTeamLineup(compID, changed, 5), ErrLineupLocked,
+			"in-tx pendingFor change to a live match must refuse with ErrLineupLocked")
+		// 4. The same change via the FORCE twin bypasses the freeze.
+		return tx.SetTeamLineupForce(compID, changed, 5)
+	})
+	require.NoError(t, err)
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "p2-substitute",
+		got[teamLineupMatchKey("team-alpha", "PoolA-0")].Positions[domain.PosJiho],
+		"forced substitution must have persisted")
+}
+
 // TestLockTeamLineupForMatch_OnlyTargetMatch: locking match P1 stamps
 // every team's P1 lineup but leaves other matches untouched.
 func TestLockTeamLineupForMatch_OnlyTargetMatch(t *testing.T) {

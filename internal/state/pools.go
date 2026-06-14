@@ -307,11 +307,13 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 // one-element slice holding the empty string), which len() then counts as a
 // phantom ippon — inflating points-won/lost in standings and corrupting
 // individual pool tie detection (two players who actually tied read as
-// differing by a phantom point). Returning nil for an empty field keeps
-// len() == 0 across every consumer.
+// differing by a phantom point). An empty field maps to a zero-length slice
+// across every consumer; we return a non-nil empty slice (not nil) so the
+// JSON projection stays a stable array ([]), not null — the viewer endpoints
+// serialize IpponsA/IpponsB and an array field should never flip to null.
 func splitIppons(s string) []string {
 	if s == "" {
-		return nil
+		return []string{}
 	}
 	return strings.Split(s, "|")
 }

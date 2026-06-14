@@ -329,8 +329,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			// Bound the audit free-text (same cap as every other reason field) so
 			// a 1MB changeReason can't land in the lineup YAML. Only force writes
 			// persist it (see below), so this only matters on the force path.
+			// Cap the TRIMMED value: the write persists strings.TrimSpace(...),
+			// so trailing/leading whitespace must not trip a false 400.
 			if req.Force {
-				if err := validateMaxLen("changeReason", req.ChangeReason, MaxLenChangeReason); err != nil {
+				if err := validateMaxLen("changeReason", strings.TrimSpace(req.ChangeReason), MaxLenChangeReason); err != nil {
 					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
 					return nil
 				}

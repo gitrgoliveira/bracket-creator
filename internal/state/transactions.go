@@ -550,23 +550,39 @@ func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		}
 		key := lineupStorageKey(l)
 		if existing, present := current[key]; present {
-			// Only block on lock if this write actually changes a recorded
-			// position (adds to empty slots are always allowed).
-			if !force && changesRecordedPosition(existing, l) && existing.LockedAt != nil {
-				return ErrLineupLocked
-			}
-			// Preserve the stamp under a forced write so a later
-			// non-force write still refuses (per-write override).
 			if force {
+				// Preserve the stamp under a forced write so a later
+				// non-force write still refuses (per-write override).
 				l.LockedAt = existing.LockedAt
+			} else if changesRecordedPosition(existing, l) {
+				// A change to an already-recorded position is blocked once the
+				// match/round has gone live (adds to empty slots are always
+				// allowed). Mirrors Store.setTeamLineupLocked exactly.
+				if existing.LockedAt != nil {
+					return ErrLineupLocked
+				}
+				// T128a TOCTOU guard: a concurrent score-save could have
+				// transitioned this lineup's match to running BETWEEN the
+				// caller's GET and this write, before the engine persisted
+				// LockedAt. The handler checks match status upstream on the
+				// FORCE path only — the non-force path does not — so re-check
+				// here under the held per-comp lock and refuse if the match is
+				// no longer mutable. Match-scoped when MatchID is set (a live
+				// match must not block a sibling match's lineup), else
+				// round-scoped (legacy).
+				if l.MatchID != "" {
+					if locked, lerr := t.store.matchIsRunningOrCompletedLocked(compID, l.MatchID); lerr != nil {
+						return lerr
+					} else if locked {
+						return ErrLineupLocked
+					}
+				} else if locked, lerr := t.store.roundHasRunningOrCompletedMatchLocked(compID, l.Round); lerr != nil {
+					return lerr
+				} else if locked {
+					return ErrLineupLocked
+				}
 			}
 		}
-		// In-tx writers have already passed the round-live check
-		// upstream (handlers do that BEFORE entering the tx body
-		// in the live-tournament flows). Skipping
-		// roundHasRunningOrCompletedMatchLocked here mirrors the
-		// non-tx fast-path: the per-comp lock + the staged
-		// in-tx state are the consistency guarantees.
 		l.CompetitionID = compID
 		current[key] = l
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())

@@ -202,6 +202,146 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	assert.Containsf(t, losers[0].body, "already_ineligible", "loser should see already_ineligible body, got %s", losers[0].body)
 }
 
+// TestBulkScore_CorrectionGateRaceproof verifies the mp-ic5b TOCTOU fix:
+// a concurrent PUT /score finalisation and a POST /bulk-score on the same
+// match (no correctionReason on either) must not both succeed. Pre-fix the
+// bulk handler snapshotted status before its write loop; a PUT /score that
+// landed between the snapshot and the write would be invisible, letting
+// bulk-score silently strip the correctionReason audit requirement. The fix
+// moves the status read inside a per-result tx.WithTransaction so it is
+// always race-free against concurrent single-score writes.
+func TestBulkScore_CorrectionGateRaceproof(t *testing.T) {
+	const rounds = 30 // repeat the race enough times to surface the old bug under -race
+	for round := range rounds {
+		func() {
+			tempDir, err := os.MkdirTemp("", "bulk-toctou-*")
+			require.NoError(t, err)
+			defer os.RemoveAll(tempDir)
+			store, err := state.NewStore(tempDir)
+			require.NoError(t, err)
+			eng := engine.New(store)
+			hub := NewHub()
+
+			compID := "toctou-race"
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID:     compID,
+				Format: state.CompFormatMixed,
+				Status: state.CompStatusPools,
+			}))
+			paID := helper.NewUUID4()
+			pbID := helper.NewUUID4()
+			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+				{ID: paID, Name: "Alpha", Dojo: "A"},
+				{ID: pbID, Name: "Beta", Dojo: "B"},
+			}))
+			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+				{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusScheduled},
+			}))
+
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			admin := r.Group("/api")
+			RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
+
+			// Two concurrent writes, each without a correctionReason. One is
+			// a PUT /score (single-score), the other is a POST /bulk-score.
+			// Exactly one may succeed as a first completion; the other must be
+			// rejected because the match is already completed.
+			type result struct {
+				code int
+				body string
+			}
+			ch := make(chan result, 2)
+
+			putScore := func() {
+				body, _ := json.Marshal(state.MatchResult{
+					ID:     "Pool A-0",
+					SideA:  "Alpha",
+					SideB:  "Beta",
+					Winner: "Alpha",
+					Status: state.MatchStatusCompleted,
+				})
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", bytes.NewBuffer(body))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
+				ch <- result{code: w.Code, body: w.Body.String()}
+			}
+			bulkScore := func() {
+				body, _ := json.Marshal([]state.MatchResult{
+					{
+						ID:     "Pool A-0",
+						SideA:  "Alpha",
+						SideB:  "Beta",
+						Winner: "Beta",
+						Status: state.MatchStatusCompleted,
+					},
+				})
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+				req.Header.Set("Content-Type", "application/json")
+				r.ServeHTTP(w, req)
+				ch <- result{code: w.Code, body: w.Body.String()}
+			}
+
+			var wg sync.WaitGroup
+			wg.Add(2)
+			go func() { defer wg.Done(); putScore() }()
+			go func() { defer wg.Done(); bulkScore() }()
+			done := make(chan struct{})
+			go func() { wg.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("round %d: deadlock — handlers did not complete within 5s", round)
+			}
+
+			res1 := <-ch
+			res2 := <-ch
+
+			// Distinguish responses by body shape:
+			//   PUT /score success  → MatchResult JSON (no "succeeded" field)
+			//   POST /bulk-score    → {"succeeded": N, "errors": [...]} always
+			isBulkSucceeded := func(body string) bool {
+				var env struct {
+					Succeeded int `json:"succeeded"`
+				}
+				if err := json.Unmarshal([]byte(body), &env); err != nil {
+					return false
+				}
+				return env.Succeeded > 0
+			}
+			isPutSucceeded := func(code int, body string) bool {
+				if code != http.StatusOK {
+					return false
+				}
+				// MatchResult JSON has no "succeeded" key; bulk-score always has it.
+				var env struct {
+					Succeeded *int `json:"succeeded"`
+				}
+				_ = json.Unmarshal([]byte(body), &env)
+				return env.Succeeded == nil
+			}
+
+			putOK := isPutSucceeded(res1.code, res1.body) || isPutSucceeded(res2.code, res2.body)
+			bulkOK := isBulkSucceeded(res1.body) || isBulkSucceeded(res2.body)
+
+			// TOCTOU signal: both succeed without a correctionReason.
+			// One write may be a first completion (valid); if the second also
+			// succeeds it overwrote a Completed match without a reason.
+			assert.Falsef(t, putOK && bulkOK,
+				"round %d: both PUT /score and bulk-score succeeded without a correctionReason — TOCTOU gate bypassed; res1=%+v res2=%+v",
+				round, res1, res2)
+
+			final, err := store.LoadPoolMatches(compID)
+			require.NoError(t, err)
+			require.Len(t, final, 1)
+			m := final[0]
+			assert.Equalf(t, state.MatchStatusCompleted, m.Status, "round %d: match never reached Completed", round)
+		}()
+	}
+}
+
 func nameFor(side string, i int) string {
 	return "Player" + side + string('0'+rune(i))
 }

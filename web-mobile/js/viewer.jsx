@@ -275,14 +275,20 @@ function useWatchlist() {
     return migrated;
   });
   const persist = (next) => {
+    // Capture the normalized value from inside the updater so the LS write
+    // can happen outside (side effects must not live in state updaters).
+    // Preact 10 executes functional updaters synchronously within the useState
+    // setter call, so normalized is always set before the LS write below.
+    // Same reliance as useChimeMuted.toggle — revisit if upgrading Preact beyond v10.
+    let normalized;
     setList(prevList => {
       const resolved = typeof next === 'function' ? next(prevList) : next;
-      const normalized = normalizeWatchlist(resolved);
-      if (typeof window !== "undefined") {
-        try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
-      }
+      normalized = normalizeWatchlist(resolved);
       return normalized;
     });
+    if (typeof window !== "undefined" && normalized !== undefined) {
+      try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
+    }
   };
   return [list, persist];
 }

@@ -594,8 +594,9 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
                       aria-label={`${m.playerName || "Bye"} — advances without an opponent`}
                       ref={(el) => { if (el) refMap.current[m.id] = el; }}
                     >
-                      <span className="bc-bye-slot__name">{m.playerName}</span>
-                      {m.playerName ? null : <span className="bc-bye-slot__tag">BYE</span>}
+                      {m.playerName
+                        ? <span className="bc-bye-slot__name">{m.playerName}</span>
+                        : <span className="bc-bye-slot__tag">BYE</span>}
                     </div>
                   </div>
                 );

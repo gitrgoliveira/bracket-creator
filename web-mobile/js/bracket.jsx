@@ -210,7 +210,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       data-match-id={match.id}
       className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
-      aria-label={`Match ${match.id}`}
+      aria-label={matchNum != null ? `Match M${matchNum}` : `Match ${match.id}`}
     >
       <div className="bc-match-meta">
         {matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null}
@@ -448,8 +448,9 @@ function computeMetaTops(columns, feedersById, heights) {
 // BracketConnectorsMeta draws feeder→parent elbows for the effective-round
 // layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
 // feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
-// correctly. A match with a single feeder (the other side is a bye/seeded
-// entrant) gets one elbow; the bye side draws no line.
+// correctly. Bye-slot placeholder cards (isByeSlot) appear in the feeder graph
+// and in refMap, so they DO receive connector lines from their parent match —
+// the elbow terminates at the bye card, mirroring the Excel Tree sheet.
 function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
   const [paths, setPaths] = useStateBC([]);
   const [size, setSize] = useStateBC({ w: 0, h: 0 });
@@ -498,10 +499,11 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   );
 }
 
-// BracketTreeMeta renders the effective-round columns (mp-7f2w). Every card is a
-// real match; structural byes are absent. Cards in column 0 plus every card is
-// absolutely positioned at the feeder-graph-derived top so parents sit centred
-// on their feeders (see computeMetaTops).
+// BracketTreeMeta renders the effective-round columns (mp-7f2w). Real match cards
+// plus structural-bye placeholder cards (isByeSlot=true) are included; phantoms
+// (hidden) are dropped. All cards are absolutely positioned at the
+// feeder-graph-derived top so parents sit centred on their feeders
+// (see computeMetaTops).
 function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
   const treeRef = useRef(null);
   const refMap = useRef({});

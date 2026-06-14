@@ -69,6 +69,16 @@ describe('buildDisplayModel', () => {
     expect(model.feedersById['m-r1-3']).toEqual([]); // Dave/Eve seeded in
   });
 
+  it('assigns sequential match numbers left-to-right, top-to-bottom (matchNumById)', () => {
+    const model = buildDisplayModel(fivePlayerRounds());
+    // Column order: QF (col 0) → SF (col 1) → Final (col 2)
+    // Within each column top card first, so: m-r1-3 (QF) → m-r1-0, m-r2-1 (SF) → m-r3-0 (Final)
+    expect(model.matchNumById['m-r1-3']).toBe(1); // QF: Dave/Eve
+    expect(model.matchNumById['m-r1-0']).toBe(2); // SF: Alice/Bob
+    expect(model.matchNumById['m-r2-1']).toBe(3); // SF: Carol
+    expect(model.matchNumById['m-r3-0']).toBe(4); // Final
+  });
+
   it('falls back to balanced rounds unchanged when no metadata', () => {
     // 4-player balanced bracket with no displayRound/hidden fields. The legacy
     // renderer draws connectors positionally inside BracketConnectors (from

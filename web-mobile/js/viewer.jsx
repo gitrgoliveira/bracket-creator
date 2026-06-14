@@ -1714,7 +1714,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     if (!hasBracketEl) return;
     const el = bracketScrollRef.current;
     if (!el) return;
-    const check = () => setBracketOverflowRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    const check = () => { const next = el.scrollLeft + el.clientWidth < el.scrollWidth - 4; setBracketOverflowRight((cur) => (cur === next ? cur : next)); };
     check();
     el.addEventListener("scroll", check, { passive: true });
     const ro = new ResizeObserver(check);

@@ -245,13 +245,25 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const multi = count >= 2;
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
+  const firstAddFiredRef = useRefV(false);
+  React.useEffect(() => {
+    if (watchlist.length === 0) firstAddFiredRef.current = false;
+  }, [watchlist.length]);
+
+  const maybeFirstAdd = () => {
+    if (!firstAddFiredRef.current && watchlist.length === 0 && onFirstAdd) {
+      firstAddFiredRef.current = true;
+      onFirstAdd();
+    }
+  };
+
   const addPlayer = (p) => {
-    if (watchlist.length === 0 && onFirstAdd) onFirstAdd();
+    maybeFirstAdd();
     setWatchlist(prev => addPlayerToWatchlist(prev, p));
   };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    if (watchlist.length === 0 && onFirstAdd) onFirstAdd();
+    maybeFirstAdd();
     setWatchlist(prev => {
       if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
       return [...prev, { type: "dojo", dojo: d.name }];

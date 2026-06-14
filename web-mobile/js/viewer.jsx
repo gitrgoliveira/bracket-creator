@@ -3888,7 +3888,10 @@ function AnnBellBtn() {
   if (state === "unsupported") return null;
 
   const BellIcon = window.BellIcon;
-  if (!BellIcon) return null;
+  if (!BellIcon) {
+    console.error('[AnnBellBtn] window.BellIcon not loaded — check script order in index.html');
+    return null;
+  }
 
   const toggle = async () => {
     if (inFlight.current) return;

@@ -1554,24 +1554,22 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                         <div className="team-sub-match__center">
                           <div className="tsm-center-marks">
                           <div className="tsm-center-pts tsm-center-pts--shiro">
+                            {/* Outstanding hansoku → red ▲ next to the name (the
+                                outer edge), rendered before the slots. A 2nd foul
+                                discharges to an H ippon for the opponent and clears
+                                this. (running_a_kendo_tournament.md: ▲ next to name.) */}
+                            {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                             {[0, 1].map(i => (
                               <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
                                 onClick={() => rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i))} title="Click to remove">
                                 {rowSides[0].pts[i] || "·"}
                               </button>
                             ))}
-                            {/* Outstanding hansoku → red △ on the inner edge,
-                                toward the result (a 2nd foul discharges to an H
-                                ippon for the opponent and clears this). */}
-                            {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                           </div>
                           <div className={`team-sub-match__score ${scoreDisplay && t.winner === "b" ? "team-sub-match__score--a-win" : scoreDisplay && t.winner === "a" ? "team-sub-match__score--b-win" : ""}`}>
                             {scoreDisplay}
                           </div>
                           <div className="tsm-center-pts tsm-center-pts--aka">
-                            {/* Hansoku △ sits on Aka's inner edge (toward the
-                                result), so render it before the reversed slots. */}
-                            {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                             {/* Aka fills outside-in: its first ippon sits on the
                                 outer (right) edge nearest the Aka name, so render
                                 the slots in reverse (pts[1] then pts[0]). */}
@@ -1581,6 +1579,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                                 {rowSides[1].pts[i] || "·"}
                               </button>
                             ))}
+                            {/* Outstanding hansoku → red ▲ next to the Aka name
+                                (the outer/right edge), after the reversed slots. */}
+                            {rowSides[1].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                           </div>
                           </div>
                           {/* Per-bout tie toggle, directly beneath the centre

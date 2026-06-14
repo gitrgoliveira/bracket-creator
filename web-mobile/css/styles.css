@@ -4270,6 +4270,16 @@ button.pool-match-row {
   margin: 12px 0;
 }
 
+/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
+   the slot nearest that competitor's name (the board's outer edge) and fills
+   inward toward the centre. Shiro (left column) packs its slots to the left
+   (outer) by default; Aka (right column) must mirror it — pack to the right and
+   render pts[0] at the outer (right) edge. See running_a_kendo_tournament.md →
+   Individual Match Scoreboard. */
+.sb-side--aka .sb-slots {
+  flex-direction: row-reverse;
+}
+
 .sb-slot {
   width: 44px;
   height: 44px;

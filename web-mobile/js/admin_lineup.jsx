@@ -81,7 +81,7 @@ function canRevise(competition, round) {
   if (!currentMatches.length) return false;
   const inProgressNext = nextMatches.some(m => m.status === "running" || m.status === "completed");
   if (inProgressNext) return false;
-  return !currentMatches.some(m => m.status === "running");
+  return currentMatches.every(m => m.status === "completed");
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {

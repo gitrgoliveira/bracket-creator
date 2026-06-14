@@ -271,8 +271,8 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   };
   const removeEntry = (entry) => {
     const k = entryKey(entry);
-    setWatchlist(watchlist.filter((e) => entryKey(e) !== k));
-    if (primaryKey === k) setPrimaryKey(""); // clear a now-orphaned pin
+    setWatchlist(prev => prev.filter((e) => entryKey(e) !== k));
+    if (primaryKey === k) setPrimaryKey("");
   };
   const togglePin = (entry) => {
     const k = entryKey(entry);

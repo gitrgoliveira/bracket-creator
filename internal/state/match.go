@@ -32,27 +32,35 @@ func (s *Store) RunningMatchOnCourt(court, skipCompID string) (*CourtOccupancy, 
 		if compID == skipCompID {
 			continue
 		}
-		if occ := runningOnCourtInPoolMatches(s, compID, court); occ != nil {
+		occ, err := runningOnCourtInPoolMatches(s, compID, court)
+		if err != nil {
+			return nil, err
+		}
+		if occ != nil {
 			return occ, nil
 		}
-		if occ, err := runningOnCourtInBracket(s, compID, court); err == nil && occ != nil {
+		occ, err = runningOnCourtInBracket(s, compID, court)
+		if err != nil {
+			return nil, err
+		}
+		if occ != nil {
 			return occ, nil
 		}
 	}
 	return nil, nil
 }
 
-func runningOnCourtInPoolMatches(s *Store, compID, court string) *CourtOccupancy {
+func runningOnCourtInPoolMatches(s *Store, compID, court string) (*CourtOccupancy, error) {
 	matches, err := s.LoadPoolMatches(compID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	for _, m := range matches {
 		if m.Status == MatchStatusRunning && m.Court == court {
-			return &CourtOccupancy{CompID: compID, MatchID: m.ID}
+			return &CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, error) {

@@ -170,12 +170,15 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 // mutex). Pass "" when calling outside a WithTransaction body.
 func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error {
 	court, err := e.lookupMatchCourt(compID, matchID)
-	if err != nil || court == "" {
+	if err != nil {
+		return err
+	}
+	if court == "" {
 		return nil
 	}
 	occ, err := e.store.RunningMatchOnCourt(court, skipCompID)
 	if err != nil {
-		return nil
+		return err
 	}
 	if occ != nil && (occ.CompID != compID || occ.MatchID != matchID) {
 		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}

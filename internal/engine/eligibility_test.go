@@ -1093,16 +1093,19 @@ func TestStartMatch_CourtExclusivity(t *testing.T) {
 		createTestCompetition(t, store, compID, "league", 3)
 		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
 
+		// Use hyphenated IDs so they survive the CSV round-trip used by the
+		// tx-path simultaneity check (LoadPoolMatchesLocked reads disk).
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
-			{ID: "m2", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "P-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
-		// m2 is on court A which is free — but Alice is also in m1.
-		// Court check passes, but player simultaneity blocks it.
-		err := eng.StartMatch(compID, "m2")
-		// Error should be IneligibleCompetitor (player already fighting), not CourtBusy.
-		assert.False(t, errors.Is(err, ErrCourtBusy), "court A is free; should not get CourtBusy")
+		// P-1 is on court A which is free — but Alice is also in P-0 on court B.
+		// Court check passes, but player simultaneity should block it.
+		err := eng.StartMatch(compID, "P-1")
+		require.Error(t, err, "Alice is already fighting; StartMatch should return an error")
+		assert.False(t, errors.Is(err, ErrCourtBusy), "court A is free; should not get ErrCourtBusy")
+		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor (player already fighting), got %v", err)
 	})
 
 	t.Run("match with no court assigned is never blocked by court exclusivity", func(t *testing.T) {

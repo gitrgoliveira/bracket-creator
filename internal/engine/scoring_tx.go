@@ -638,7 +638,10 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 // while all other competitions are scanned via the store's public methods.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
-	if err != nil || court == "" {
+	if err != nil {
+		return err
+	}
+	if court == "" {
 		return nil
 	}
 	// Check compID's own matches via tx (avoids deadlock on non-reentrant mutex).
@@ -648,7 +651,7 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 	// Check all other competitions via the store (safe: their write locks are free).
 	occ, err := e.store.RunningMatchOnCourt(court, compID)
 	if err != nil {
-		return nil
+		return err
 	}
 	if occ != nil {
 		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}

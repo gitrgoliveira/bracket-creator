@@ -591,7 +591,10 @@ export async function notifEnable() {
   }
   if (Notification.permission === "default") {
     let r;
-    try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }
+    try { r = await Notification.requestPermission(); } catch (_e) {
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e2) {}
+      return "off";
+    }
     if (r !== "granted") {
       try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
       return r === "denied" ? "denied" : "off";

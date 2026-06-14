@@ -42,6 +42,7 @@ const AdminCreateCompetition = window.AdminCreateCompetition;
 const AdminImportPage = window.AdminImportPage;
 const AdminSchedulePage = window.AdminSchedulePage;
 const AdminScoreEditorPage = window.AdminScoreEditorPage;
+const AdminShiaijoPage = window.AdminShiaijoPage;
 
 // Pure helper for the "merge an updated competition into the latest
 // tournament state" pattern used by AdminApp's async handlers. Takes
@@ -535,6 +536,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onOpenSchedule={() => setView({ kind: "schedule" })}
         onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
         onOpenImport={() => setView({ kind: "import" })}
+        onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
         onLogout={onLogout}
@@ -606,6 +608,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}
+    />;
+  }
+
+  if (view.kind === "shiaijo") {
+    return <AdminShiaijoPage
+      key={view.court}
+      tournament={t}
+      court={view.court}
+      onBack={() => setView({ kind: "dashboard" })}
+      onEditScore={editMatchScore}
+      onMoveCourt={moveMatchCourt}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      password={password}
+      showToast={showToast}
+      tweaks={tweaks}
+      onSwitchCourt={(court) => setView({ kind: "shiaijo", court })}
     />;
   }
 

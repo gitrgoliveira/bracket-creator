@@ -199,18 +199,37 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	return nil
 }
 
-func checkUniqueCompName(store *state.Store, name, excludeID string) error {
-	ids, _ := store.ListCompetitions()
+// checkUniqueCompFields verifies that name and prefix are both unique across all
+// competitions except excludeID in a single store pass. Returns (infraErr,
+// validationErr): infraErr is non-nil when the store cannot be queried (caller
+// should 500); validationErr is non-nil when a collision is detected (caller
+// should 400). Empty prefix is exempt from the uniqueness check.
+func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (error, error) {
+	prefix = strings.TrimSpace(prefix)
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return fmt.Errorf("list competitions: %w", err), nil
+	}
 	for _, existingID := range ids {
 		if existingID == excludeID {
 			continue
 		}
 		existing, err := store.LoadCompetition(existingID)
-		if err == nil && existing != nil && strings.EqualFold(existing.Name, name) {
-			return fmt.Errorf("competition name %q already exists", name)
+		if err != nil {
+			return fmt.Errorf("load competition %s: %w", existingID, err), nil
+		}
+		if existing == nil {
+			continue
+		}
+		if strings.EqualFold(existing.Name, name) {
+			return nil, fmt.Errorf("competition name %q already exists", name)
+		}
+		if prefix != "" && existing.NumberPrefix != "" &&
+			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
+			return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
@@ -324,14 +343,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Cross-file guard symmetry with POST/PUT /tournament: same
 		// label + cap check via validateCompetitionCourts (looser than
-		// the tournament version — empty courts is allowed because the
-		// engine applies a 1-court default and the import handler has
-		// the same fallback). Defense against direct API callers
+		// the tournament version: empty courts are allowed here because
+		// they are immediately resolved to the tournament's courts via
+		// resolveCompetitionCourts on the next line, so every match ends
+		// up with a real court label). Defense against direct API callers
 		// sending multi-character labels.
 		if err := validateCompetitionCourts(comp.Courts); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "courts: " + err.Error()})
 			return
 		}
+
+		// Guarantee >=1 court: empty competition courts inherit the
+		// tournament's courts so every match carries a real court label
+		// (otherwise the per-court Shiaijo operator view can't surface them).
+		comp.Courts = resolveCompetitionCourts(comp.Courts, createTourn)
 
 		// Reject negative per-phase or legacy durations.
 		if err := validateCompetitionDurations(&comp); err != nil {
@@ -394,22 +419,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Atomic uniqueness-check + save under the global
 		// competition-rename mutex. Closes the AB-BA window where two
 		// concurrent POSTs (or PUT renames) to the same new name both
-		// passed checkUniqueCompName (each seeing the other still had
+		// passed checkUniqueCompFields (each seeing the other still had
 		// its old name) and both landed. See state.Store
 		// WithCompetitionRenameLock for full rationale.
 		//
 		// Also checks ID uniqueness: pre-fix, a POST with an existing
-		// `id` but different `name` passed checkUniqueCompName (the
+		// `id` but different `name` passed checkUniqueCompFields (the
 		// name was unique) and then SaveCompetitionChanged silently
 		// overwrote the existing competition. POST is documented as
 		// CREATE, so an existing ID is a 409 / 400 case.
-		var nameErr, idErr error
+		var validationErr, idErr error
 		lockErr := store.WithCompetitionRenameLock(func() error {
 			if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
-			if nameErr = checkUniqueCompName(store, comp.Name, ""); nameErr != nil {
+			var infraErr error
+			infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, "")
+			if infraErr != nil {
+				return infraErr
+			}
+			if validationErr != nil {
 				return nil
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
@@ -420,8 +450,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": idErr.Error()})
 			return
 		}
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
 		if err != nil {
@@ -608,6 +638,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
+			// Guarantee >=1 court: a settings PUT that clears courts (or a
+			// direct API caller sending none) inherits the tournament's
+			// courts so every match carries a real court label. The transform
+			// below copies comp.Courts onto current for settings-only PUTs.
+			comp.Courts = resolveCompetitionCourts(comp.Courts, putTourn)
+
 			// Reject negative per-phase or legacy durations.
 			if err := validateCompetitionDurations(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -654,7 +690,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// 1. AB-BA rename race closure: two concurrent PUTs renaming
 		//    different competitions to the same new name both passed
-		//    checkUniqueCompName pre-fix (each seeing the other still
+		//    checkUniqueCompFields pre-fix (each seeing the other still
 		//    had its old name) and both landed. The dedicated rename
 		//    mutex (different from any per-comp lock) serializes the
 		//    check+save for uniqueness. An earlier attempt folded the
@@ -686,7 +722,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// (`{ ...c, players: np }`): when the body has Players, we run
 		// the participants/seeds save AFTER the transform commits and
 		// set HasParticipantIDs=true (saveParticipants writes UUID rows).
-		var nameErr error
+		var validationErr error
 		var notFoundFlag bool
 		var drawReadyFlag bool
 		var changed bool
@@ -748,17 +784,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return nil, nil
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
-				// checkUniqueCompName BEFORE the transform, so a PUT to
+				// checkUniqueCompFields BEFORE the transform, so a PUT to
 				// a missing :id whose body Name happened to collide with
 				// an existing competition would 400 "name already exists"
 				// instead of the documented 404 missing. Folding the
 				// check into the transform — after current == nil — is
 				// safe under WithCompetitionRenameLock: the rename mutex
 				// serializes rename ops, so the LoadCompetition calls on
-				// OTHER comp IDs that checkUniqueCompName performs can't
+				// OTHER comp IDs that checkUniqueCompFields performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
-				if nameErr = checkUniqueCompName(store, comp.Name, id); nameErr != nil {
+				var infraErr error
+				infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
+				if infraErr != nil {
+					return nil, infraErr
+				}
+				if validationErr != nil {
 					return nil, nil
 				}
 				// Populate per-phase durations from legacy MatchDuration
@@ -781,6 +822,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.PoolSize = comp.PoolSize
 				current.PoolWinners = comp.PoolWinners
 				current.PoolSizeMode = comp.PoolSizeMode
+				// comp.Courts was already defaulted to >=1 court (tournament
+				// fallback) in the settings-validation block above.
 				current.Courts = comp.Courts
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName
@@ -806,9 +849,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return updateErr
 		})
 		// 404 before 400 — with the uniqueness check now inside the
-		// transform (after the current == nil branch), notFoundFlag and
-		// nameErr are mutually exclusive. Order kept defensive in case
-		// either flag escapes the transform unexpectedly.
+		// transform (after current == nil), notFoundFlag and validationErr
+		// are mutually exclusive. Order kept defensive in case either flag
+		// escapes the transform unexpectedly.
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 			return
@@ -817,8 +860,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
 			return
 		}
-		if nameErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": nameErr.Error()})
+		if validationErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error()})
 			return
 		}
 		if err != nil {

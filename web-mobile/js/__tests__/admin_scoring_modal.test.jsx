@@ -20,6 +20,8 @@ import {
   applyFusenshoToggle,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  teamResultLabel,
+  isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
@@ -1069,5 +1071,42 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // Because shouldBlockScoringKeys only inspects decidedByHantei — not key
   // identity — it cannot selectively suppress Enter; that invariant is
   // enforced by source ordering, not by a predicate we can unit-test here.
+});
+
+describe('teamResultLabel (no draw in a knockout)', () => {
+  it('names the winning side regardless of phase', () => {
+    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('AKA WIN');
+    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('SHIRO WIN');
+  });
+
+  it('a tied POOL encounter is a true draw', () => {
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('DRAW');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('DRAW');
+  });
+
+  it('a tied KNOCKOUT encounter is never a draw — it needs a daihyosen', () => {
+    // Scored tie in a bracket match → resolve by representative bout.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    // Nothing scored yet in a bracket match → pending, still not a draw.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe('—');
+  });
+});
+
+describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
+  it('blocks Finish on a tied, unfinished knockout encounter', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: null, isComplete: false })).toBe(true);
+  });
+
+  it('does not block once a winner exists (e.g. daihyosen decided)', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: 'a', isComplete: false })).toBe(false);
+  });
+
+  it('never blocks a pool encounter — a pool draw is finishable', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: false, teamWinner: null, isComplete: false })).toBe(false);
+  });
+
+  it('never blocks an already-completed match (correction flow)', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: null, isComplete: true })).toBe(false);
+  });
 });
 

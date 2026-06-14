@@ -65,6 +65,10 @@
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
+    <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
+         viewer.jsx. Reads its viewer.jsx helper deps from window at render time,
+         so load order relative to viewer.js does not matter. -->
+    <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>
@@ -81,6 +85,9 @@
          (which embeds it inside the Edit Tournament page) — mp-scf. -->
     <script type="module" src="/dist/admin_branding.js?v=5"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
+    <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
+         admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->
+    <script type="module" src="/dist/admin_shiaijo.js?v=5"></script>
     <script type="module" src="/dist/admin.js?v=5"></script>
     <script type="module" src="/dist/app.js?v=5"></script>
 </body>

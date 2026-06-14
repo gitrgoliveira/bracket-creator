@@ -58,6 +58,8 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 | `--accent-fg` | `#ffffff` | Text on `--accent` |
 | `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only — never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
+| `--danger` | `var(--red)` | **Semantic alias of `--red`** for error/destructive intent (error text/borders, the hansoku ▲, invalid-input outlines). Prefer `--danger` over `--red` when the meaning is "error", not "Aka side" — it reads at the call site and keeps the value single-sourced. Never use for running state. |
+| `--danger-soft` | `var(--red-soft)` | Soft danger tint — faint error backgrounds. Alias of `--red-soft`. |
 | `--shiro-edge` | `#2a3346` | Shiro framing on dark surfaces (rare; most Shiro frames use `--accent`) |
 | `--shiro-hatch` | `rgba(42,51,70,0.07)` | 45° diagonal hatch on the Shiro side |
 | `--aka-bright` | `#ff3b3b` | Luminous Aka red for dark TV/overlay surfaces (scoreboard glow) |
@@ -134,9 +136,26 @@ Three levels only:
 
 Never combine shadow with a solid border on the same side — pick one elevation language per component.
 
+### Rings
+
+Two semantic ring tokens, both `0 0 0 3px var(--accent-soft)` today. They carry the **same value but different intent**, so a future change to one (e.g. an a11y tweak to the focus ring) doesn't silently restyle the other.
+
+| Token | Use |
+|---|---|
+| `--focus-ring` | Keyboard-focus halo on **text-entry controls** (`.input/.textarea/.select`, `.radio-pill`, `.lined-textarea`, `.ipt-btn`). Buttons use the separate `outline: 2px solid var(--accent)` convention, not this. |
+| `--ring-active` | The **running/highlight card** halo (`.bc-match--running` / `--highlight`, `.sched-row--running`, `.vsched-item--running`) — part of the navy running-signal language (§5). |
+
+The `.dot--running` pulse uses a 4px ring inline (its own keyframe), not these tokens.
+
 ### Motion
 
-| Token (de facto) | Use |
+| Token | Value | Use |
+|---|---|---|
+| `--ease-out` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | Standard ease-out — the default for transitions and entrances. Decelerates hard, no overshoot. |
+
+Durations remain literals (de facto tokens, fold new work toward these):
+
+| Duration (de facto) | Use |
 |---|---|
 | `120ms` | Color/border transitions on buttons, chips, badges |
 | `140ms` | Card hovers (tcard, pool, sched-row) |
@@ -147,7 +166,7 @@ Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.cs
 - `pulse` (1.6s infinite) — `.dot--running` only
 - `spin` (0.6s linear infinite) — loading spinners
 - `toast-in` (300ms) — toast entrance
-- `decision-prompt-in` (160ms, cubic-bezier(0.2, 0.8, 0.2, 1)) — match-decision modal entrance
+- `decision-prompt-in` (160ms, `var(--ease-out)`) — match-decision modal entrance
 
 A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables all four animations (`.dot--running`, `.spinner`, `.toast`, `.decision-prompt`). Gate any new non-essential animation behind this media query.
 
@@ -389,7 +408,7 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 - **Contrast**: `--ink-4` is the floor at 4.7:1 on `--surface` (WCAG AA). For tournament-critical surfaces that must survive venue glare, use `--ink-1` (~18:1, AAA). Don't introduce new gray tokens without re-checking contrast.
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo** — see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers — note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
-- **Focus rings**: inputs use a 3px `--accent-soft` ring. Don't suppress `:focus-visible` — operators tab through forms.
+- **Focus rings**: text-entry controls use the `--focus-ring` token (3px `--accent-soft`); buttons use `outline: 2px solid var(--accent)`. Don't suppress `:focus-visible` — operators tab through forms. See §3 Rings.
 - **Motion**: there's no global `prefers-reduced-motion` opt-out yet — tracked in `bd show bracket-creator-3ch`. Pulse, spin, toast-in, and decision-prompt-in are the only ambient animations; if you add more, gate them yourself until the global block lands.
 
 ## 7. Frontend conventions

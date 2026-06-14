@@ -65,6 +65,18 @@ window.applyTheme = applyTheme;
 // Pure helper: parse the current pathname into the App's view state.
 // Extracted so it remains unit-testable; previously inlined as a
 // closure in App() which prevented both reuse and isolated testing.
+// decodeURIComponent throws on malformed percent-encoding (e.g. "%E0").
+// parsePath runs in the popstate handler with no try/catch, so a crafted
+// or truncated URL would otherwise crash back/forward navigation. Fall
+// back to the raw segment rather than throwing.
+function safeDecode(s) {
+    try {
+        return decodeURIComponent(s);
+    } catch (_e) {
+        return s;
+    }
+}
+
 function parsePath(path) {
     if (path.startsWith("/admin")) {
       const parts = path.split("/").filter(Boolean);
@@ -74,6 +86,9 @@ function parsePath(path) {
       if (parts[1] === "import") return { mode: "admin", admin: { kind: "import" } };
       if (parts[1] === "edit-tournament") return { mode: "admin", admin: { kind: "editTournament" } };
       if (parts[1] === "create-competition") return { mode: "admin", admin: { kind: "createComp" } };
+      if (parts[1] === "shiaijo" && parts[2]) {
+        return { mode: "admin", admin: { kind: "shiaijo", court: safeDecode(parts[2]) } };
+      }
       if (parts[1] === "competition" && parts[2]) {
         return { mode: "admin", admin: { kind: "competition", id: parts[2], section: parts[3] || "overview" } };
       }
@@ -129,6 +144,7 @@ function pathFromState(m, vs, vcid, av) {
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "editTournament") return "/admin/edit-tournament";
       if (av.kind === "createComp") return "/admin/create-competition";
+      if (av.kind === "shiaijo") return av.court ? `/admin/shiaijo/${encodeURIComponent(av.court)}` : "/admin";
       if (av.kind === "competition") {
         let url = `/admin/competition/${av.id}`;
         if (av.section && av.section !== "overview") url += `/${av.section}`;

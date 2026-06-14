@@ -715,7 +715,9 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [runningMatch], tweaks: {}, onMatchClick: spy });
     const cells = allCells(tree);
-    const runningCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--running'));
+    // A running bout renders the same as a pending one in the scoreboard
+    // (no live marker), but its cell is still interactive.
+    const runningCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--pending'));
     expect(runningCell).toBeTruthy();
     runningCell.props.onClick();
     expect(spy).toHaveBeenCalledTimes(1);
@@ -1171,3 +1173,238 @@ describe('isNonPublicOrigin', () => {
   });
 });
 
+
+// VSchedItem live score rendering — T217
+// Assertions: running match with ≥1 ippon renders score + .vsched-item__score--live;
+// running match with no score falls through to "vs".
+describe('VSchedItem live score rendering (mp-42rg)', () => {
+  const realReact = global.React;
+  let runtime;
+  let VSchedItemComp;
+  const savedGlobals = {};
+  const STUBBED = ['ipponsFromScore', 'matchScoreStr', 'roundLabel', 'pluralize', 'queueLabelCompact'];
+
+  function findNode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const k of node) { const f = findNode(k, pred); if (f) return f; }
+      return null;
+    }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  const mkMatch = (overrides) => ({
+    id: 'm1', compId: 'c1', status: 'running', court: 'A',
+    phase: 'bracket', round: 'QF',
+    sideA: { id: 'pA', name: 'Alice' },
+    sideB: { id: 'pB', name: 'Bob' },
+    ipponsA: [], ipponsB: [],
+    ...overrides,
+  });
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] } : { had: false };
+    });
+    global.window.ipponsFromScore = vi.fn(() => []);
+    global.window.matchScoreStr = vi.fn(() => '');
+    global.window.roundLabel = vi.fn((i) => `Round ${i + 1}`);
+    global.window.pluralize = vi.fn((n, s) => `${n} ${s}`);
+    global.window.queueLabelCompact = null;
+    vi.resetModules();
+    ({ VSchedItem: VSchedItemComp } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders .vsched-item--running class for a running match', () => {
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch(), tweaks: {} });
+    const btn = findNode(tree, n => n.type === 'button');
+    expect(btn?.props?.className).toMatch(/vsched-item--running/);
+  });
+
+  it('renders score + .vsched-item__score--live when running and matchScoreStr returns a non-empty string', () => {
+    global.window.matchScoreStr = vi.fn(() => 'M–·');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch({ ipponsA: ['M'], ipponsB: [] }), tweaks: {} });
+    const scoreSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__score'));
+    expect(scoreSpan).toBeTruthy();
+    expect(scoreSpan.props.className).toContain('vsched-item__score--live');
+    const scoreText = [].concat(scoreSpan.children ?? scoreSpan.props?.children ?? []).join('');
+    expect(scoreText).toBe('M–·');
+  });
+
+  it('renders "vs" when running but matchScoreStr returns empty (no ippon yet)', () => {
+    global.window.matchScoreStr = vi.fn(() => '');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch(), tweaks: {} });
+    const vsSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__vs'));
+    expect(vsSpan).toBeTruthy();
+    const text = [].concat(vsSpan.children ?? vsSpan.props?.children ?? []).join('');
+    expect(text).toBe('vs');
+  });
+
+  it('does NOT add .vsched-item__score--live for a completed match', () => {
+    global.window.matchScoreStr = vi.fn(() => 'MK–D');
+    const tree = runtime.mount(VSchedItemComp, { m: mkMatch({ status: 'completed' }), tweaks: {} });
+    const scoreSpan = findNode(tree, n => n.type === 'span' && String(n.props?.className || '').includes('vsched-item__score'));
+    expect(scoreSpan).toBeTruthy();
+    expect(scoreSpan.props.className).not.toContain('vsched-item__score--live');
+  });
+});
+
+// -----------------------------------------------------------------------
+// ViewerHome globalRunning de-dup render test (mp-42rg)
+// -----------------------------------------------------------------------
+describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
+  const realReact = global.React;
+  let runtime;
+  let ViewerHomeComp;
+  let originalLocalStorageDescriptor;
+  // Module-level consts captured at import time + render-time window reads
+  const STUBBED = [
+    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
+    'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
+    'roundLabel', 'matchScoreStr', 'ipponsFromScore',
+  ];
+  const savedGlobals = {};
+
+  function findNode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const k of node) { const f = findNode(k, pred); if (f) return f; }
+      return null;
+    }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  const mkPlayer = (id, name) => ({ id, name, dojo: 'TestDojo' });
+  const mkRunning = (id, sideAId, sideBId) => ({
+    id, status: 'running', phase: 'pool', poolName: 'Pool A', court: 'A',
+    sideA: { id: sideAId, name: sideAId }, sideB: { id: sideBId, name: sideBId },
+    ipponsA: [], ipponsB: [],
+  });
+  const mkTournament = (poolMatches) => ({
+    name: 'T', date: '10-06-2026',
+    competitions: [{
+      id: 'c1', name: 'Open', format: 'individual', status: 'pools',
+      players: [
+        mkPlayer('p-alice', 'Alice'), mkPlayer('p-bob', 'Bob'),
+        mkPlayer('p-carol', 'Carol'), mkPlayer('p-dave', 'Dave'),
+      ],
+      poolMatches,
+    }],
+  });
+  const NOOP = () => {};
+
+  beforeEach(async () => {
+    // Install a fresh localStorage mock via defineProperty so prior test suites
+    // that clobber window.localStorage via defineProperty don't break this suite.
+    originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    const store = {};
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: (k) => (k in store ? store[k] : null),
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; },
+        clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+      },
+      writable: true,
+      configurable: true,
+    });
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] } : { had: false };
+    });
+    // Module-level const bindings — must be set before vi.resetModules + import
+    global.window.StatusBadge = vi.fn(() => null);
+    global.window.formatDate = (d) => d || '';
+    global.window.formatLabel = (l) => l || '';
+    global.window.formatViewerHeaderEyebrow = () => '';
+    global.window.pluralize = (n, s) => `${n} ${s}`;
+    // Render-time window reads
+    global.window.hasBothSides = () => true;
+    global.window.compareDmy = () => 0;
+    global.window.queueLabelCompact = null;
+    global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.matchScoreStr = () => '';
+    global.window.ipponsFromScore = () => [];
+    vi.resetModules();
+    ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    if (originalLocalStorageDescriptor) {
+      Object.defineProperty(window, 'localStorage', originalLocalStorageDescriptor);
+    }
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('excludes watched running matches from .hero-running and shows unwatched ones', () => {
+    // Alice is watched. Alice's match (m-alice) must be excluded from
+    // .hero-running; Carol's unwatched match (m-carol) must appear there.
+    window.localStorage.setItem('bc_watchlist',
+      JSON.stringify([{ type: 'player', id: 'p-alice', name: 'Alice' }]));
+    const aliceMatch = mkRunning('m-alice', 'p-alice', 'p-bob');
+    const carolMatch = mkRunning('m-carol', 'p-carol', 'p-dave');
+    const tree = runtime.mount(ViewerHomeComp, {
+      tournament: mkTournament([aliceMatch, carolMatch]),
+      sseConnected: true, onSelectCompetition: NOOP, onAdminClick: NOOP,
+      onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP,
+    });
+    const heroRunning = findNode(tree, n => n.props?.className === 'hero-running');
+    // .hero-running present because Carol's match is not watched
+    expect(heroRunning).toBeTruthy();
+    // Alice's match key must NOT appear inside .hero-running
+    const aliceKey = findNode(heroRunning, n => n.props?.key === 'c1:m-alice');
+    expect(aliceKey).toBeNull();
+    // Carol's match key MUST appear inside .hero-running
+    const carolKey = findNode(heroRunning, n => n.props?.key === 'c1:m-carol');
+    expect(carolKey).toBeTruthy();
+  });
+
+  it('hides .hero-running entirely when every running match is in the watchlist', () => {
+    // Both Alice and Carol watched → globalRunning is empty → no .hero-running
+    window.localStorage.setItem('bc_watchlist',
+      JSON.stringify([
+        { type: 'player', id: 'p-alice', name: 'Alice' },
+        { type: 'player', id: 'p-carol', name: 'Carol' },
+      ]));
+    const aliceMatch = mkRunning('m-alice', 'p-alice', 'p-bob');
+    const carolMatch = mkRunning('m-carol', 'p-carol', 'p-dave');
+    const tree = runtime.mount(ViewerHomeComp, {
+      tournament: mkTournament([aliceMatch, carolMatch]),
+      sseConnected: true, onSelectCompetition: NOOP, onAdminClick: NOOP,
+      onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP,
+    });
+    const heroRunning = findNode(tree, n => n.props?.className === 'hero-running');
+    expect(heroRunning).toBeNull();
+  });
+});

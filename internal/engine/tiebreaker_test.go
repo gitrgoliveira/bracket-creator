@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -34,51 +36,261 @@ func TestIsTiebreakerMatchID(t *testing.T) {
 	}
 }
 
-func TestDetectPoolTies_NoTies(t *testing.T) {
-	standings := []state.PlayerStanding{
-		{Player: domain.Player{Name: "Alice"}, Points: 300},
-		{Player: domain.Player{Name: "Bob"}, Points: 200},
-		{Player: domain.Player{Name: "Charlie"}, Points: 100},
+// namesAt resolves a tied position group back to competitor names, for stable
+// assertions when the input was sorted by Points.
+func namesAt(standings []state.PlayerStanding, positions []int) []string {
+	out := make([]string, len(positions))
+	for i, idx := range positions {
+		out[i] = standings[idx].Player.Name
 	}
-	groups := detectPoolTies(standings)
-	assert.Empty(t, groups)
+	return out
 }
 
-func TestDetectPoolTies_TwoWayTie(t *testing.T) {
-	standings := []state.PlayerStanding{
-		{Player: domain.Player{Name: "Alice"}, Points: 300},
-		{Player: domain.Player{Name: "Bob"}, Points: 100},
-		{Player: domain.Player{Name: "Charlie"}, Points: 100},
+// pointsStandings builds standings with the given Points values (names P0..Pn).
+func pointsStandings(points ...int) []state.PlayerStanding {
+	s := make([]state.PlayerStanding, len(points))
+	for i, p := range points {
+		s[i] = state.PlayerStanding{Player: domain.Player{Name: fmt.Sprintf("P%d", i)}, Points: p}
 	}
-	groups := detectPoolTies(standings)
-	require.Len(t, groups, 1)
-	assert.Len(t, groups[0], 2)
-	names := []string{groups[0][0].Player.Name, groups[0][1].Player.Name}
-	assert.ElementsMatch(t, []string{"Bob", "Charlie"}, names)
+	return s
 }
 
-func TestDetectPoolTies_ThreeWayTie(t *testing.T) {
-	standings := []state.PlayerStanding{
-		{Player: domain.Player{Name: "Alice"}, Points: 100},
-		{Player: domain.Player{Name: "Bob"}, Points: 100},
-		{Player: domain.Player{Name: "Charlie"}, Points: 100},
+// TestDetectPoolTies_Positions exhaustively pins the position groups returned
+// for every shape of (already Points-sorted) standings: no ties, ties at the
+// top / middle / bottom, multiple groups (adjacent and with gaps), all-tied,
+// negatives and zeros, and the empty/single degenerate inputs.
+func TestDetectPoolTies_Positions(t *testing.T) {
+	tests := []struct {
+		name   string
+		points []int
+		want   [][]int
+	}{
+		{"empty", []int{}, nil},
+		{"single", []int{100}, nil},
+		{"two distinct", []int{200, 100}, nil},
+		{"all distinct", []int{300, 200, 100}, nil},
+		{"two tied", []int{100, 100}, [][]int{{0, 1}}},
+		{"three tied", []int{100, 100, 100}, [][]int{{0, 1, 2}}},
+		{"tie at top", []int{200, 200, 100}, [][]int{{0, 1}}},
+		{"tie at bottom", []int{300, 100, 100}, [][]int{{1, 2}}},
+		{"tie in middle", []int{300, 200, 200, 100}, [][]int{{1, 2}}},
+		{"two adjacent groups", []int{300, 300, 200, 200}, [][]int{{0, 1}, {2, 3}}},
+		{"two groups with a gap", []int{300, 300, 250, 200, 200}, [][]int{{0, 1}, {3, 4}}},
+		{"all four tied", []int{100, 100, 100, 100}, [][]int{{0, 1, 2, 3}}},
+		{"group single group", []int{500, 500, 400, 300, 300, 300}, [][]int{{0, 1}, {3, 4, 5}}},
+		{"negative points tie", []int{-50, -50}, [][]int{{0, 1}}},
+		{"zero points all tied", []int{0, 0, 0}, [][]int{{0, 1, 2}}},
+		{"single then pair", []int{300, 200, 200}, [][]int{{1, 2}}},
 	}
-	groups := detectPoolTies(standings)
-	require.Len(t, groups, 1)
-	assert.Len(t, groups[0], 3)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, detectPoolTies(pointsStandings(tc.points...)))
+		})
+	}
 }
 
-func TestDetectPoolTies_MultipleGroups(t *testing.T) {
-	standings := []state.PlayerStanding{
-		{Player: domain.Player{Name: "A"}, Points: 400},
-		{Player: domain.Player{Name: "B"}, Points: 400},
-		{Player: domain.Player{Name: "C"}, Points: 200},
-		{Player: domain.Player{Name: "D"}, Points: 200},
+// TestDetectPoolTies_TeamCriteria proves that, for TEAM standings, two teams
+// are flagged tied only when they match on the full chain
+// W>L>T>IV>IL>IT>PW>PL: a difference in any single criterion (however far down)
+// separates them via the packed Points, so no daihyosen would be injected.
+func TestDetectPoolTies_TeamCriteria(t *testing.T) {
+	type team struct {
+		name                         string
+		w, l, td, iv, il, it, pw, pl int
 	}
-	groups := detectPoolTies(standings)
-	require.Len(t, groups, 2)
-	assert.Len(t, groups[0], 2)
-	assert.Len(t, groups[1], 2)
+	mk := func(teams ...team) []state.PlayerStanding {
+		s := make([]state.PlayerStanding, len(teams))
+		for i, tm := range teams {
+			ps := state.PlayerStanding{
+				Player: domain.Player{Name: tm.name},
+				Wins:   tm.w, Losses: tm.l, Draws: tm.td,
+				IndividualWins: tm.iv, IndividualLosses: tm.il, IndividualDraws: tm.it,
+				PointsWon: tm.pw, PointsLost: tm.pl,
+			}
+			ps.Points = teamStandingPoints(ps)
+			s[i] = ps
+		}
+		sort.SliceStable(s, func(a, b int) bool { return s[a].Points > s[b].Points })
+		return s
+	}
+
+	t.Run("identical on every criterion -> tied", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 1, td: 1, iv: 2, it: 2, pw: 4},
+			team{name: "B", w: 1, td: 1, iv: 2, it: 2, pw: 4},
+			team{name: "C", l: 2, il: 4, pl: 8},
+		)
+		groups := detectPoolTies(s)
+		require.Len(t, groups, 1)
+		assert.ElementsMatch(t, []string{"A", "B"}, namesAt(s, groups[0]))
+	})
+	t.Run("same W/L/T/IV but different PW -> not tied", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 1, td: 1, iv: 2, pw: 5},
+			team{name: "B", w: 1, td: 1, iv: 2, pw: 4},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+	t.Run("same down to PW but different PL -> not tied", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 1, iv: 1, pw: 2, pl: 0},
+			team{name: "B", w: 1, iv: 1, pw: 2, pl: 1},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+	t.Run("differ only on IT (individual draws) -> not tied", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 1, iv: 1, it: 2},
+			team{name: "B", w: 1, iv: 1, it: 1},
+		)
+		assert.Empty(t, detectPoolTies(s))
+	})
+	t.Run("one more team win beats a large PW deficit -> not tied", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 2, pw: 0},
+			team{name: "B", w: 1, pw: 99},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+	t.Run("two separate two-way ties -> two groups", func(t *testing.T) {
+		s := mk(
+			team{name: "A", w: 2, iv: 3},
+			team{name: "B", w: 2, iv: 3},
+			team{name: "C", w: 1, iv: 1},
+			team{name: "D", w: 1, iv: 1},
+		)
+		groups := detectPoolTies(s)
+		require.Len(t, groups, 2)
+		assert.ElementsMatch(t, []string{"A", "B"}, namesAt(s, groups[0]))
+		assert.ElementsMatch(t, []string{"C", "D"}, namesAt(s, groups[1]))
+	})
+}
+
+// TestDetectPoolTies_IndividualCriteria mirrors the team test for INDIVIDUAL
+// standings (chain W>L>D>ipponsGiven>ipponsTaken).
+func TestDetectPoolTies_IndividualCriteria(t *testing.T) {
+	type ind struct {
+		name              string
+		w, l, d, ig, itak int
+	}
+	mk := func(players ...ind) []state.PlayerStanding {
+		s := make([]state.PlayerStanding, len(players))
+		for i, p := range players {
+			ps := state.PlayerStanding{
+				Player: domain.Player{Name: p.name},
+				Wins:   p.w, Losses: p.l, Draws: p.d,
+				IpponsGiven: p.ig, IpponsTaken: p.itak,
+			}
+			ps.Points = individualStandingPoints(ps)
+			s[i] = ps
+		}
+		sort.SliceStable(s, func(a, b int) bool { return s[a].Points > s[b].Points })
+		return s
+	}
+
+	t.Run("identical -> tied", func(t *testing.T) {
+		s := mk(
+			ind{name: "A", w: 2, ig: 4, itak: 1},
+			ind{name: "B", w: 2, ig: 4, itak: 1},
+			ind{name: "C", l: 2, itak: 4},
+		)
+		groups := detectPoolTies(s)
+		require.Len(t, groups, 1)
+		assert.ElementsMatch(t, []string{"A", "B"}, namesAt(s, groups[0]))
+	})
+	t.Run("same W/L/D but different ippons given -> not tied", func(t *testing.T) {
+		s := mk(
+			ind{name: "A", w: 2, ig: 5},
+			ind{name: "B", w: 2, ig: 4},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+	t.Run("same down to given but different taken -> not tied", func(t *testing.T) {
+		s := mk(
+			ind{name: "A", w: 2, ig: 4, itak: 1},
+			ind{name: "B", w: 2, ig: 4, itak: 2},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+	t.Run("one more win beats a large ippon deficit -> not tied", func(t *testing.T) {
+		s := mk(
+			ind{name: "A", w: 2, ig: 0},
+			ind{name: "B", w: 1, ig: 50},
+		)
+		assert.Empty(t, detectPoolTies(s))
+		assert.Equal(t, "A", s[0].Player.Name)
+	})
+}
+
+// TestStandingPoints_CriteriaPriority proves the packing preserves strict
+// criterion priority: a one-unit advantage in a higher criterion always
+// outranks any (realistic) deficit in every lower criterion combined.
+func TestStandingPoints_CriteriaPriority(t *testing.T) {
+	t.Run("team", func(t *testing.T) {
+		// big = maxed-out lower tiers; each higher-tier bump must still win.
+		big := func(s state.PlayerStanding) state.PlayerStanding {
+			s.IndividualWins += 90
+			s.IndividualDraws += 90
+			s.PointsWon += 90
+			return s
+		}
+		// +1 W beats any lower deficit
+		assert.Greater(t,
+			teamStandingPoints(state.PlayerStanding{Wins: 1}),
+			teamStandingPoints(big(state.PlayerStanding{Wins: 0})))
+		// fewer L (at equal W) beats lower deficit
+		assert.Greater(t,
+			teamStandingPoints(state.PlayerStanding{Wins: 1, Losses: 0}),
+			teamStandingPoints(big(state.PlayerStanding{Wins: 1, Losses: 1})))
+		// +1 IV beats any PW/PL deficit
+		assert.Greater(t,
+			teamStandingPoints(state.PlayerStanding{IndividualWins: 1}),
+			teamStandingPoints(state.PlayerStanding{IndividualWins: 0, PointsWon: 90}))
+		// +1 PW beats a PL deficit
+		assert.Greater(t,
+			teamStandingPoints(state.PlayerStanding{PointsWon: 1, PointsLost: 1}),
+			teamStandingPoints(state.PlayerStanding{PointsWon: 0, PointsLost: 0}))
+	})
+	t.Run("individual", func(t *testing.T) {
+		// +1 W beats any ippon advantage
+		assert.Greater(t,
+			individualStandingPoints(state.PlayerStanding{Wins: 1}),
+			individualStandingPoints(state.PlayerStanding{Wins: 0, IpponsGiven: 90}))
+		// +1 ippon given beats an ippons-taken deficit
+		assert.Greater(t,
+			individualStandingPoints(state.PlayerStanding{IpponsGiven: 1, IpponsTaken: 1}),
+			individualStandingPoints(state.PlayerStanding{IpponsGiven: 0, IpponsTaken: 0}))
+	})
+}
+
+// TestStandingsAt covers position->standing resolution: order preservation and
+// defensive skipping of out-of-range indices.
+func TestStandingsAt(t *testing.T) {
+	s := []state.PlayerStanding{
+		{Player: domain.Player{Name: "A"}},
+		{Player: domain.Player{Name: "B"}},
+		{Player: domain.Player{Name: "C"}},
+	}
+	t.Run("preserves position order", func(t *testing.T) {
+		got := standingsAt(s, []int{2, 0})
+		require.Len(t, got, 2)
+		assert.Equal(t, "C", got[0].Player.Name)
+		assert.Equal(t, "B", s[1].Player.Name) // input untouched
+		assert.Equal(t, "A", got[1].Player.Name)
+	})
+	t.Run("skips out-of-range indices", func(t *testing.T) {
+		got := standingsAt(s, []int{0, 9, 2, -1})
+		require.Len(t, got, 2)
+		assert.Equal(t, []string{"A", "C"}, []string{got[0].Player.Name, got[1].Player.Name})
+	})
+	t.Run("empty positions -> empty", func(t *testing.T) {
+		assert.Empty(t, standingsAt(s, nil))
+	})
 }
 
 func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {

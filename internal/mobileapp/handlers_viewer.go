@@ -171,6 +171,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					annotateQueuePositions(poolMatches)
 					annotateBracketQueuePositions(bracket)
 
+					// Redact operator-only audit fields before this PUBLIC payload.
+					stripMatchesAudit(poolMatches)
+					stripBracketAudit(bracket)
+
 					results[idx] = gin.H{
 						"config":      comp,
 						"poolMatches": poolMatches,
@@ -291,6 +295,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
 			// on the TV display, streaming overlay, and viewer card.
 			mergePoolNumbersIntoPlayers(comp, pools)
+
+			// Redact operator-only audit fields before this PUBLIC payload.
+			stripMatchesAudit(poolMatches)
+			stripBracketAudit(bracket)
 
 			return json.Marshal(gin.H{
 				"config":      comp,

@@ -149,8 +149,9 @@ func TestMatchLineup_RoundLockSkipsMatchScoped(t *testing.T) {
 }
 
 // TestMatchLineup_SetGuardedByOwnMatchStatus: SetTeamLineup for a
-// match-scoped lineup is refused only when THAT match is running, and is
-// allowed when a DIFFERENT match is running.
+// match-scoped lineup is only blocked when THAT match is running AND the write
+// changes an already-recorded position. A NEW lineup (no prior entry) can
+// always be saved — even while its match is running (live table entry).
 func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -165,14 +166,104 @@ func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
 	}))
 
-	// PoolA-0 is running → its match-scoped lineup is blocked even with
-	// no LockedAt stamp yet (TOCTOU guard).
-	require.ErrorIs(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
-		ErrLineupLocked, "running match PoolA-0 must block its own lineup")
+	// PoolA-0 is running but no prior lineup — NEW lineup must succeed.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		"saving a new match-scoped lineup while the match is running must succeed (live table entry)")
+
+	// PoolA-0 is running AND a lineup is recorded — CHANGING a position must be blocked.
+	changed := fiveStarterForMatch("team-alpha", "PoolA-0")
+	changed.Positions[domain.PosJiho] = "p2-substitute"
+	require.ErrorIs(t, store.SetTeamLineup(compID, changed, 5),
+		ErrLineupLocked, "changing a recorded position while the match is running must return ErrLineupLocked")
 
 	// PoolA-1 is only scheduled → its lineup is freely settable.
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-1"), 5),
 		"scheduled match PoolA-1 must allow its lineup")
+}
+
+// TestSetTeamLineupForce_BypassesMatchFreeze: the operator override sets a
+// lineup on a running match, and preserves an existing LockedAt stamp so a
+// later non-force write (that changes a recorded position) still refuses.
+func TestSetTeamLineupForce_BypassesMatchFreeze(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-force"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+	}))
+
+	// Normal path: NEW lineup while match is running — now SUCCEEDS.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		"new lineup while match is running must succeed (live table entry)")
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Contains(t, got, teamLineupMatchKey("team-alpha", "PoolA-0"), "lineup persisted")
+
+	// Stamp a lock, then force again: it succeeds but preserves the stamp,
+	// so the next non-force write (that changes a recorded position) still refuses.
+	require.NoError(t, store.LockTeamLineupForMatch(compID, "PoolA-0", time.Now().UTC()))
+	require.NoError(t, store.SetTeamLineupForce(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
+		"force overrides a stamped LockedAt")
+	got, err = store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.NotNil(t, got[teamLineupMatchKey("team-alpha", "PoolA-0")].LockedAt,
+		"force preserves the existing LockedAt stamp")
+
+	// Non-force write that CHANGES a recorded position must still be refused.
+	changed := fiveStarterForMatch("team-alpha", "PoolA-0")
+	changed.Positions[domain.PosJiho] = "p2-substitute"
+	require.ErrorIs(t, store.SetTeamLineup(compID, changed, 5),
+		ErrLineupLocked, "non-force that changes a recorded position still refuses after a forced write")
+}
+
+// TestSetTeamLineup_InTxPendingForGuardsLiveMatch is the in-transaction twin
+// of TestMatchLineup_SetGuardedByOwnMatchStatus: when lineups.yaml is already
+// staged earlier in the SAME transaction (the pendingFor branch of
+// storeTx.setTeamLineup), a later non-force write that CHANGES a recorded
+// position while the match is running with no persisted LockedAt must still be
+// refused with ErrLineupLocked. Regression guard for the T128a TOCTOU: the
+// in-tx pendingFor path previously checked only LockedAt and skipped the
+// match-status re-check that Store.setTeamLineupLocked performs.
+func TestSetTeamLineup_InTxPendingForGuardsLiveMatch(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-match-tx-toctou"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
+		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
+	}))
+
+	err := store.WithTransaction(compID, func(tx StoreTx) error {
+		// 1. NEW lineup on the running match — stages lineups.yaml, so every
+		//    subsequent write in this tx hits the pendingFor branch.
+		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5); e != nil {
+			return e
+		}
+		// 2. A scheduled match's lineup is still freely settable via pendingFor.
+		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-1"), 5); e != nil {
+			return e
+		}
+		// 3. CHANGING a recorded position on the RUNNING match must be refused,
+		//    even though no LockedAt is persisted (the match-status re-check).
+		changed := fiveStarterForMatch("team-alpha", "PoolA-0")
+		changed.Positions[domain.PosJiho] = "p2-substitute"
+		require.ErrorIs(t, tx.SetTeamLineup(compID, changed, 5), ErrLineupLocked,
+			"in-tx pendingFor change to a live match must refuse with ErrLineupLocked")
+		// 4. The same change via the FORCE twin bypasses the freeze.
+		return tx.SetTeamLineupForce(compID, changed, 5)
+	})
+	require.NoError(t, err)
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "p2-substitute",
+		got[teamLineupMatchKey("team-alpha", "PoolA-0")].Positions[domain.PosJiho],
+		"forced substitution must have persisted")
 }
 
 // TestLockTeamLineupForMatch_OnlyTargetMatch: locking match P1 stamps

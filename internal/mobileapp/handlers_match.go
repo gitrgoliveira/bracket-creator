@@ -276,6 +276,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		force := c.Query("force") == "true"
 
+		// Correction-reason audit gate (parity with PUT /score): overwriting an
+		// already-completed result is a correction and must carry a non-empty
+		// CorrectionReason. Without this, bulk-score is a silent bypass of the
+		// single-score gate — a finalized result could be rewritten with no
+		// audit trail. The status is snapshotted once before the loop rather
+		// than read under each write's lock, so a narrow TOCTOU remains: if a
+		// concurrent admin PUT /score finalizes a match between this snapshot
+		// and our RecordMatchResult call, the reason can be stripped. This is
+		// audit-trail only (the write itself is atomic and authenticated) and
+		// closes the common single-admin case; the per-result-transaction fix
+		// for the concurrent-admin window is tracked in bead mp-ic5b.
+		statusBefore := matchStatusSnapshot(store, id)
+
 		for i := range results {
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
 			// (top-level and each sub-bout independently).
@@ -289,6 +302,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
+			// Normalize + gate the audit reason exactly as the single-score path
+			// does. A reason is meaningful only on a correction (completed →
+			// completed); drop it on any non-correction write.
+			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
+			if results[i].Status == state.MatchStatusCompleted {
+				if statusBefore[results[i].ID] == state.MatchStatusCompleted {
+					if results[i].CorrectionReason == "" {
+						errs = append(errs, scoreError{MatchID: results[i].ID, Error: "correcting a completed match result requires a non-empty correctionReason"})
+						continue
+					}
+				} else {
+					results[i].CorrectionReason = "" // first finalization — not a correction
+				}
+			} else {
+				results[i].CorrectionReason = ""
+			}
+
 			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 			} else {
@@ -299,7 +329,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		if len(successful) > 0 {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
-				"results":       successful,
+				"results":       matchesForBroadcast(successful),
 			})
 			tryAutoCompletePools(c, eng, hub, id)
 		}
@@ -638,6 +668,59 @@ func isMatchFinalized(r *state.MatchResult) bool {
 	return r.Status == state.MatchStatusCompleted
 }
 
+// lookupMatchStatusUnderTx reads the current status of matchID from
+// the pool-matches CSV or bracket JSON (in that order) without taking
+// any additional lock (caller MUST hold the per-comp lock via
+// WithTransaction). Returns the empty MatchStatus "" when the match
+// cannot be found in either store — callers treat an unknown match as
+// "not yet completed" (the engine will reject it via errMatchNotFound
+// on the actual score write, so we don't need to fail here).
+func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.MatchStatus {
+	poolMatches, err := stx.LoadPoolMatches(compID)
+	if err == nil {
+		for i := range poolMatches {
+			if poolMatches[i].ID == matchID {
+				return poolMatches[i].Status
+			}
+		}
+	}
+	bracket, err := stx.LoadBracket(compID)
+	if err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				if round[i].ID == matchID {
+					return round[i].Status
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// matchStatusSnapshot returns a matchID→status map for every pool and bracket
+// match in compID. It is the bulk-score equivalent of lookupMatchStatusUnderTx:
+// the bulk handler reads it once before its write loop to enforce the
+// correction-reason audit gate (an overwrite of an already-completed result
+// must carry a reason). Read errors are best-effort — a missing entry reads as
+// "" (not completed), so a transient load failure relaxes the gate rather than
+// rejecting an otherwise-valid batch, matching lookupMatchStatusUnderTx.
+func matchStatusSnapshot(store CompetitionStore, compID string) map[string]state.MatchStatus {
+	snapshot := map[string]state.MatchStatus{}
+	if poolMatches, err := store.LoadPoolMatches(compID); err == nil {
+		for i := range poolMatches {
+			snapshot[poolMatches[i].ID] = poolMatches[i].Status
+		}
+	}
+	if bracket, err := store.LoadBracket(compID); err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for i := range round {
+				snapshot[round[i].ID] = round[i].Status
+			}
+		}
+	}
+	return snapshot
+}
+
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`
 // endpoint via the consumer-boundary interfaces (T014/T017) instead of
 // the concrete `*engine.Engine` / `*Hub`. This is the Slice 0
@@ -707,6 +790,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		result := req.AsMatchResult()
 		result.ResultSource = resultSource
+		// Normalize the audit reason once, before validation and the engine
+		// write, so a whitespace-only reason can't satisfy the correction gate
+		// and the persisted value never carries leading/trailing whitespace.
+		result.CorrectionReason = strings.TrimSpace(result.CorrectionReason)
+		// A correctionReason is meaningful only on a correction (an overwrite of
+		// an already-completed result). A non-completed write can never be one,
+		// so don't persist a client-supplied reason there.
+		if result.Status != state.MatchStatusCompleted {
+			result.CorrectionReason = ""
+		}
 
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The
@@ -735,6 +828,31 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
 					engErr = err
 					return nil
+				}
+			}
+			// Correction audit: overwriting an already-completed result
+			// (completed -> completed) is a correction and requires a non-empty
+			// CorrectionReason for traceability. This applies to ANY decision
+			// type, including a withdrawal (kiken/fusenpai) submitted via /score
+			// — exempting those would let a finalized result be overwritten with
+			// no audit reason. The check runs inside the tx so the is-completed
+			// read is race-free (same lock). A first finalization (existing
+			// status is not completed) needs no reason.
+			if result.Status == state.MatchStatusCompleted {
+				existing := lookupMatchStatusUnderTx(stx, id, mid)
+				if existing == state.MatchStatusCompleted {
+					// Overwriting a finalized result is a correction — require a reason.
+					if result.CorrectionReason == "" {
+						engErr = &ValidationError{
+							Field:   "correctionReason",
+							Message: "correcting a completed match result requires a non-empty correctionReason",
+						}
+						return nil
+					}
+				} else {
+					// First finalization — not a correction. The contract says the
+					// reason is omitted here, so drop any client-supplied value.
+					result.CorrectionReason = ""
 				}
 			}
 			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
@@ -809,6 +927,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				})
 				return
 			}
+			var valErr *ValidationError
+			if errors.As(engErr, &valErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": engErr.Error()})
 			return
 		}
@@ -818,7 +941,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
-			"result":        result,
+			"result":        matchPtrForBroadcast(result),
 		})
 		// T085/T092 — when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface

@@ -103,6 +103,7 @@ type StoreTx interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
@@ -519,6 +520,17 @@ func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, 
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
+	return t.setTeamLineup(compID, l, teamSize, false)
+}
+
+// SetTeamLineupForce is the in-tx twin of Store.SetTeamLineupForce: it bypasses
+// the start-of-match freeze (operator override, officiated mode) while still
+// validating the lineup. See that method for the rationale.
+func (t *storeTx) SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error {
+	return t.setTeamLineup(compID, l, teamSize, true)
+}
+
+func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int, force bool) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
@@ -529,7 +541,7 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	// into the staged map instead of the on-disk version. Otherwise
 	// the staged write would be discarded on the next save.
 	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		if err := l.Validate(teamSize); err != nil {
+		if err := l.ValidatePositions(teamSize); err != nil {
 			return err
 		}
 		current, perr := parseTeamLineupsBytes(pending)
@@ -537,20 +549,45 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 			return perr
 		}
 		key := lineupStorageKey(l)
-		if existing, present := current[key]; present && existing.LockedAt != nil {
-			return ErrLineupLocked
+		if existing, present := current[key]; present {
+			if force {
+				// Preserve the stamp under a forced write so a later
+				// non-force write still refuses (per-write override).
+				l.LockedAt = existing.LockedAt
+			} else if changesRecordedPosition(existing, l) {
+				// A change to an already-recorded position is blocked once the
+				// match/round has gone live (adds to empty slots are always
+				// allowed). Mirrors Store.setTeamLineupLocked exactly.
+				if existing.LockedAt != nil {
+					return ErrLineupLocked
+				}
+				// T128a TOCTOU guard: a concurrent score-save could have
+				// transitioned this lineup's match to running BETWEEN the
+				// caller's GET and this write, before the engine persisted
+				// LockedAt. The handler checks match status upstream on the
+				// FORCE path only — the non-force path does not — so re-check
+				// here under the held per-comp lock and refuse if the match is
+				// no longer mutable. Match-scoped when MatchID is set (a live
+				// match must not block a sibling match's lineup), else
+				// round-scoped (legacy).
+				if l.MatchID != "" {
+					if locked, lerr := t.store.matchIsRunningOrCompletedLocked(compID, l.MatchID); lerr != nil {
+						return lerr
+					} else if locked {
+						return ErrLineupLocked
+					}
+				} else if locked, lerr := t.store.roundHasRunningOrCompletedMatchLocked(compID, l.Round); lerr != nil {
+					return lerr
+				} else if locked {
+					return ErrLineupLocked
+				}
+			}
 		}
-		// In-tx writers have already passed the round-live check
-		// upstream (handlers do that BEFORE entering the tx body
-		// in the live-tournament flows). Skipping
-		// roundHasRunningOrCompletedMatchLocked here mirrors the
-		// non-tx fast-path: the per-comp lock + the staged
-		// in-tx state are the consistency guarantees.
 		l.CompetitionID = compID
 		current[key] = l
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+	return t.store.setTeamLineupLocked(compID, l, teamSize, force, t.txWriteFn())
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {

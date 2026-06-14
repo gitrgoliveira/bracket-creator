@@ -731,14 +731,19 @@ const API = {
         }
         return res.json();
     },
-    async putMatchLineup(compID, teamId, matchId, positions, password) {
+    async putMatchLineup(compID, teamId, matchId, positions, password, force = false, reason = "") {
+        if (force && !(reason && reason.trim())) {
+            throw new Error("A change reason is required to override the lineup lock.");
+        }
+        const body = { teamId, competitionId: compID, matchId, positions, force };
+        if (reason) body.changeReason = reason;
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ teamId, competitionId: compID, matchId, positions })
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -776,6 +781,23 @@ const API = {
             throw new Error(err.error || "Failed to add daihyosen");
         }
         return res.json();
+    },
+    // T141: remove an unscored daihyosen placeholder from a knockout team match.
+    // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
+    // match not found) or 409 (daihyosen already scored — clear scores first).
+    async removeDaihyosen(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to remove daihyosen");
+        }
+        // The handler responds with an envelope ({ result: MatchResult }); unwrap
+        // it so the return value matches the docstring ("the updated MatchResult").
+        const body = await res.json().catch(() => ({}));
+        return body.result ?? body;
     },
     // T190-T193 (US13 — Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current

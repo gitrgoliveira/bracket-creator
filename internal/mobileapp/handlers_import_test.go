@@ -580,6 +580,46 @@ competitions:
 			"existing comp's name must be untouched by the colliding-ID import")
 	})
 
+	// mp-yin4: the import path must enforce number-prefix uniqueness just like
+	// POST/PUT — a manifest row with a duplicate NumberPrefix must land a
+	// per-row error and not be persisted.
+	t.Run("Duplicate Number Prefix Across Import And Existing Comp Rejected", func(t *testing.T) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: "pfx-import-existing", Name: "Pfx Import Existing", NumberPrefix: "I",
+		}))
+
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		manifestPart, _ := writer.CreateFormFile("files", "manifest.yaml")
+		manifestPart.Write([]byte(`
+competitions:
+  - id: "pfx-import-dup"
+    name: "Pfx Import Dup"
+    number_prefix: "I"
+    kind: "individual"
+    format: "mixed"
+    courts: ["A"]
+`))
+		writer.Close()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/import", body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp struct {
+			Results []ImportResult `json:"results"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Results, 1)
+		assert.Contains(t, resp.Results[0].Error, "number prefix",
+			"duplicate prefix should land in ImportResult.Error")
+
+		stored, _ := store.LoadCompetition("pfx-import-dup")
+		assert.Nil(t, stored, "pfx-import-dup must not have been persisted")
+	})
+
 	// Date must be DD-MM-YYYY. Non-canonical formats (e.g. ISO YYYY-MM-DD)
 	// land a per-row error rather than persisting the bad date — matches
 	// the POST/PUT 400 contract in handlers_competition.go.
@@ -826,5 +866,35 @@ func TestParseSeedsBytes(t *testing.T) {
 		assert.Equal(t, 1, seeds[0].SeedRank)
 		assert.Equal(t, "Player B", seeds[1].Name)
 		assert.Equal(t, 2, seeds[1].SeedRank)
+	})
+}
+
+// TestImportCompetition_InheritsTournamentCourts locks in that the manifest
+// importer applies the same court invariant as the POST/PUT handlers: a row
+// that omits courts inherits the tournament's courts via
+// resolveCompetitionCourts (it used to hardcode a single "A").
+func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A", "B"},
+	}))
+
+	t.Run("omitted courts inherit the tournament's courts", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-no-courts", Name: "No Courts", Date: "11-06-2026"}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-no-courts")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B"}, comp.Courts)
+	})
+
+	t.Run("explicit manifest courts are preserved", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-one-court", Name: "One Court", Date: "11-06-2026", Courts: []string{"B"}}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-one-court")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"B"}, comp.Courts)
 	})
 }

@@ -88,7 +88,7 @@ function watchSustainedDisconnect(thresholdMs, onSustained) {
   };
 }
 
-function AdminTopbar({ onLogout, onViewerMode, tournament }) {
+function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   // Render running matches as chips below the topbar so admins always
   // know what's under way, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
@@ -179,7 +179,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament }) {
           Connection interrupted. Reconnecting… Scores on screen may be out of date.
         </div>
       )}
-      {runningMatches.length > 0 && (
+      {!hideRunningStrip && runningMatches.length > 0 && (
         <div className="running-strip" role="region" aria-label={`${pluralize(runningMatches.length, "match", "matches")} in progress`}>
           <span className="running-strip__lbl"><span className="dot dot--running"></span> {pluralize(runningMatches.length, "match", "matches")} in progress</span>
           <div className="running-strip__chips">
@@ -331,7 +331,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
   const t = tournament;
   const comps = t.competitions || [];
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
@@ -453,6 +453,18 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
         </div>
+        {onOpenShiaijo && (t.courts || []).length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <div className="section-title">Shiaijo operator views</div>
+            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+              {(t.courts || []).map(court => (
+                <button key={court} className="btn" style={{ minWidth: 120 }} onClick={() => onOpenShiaijo(court)}>
+                  Shiaijo {court} →
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>

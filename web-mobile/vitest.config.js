@@ -20,7 +20,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // and warns "Both esbuild and oxc options were set. oxc options will be used
 // and esbuild options will be ignored." if both are present.
 
-const sharedPlugins = [react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
+// Use a factory so each project gets its own plugin instance — sharing a
+// single instance across projects can cause cross-project state leakage in
+// plugins that cache state per build (e.g. configResolved caches).
+const makePlugins = () => [react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
 const sharedResolve = {
   alias: {
     // qr.jsx is imported as ./qr.js in admin_shell.jsx because esbuild's
@@ -35,7 +38,7 @@ export default defineConfig({
   test: {
     projects: [
       {
-        plugins: sharedPlugins,
+        plugins: makePlugins(),
         resolve: sharedResolve,
         test: {
           name: 'unit',
@@ -50,7 +53,7 @@ export default defineConfig({
         },
       },
       {
-        plugins: sharedPlugins,
+        plugins: makePlugins(),
         resolve: sharedResolve,
         test: {
           name: 'render',

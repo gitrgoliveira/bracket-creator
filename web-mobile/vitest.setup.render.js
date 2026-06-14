@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@testing-library/jest-dom';
-import { afterEach } from 'vitest';
+import { vi, beforeEach, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
 // Provide real React 18 as the window/global that component files destructure:
@@ -15,7 +15,28 @@ global.ReactDOM = { createRoot };
 // Load it now so those globals are available when render tests import components.
 await import('./js/admin_helpers.jsx');
 
-// Clean up mounted components after each test.
+// Fail tests that produce unexpected console.warn or console.error — matches
+// the invariant enforced by the unit suite (vitest.setup.js).
+// Tests that intentionally trigger warnings (e.g. the GUARD test) must spy on
+// console.error themselves with a local mock, which replaces this spy for that
+// test so afterEach only sees the genuinely unexpected calls.
+let warnSpy, errorSpy;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
 afterEach(() => {
+  const warns = warnSpy.mock?.calls ?? [];
+  const errors = errorSpy.mock?.calls ?? [];
+  warnSpy.mockRestore();
+  errorSpy.mockRestore();
   cleanup();
+  if (warns.length > 0) {
+    throw new Error(`Unexpected console.warn (${warns.length} call(s)):\n${warns.map((a) => a.join(' ')).join('\n')}`);
+  }
+  if (errors.length > 0) {
+    throw new Error(`Unexpected console.error (${errors.length} call(s)):\n${errors.map((a) => a.join(' ')).join('\n')}`);
+  }
 });

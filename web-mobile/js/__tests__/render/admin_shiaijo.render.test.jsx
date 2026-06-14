@@ -175,6 +175,18 @@ describe('AdminShiaijoPage render-smoke', () => {
       // eslint-disable-next-line no-undef
       return <div>{undefinedVariable}</div>;
     };
-    expect(() => render(<BrokenComponent />)).toThrow(ReferenceError);
+    // React 18 calls console.error internally when a component throws (before
+    // re-throwing the error). Suppress those expected calls with a local spy so
+    // the suite's fail-on-console.error guard does not trip on this intentional
+    // throw. The local spy replaces the beforeEach spy for this test's duration;
+    // afterEach checks the beforeEach spy (which has 0 calls) and passes.
+    const localError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const localWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      expect(() => render(<BrokenComponent />)).toThrow(ReferenceError);
+    } finally {
+      localError.mockRestore();
+      localWarn.mockRestore();
+    }
   });
 });

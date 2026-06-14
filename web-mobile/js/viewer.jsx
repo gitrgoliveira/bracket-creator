@@ -3960,7 +3960,7 @@ function AnnBellBtn() {
     if (!supported) return;
     const onSync = (e) => {
       if (Notification.permission === "denied") { setState("denied"); return; }
-      setState(e.detail ? "on" : "off");
+      setState((e.detail && Notification.permission === "granted") ? "on" : "off");
     };
     // CustomEvents dispatched on window are same-origin; no origin check needed.
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);

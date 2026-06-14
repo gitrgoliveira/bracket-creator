@@ -578,32 +578,33 @@ const NOTIF_SYNC_EVENT = "notifEnabledSync";
 // LocalStorage key for the browser notification opt-in toggle.
 const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 
-// Notification opt-in helpers used by AnnBellBtn and NotificationSettings.
-// handleBellToggle cannot delegate here — it must revert the optimistic chime
-// flip on throw and sync AnnBellBtn on denied/dismissed, which require logic
-// tightly coupled to the call site. Return values for notifEnable: "on"
-// (granted), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
+// Notification opt-in helpers used by AnnBellBtn, NotificationSettings, and
+// handleBellToggle. Return values for notifEnable: "on" (granted + LS write
+// succeeded), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
+function dispatchNotif(enabled) {
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }
+}
 export async function notifEnable() {
   if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") {
-    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+    dispatchNotif(false);
     return "denied";
   }
   if (Notification.permission === "default") {
     let r;
     try { r = await Notification.requestPermission(); } catch (_e) {
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e2) {}
+      dispatchNotif(false);
       return "off";
     }
     if (r !== "granted") {
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+      dispatchNotif(false);
       return r === "denied" ? "denied" : "off";
     }
   }
   let stored = false;
-  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
+  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) { /* quota — stored stays false, dispatch will reflect "off" */ }
   // Dispatch with the actual stored value so listeners show the correct state.
-  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
+  dispatchNotif(stored);
   return stored ? "on" : "off";
 }
 export function notifDisable() {
@@ -611,13 +612,13 @@ export function notifDisable() {
     window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false");
   } catch (_e) {
     // If setItem fails (quota), try removing the key so fireNotification won't see "true".
-    try { window.localStorage.removeItem(LS_NOTIFICATIONS_ENABLED); } catch (_e2) {}
+    try { window.localStorage.removeItem(LS_NOTIFICATIONS_ENABLED); } catch (_e2) { /* storage locked */ }
   }
   // Dispatch the actual persisted state so listeners don't show "off" when the
   // key is still "true" (i.e. both setItem and removeItem failed).
   let nowEnabled = false;
-  try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) {}
-  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: nowEnabled })); } catch (_e) {}
+  try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: nowEnabled })); } catch (_e) { /* ignore */ }
 }
 
 function useChimeMuted() {
@@ -649,8 +650,8 @@ function useChimeMuted() {
     let next;
     setMuted(prev => { next = !prev; return next; });
     if (typeof window === "undefined") return;
-    try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) {}
-    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) {}
+    try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) { /* ignore */ }
+    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) { /* ignore */ }
   };
   return [muted, toggle];
 }
@@ -1061,7 +1062,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
 
   // Add a single player to the watchlist (dedup by id). Used by the deep link.
-  const addWatchPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
+  const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
 
   // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
   // links from QR codes exactly once. Adding to the watchlist is
@@ -1160,33 +1161,14 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         return;
       }
       if (!notificationSupported()) return; // enabling path requires the API
-      // Enabling: request permission if needed. fireNotification() gates on the
-      // localStorage flag at fire time (see fireNotification in app.jsx).
-      const perm = Notification.permission;
-      if (perm === "denied") {
-        // Browser already blocked — chime stays enabled ("chime only" mode).
-        // Sync any AnnBellBtn instances so they show the denied state.
-        try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
-        return;
+      // Delegate to notifEnable() which handles permission request, LS write, and
+      // NOTIF_SYNC_EVENT dispatch. Revert the optimistic chime flip only when the
+      // user dismissed the prompt or LS write failed ("off"); on "denied" the
+      // chime stays enabled (chime-only mode) and on "on" everything is in sync.
+      const outcome = await notifEnable();
+      if (outcome === "off") {
+        toggleChimeMuted(); // revert optimistic flip
       }
-      if (perm === "default") {
-        let result;
-        try { result = await Notification.requestPermission(); } catch (_e) {
-          // requestPermission() threw (rare) — revert the optimistic flip.
-          // toggle() uses a functional updater so prev=false (post-flip) → next=true.
-          toggleChimeMuted();
-          return;
-        }
-        if (result !== "granted") {
-          // Dismissed or denied after prompt — chime stays, sync AnnBellBtn.
-          try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
-          return;
-        }
-      }
-      // perm is now "granted" (either pre-existing or just obtained above).
-      let stored = false;
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
     } finally {
       bellToggleInFlight.current = false;
     }
@@ -3912,6 +3894,9 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
+// Resolved once at module load; avoids a per-render read and repeated console.error on miss.
+const AnnBellBtnIcon = window.BellIcon;
+
 // AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
 function AnnBellBtn() {
   const supported = notificationSupported();
@@ -3966,11 +3951,7 @@ function AnnBellBtn() {
 
   if (state === "unsupported") return null;
 
-  const BellIcon = window.BellIcon;
-  if (!BellIcon) {
-    console.error('[AnnBellBtn] window.BellIcon not loaded — check script order in index.html');
-    return null;
-  }
+  if (!AnnBellBtnIcon) return null;
 
   const toggle = async () => {
     if (inFlight.current) return;
@@ -3991,7 +3972,7 @@ function AnnBellBtn() {
       aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
       title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
     >
-      <BellIcon muted={state !== "on"} size={13} />
+      <AnnBellBtnIcon muted={state !== "on"} size={13} />
     </button>
   );
 }

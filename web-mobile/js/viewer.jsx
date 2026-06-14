@@ -1822,10 +1822,11 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     highlightPlayers={highlightPlayers}
                     onMatchClick={(m, ri, _mi, total) => {
                       const label = window.roundLabel(ri, total ?? derivedBracket.rounds.length);
-                      // m.roundIndex is already the backend round array index
-                      // (stamped by compMatches); prefer it over the display-
-                      // column index (ri) so team lineup fetches use the right
-                      // round even when phantom leading rounds shift the indices.
+                      // m.roundIndex is the backend round array index, stamped by
+                      // buildDisplayModel (meta mode) or the raw rounds[ri] position
+                      // (legacy mode where ri equals the backend index). Prefer it
+                      // over the display-column index so lineup fetches use the right
+                      // round when phantom leading rounds shift the display column.
                       setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />

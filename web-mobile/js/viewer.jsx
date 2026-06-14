@@ -637,17 +637,23 @@ function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
     if (typeof window === "undefined") return true;
     try {
-      // Default muted until the user explicitly enables via the bell.
-      // A stored "false" means the user turned it on; anything else → muted.
-      // Write the default explicitly so future default changes don't silently
-      // flip returning users who never stored a preference.
+      // A stored "false" means the user turned chime on; anything else → muted.
       const stored = window.localStorage.getItem(LS_CHIME_MUTED);
-      if (stored === null) {
-        try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) { /* ignore */ }
-      }
       return stored !== "false";
     } catch (_e) { return true; }
   });
+  // Write the default once after mount so future default changes don't silently
+  // flip returning users who never stored a preference. Kept out of the useState
+  // initializer to avoid side effects during render (initializers can re-run on
+  // strict-mode double-invocation / remounts).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(LS_CHIME_MUTED) === null) {
+        window.localStorage.setItem(LS_CHIME_MUTED, "true");
+      }
+    } catch (_e) { /* ignore */ }
+  }, []);
   // Sync across same-page instances via custom event.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -3750,7 +3756,9 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 
 // ---------------------------------------------------------------------------
 // NotificationSettings — viewer settings panel for browser push notifications.
-// Exported for unit testing.
+// NOT currently mounted in production UI — the notification toggle is now
+// integrated into BellIcon (WatchlistPanel) and AnnBellBtn.
+// Exported for unit testing only (app_announcement.test.jsx).
 // ---------------------------------------------------------------------------
 
 // Pure helper: detect Notification API support.
@@ -3917,11 +3925,11 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-// Resolved once at module load; avoids a per-render read and repeated console.error on miss.
-const AnnBellBtnIcon = window.BellIcon;
-
 // AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
 function AnnBellBtn() {
+  // Read at render time so a load-order violation surfaces immediately rather
+  // than being frozen as a permanent null captured at module eval.
+  const AnnBellBtnIcon = window.BellIcon;
   const supported = notificationSupported();
   const inFlight = useRefV(false);
   const [state, setState] = useState(() => {
@@ -3973,7 +3981,10 @@ function AnnBellBtn() {
 
   if (state === "unsupported") return null;
 
-  if (!AnnBellBtnIcon) return null;
+  if (!AnnBellBtnIcon) {
+    console.warn("[AnnBellBtn] window.BellIcon not set — check script load order in index.html");
+    return null;
+  }
 
   const toggle = async () => {
     if (inFlight.current) return;

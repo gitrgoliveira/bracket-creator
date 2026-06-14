@@ -116,6 +116,25 @@ describe('notification helpers', () => {
       expect(dispatchSpy).toHaveBeenCalledOnce();
       expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
     });
+
+    it('returns "off" when notifDisable() is called while awaiting permission', async () => {
+      const ls = makeLocalStorageMock();
+      installLS(ls);
+      // Deferred permission so we can interleave notifDisable() before it resolves.
+      let resolvePermission;
+      const permPromise = new Promise((res) => { resolvePermission = res; });
+      global.Notification = { permission: 'default', requestPermission: () => permPromise };
+
+      const enableResult = notifEnable();
+      notifDisable(); // sets notifCancelled = true while dialog is pending
+      resolvePermission('granted'); // user approves — but already cancelled
+
+      const result = await enableResult;
+      expect(result).toBe('off');
+      // LS must NOT have been written with 'true' (the disable ran first)
+      expect(ls.setItem).not.toHaveBeenCalledWith('viewer.notifications.enabled', 'true');
+      expect(dispatchSpy.mock.calls.at(-1)[0].detail).toBe(false);
+    });
   });
 
   describe('notifDisable', () => {

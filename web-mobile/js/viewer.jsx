@@ -579,7 +579,6 @@ const CHIME_SYNC_EVENT = "chimeMutedSync";
 // Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
 // instances and the watchlist bell stay visually in sync within one page.
 const NOTIF_SYNC_EVENT = "notifEnabledSync";
-// LS_NOTIFICATIONS_ENABLED is imported from notification_keys.jsx (shared with app.jsx).
 
 // Notification opt-in helpers used by AnnBellBtn, NotificationSettings, and
 // handleBellToggle. Return values for notifEnable: "on" (granted + LS write
@@ -591,9 +590,14 @@ function dispatchNotif(enabled) {
 // the same permission dialog and get the same outcome instead of an immediate
 // "off" that can leave bells out of sync with the first call's actual result.
 let notifEnablePromise = null;
+// Set to true by notifDisable() while notifEnable() is awaiting the permission
+// dialog. Checked before the final LS write so a concurrent disable is not
+// overridden when the user approves the dialog after having already tapped disable.
+let notifCancelled = false;
 export async function notifEnable() {
   if (notifEnablePromise) return notifEnablePromise;
   notifEnablePromise = (async () => {
+    notifCancelled = false;
     if (typeof Notification === "undefined") { dispatchNotif(false); return "off"; }
     if (Notification.permission === "denied") {
       dispatchNotif(false);
@@ -610,6 +614,7 @@ export async function notifEnable() {
         return r === "denied" ? "denied" : "off";
       }
     }
+    if (notifCancelled) { dispatchNotif(false); return "off"; }
     let stored = false;
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) { /* quota — stored stays false, dispatch will reflect "off" */ }
     // Dispatch with the actual stored value so listeners show the correct state.
@@ -619,6 +624,7 @@ export async function notifEnable() {
   return notifEnablePromise;
 }
 export function notifDisable() {
+  notifCancelled = true; // cancel any in-flight notifEnable() before the LS write
   try {
     window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false");
   } catch (_e) {
@@ -637,7 +643,10 @@ function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
     if (typeof window === "undefined") return true;
     try {
-      // A stored "false" means the user turned chime on; anything else → muted.
+      // Chime is opt-in: absent/null key → muted. The user opts in via
+      // handleBellToggle; onFirstAdd triggers it automatically on the first
+      // watchlist entry. Stored "false" = chime enabled (inverted for ergonomics:
+      // "muted=false" means sound is on).
       const stored = window.localStorage.getItem(LS_CHIME_MUTED);
       return stored !== "false";
     } catch (_e) { return true; }
@@ -1053,7 +1062,10 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const WatchlistPanel = window.WatchlistPanel ?? (() => null);
   const t = tournament;
   const comps = t.competitions || [];
-  const completedCount = comps.filter((c) => c.status === "completed").length;
+  const completedCount = useMemo(
+    () => comps.filter((c) => c.status === "completed").length,
+    [comps]
+  );
   const compsByDate = useMemo(() => {
     const map = {};
     comps.forEach((c) => {
@@ -3929,7 +3941,7 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
 function AnnBellBtn() {
   // Read at render time so a load-order violation surfaces immediately rather
   // than being frozen as a permanent null captured at module eval.
-  const AnnBellBtnIcon = window.BellIcon;
+  const BellIcon = window.BellIcon;
   const supported = notificationSupported();
   const inFlight = useRefV(false);
   const [state, setState] = useState(() => {
@@ -3981,7 +3993,7 @@ function AnnBellBtn() {
 
   if (state === "unsupported") return null;
 
-  if (!AnnBellBtnIcon) {
+  if (!BellIcon) {
     console.warn("[AnnBellBtn] window.BellIcon not set — check script load order in index.html");
     return null;
   }
@@ -4011,7 +4023,7 @@ function AnnBellBtn() {
       aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
       title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
     >
-      <AnnBellBtnIcon muted={state !== "on"} size={13} />
+      <BellIcon muted={state !== "on"} size={13} />
     </button>
   );
 }

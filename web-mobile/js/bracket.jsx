@@ -182,7 +182,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayers, matchNum }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
@@ -194,8 +194,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aScore = isDone ? (ipponsA.join("") || null) : null;
   const bScore = isDone ? (ipponsB.join("") || null) : null;
 
-  const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
-  const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
+  const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
+  const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");
 
   // mp-xhaa: highlight any watched player (Set of ids+names). Lazy window
   // lookup mirrors the prior pattern so bracket.jsx stays decoupled from

@@ -1330,18 +1330,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     if (!m.compId) return;
     // compMatches injects m.roundIndex (0-based) for bracket matches, and
     // m.round as a string label for display ("R16", "Quarterfinals", ...).
-    // Prefer roundIndex when present; fall back through the numeric/string
-    // forms for legacy shapes. Pool matches don't have a per-round lineup,
-    // so round stays 0 in that case.
-    let round = 0;
-    if (typeof m.roundIndex === "number" && m.roundIndex >= 0) {
-      round = m.roundIndex;
-    } else if (typeof m.round === "number") {
-      round = m.round;
-    } else if (typeof m.round === "string") {
-      const mr = /^Round\s+(\d+)$/.exec(m.round);
-      if (mr) round = parseInt(mr[1], 10) - 1;
-    }
+    // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
+    // Pool matches return 0 (no per-round lineup).
+    const round = window.resolveRoundIndex(m);
     // Side keys are NAME-keyed (api_serializers.buildPlayerMap sets id =
     // name); lineups are stored under the participant's real id (UUID).
     const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");

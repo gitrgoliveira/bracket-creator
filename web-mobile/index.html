@@ -64,11 +64,12 @@
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
-    <script type="module" src="/dist/viewer.js?v=5"></script>
     <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
-         viewer.jsx. Reads its viewer.jsx helper deps from window at render time,
-         so load order relative to viewer.js does not matter. -->
+         viewer.jsx. Loaded before viewer.js so window.BellIcon is set before
+         AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps
+         (poolLabel etc.) from window at render time, so this order is safe. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
+    <script type="module" src="/dist/viewer.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>

@@ -248,13 +248,15 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const maybeFirstAdd = () => { if (watchlist.length === 0 && onFirstAdd) onFirstAdd(); };
   const addPlayer = (p) => {
     maybeFirstAdd(); // inside gesture handler — permission prompt can fire
-    setWatchlist(addPlayerToWatchlist(watchlist, p));
+    setWatchlist(prev => addPlayerToWatchlist(prev, p));
   };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
     maybeFirstAdd();
-    setWatchlist([...watchlist, { type: "dojo", dojo: d.name }]);
+    setWatchlist(prev => {
+      if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
+      return [...prev, { type: "dojo", dojo: d.name }];
+    });
   };
   const removeEntry = (entry) => {
     const k = entryKey(entry);

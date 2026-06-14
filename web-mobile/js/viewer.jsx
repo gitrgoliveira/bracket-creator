@@ -576,7 +576,7 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 // tightly coupled to the call site. Return values for notifEnable: "on"
 // (granted), "off" (dismissed / failed / threw), "denied" (permanently blocked),
 // "storage-failed" (granted but localStorage write threw — firing path won't fire).
-async function notifEnable() {
+export async function notifEnable() {
   if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") return "denied";
   if (Notification.permission === "default") {
@@ -590,7 +590,7 @@ async function notifEnable() {
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
   return stored ? "on" : "storage-failed";
 }
-function notifDisable() {
+export function notifDisable() {
   try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
 }
@@ -1152,8 +1152,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
         }
       }
       // perm is now "granted" (either pre-existing or just obtained above).
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
+      let stored = false;
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
     } finally {
       bellToggleInFlight.current = false;
     }
@@ -3898,7 +3899,7 @@ function AnnBellBtn() {
       className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
       onClick={toggle}
       disabled={state === "denied"}
-      aria-label={state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
+      aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
       title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
     >
       <BellIcon muted={state !== "on"} size={13} />
@@ -4114,7 +4115,6 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
-window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 // mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
 // (those files don't ES-import viewer.jsx; they pick globals off window).
 window.linkBase = linkBase;

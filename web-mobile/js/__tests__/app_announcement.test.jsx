@@ -815,7 +815,11 @@ describe('NotificationSettings (reactive)', () => {
       writable: true, configurable: true,
     });
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    global.Notification = { permission: 'default', requestPermission: vi.fn().mockResolvedValue('granted') };
+    let _perm1 = 'default';
+    const notifMock1 = Object.create(null);
+    Object.defineProperty(notifMock1, 'permission', { get: () => _perm1, configurable: true });
+    notifMock1.requestPermission = vi.fn().mockImplementation(async () => { _perm1 = 'granted'; return 'granted'; });
+    global.Notification = notifMock1;
 
     runtime.mount(RS, {});
     expect(findToggle().props.checked).toBe(false);
@@ -832,7 +836,11 @@ describe('NotificationSettings (reactive)', () => {
       writable: true, configurable: true,
     });
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    global.Notification = { permission: 'default', requestPermission: vi.fn().mockResolvedValue('granted') };
+    let _perm2 = 'default';
+    const notifMock2 = Object.create(null);
+    Object.defineProperty(notifMock2, 'permission', { get: () => _perm2, configurable: true });
+    notifMock2.requestPermission = vi.fn().mockImplementation(async () => { _perm2 = 'granted'; return 'granted'; });
+    global.Notification = notifMock2;
 
     runtime.mount(RS, {});
     await findToggle().props.onChange();

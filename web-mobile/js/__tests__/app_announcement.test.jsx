@@ -760,6 +760,19 @@ describe('NotificationSettings', () => {
 // 3328780129). Uses the makeReactive() shim like reset.test.jsx.
 // ---------------------------------------------------------------------------
 
+// Builds a Notification mock whose .permission auto-updates after requestPermission resolves,
+// matching real browser behavior (unlike a plain { permission: 'default' } object).
+function makeNotifMock({ permission = 'default', requestResult = 'granted' } = {}) {
+  let _perm = permission;
+  const mock = Object.create(null);
+  Object.defineProperty(mock, 'permission', { get: () => _perm, configurable: true });
+  mock.requestPermission = vi.fn().mockImplementation(async () => {
+    if (requestResult === 'granted' || requestResult === 'denied') _perm = requestResult;
+    return requestResult;
+  });
+  return mock;
+}
+
 describe('NotificationSettings (reactive)', () => {
   let runtime, RS, realReact, origNotif, origSecure, origLS;
 
@@ -815,11 +828,7 @@ describe('NotificationSettings (reactive)', () => {
       writable: true, configurable: true,
     });
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    let _perm1 = 'default';
-    const notifMock1 = Object.create(null);
-    Object.defineProperty(notifMock1, 'permission', { get: () => _perm1, configurable: true });
-    notifMock1.requestPermission = vi.fn().mockImplementation(async () => { _perm1 = 'granted'; return 'granted'; });
-    global.Notification = notifMock1;
+    global.Notification = makeNotifMock();
 
     runtime.mount(RS, {});
     expect(findToggle().props.checked).toBe(false);
@@ -836,11 +845,7 @@ describe('NotificationSettings (reactive)', () => {
       writable: true, configurable: true,
     });
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    let _perm2 = 'default';
-    const notifMock2 = Object.create(null);
-    Object.defineProperty(notifMock2, 'permission', { get: () => _perm2, configurable: true });
-    notifMock2.requestPermission = vi.fn().mockImplementation(async () => { _perm2 = 'granted'; return 'granted'; });
-    global.Notification = notifMock2;
+    global.Notification = makeNotifMock();
 
     runtime.mount(RS, {});
     await findToggle().props.onChange();

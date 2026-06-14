@@ -3790,7 +3790,7 @@ export function NotificationSettings() {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      if (enabled) { notifDisable(); setEnabled(false); return; }
+      if (enabled) { notifDisable(); setEnabled(false); setPermission(Notification.permission); return; }
       // notifEnable() handles the permission prompt, persists the flag, and
       // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
       const outcome = await notifEnable();

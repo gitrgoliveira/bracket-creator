@@ -750,11 +750,13 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
           // No per-match entry — reflect the round default (fetch-and-show,
           // but do NOT set isMatchOverride so the label says "inheriting").
           let round = 0;
-          if (typeof match.round === "string") {
-            const mr = /^Round\s+(\d+)$/.exec(match.round);
-            if (mr) round = parseInt(mr[1], 10) - 1;
+          if (typeof match.roundIndex === "number" && match.roundIndex >= 0) {
+            round = match.roundIndex;
           } else if (typeof match.round === "number") {
             round = match.round;
+          } else if (typeof match.round === "string") {
+            const mr = /^Round\s+(\d+)$/.exec(match.round);
+            if (mr) round = parseInt(mr[1], 10) - 1;
           }
           try {
             const roundLineup = await window.API.fetchTeamLineup(compId, teamId, round);

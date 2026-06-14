@@ -210,7 +210,7 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       data-match-id={match.id}
       className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
-      aria-label={matchNum != null ? `Match M${matchNum}` : `Match ${match.id}`}
+      aria-label={matchNum != null ? `Match ${matchNum}` : `Match ${match.id}`}
     >
       <div className="bc-match-meta">
         {matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null}
@@ -354,24 +354,22 @@ function buildDisplayModel(rounds) {
     // players; those don't need placeholders.
     const feedersById = {};
     real.forEach((m) => {
-      if (m.displayRound >= maxDR) return;
+      const hasUpstream = m.displayRound < maxDR;
+      const resolvedFeeders = [];
       (m.feeders || []).forEach((feederId, idx) => {
-        if (feederId === "") {
+        if (feederId === "" && hasUpstream) {
           const playerObj = idx === 0 ? m.sideA : m.sideB;
           const playerName = typeof playerObj === "object" ? (playerObj?.name || "") : (playerObj || "");
           const slot = { id: `bye-${m.id}-${idx}`, isByeSlot: true, displayRound: m.displayRound + 1, playerName };
           feedersById[slot.id] = [];
           const colIdx = maxDR - slot.displayRound;
           if (colIdx >= 0 && colIdx < columns.length) columns[colIdx].push(slot);
+          resolvedFeeders.push(slot.id);
+        } else if (feederId !== "") {
+          resolvedFeeders.push(feederId);
         }
       });
-    });
-    real.forEach((m) => {
-      const hasUpstream = m.displayRound < maxDR;
-      feedersById[m.id] = (m.feeders || []).map((feederId, idx) => {
-        if (feederId === "" && hasUpstream) return `bye-${m.id}-${idx}`;
-        return feederId;
-      }).filter(Boolean);
+      feedersById[m.id] = resolvedFeeders;
     });
     // Match numbers: earliest round first (highest displayRound), then by position
     // extracted from the id suffix — mirrors the Excel FillInMatches order so

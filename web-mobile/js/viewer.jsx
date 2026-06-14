@@ -1719,6 +1719,9 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
     el.addEventListener("scroll", check, { passive: true });
     const ro = new ResizeObserver(check);
     ro.observe(el);
+    // Also observe the inner canvas so bracket content width changes (e.g.
+    // new bracket payload rendered into the same tab) trigger a recheck.
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
     return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
   }, [hasBracketEl]);
 

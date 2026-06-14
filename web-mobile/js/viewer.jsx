@@ -574,7 +574,8 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 // handleBellToggle cannot delegate here — it must revert the optimistic chime
 // flip on throw and sync AnnBellBtn on denied/dismissed, which require logic
 // tightly coupled to the call site. Return values for notifEnable: "on"
-// (granted), "off" (dismissed / failed / threw), "denied" (permanently blocked).
+// (granted), "off" (dismissed / failed / threw), "denied" (permanently blocked),
+// "storage-failed" (granted but localStorage write threw — firing path won't fire).
 async function notifEnable() {
   if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") return "denied";
@@ -583,9 +584,11 @@ async function notifEnable() {
     try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }
     if (r !== "granted") return Notification.permission === "denied" ? "denied" : "off";
   }
-  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
-  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
-  return "on";
+  let stored = false;
+  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
+  // Dispatch with the actual stored value so listeners show the correct state.
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
+  return stored ? "on" : "storage-failed";
 }
 function notifDisable() {
   try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
@@ -3737,6 +3740,7 @@ export function NotificationSettings() {
   // have to click twice and never see the prompt. Gating on granted keeps the
   // handler branch aligned with the visible checkbox state.
   const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
+  const inFlight = useRefV(false);
 
   // Phase 4: secure-context warning. In production the TLS proxy makes this
   // false; it only matters for bare http:// (no proxy) access.
@@ -3786,23 +3790,18 @@ export function NotificationSettings() {
   }
 
   const handleToggle = async () => {
-    if (enabled) {
-      notifDisable();
-      setEnabled(false);
-      return;
-    }
-    // Turning on: request permission first (this is the user-gesture gate).
-    if (Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result !== "granted") return;
-    } else {
+    if (inFlight.current) return;
+    if (enabled) { notifDisable(); setEnabled(false); return; }
+    inFlight.current = true;
+    try {
+      // notifEnable() handles the permission prompt, persists the flag, and
+      // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
+      const outcome = await notifEnable();
       setPermission(Notification.permission);
+      setEnabled(outcome === "on");
+    } finally {
+      inFlight.current = false;
     }
-    // notifEnable() persists the flag and dispatches NOTIF_SYNC_EVENT so
-    // AnnBellBtn instances update immediately.
-    const outcome = await notifEnable();
-    setEnabled(outcome === "on");
   };
 
   const denied = permission === "denied";
@@ -3877,6 +3876,7 @@ function AnnBellBtn() {
       if (Notification.permission === "denied") { setState("denied"); return; }
       setState(e.detail ? "on" : "off");
     };
+    // CustomEvents dispatched on window are same-origin; no origin check needed.
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);
     return () => window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- supported is a static boolean
@@ -3885,15 +3885,11 @@ function AnnBellBtn() {
 
   const toggle = async () => {
     if (inFlight.current) return;
-    if (state === "on") {
-      notifDisable();
-      setState("off");
-      return;
-    }
     inFlight.current = true;
     try {
+      if (state === "on") { notifDisable(); setState("off"); return; }
       const result = await notifEnable();
-      setState(result); // "on", "off" (dismissed), or "denied" (blocked)
+      setState(result); // "on", "off" (dismissed), "denied" (blocked), or "storage-failed"
     } finally {
       inFlight.current = false;
     }

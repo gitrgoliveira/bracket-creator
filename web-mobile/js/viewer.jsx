@@ -3931,7 +3931,7 @@ function AnnBellBtn() {
     // Progressive enhancement: listen for browser-level permission changes.
     // navigator.permissions is not available in all environments; guard with ?..
     let permStatus = null;
-    navigator.permissions?.query({ name: "notifications" }).then((s) => {
+    navigator.permissions?.query({ name: "notifications" })?.then((s) => {
       permStatus = s;
       s.onchange = () => {
         if (s.state === "denied") { setState("denied"); return; }
@@ -3942,7 +3942,7 @@ function AnnBellBtn() {
           setState(optIn ? "on" : "off");
         } catch (_e) { setState("off"); }
       };
-    }).catch(() => {});
+    })?.catch(() => {});
 
     return () => {
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);

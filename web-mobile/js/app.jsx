@@ -3,6 +3,7 @@
 
 import { applyPatch as patchCompetitionData } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
+import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -206,7 +207,7 @@ export function fireNotification(title, body, { tag } = {}) {
   if (Notification.permission !== "granted") return;
   let enabled = false;
   try {
-    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
+    enabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
   } catch (_e) { /* storage unavailable */ }
   if (!enabled) return;
   try {

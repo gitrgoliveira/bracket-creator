@@ -45,7 +45,8 @@ describe('notification helpers', () => {
       delete global.Notification;
       const result = await notifEnable();
       expect(result).toBe('off');
-      expect(dispatchSpy).not.toHaveBeenCalled();
+      expect(dispatchSpy).toHaveBeenCalledOnce();
+      expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
     });
 
     it('returns "denied" and dispatches {detail:false} when permission is already denied', async () => {

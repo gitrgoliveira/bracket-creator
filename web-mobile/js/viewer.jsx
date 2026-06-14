@@ -5,6 +5,7 @@ import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './m
 // Re-export the shared scoreboard primitives so existing tests that import them
 // from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
 export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
+import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -278,15 +279,18 @@ function useWatchlist() {
     // Capture the normalized value from inside the updater so the LS write
     // can happen outside (side effects must not live in state updaters).
     // Preact 10 executes functional updaters synchronously within the useState
-    // setter call, so normalized is always set before the LS write below.
+    // setter call, so normalized and changed are always set before the LS write below.
     // Same reliance as useChimeMuted.toggle — revisit if upgrading Preact beyond v10.
     let normalized;
+    let changed = false;
     setList(prevList => {
       const resolved = typeof next === "function" ? next(prevList) : next;
+      if (resolved === prevList) return prevList; // same-reference: no re-render, skip LS write
+      changed = true;
       normalized = normalizeWatchlist(resolved);
       return normalized;
     });
-    if (typeof window !== "undefined") {
+    if (changed && typeof window !== "undefined") {
       try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
     }
   };
@@ -575,8 +579,7 @@ const CHIME_SYNC_EVENT = "chimeMutedSync";
 // Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
 // instances and the watchlist bell stay visually in sync within one page.
 const NOTIF_SYNC_EVENT = "notifEnabledSync";
-// LocalStorage key for the browser notification opt-in toggle.
-const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
+// LS_NOTIFICATIONS_ENABLED is imported from notification_keys.jsx (shared with app.jsx).
 
 // Notification opt-in helpers used by AnnBellBtn, NotificationSettings, and
 // handleBellToggle. Return values for notifEnable: "on" (granted + LS write
@@ -591,7 +594,7 @@ let notifEnablePromise = null;
 export async function notifEnable() {
   if (notifEnablePromise) return notifEnablePromise;
   notifEnablePromise = (async () => {
-    if (typeof Notification === "undefined") return "off";
+    if (typeof Notification === "undefined") { dispatchNotif(false); return "off"; }
     if (Notification.permission === "denied") {
       dispatchNotif(false);
       return "denied";
@@ -627,6 +630,7 @@ export function notifDisable() {
   let nowEnabled = false;
   try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
   dispatchNotif(nowEnabled);
+  return nowEnabled;
 }
 
 function useChimeMuted() {
@@ -3846,11 +3850,7 @@ export function NotificationSettings() {
     inFlight.current = true;
     try {
       if (enabled) {
-        notifDisable();
-        // Re-read LS to match the actual persisted state (notifDisable dispatches
-        // the real state; if both setItem and removeItem failed, key stays "true").
-        let nowEnabled = false;
-        try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+        const nowEnabled = notifDisable();
         setEnabled(nowEnabled);
         setPermission(Notification.permission);
         return;
@@ -3980,10 +3980,7 @@ function AnnBellBtn() {
     inFlight.current = true;
     try {
       if (state === "on") {
-        notifDisable();
-        // Direct state update in case dispatchNotif's try/catch swallowed the event.
-        let nowEnabled = false;
-        try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+        const nowEnabled = notifDisable();
         setState(nowEnabled ? "on" : "off");
         return;
       }

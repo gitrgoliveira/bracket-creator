@@ -615,9 +615,13 @@ export async function notifEnable() {
       }
     }
     if (notifCancelled) { dispatchNotif(false); return "off"; }
+    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* quota */ }
+    // Read back the actual persisted value — setItem may have thrown while the key
+    // was already "true" (locked/quota quota-exceeded on a pre-existing opt-in).
+    // Dispatching the real stored state keeps bells in sync with what
+    // fireNotification() will see, mirroring the same pattern in notifDisable().
     let stored = false;
-    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) { /* quota — stored stays false, dispatch will reflect "off" */ }
-    // Dispatch with the actual stored value so listeners show the correct state.
+    try { stored = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e2) { /* ignore */ }
     dispatchNotif(stored);
     return stored ? "on" : "off";
   })().finally(() => { notifEnablePromise = null; });

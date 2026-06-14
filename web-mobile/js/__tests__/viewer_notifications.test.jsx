@@ -3,6 +3,7 @@
 // NOTIF_SYNC_EVENT broadcast — cover every return value branch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { notifEnable, notifDisable } from '../viewer.jsx';
+import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
 import { makeLocalStorageMock, makeThrowingLocalStorageMock, makeNotifMock } from './test_helpers.js';
 
 function installLS(mock) {
@@ -64,20 +65,38 @@ describe('notification helpers', () => {
       global.Notification = makeNotifMock({ permission: 'granted' });
       const result = await notifEnable();
       expect(result).toBe('on');
-      expect(ls.setItem).toHaveBeenCalledWith('viewer.notifications.enabled', 'true');
+      expect(ls.setItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED, 'true');
       expect(dispatchSpy).toHaveBeenCalledOnce();
       const evt = dispatchSpy.mock.calls[0][0];
       expect(evt.type).toBe('notifEnabledSync');
       expect(evt.detail).toBe(true);
     });
 
-    it('returns "off" and dispatches {detail:false} when LS write throws', async () => {
+    it('returns "off" and dispatches {detail:false} when LS write throws and key was absent', async () => {
       installLS(makeThrowingLocalStorageMock());
       global.Notification = makeNotifMock({ permission: 'granted' });
       const result = await notifEnable();
       expect(result).toBe('off');
       expect(dispatchSpy).toHaveBeenCalledOnce();
       expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
+    });
+
+    it('returns "on" and dispatches {detail:true} when LS write throws but key was already "true"', async () => {
+      // setItem throws (quota), but the key was already persisted "true" from a
+      // previous opt-in. fireNotification() will read "true", so bells must show "on".
+      const store = { [LS_NOTIFICATIONS_ENABLED]: 'true' };
+      const ls = {
+        getItem: vi.fn((k) => (k in store ? store[k] : null)),
+        setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
+        removeItem: vi.fn((k) => { delete store[k]; }),
+        clear: () => {},
+      };
+      installLS(ls);
+      global.Notification = makeNotifMock({ permission: 'granted' });
+      const result = await notifEnable();
+      expect(result).toBe('on');
+      expect(dispatchSpy).toHaveBeenCalledOnce();
+      expect(dispatchSpy.mock.calls[0][0].detail).toBe(true);
     });
 
     it('requests permission when "default", returns "on" on grant', async () => {
@@ -132,18 +151,18 @@ describe('notification helpers', () => {
       const result = await enableResult;
       expect(result).toBe('off');
       // LS must NOT have been written with 'true' (the disable ran first)
-      expect(ls.setItem).not.toHaveBeenCalledWith('viewer.notifications.enabled', 'true');
+      expect(ls.setItem).not.toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED, 'true');
       expect(dispatchSpy.mock.calls.at(-1)[0].detail).toBe(false);
     });
   });
 
   describe('notifDisable', () => {
     it('writes "false" to localStorage and dispatches {detail:false}', () => {
-      const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+      const ls = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
       installLS(ls);
       notifDisable();
-      expect(ls.setItem).toHaveBeenCalledWith('viewer.notifications.enabled', 'false');
-      expect(ls.getItem).toHaveBeenCalledWith('viewer.notifications.enabled');
+      expect(ls.setItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED, 'false');
+      expect(ls.getItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED);
       expect(dispatchSpy).toHaveBeenCalledOnce();
       const evt = dispatchSpy.mock.calls[0][0];
       expect(evt.type).toBe('notifEnabledSync');
@@ -160,7 +179,7 @@ describe('notification helpers', () => {
       // Storage completely locked (e.g. corrupted profile): neither setItem nor
       // removeItem can write. The read-back reflects the actual persisted state
       // so all bell instances stay in sync with what fireNotification() will see.
-      const store = { 'viewer.notifications.enabled': 'true' };
+      const store = { [LS_NOTIFICATIONS_ENABLED]: 'true' };
       const ls = {
         getItem: vi.fn((k) => (k in store ? store[k] : null)),
         setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
@@ -169,8 +188,8 @@ describe('notification helpers', () => {
       };
       installLS(ls);
       notifDisable();
-      expect(ls.removeItem).toHaveBeenCalledWith('viewer.notifications.enabled');
-      expect(ls.getItem).toHaveBeenCalledWith('viewer.notifications.enabled');
+      expect(ls.removeItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED);
+      expect(ls.getItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED);
       expect(dispatchSpy).toHaveBeenCalledOnce();
       expect(dispatchSpy.mock.calls[0][0].detail).toBe(true);
     });

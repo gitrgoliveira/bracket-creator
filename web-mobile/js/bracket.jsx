@@ -23,11 +23,9 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
-  // mp-13y #8: "Round N" (drop the "of"), where N is the round's bracket size
-  // = 2^(fromEnd+1). Computed generically so 128/256-player brackets read
-  // "Round 128" / "Round 256" instead of falling back to "Round 1".
-  if (fromEnd >= 3) return `Round ${2 ** (fromEnd + 1)}`;
-  return `Round ${roundIdx + 1}`;
+  // mp-13y #8: abbreviated column header — R{N} where N is the bracket size
+  // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
+  return `R${2 ** (fromEnd + 1)}`;
 }
 
 const DECISION_CHIPS = {
@@ -164,7 +162,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
       <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
-      {player.seed ? <span className="bc-seed">{player.seed}</span> : <span className="bc-seed bc-seed--empty"></span>}
+
       <div className="bc-name-wrap">
         <span className="bc-name">
           {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
@@ -184,7 +182,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, isPlaceholder, highlightPlayers }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
@@ -196,8 +194,8 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const aScore = isDone ? (ipponsA.join("") || null) : null;
   const bScore = isDone ? (ipponsB.join("") || null) : null;
 
-  const aTBD = isPlaceholder || (match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-"));
-  const bTBD = isPlaceholder || (match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-"));
+  const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
+  const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");
 
   // mp-xhaa: highlight any watched player (Set of ids+names). Lazy window
   // lookup mirrors the prior pattern so bracket.jsx stays decoupled from
@@ -212,9 +210,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       data-match-id={match.id}
       className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
-      aria-label={`Match ${match.id}`}
+      aria-label={matchNum != null ? `Match ${matchNum}` : `Match ${match.id}`}
     >
       <div className="bc-match-meta">
+        {matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null}
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {running ? <span className="bc-running">● NOW</span> : null}
@@ -342,14 +341,48 @@ function buildDisplayModel(rounds) {
   if (hasMeta) {
     let maxDR = 0;
     const real = [];
-    rounds.forEach((r) => r.forEach((m) => {
-      if (!m.hidden && (m.displayRound || 0) > 0) { real.push(m); if (m.displayRound > maxDR) maxDR = m.displayRound; }
+    rounds.forEach((r, backendRi) => r.forEach((m) => {
+      if (!m.hidden && (m.displayRound || 0) > 0) { real.push({ ...m, roundIndex: backendRi }); if (m.displayRound > maxDR) maxDR = m.displayRound; }
     }));
     const columns = [];
     for (let dr = maxDR; dr >= 1; dr--) columns.push(real.filter((m) => m.displayRound === dr));
+    // Structural-bye slots: for non-leaf matches whose feeder[i] is "" (meaning
+    // one side had no upstream match and the player seeded directly), insert a
+    // visible placeholder card in the upstream column so the tree layout
+    // communicates the skip spatially — mirroring the Excel Tree sheet output.
+    // Leaf-round matches (displayRound === maxDR) always have "" feeders for real
+    // players; those don't need placeholders.
     const feedersById = {};
-    real.forEach((m) => { feedersById[m.id] = (m.feeders || []).filter(Boolean); });
-    return { hasMeta: true, columns, feedersById };
+    real.forEach((m) => {
+      const hasUpstream = m.displayRound < maxDR;
+      const resolvedFeeders = [];
+      (m.feeders || []).forEach((feederId, idx) => {
+        if (feederId === "" && hasUpstream) {
+          const playerObj = idx === 0 ? m.sideA : m.sideB;
+          const playerName = typeof playerObj === "object" ? (playerObj?.name || "") : (playerObj || "");
+          const slot = { id: `bye-${m.id}-${idx}`, isByeSlot: true, displayRound: m.displayRound + 1, playerName };
+          feedersById[slot.id] = [];
+          const colIdx = maxDR - slot.displayRound;
+          if (colIdx >= 0 && colIdx < columns.length) columns[colIdx].push(slot);
+          resolvedFeeders.push(slot.id);
+        } else if (feederId !== "") {
+          resolvedFeeders.push(feederId);
+        }
+      });
+      feedersById[m.id] = resolvedFeeders;
+    });
+    // Match numbers: earliest round first (highest displayRound), then by position
+    // extracted from the id suffix — mirrors the Excel FillInMatches order so
+    // card labels ("M1", "M2") match what referees see on the printed sheet.
+    // id format: "m-r{ROUND}-{POS}" — last segment is the 0-based within-round index.
+    const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
+    const numbered = [...real].sort((a, b) => {
+      const dr = b.displayRound - a.displayRound;
+      return dr !== 0 ? dr : posFromId(a.id) - posFromId(b.id);
+    });
+    const matchNumById = {};
+    numbered.forEach((m, i) => { matchNumById[m.id] = i + 1; });
+    return { hasMeta: true, columns, feedersById, matchNumById };
   }
   // Legacy: columns = rounds. Connectors are positional (BracketConnectors
   // derives the 2i/2i+1 feeders from `rounds` itself), so no feeder graph is
@@ -413,8 +446,9 @@ function computeMetaTops(columns, feedersById, heights) {
 // BracketConnectorsMeta draws feeder→parent elbows for the effective-round
 // layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
 // feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
-// correctly. A match with a single feeder (the other side is a bye/seeded
-// entrant) gets one elbow; the bye side draws no line.
+// correctly. Bye-slot placeholder cards (isByeSlot) appear in the feeder graph
+// and in refMap, so they DO receive connector lines from their parent match —
+// the elbow terminates at the bye card, mirroring the Excel Tree sheet.
 function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
   const [paths, setPaths] = useStateBC([]);
   const [size, setSize] = useStateBC({ w: 0, h: 0 });
@@ -463,11 +497,12 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   );
 }
 
-// BracketTreeMeta renders the effective-round columns (mp-7f2w). Every card is a
-// real match; structural byes are absent. Cards in column 0 plus every card is
-// absolutely positioned at the feeder-graph-derived top so parents sit centred
-// on their feeders (see computeMetaTops).
-function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
+// BracketTreeMeta renders the effective-round columns (mp-7f2w). Real match cards
+// plus structural-bye placeholder cards (isByeSlot=true) are included; phantoms
+// (hidden) are dropped. All cards are absolutely positioned at the
+// feeder-graph-derived top so parents sit centred on their feeders
+// (see computeMetaTops).
+function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, showDojo = true, onMatchClick, highlightedMatchId, autoScrollMatchId, scrollContainerRef, highlightPlayers }) {
   const treeRef = useRef(null);
   const refMap = useRef({});
   const [version, setVersion] = useStateBC(0);
@@ -549,17 +584,31 @@ function BracketTreeMeta({ columns, feedersById, variant = 1, showDojo = true, o
               const wrapStyle = top != null
                 ? { "--mi": mi, position: "absolute", top: `${top}px`, left: 0, right: 0 }
                 : { "--mi": mi };
+              const inner = m.isByeSlot ? (
+                <div
+                  className="bc-bye-slot"
+                  aria-label={`${m.playerName || "Bye"} — advances without an opponent`}
+                  ref={(el) => { if (el) refMap.current[m.id] = el; }}
+                >
+                  {m.playerName
+                    ? <span className="bc-bye-slot__name">{m.playerName}</span>
+                    : <span className="bc-bye-slot__tag">BYE</span>}
+                </div>
+              ) : (
+                <MatchCard
+                  match={m}
+                  variant={variant}
+                  showDojo={showDojo}
+                  highlighted={m.id === highlightedMatchId}
+                  matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                  onClick={() => onMatchClick && onMatchClick(m, ci, mi, columns.length)}
+                  highlightPlayers={highlightPlayers}
+                  matchNum={matchNumById[m.id]}
+                />
+              );
               return (
                 <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
-                  <MatchCard
-                    match={m}
-                    variant={variant}
-                    showDojo={showDojo}
-                    highlighted={m.id === highlightedMatchId}
-                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                    onClick={() => onMatchClick && onMatchClick(m, ci, mi)}
-                    highlightPlayers={highlightPlayers}
-                  />
+                  {inner}
                 </div>
               );
             })}
@@ -578,7 +627,7 @@ function BracketTree(props) {
   // the measured layout in a loop.
   const model = React.useMemo(() => buildDisplayModel(props.rounds), [props.rounds]);
   if (model.hasMeta) {
-    return <BracketTreeMeta {...props} columns={model.columns} feedersById={model.feedersById} />;
+    return <BracketTreeMeta {...props} columns={model.columns} feedersById={model.feedersById} matchNumById={model.matchNumById} />;
   }
   return <BracketTreeLegacy {...props} />;
 }
@@ -690,7 +739,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
                     showDojo={showDojo}
                     highlighted={m.id === highlightedMatchId}
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                    onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
+                    onClick={() => onMatchClick && onMatchClick(m, ri, mi, rounds.length)}
                     highlightPlayers={highlightPlayers}
                   />
                 </div>

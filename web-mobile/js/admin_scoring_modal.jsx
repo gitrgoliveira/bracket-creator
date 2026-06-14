@@ -1328,19 +1328,11 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   useEffectA(() => {
     let cancelled = false;
     if (!m.compId) return;
-    // compMatches injects m.round as a string label ("Round 2",
-    // "Quarterfinals", ...) — for bracket matches we extract the numeric
-    // index from "Round N" when possible. Pool matches don't have a
-    // per-round lineup in the current model, so we fall back to round 0.
-    // TODO(T131): plumb a numeric round through compMatches so this
-    // lookup is exact for every phase / label.
-    let round = 0;
-    if (typeof m.round === "string") {
-      const mr = /^Round\s+(\d+)$/.exec(m.round);
-      if (mr) round = parseInt(mr[1], 10) - 1;
-    } else if (typeof m.round === "number") {
-      round = m.round;
-    }
+    // compMatches injects m.roundIndex (0-based) for bracket matches, and
+    // m.round as a string label for display ("R16", "Quarterfinals", ...).
+    // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
+    // Pool matches return 0 (no per-round lineup).
+    const round = window.resolveRoundIndex(m);
     // Side keys are NAME-keyed (api_serializers.buildPlayerMap sets id =
     // name); lineups are stored under the participant's real id (UUID).
     const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");

@@ -319,9 +319,20 @@ function courtCount(courts) {
   return normalizeCourts(courts).length;
 }
 
+// Resolves the 0-based round index from a match object. Bracket matches
+// carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
+// non-negative numeric m.round for any older shapes.
+// Returns 0 for pool matches (no per-round lineup).
+function resolveRoundIndex(match) {
+  if (typeof match.roundIndex === "number" && match.roundIndex >= 0) return match.roundIndex;
+  if (typeof match.round === "number" && match.round >= 0) return match.round;
+  return 0;
+}
+
 // Guard window assignments so this file stays safely importable in
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
+  window.resolveRoundIndex = resolveRoundIndex;
   window.sideName = sideName;
   window.hasBothSides = hasBothSides;
   window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
@@ -440,4 +451,5 @@ export {
   deriveTournamentDays,
   normalizeCourts,
   courtCount,
+  resolveRoundIndex,
 };

@@ -1796,12 +1796,29 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
   const [bracketScrollTarget, setBracketScrollTarget] = useState(null);
   const bracketScrollRef = useRefV(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
+  const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   React.useEffect(() => {
     if (tab === "bracket" && currentMatch) {
       setBracketScrollTarget(currentMatch.id + "::" + Date.now());
     }
   }, [tab, currentMatch?.id]);
+
+  const hasBracketEl = tab === "bracket" && !!derivedBracket;
+  React.useEffect(() => {
+    if (!hasBracketEl) return;
+    const el = bracketScrollRef.current;
+    if (!el) return;
+    const check = () => { const next = el.scrollLeft + el.clientWidth < el.scrollWidth - 4; setBracketOverflowRight((cur) => (cur === next ? cur : next)); };
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    // Also observe the inner canvas so bracket content width changes (e.g.
+    // new bracket payload rendered into the same tab) trigger a recheck.
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
+  }, [hasBracketEl]);
 
   return (
     <div className="viewer">
@@ -1887,7 +1904,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
             />
           )}
           {tab === "bracket" && derivedBracket && (
-            <div className="viewer-bracket-bleed">
+            <div className={`viewer-bracket-bleed${bracketOverflowRight ? " viewer-bracket-bleed--overflow-right" : ""}`}>
               <div ref={bracketScrollRef} className="bracket-canvas" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
                   <window.BracketTree
@@ -1898,9 +1915,14 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
                     highlightPlayers={highlightPlayers}
-                    onMatchClick={(m, ri) => {
-                      const label = window.roundLabel(ri, derivedBracket.rounds.length);
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
+                    onMatchClick={(m, ri, _mi, total) => {
+                      const label = window.roundLabel(ri, total ?? derivedBracket.rounds.length);
+                      // m.roundIndex is the backend round array index, stamped by
+                      // buildDisplayModel (meta mode) or the raw rounds[ri] position
+                      // (legacy mode where ri equals the backend index). Prefer it
+                      // over the display-column index so lineup fetches use the right
+                      // round when phantom leading rounds shift the display column.
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
                 </div>

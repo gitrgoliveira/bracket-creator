@@ -37,8 +37,10 @@ function installLS(mock) {
 describe('notification helpers', () => {
   let dispatchSpy;
   let savedLS;
+  let savedNotification;
 
   beforeEach(() => {
+    savedNotification = global.Notification;
     dispatchSpy = vi.spyOn(window, 'dispatchEvent').mockImplementation(() => true);
     savedLS = Object.getOwnPropertyDescriptor(window, 'localStorage');
     delete global.Notification;
@@ -51,7 +53,11 @@ describe('notification helpers', () => {
     } else {
       Object.defineProperty(window, 'localStorage', { value: undefined, writable: true, configurable: true });
     }
-    delete global.Notification;
+    if (savedNotification !== undefined) {
+      global.Notification = savedNotification;
+    } else {
+      delete global.Notification;
+    }
   });
 
   describe('notifEnable', () => {

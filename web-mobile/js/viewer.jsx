@@ -588,7 +588,7 @@ export async function notifEnable() {
     try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }
     if (r !== "granted") {
       try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
-      return Notification.permission === "denied" ? "denied" : "off";
+      return r === "denied" ? "denied" : "off";
     }
   }
   let stored = false;
@@ -598,8 +598,17 @@ export async function notifEnable() {
   return stored ? "on" : "off";
 }
 export function notifDisable() {
-  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
-  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+  try {
+    window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false");
+  } catch (_e) {
+    // If setItem fails (quota), try removing the key so fireNotification won't see "true".
+    try { window.localStorage.removeItem(LS_NOTIFICATIONS_ENABLED); } catch (_e2) {}
+  }
+  // Dispatch the actual persisted state so listeners don't show "off" when the
+  // key is still "true" (i.e. both setItem and removeItem failed).
+  let nowEnabled = false;
+  try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) {}
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: nowEnabled })); } catch (_e) {}
 }
 
 function useChimeMuted() {

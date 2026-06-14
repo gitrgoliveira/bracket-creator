@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "test:render": "vitest run --config vitest.config.render.js",
     "lint": "eslint . --max-warnings 0"
   },
   "devDependencies": {

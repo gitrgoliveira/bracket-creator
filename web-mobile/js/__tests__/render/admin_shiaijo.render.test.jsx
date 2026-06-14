@@ -1,11 +1,12 @@
 import React from 'react';
 import { render } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 
-// Window globals that admin_shiaijo.jsx captures at MODULE EVALUATION TIME
-// (e.g. `const AdminTopbar = window.AdminTopbar;`). These must be set before
-// the dynamic import below or the module captures undefined.
-const STUBBED_MODULE_GLOBALS = {
+// Window globals required by admin_shiaijo.jsx.
+// MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
+// must be set before the dynamic import or the module captures undefined.
+const STUBBED_GLOBALS = {
+  // MODULE-EVAL-TIME — captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,
   ScoreEditorModal: () => <div data-testid="score-editor" />,
@@ -13,11 +14,7 @@ const STUBBED_MODULE_GLOBALS = {
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
   hasBothSides: () => true,
-};
-
-// Window globals called lazily (in event handlers or guarded effects).
-// Set them globally so any code path that reaches them doesn't throw.
-const STUBBED_RUNTIME_GLOBALS = {
+  // LAZY — only called in event handlers or guarded effects
   filterMatchesByCourt: (matches, _court) => matches,
   tournamentMatches: () => [],
   filterMatchesByPhase: (matches) => matches,
@@ -34,13 +31,15 @@ const STUBBED_RUNTIME_GLOBALS = {
 };
 
 const originals = {};
+let AdminShiaijoPage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries({ ...STUBBED_MODULE_GLOBALS, ...STUBBED_RUNTIME_GLOBALS })) {
+  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
     originals[k] = { had: k in window, value: window[k] };
     window[k] = v;
   }
   await import('../../admin_shiaijo.jsx');
+  AdminShiaijoPage = window.AdminShiaijoPage;
 });
 
 afterAll(() => {
@@ -48,6 +47,12 @@ afterAll(() => {
     if (orig.had) window[k] = orig.value;
     else delete window[k];
   }
+});
+
+// Reset per-test window overrides so each test starts from a known baseline.
+afterEach(() => {
+  window.tournamentMatches = STUBBED_GLOBALS.tournamentMatches;
+  window.filterMatchesByCourt = STUBBED_GLOBALS.filterMatchesByCourt;
 });
 
 function makeMinimalTournament(overrides = {}) {
@@ -59,49 +64,33 @@ function makeMinimalTournament(overrides = {}) {
   };
 }
 
+function renderPage(tournament, court = 'A') {
+  return render(
+    <AdminShiaijoPage
+      tournament={tournament}
+      court={court}
+      onBack={vi.fn()}
+      onEditScore={vi.fn()}
+      onMoveCourt={vi.fn()}
+      onLogout={vi.fn()}
+      onViewerMode={vi.fn()}
+      password=""
+      showToast={vi.fn()}
+      tweaks={{}}
+      onSwitchCourt={vi.fn()}
+    />
+  );
+}
+
 describe('AdminShiaijoPage render-smoke', () => {
   it('renders without throwing for an unknown court (empty state)', () => {
-    const AdminShiaijoPage = window.AdminShiaijoPage;
-    expect(() =>
-      render(
-        <AdminShiaijoPage
-          tournament={makeMinimalTournament()}
-          court="Z"
-          onBack={vi.fn()}
-          onEditScore={vi.fn()}
-          onMoveCourt={vi.fn()}
-          onLogout={vi.fn()}
-          onViewerMode={vi.fn()}
-          password=""
-          showToast={vi.fn()}
-          tweaks={{}}
-          onSwitchCourt={vi.fn()}
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderPage(makeMinimalTournament(), 'Z')).not.toThrow();
   });
 
   it('renders without throwing for a known court with no matches (empty queue)', () => {
     window.tournamentMatches = () => [];
     window.filterMatchesByCourt = () => [];
-    const AdminShiaijoPage = window.AdminShiaijoPage;
-    expect(() =>
-      render(
-        <AdminShiaijoPage
-          tournament={makeMinimalTournament()}
-          court="A"
-          onBack={vi.fn()}
-          onEditScore={vi.fn()}
-          onMoveCourt={vi.fn()}
-          onLogout={vi.fn()}
-          onViewerMode={vi.fn()}
-          password=""
-          showToast={vi.fn()}
-          tweaks={{}}
-          onSwitchCourt={vi.fn()}
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderPage(makeMinimalTournament())).not.toThrow();
   });
 
   it('renders without throwing with an individual match in "Up Next"', () => {
@@ -113,24 +102,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     };
     window.tournamentMatches = () => [upNextMatch];
     window.filterMatchesByCourt = (matches) => matches;
-    const AdminShiaijoPage = window.AdminShiaijoPage;
-    expect(() =>
-      render(
-        <AdminShiaijoPage
-          tournament={makeMinimalTournament()}
-          court="A"
-          onBack={vi.fn()}
-          onEditScore={vi.fn()}
-          onMoveCourt={vi.fn()}
-          onLogout={vi.fn()}
-          onViewerMode={vi.fn()}
-          password=""
-          showToast={vi.fn()}
-          tweaks={{}}
-          onSwitchCourt={vi.fn()}
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderPage(makeMinimalTournament())).not.toThrow();
   });
 
   it('renders without throwing with a running team match', () => {
@@ -143,24 +115,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     };
     window.tournamentMatches = () => [runningTeamMatch];
     window.filterMatchesByCourt = (matches) => matches;
-    const AdminShiaijoPage = window.AdminShiaijoPage;
-    expect(() =>
-      render(
-        <AdminShiaijoPage
-          tournament={makeMinimalTournament()}
-          court="A"
-          onBack={vi.fn()}
-          onEditScore={vi.fn()}
-          onMoveCourt={vi.fn()}
-          onLogout={vi.fn()}
-          onViewerMode={vi.fn()}
-          password=""
-          showToast={vi.fn()}
-          tweaks={{}}
-          onSwitchCourt={vi.fn()}
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderPage(makeMinimalTournament())).not.toThrow();
   });
 
   // Guard: verify that a missing window scope reference causes a render failure.

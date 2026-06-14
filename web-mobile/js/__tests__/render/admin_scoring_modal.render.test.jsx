@@ -36,6 +36,7 @@ const STUBBED_GLOBALS = {
 };
 
 const originals = {};
+let ScoreEditorModal;
 
 beforeAll(async () => {
   for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
@@ -43,6 +44,7 @@ beforeAll(async () => {
     window[k] = v;
   }
   await import('../../admin_scoring_modal.jsx');
+  ScoreEditorModal = window.ScoreEditorModal;
 });
 
 afterAll(() => {
@@ -81,121 +83,54 @@ function makeTeamMatch(overrides = {}) {
   };
 }
 
+function renderModal(match) {
+  return render(
+    <ScoreEditorModal
+      match={match}
+      onClose={vi.fn()}
+      onSubmit={vi.fn()}
+      password=""
+    />
+  );
+}
+
 describe('ScoreEditorModal render-smoke', () => {
   it('renders individual scheduled match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeIndividualMatch()}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeIndividualMatch())).not.toThrow();
   });
 
   it('renders individual running match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeIndividualMatch({ status: 'running' })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeIndividualMatch({ status: 'running' }))).not.toThrow();
   });
 
   it('renders individual completed match (correction mode) without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
     expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeIndividualMatch({
-            status: 'completed',
-            ipponsA: ['M'],
-            ipponsB: [],
-            winner: { id: 'p1', name: 'Yamada' },
-          })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
+      renderModal(makeIndividualMatch({
+        status: 'completed',
+        ipponsA: ['M'],
+        ipponsB: [],
+        winner: { id: 'p1', name: 'Yamada' },
+      }))
     ).not.toThrow();
   });
 
   it('renders individual pool match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeIndividualMatch({ phase: 'pool', poolName: 'Pool 2' })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeIndividualMatch({ phase: 'pool', poolName: 'Pool 2' }))).not.toThrow();
   });
 
   it('renders individual knockout match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeIndividualMatch({ phase: 'knockout', round: 'Semi-final' })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeIndividualMatch({ phase: 'knockout', round: 'Semi-final' }))).not.toThrow();
   });
 
   it('renders team scheduled match (routes to TeamScoreEditorModal) without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeTeamMatch()}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeTeamMatch())).not.toThrow();
   });
 
   it('renders team running match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeTeamMatch({ status: 'running' })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeTeamMatch({ status: 'running' }))).not.toThrow();
   });
 
   it('renders team completed match without throwing', () => {
-    const ScoreEditorModal = window.ScoreEditorModal;
-    expect(() =>
-      render(
-        <ScoreEditorModal
-          match={makeTeamMatch({ status: 'completed' })}
-          onClose={vi.fn()}
-          onSubmit={vi.fn()}
-          password=""
-        />
-      )
-    ).not.toThrow();
+    expect(() => renderModal(makeTeamMatch({ status: 'completed' }))).not.toThrow();
   });
 });

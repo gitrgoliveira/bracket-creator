@@ -10,6 +10,13 @@ import { cleanup } from '@testing-library/react';
 global.React = React;
 global.ReactDOM = { createRoot };
 
+// Stub browser dialog APIs that jsdom leaves undefined. Components that call
+// alert/confirm/prompt directly (rather than via window.confirmDialog) would
+// otherwise throw in the render suite.
+global.alert = vi.fn();
+global.confirm = vi.fn(() => true);
+global.prompt = vi.fn(() => null);
+
 // admin_helpers.jsx sets window constants (MAX_RANK, MAX_COURTS, MAX_TEAM_SIZE,
 // etc.) that are evaluated at module load time by several components.
 // Load it now so those globals are available when render tests import components.

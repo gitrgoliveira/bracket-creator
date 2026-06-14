@@ -286,7 +286,7 @@ function useWatchlist() {
       normalized = normalizeWatchlist(resolved);
       return normalized;
     });
-    if (typeof window !== "undefined" && normalized !== undefined) {
+    if (typeof window !== "undefined") {
       try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
     }
   };
@@ -584,7 +584,13 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 function dispatchNotif(enabled) {
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }
 }
+// Module-level guard prevents concurrent requestPermission() calls when multiple
+// components (handleBellToggle + AnnBellBtn) trigger notifEnable simultaneously.
+let notifEnableInFlight = false;
 export async function notifEnable() {
+  if (notifEnableInFlight) return "off";
+  notifEnableInFlight = true;
+  try {
   if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") {
     dispatchNotif(false);
@@ -606,6 +612,9 @@ export async function notifEnable() {
   // Dispatch with the actual stored value so listeners show the correct state.
   dispatchNotif(stored);
   return stored ? "on" : "off";
+  } finally {
+    notifEnableInFlight = false;
+  }
 }
 export function notifDisable() {
   try {
@@ -618,7 +627,7 @@ export function notifDisable() {
   // key is still "true" (i.e. both setItem and removeItem failed).
   let nowEnabled = false;
   try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
-  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: nowEnabled })); } catch (_e) { /* ignore */ }
+  dispatchNotif(nowEnabled);
 }
 
 function useChimeMuted() {
@@ -627,7 +636,13 @@ function useChimeMuted() {
     try {
       // Default muted until the user explicitly enables via the bell.
       // A stored "false" means the user turned it on; anything else → muted.
-      return window.localStorage.getItem(LS_CHIME_MUTED) !== "false";
+      // Write the default explicitly so future default changes don't silently
+      // flip returning users who never stored a preference.
+      const stored = window.localStorage.getItem(LS_CHIME_MUTED);
+      if (stored === null) {
+        try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) { /* ignore */ }
+      }
+      return stored !== "false";
     } catch (_e) { return true; }
   });
   // Sync across same-page instances via custom event.
@@ -3936,7 +3951,6 @@ function AnnBellBtn() {
     let permStatus = null;
     let cancelled = false;
     const onPermChange = () => {
-      if (!permStatus) return;
       if (permStatus.state === "denied") { setState("denied"); return; }
       if (permStatus.state === "prompt") { setState("off"); return; }
       // "granted" — user re-granted in settings; re-read LS for persisted opt-in.

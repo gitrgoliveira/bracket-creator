@@ -1820,9 +1820,13 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                     autoScrollMatchId={bracketScrollTarget}
                     scrollContainerRef={bracketScrollRef}
                     highlightPlayers={highlightPlayers}
-                    onMatchClick={(m, ri) => {
-                      const label = window.roundLabel(ri, derivedBracket.rounds.length);
-                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
+                    onMatchClick={(m, ri, _mi, total) => {
+                      const label = window.roundLabel(ri, total ?? derivedBracket.rounds.length);
+                      // m.roundIndex is already the backend round array index
+                      // (stamped by compMatches); prefer it over the display-
+                      // column index (ri) so team lineup fetches use the right
+                      // round even when phantom leading rounds shift the indices.
+                      setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
                 </div>

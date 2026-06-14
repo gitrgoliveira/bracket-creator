@@ -584,33 +584,31 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
               const wrapStyle = top != null
                 ? { "--mi": mi, position: "absolute", top: `${top}px`, left: 0, right: 0 }
                 : { "--mi": mi };
-              if (m.isByeSlot) {
-                return (
-                  <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
-                    <div
-                      className="bc-bye-slot"
-                      aria-label={`${m.playerName || "Bye"} — advances without an opponent`}
-                      ref={(el) => { if (el) refMap.current[m.id] = el; }}
-                    >
-                      {m.playerName
-                        ? <span className="bc-bye-slot__name">{m.playerName}</span>
-                        : <span className="bc-bye-slot__tag">BYE</span>}
-                    </div>
-                  </div>
-                );
-              }
+              const inner = m.isByeSlot ? (
+                <div
+                  className="bc-bye-slot"
+                  aria-label={`${m.playerName || "Bye"} — advances without an opponent`}
+                  ref={(el) => { if (el) refMap.current[m.id] = el; }}
+                >
+                  {m.playerName
+                    ? <span className="bc-bye-slot__name">{m.playerName}</span>
+                    : <span className="bc-bye-slot__tag">BYE</span>}
+                </div>
+              ) : (
+                <MatchCard
+                  match={m}
+                  variant={variant}
+                  showDojo={showDojo}
+                  highlighted={m.id === highlightedMatchId}
+                  matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
+                  onClick={() => onMatchClick && onMatchClick(m, ci, mi, columns.length)}
+                  highlightPlayers={highlightPlayers}
+                  matchNum={matchNumById[m.id]}
+                />
+              );
               return (
                 <div className="bc-match-wrap" key={m.id} style={wrapStyle}>
-                  <MatchCard
-                    match={m}
-                    variant={variant}
-                    showDojo={showDojo}
-                    highlighted={m.id === highlightedMatchId}
-                    matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                    onClick={() => onMatchClick && onMatchClick(m, ci, mi)}
-                    highlightPlayers={highlightPlayers}
-                    matchNum={matchNumById[m.id]}
-                  />
+                  {inner}
                 </div>
               );
             })}
@@ -741,7 +739,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
                     showDojo={showDojo}
                     highlighted={m.id === highlightedMatchId}
                     matchRef={(el) => { if (el) refMap.current[m.id] = el; }}
-                    onClick={() => onMatchClick && onMatchClick(m, ri, mi)}
+                    onClick={() => onMatchClick && onMatchClick(m, ri, mi, rounds.length)}
                     highlightPlayers={highlightPlayers}
                   />
                 </div>

@@ -570,11 +570,13 @@ const NOTIF_SYNC_EVENT = "notifEnabledSync";
 // LocalStorage key for the browser notification opt-in toggle.
 const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 
-// Shared notification opt-in helpers used by both handleBellToggle and
-// AnnBellBtn to avoid duplicating the permission-check + localStorage +
-// sync-event sequence. Return values for notifEnable: "on" (granted),
-// "off" (dismissed / failed / threw), "denied" (permanently blocked).
+// Notification opt-in helpers used by AnnBellBtn and NotificationSettings.
+// handleBellToggle cannot delegate here — it must revert the optimistic chime
+// flip on throw and sync AnnBellBtn on denied/dismissed, which require logic
+// tightly coupled to the call site. Return values for notifEnable: "on"
+// (granted), "off" (dismissed / failed / threw), "denied" (permanently blocked).
 async function notifEnable() {
+  if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") return "denied";
   if (Notification.permission === "default") {
     let r;
@@ -1109,46 +1111,53 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
   const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
+  const bellToggleInFlight = useRefV(false);
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = async () => {
-    const willEnable = chimeMuted; // currently muted → about to enable
-    toggleChimeMuted(); // optimistic flip
-    if (!notificationSupported()) return;
-    if (!willEnable) {
-      // Muting: disable browser notifications too so they don't keep firing.
-      notifDisable();
-      return;
-    }
-    // Enabling: request permission if needed. fireNotification() gates on the
-    // localStorage flag at fire time (app.jsx:193).
-    const perm = Notification.permission;
-    if (perm === "denied") {
-      // Browser already blocked — chime stays enabled ("chime only" mode).
-      // Sync any AnnBellBtn instances so they show the denied state.
-      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
-      return;
-    }
-    if (perm === "default") {
-      let result;
-      try { result = await Notification.requestPermission(); } catch (_e) {
-        // requestPermission() threw (rare) — revert the optimistic flip directly.
-        // toggleChimeMuted() would be a no-op here: its closure captured muted=true
-        // before the flip, so !muted === false — the revert computes the same value
-        // as the original flip. setChimeMuted(true) bypasses the stale closure.
-        setChimeMuted(true);
-        try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) {}
-        try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: true })); } catch (_e2) {}
+    if (bellToggleInFlight.current) return;
+    bellToggleInFlight.current = true;
+    try {
+      const willEnable = chimeMuted; // currently muted → about to enable
+      toggleChimeMuted(); // optimistic flip
+      if (!notificationSupported()) return;
+      if (!willEnable) {
+        // Muting: disable browser notifications too so they don't keep firing.
+        notifDisable();
         return;
       }
-      if (result !== "granted") {
-        // Dismissed or denied after prompt — chime stays, sync AnnBellBtn.
+      // Enabling: request permission if needed. fireNotification() gates on the
+      // localStorage flag at fire time (app.jsx:193).
+      const perm = Notification.permission;
+      if (perm === "denied") {
+        // Browser already blocked — chime stays enabled ("chime only" mode).
+        // Sync any AnnBellBtn instances so they show the denied state.
         try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
         return;
       }
+      if (perm === "default") {
+        let result;
+        try { result = await Notification.requestPermission(); } catch (_e) {
+          // requestPermission() threw (rare) — revert the optimistic flip directly.
+          // toggleChimeMuted() would be a no-op here: its closure captured muted=true
+          // before the flip, so !muted === false — the revert computes the same value
+          // as the original flip. setChimeMuted(true) bypasses the stale closure.
+          setChimeMuted(true);
+          try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) {}
+          try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: true })); } catch (_e2) {}
+          return;
+        }
+        if (result !== "granted") {
+          // Dismissed or denied after prompt — chime stays, sync AnnBellBtn.
+          try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+          return;
+        }
+      }
+      // perm is now "granted" (either pre-existing or just obtained above).
+      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
+    } finally {
+      bellToggleInFlight.current = false;
     }
-    // perm is now "granted" (either pre-existing or just obtained above).
-    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) {}
-    try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: true })); } catch (_e) {}
   };
   const [alertMatch, setAlertMatch] = useState(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
@@ -3778,8 +3787,7 @@ export function NotificationSettings() {
 
   const handleToggle = async () => {
     if (enabled) {
-      // Turning off: just persist the preference.
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) { /* storage unavailable */ }
+      notifDisable();
       setEnabled(false);
       return;
     }
@@ -3787,21 +3795,14 @@ export function NotificationSettings() {
     if (Notification.permission === "default") {
       const result = await Notification.requestPermission();
       setPermission(result);
-      if (result !== "granted") return; // user denied — don't toggle on
+      if (result !== "granted") return;
     } else {
       setPermission(Notification.permission);
     }
-    // Only mark the toggle ON if the preference actually persisted.
-    // fireBrowserNotifications() reads this localStorage flag at fire time, so
-    // an unpersisted "on" would render a checked box that never fires (storage
-    // throwing → flag missing → firing path reads opt-out). Keep the UI honest
-    // with the firing path: if persistence failed, leave the toggle off.
-    let persisted = false;
-    try {
-      window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true");
-      persisted = true;
-    } catch (_e) { /* storage unavailable — keep toggle off */ }
-    setEnabled(persisted);
+    // notifEnable() persists the flag and dispatches NOTIF_SYNC_EVENT so
+    // AnnBellBtn instances update immediately.
+    const outcome = await notifEnable();
+    setEnabled(outcome === "on");
   };
 
   const denied = permission === "denied";
@@ -3889,7 +3890,6 @@ function AnnBellBtn() {
       setState("off");
       return;
     }
-    if (state === "denied") return;
     inFlight.current = true;
     try {
       const result = await notifEnable();
@@ -4122,7 +4122,6 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
-window.NotificationSettings = NotificationSettings;
 window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 // mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
 // (those files don't ES-import viewer.jsx; they pick globals off window).

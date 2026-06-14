@@ -20,9 +20,9 @@ export function makeNotifMock({ permission = 'default', requestResult = 'granted
 export function makeLocalStorageMock(initial = {}) {
   const store = { ...initial };
   return {
-    getItem: (k) => (k in store ? store[k] : null),
+    getItem: vi.fn((k) => (k in store ? store[k] : null)),
     setItem: vi.fn((k, v) => { store[k] = String(v); }),
-    removeItem: (k) => { delete store[k]; },
+    removeItem: vi.fn((k) => { delete store[k]; }),
     clear: () => { Object.keys(store).forEach(k => delete store[k]); },
     get _store() { return store; },
   };
@@ -30,9 +30,9 @@ export function makeLocalStorageMock(initial = {}) {
 
 export function makeThrowingLocalStorageMock() {
   return {
-    getItem: () => null,
+    getItem: vi.fn(() => null),
     setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
-    removeItem: () => {},
+    removeItem: vi.fn(() => {}),
     clear: () => {},
   };
 }

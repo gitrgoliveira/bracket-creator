@@ -630,8 +630,12 @@ function useChimeMuted() {
   // Functional updater: `prev` is the current state at call time, not a
   // captured closure value. This lets callers call toggle() twice (optimistic
   // flip + revert on throw) without stale-closure issues.
-  // Side effects run after setMuted returns; in Preact, functional updaters
-  // resolve synchronously so `next` is set when we write LS and dispatch.
+  // `next` is captured from inside the updater and read after setMuted returns.
+  // Preact 10 (hooks.umd.js in vendor/) executes functional updaters
+  // synchronously within the useState setter call, so `next` is always
+  // defined before the LS write and dispatch below. If upgrading Preact beyond
+  // v10, verify this invariant still holds — the effect-based alternative is
+  // a useEffect on `muted` for LS/dispatch, but it adds a render cycle delay.
   const toggle = () => {
     let next;
     setMuted(prev => { next = !prev; return next; });
@@ -1138,14 +1142,16 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     try {
       const willEnable = chimeMuted; // currently muted → about to enable
       toggleChimeMuted(); // optimistic flip
-      if (!notificationSupported()) return;
       if (!willEnable) {
         // Muting: disable browser notifications too so they don't keep firing.
+        // notifDisable() is a pure LS+event op; runs even when the Notification
+        // API is absent (e.g. bare http) so the opt-in flag stays in sync.
         notifDisable();
         return;
       }
+      if (!notificationSupported()) return; // enabling path requires the API
       // Enabling: request permission if needed. fireNotification() gates on the
-      // localStorage flag at fire time (app.jsx:193).
+      // localStorage flag at fire time (see fireNotification in app.jsx).
       const perm = Notification.permission;
       if (perm === "denied") {
         // Browser already blocked — chime stays enabled ("chime only" mode).
@@ -3883,6 +3889,8 @@ function AnnBellBtn() {
   });
 
   // Sync with the watchlist bell and other AnnBellBtn instances on the page.
+  // Also subscribe to the Permissions API so external permission revokes
+  // (user visits browser settings mid-session) are caught proactively.
   useEffect(() => {
     if (!supported) return;
     const onSync = (e) => {
@@ -3891,8 +3899,28 @@ function AnnBellBtn() {
     };
     // CustomEvents dispatched on window are same-origin; no origin check needed.
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);
-    return () => window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-  }, []); // supported is a static boolean; the effect only wires up the event listener once
+
+    // Progressive enhancement: listen for browser-level permission changes.
+    // navigator.permissions is not available in all environments; guard with ?..
+    let permStatus = null;
+    navigator.permissions?.query({ name: "notifications" }).then((s) => {
+      permStatus = s;
+      s.onchange = () => {
+        if (s.state === "denied") { setState("denied"); return; }
+        if (s.state === "prompt") { setState("off"); return; }
+        // "granted" — user re-granted in settings; re-read LS for persisted opt-in.
+        try {
+          const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+          setState(optIn ? "on" : "off");
+        } catch (_e) { setState("off"); }
+      };
+    }).catch(() => {});
+
+    return () => {
+      window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
+      if (permStatus) permStatus.onchange = null;
+    };
+  }, []); // supported is a static boolean; the effect only wires up listeners once
 
   if (state === "unsupported") return null;
 

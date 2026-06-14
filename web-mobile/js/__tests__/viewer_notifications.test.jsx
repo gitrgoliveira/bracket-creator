@@ -122,6 +122,7 @@ describe('notification helpers', () => {
       installLS(ls);
       notifDisable();
       expect(ls.setItem).toHaveBeenCalledWith('viewer.notifications.enabled', 'false');
+      expect(ls.getItem).toHaveBeenCalledWith('viewer.notifications.enabled');
       expect(dispatchSpy).toHaveBeenCalledOnce();
       const evt = dispatchSpy.mock.calls[0][0];
       expect(evt.type).toBe('notifEnabledSync');
@@ -132,6 +133,25 @@ describe('notification helpers', () => {
       installLS(makeThrowingLocalStorageMock());
       dispatchSpy.mockImplementation(() => { throw new Error('csp'); });
       expect(() => notifDisable()).not.toThrow();
+    });
+
+    it('dispatches {detail:true} when both setItem and removeItem fail and key remains "true"', () => {
+      // Storage completely locked (e.g. corrupted profile): neither setItem nor
+      // removeItem can write. The read-back reflects the actual persisted state
+      // so all bell instances stay in sync with what fireNotification() will see.
+      const store = { 'viewer.notifications.enabled': 'true' };
+      const ls = {
+        getItem: vi.fn((k) => (k in store ? store[k] : null)),
+        setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
+        removeItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
+        clear: () => {},
+      };
+      installLS(ls);
+      notifDisable();
+      expect(ls.removeItem).toHaveBeenCalledWith('viewer.notifications.enabled');
+      expect(ls.getItem).toHaveBeenCalledWith('viewer.notifications.enabled');
+      expect(dispatchSpy).toHaveBeenCalledOnce();
+      expect(dispatchSpy.mock.calls[0][0].detail).toBe(true);
     });
   });
 });

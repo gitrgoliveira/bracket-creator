@@ -1312,7 +1312,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
                   <div className="viewer-nav-card__title">Results</div>
                   <div className="viewer-nav-card__sub">All placings</div>
                 </div>
-                <span className="viewer__results-badge">{comps.filter(c => c.status === "completed").length}</span>
+                <span className="viewer__results-badge" aria-label={`${comps.filter(c => c.status === "completed").length} completed`}>{comps.filter(c => c.status === "completed").length}</span>
                 <span className="viewer-nav-card__chev">→</span>
               </button>
             )}
@@ -3939,7 +3939,9 @@ function AnnBellBtn() {
     // Progressive enhancement: listen for browser-level permission changes.
     // navigator.permissions is not available in all environments; guard with ?..
     let permStatus = null;
+    let cancelled = false;
     navigator.permissions?.query({ name: "notifications" })?.then((s) => {
+      if (cancelled) return;
       permStatus = s;
       s.onchange = () => {
         if (s.state === "denied") { setState("denied"); return; }
@@ -3953,6 +3955,7 @@ function AnnBellBtn() {
     })?.catch(() => {});
 
     return () => {
+      cancelled = true;
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
       if (permStatus) permStatus.onchange = null;
     };

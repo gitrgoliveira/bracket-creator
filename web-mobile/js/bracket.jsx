@@ -341,8 +341,8 @@ function buildDisplayModel(rounds) {
   if (hasMeta) {
     let maxDR = 0;
     const real = [];
-    rounds.forEach((r) => r.forEach((m) => {
-      if (!m.hidden && (m.displayRound || 0) > 0) { real.push(m); if (m.displayRound > maxDR) maxDR = m.displayRound; }
+    rounds.forEach((r, backendRi) => r.forEach((m) => {
+      if (!m.hidden && (m.displayRound || 0) > 0) { real.push({ ...m, roundIndex: backendRi }); if (m.displayRound > maxDR) maxDR = m.displayRound; }
     }));
     const columns = [];
     for (let dr = maxDR; dr >= 1; dr--) columns.push(real.filter((m) => m.displayRound === dr));

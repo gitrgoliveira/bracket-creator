@@ -1028,6 +1028,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const WatchlistPanel = window.WatchlistPanel ?? (() => null);
   const t = tournament;
   const comps = t.competitions || [];
+  const completedCount = comps.filter((c) => c.status === "completed").length;
   const compsByDate = useMemo(() => {
     const map = {};
     comps.forEach((c) => {
@@ -1305,14 +1306,14 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </button>
 
             {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
-            {onOpenResults && comps.some((c) => c.status === "completed") && (
+            {onOpenResults && completedCount > 0 && (
               <button className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
                 <span className="viewer-nav-card__icon">🏅</span>
                 <div className="viewer-nav-card__text">
                   <div className="viewer-nav-card__title">Results</div>
                   <div className="viewer-nav-card__sub">All placings</div>
                 </div>
-                <span className="viewer__results-badge" aria-label={`${comps.filter(c => c.status === "completed").length} completed`}>{comps.filter(c => c.status === "completed").length}</span>
+                <span className="viewer__results-badge" aria-label={`${completedCount} completed`}>{completedCount}</span>
                 <span className="viewer-nav-card__chev">→</span>
               </button>
             )}
@@ -3940,24 +3941,26 @@ function AnnBellBtn() {
     // navigator.permissions is not available in all environments; guard with ?..
     let permStatus = null;
     let cancelled = false;
+    const onPermChange = () => {
+      if (!permStatus) return;
+      if (permStatus.state === "denied") { setState("denied"); return; }
+      if (permStatus.state === "prompt") { setState("off"); return; }
+      // "granted" — user re-granted in settings; re-read LS for persisted opt-in.
+      try {
+        const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+        setState(optIn ? "on" : "off");
+      } catch (_e) { setState("off"); }
+    };
     navigator.permissions?.query({ name: "notifications" })?.then((s) => {
       if (cancelled) return;
       permStatus = s;
-      s.onchange = () => {
-        if (s.state === "denied") { setState("denied"); return; }
-        if (s.state === "prompt") { setState("off"); return; }
-        // "granted" — user re-granted in settings; re-read LS for persisted opt-in.
-        try {
-          const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
-          setState(optIn ? "on" : "off");
-        } catch (_e) { setState("off"); }
-      };
+      s.addEventListener("change", onPermChange);
     })?.catch(() => {});
 
     return () => {
       cancelled = true;
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-      if (permStatus) permStatus.onchange = null;
+      if (permStatus) permStatus.removeEventListener("change", onPermChange);
     };
   }, []); // supported is a static boolean; the effect only wires up listeners once
 

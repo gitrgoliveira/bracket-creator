@@ -85,11 +85,11 @@ describe('notification helpers', () => {
       expect(evt.detail).toBe(true);
     });
 
-    it('returns "storage-failed" and dispatches {detail:false} when LS write throws', async () => {
+    it('returns "off" and dispatches {detail:false} when LS write throws', async () => {
       installLS(makeThrowingLocalStorageMock());
       mockNotification({ permission: 'granted' });
       const result = await notifEnable();
-      expect(result).toBe('storage-failed');
+      expect(result).toBe('off');
       expect(dispatchSpy).toHaveBeenCalledOnce();
       expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
     });

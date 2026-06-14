@@ -275,12 +275,14 @@ function useWatchlist() {
     return migrated;
   });
   const persist = (next) => {
-    const normalized = normalizeWatchlist(next);
-    setList(normalized);
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized));
-    } catch (_e) { /* ignore — in-memory state remains valid for the session */ }
+    setList(prevList => {
+      const resolved = typeof next === 'function' ? next(prevList) : next;
+      const normalized = normalizeWatchlist(resolved);
+      if (typeof window !== "undefined") {
+        try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
+      }
+      return normalized;
+    });
   };
   return [list, persist];
 }
@@ -574,8 +576,7 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 // handleBellToggle cannot delegate here — it must revert the optimistic chime
 // flip on throw and sync AnnBellBtn on denied/dismissed, which require logic
 // tightly coupled to the call site. Return values for notifEnable: "on"
-// (granted), "off" (dismissed / failed / threw), "denied" (permanently blocked),
-// "storage-failed" (granted but localStorage write threw — firing path won't fire).
+// (granted), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
 export async function notifEnable() {
   if (typeof Notification === "undefined") return "off";
   if (Notification.permission === "denied") {
@@ -594,7 +595,7 @@ export async function notifEnable() {
   try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
   // Dispatch with the actual stored value so listeners show the correct state.
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: stored })); } catch (_e) {}
-  return stored ? "on" : "storage-failed";
+  return stored ? "on" : "off";
 }
 export function notifDisable() {
   try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) {}
@@ -1828,7 +1829,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                   <span key={k} className="pmf__chip pmf__chip--dojo">
                     <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
                     {entry.dojo}
-                    <button onClick={() => { setWatchlist(watchlist.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
+                    <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
                   </span>
                 );
               }
@@ -1839,12 +1840,12 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                 <span key={k} className="pmf__chip">
                   {number && <span className="num-prefix">{number}</span>}
                   {name}
-                  <button onClick={() => { setWatchlist(watchlist.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
+                  <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
                 </span>
               );
             })}
             {compWatchlist.length > 1 && (
-              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist(watchlist.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
+              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist(prev => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
             )}
           </div>
         )}
@@ -3882,7 +3883,7 @@ function AnnBellBtn() {
     // CustomEvents dispatched on window are same-origin; no origin check needed.
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);
     return () => window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- supported is a static boolean
+  }, []); // supported is a static boolean; the effect only wires up the event listener once
 
   if (state === "unsupported") return null;
 
@@ -3893,9 +3894,8 @@ function AnnBellBtn() {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      if (state === "on") { notifDisable(); setState("off"); return; }
-      const result = await notifEnable();
-      setState(result === "storage-failed" ? "off" : result); // "on", "off" (dismissed), or "denied" (blocked)
+      if (state === "on") { notifDisable(); return; }
+      await notifEnable();
     } finally {
       inFlight.current = false;
     }
@@ -3905,6 +3905,7 @@ function AnnBellBtn() {
       className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
       onClick={toggle}
       disabled={state === "denied"}
+      aria-pressed={state === "on"}
       aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
       title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
     >

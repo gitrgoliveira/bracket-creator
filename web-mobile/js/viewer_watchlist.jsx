@@ -246,15 +246,16 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
   const addPlayer = (p) => {
-    const next = addPlayerToWatchlist(watchlist, p);
-    if (watchlist.length === 0 && next.length > 0 && onFirstAdd) onFirstAdd();
-    setWatchlist(next);
+    if (watchlist.length === 0 && onFirstAdd) onFirstAdd();
+    setWatchlist(prev => addPlayerToWatchlist(prev, p));
   };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
     if (watchlist.length === 0 && onFirstAdd) onFirstAdd();
-    setWatchlist([...watchlist, { type: "dojo", dojo: d.name }]);
+    setWatchlist(prev => {
+      if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
+      return [...prev, { type: "dojo", dojo: d.name }];
+    });
   };
   const removeEntry = (entry) => {
     const k = entryKey(entry);
@@ -319,8 +320,9 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           <button
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
             onClick={toggleChimeMuted}
+            aria-pressed={!chimeMuted}
             aria-label={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
-            title={chimeMuted ? "Alerts muted — tap to enable" : "Alert me when my match is up next"}
+            title={chimeMuted ? "Alerts muted — browser notifications also paused" : "Alert me when my match is up next"}
           >
             <BellIcon muted={chimeMuted} />
           </button>

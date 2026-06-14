@@ -104,20 +104,22 @@ describe('notification helpers', () => {
       expect(dispatchSpy.mock.calls[0][0].detail).toBe(true);
     });
 
-    it('returns "denied" when requestPermission resolves "denied"', async () => {
+    it('returns "denied" and dispatches {detail:false} when requestPermission resolves "denied"', async () => {
       installLS(makeLocalStorageMock());
       mockNotification({ permission: 'default', requestResult: 'denied' });
       const result = await notifEnable();
       expect(result).toBe('denied');
-      expect(dispatchSpy).not.toHaveBeenCalled();
+      expect(dispatchSpy).toHaveBeenCalledOnce();
+      expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
     });
 
-    it('returns "off" when requestPermission resolves "dismissed"', async () => {
+    it('returns "off" and dispatches {detail:false} when requestPermission resolves "dismissed"', async () => {
       installLS(makeLocalStorageMock());
       mockNotification({ permission: 'default', requestResult: 'dismissed' });
       const result = await notifEnable();
       expect(result).toBe('off');
-      expect(dispatchSpy).not.toHaveBeenCalled();
+      expect(dispatchSpy).toHaveBeenCalledOnce();
+      expect(dispatchSpy.mock.calls[0][0].detail).toBe(false);
     });
 
     it('returns "off" when requestPermission throws', async () => {

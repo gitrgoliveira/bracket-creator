@@ -275,7 +275,8 @@ function useWatchlist() {
     return migrated;
   });
   const persist = (next) => {
-    const normalized = normalizeWatchlist(next);
+    const resolved = typeof next === 'function' ? next(list) : next;
+    const normalized = normalizeWatchlist(resolved);
     setList(normalized);
     if (typeof window === "undefined") return;
     try {
@@ -585,7 +586,10 @@ export async function notifEnable() {
   if (Notification.permission === "default") {
     let r;
     try { r = await Notification.requestPermission(); } catch (_e) { return "off"; }
-    if (r !== "granted") return Notification.permission === "denied" ? "denied" : "off";
+    if (r !== "granted") {
+      try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: false })); } catch (_e) {}
+      return Notification.permission === "denied" ? "denied" : "off";
+    }
   }
   let stored = false;
   try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) {}
@@ -617,14 +621,14 @@ function useChimeMuted() {
   // Functional updater: `prev` is the current state at call time, not a
   // captured closure value. This lets callers call toggle() twice (optimistic
   // flip + revert on throw) without stale-closure issues.
+  // Side effects run after setMuted returns; in Preact, functional updaters
+  // resolve synchronously so `next` is set when we write LS and dispatch.
   const toggle = () => {
-    setMuted(prev => {
-      const next = !prev;
-      if (typeof window === "undefined") return next;
-      try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) {}
-      try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) {}
-      return next;
-    });
+    let next;
+    setMuted(prev => { next = !prev; return next; });
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) {}
+    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) {}
   };
   return [muted, toggle];
 }

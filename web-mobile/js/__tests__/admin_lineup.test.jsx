@@ -101,6 +101,15 @@ describe('canRevise', () => {
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
+    it('returns false when current-round matches are scheduled but not yet played', () => {
+      // All roundIndex=0 matches still scheduled — round not complete → block.
+      window.compMatches = () => [
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
+        { id: 'm2', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
+      ];
+      expect(canRevise({ id: 'c1' }, 0)).toBe(false);
+    });
+
     it('returns true on the happy path (current round done, next round not yet started)', () => {
       window.compMatches = () => [
         { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },

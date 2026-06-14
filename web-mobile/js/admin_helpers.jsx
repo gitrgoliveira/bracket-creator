@@ -320,16 +320,12 @@ function courtCount(courts) {
 }
 
 // Resolves the 0-based round index from a match object. Bracket matches
-// carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back through
-// numeric m.round, then the legacy "Round N" string for any stale shapes.
+// carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
+// non-negative numeric m.round for any older shapes.
 // Returns 0 for pool matches (no per-round lineup).
 function resolveRoundIndex(match) {
   if (typeof match.roundIndex === "number" && match.roundIndex >= 0) return match.roundIndex;
-  if (typeof match.round === "number") return match.round;
-  if (typeof match.round === "string") {
-    const mr = /^Round\s+(\d+)$/.exec(match.round);
-    if (mr) return parseInt(mr[1], 10) - 1;
-  }
+  if (typeof match.round === "number" && match.round >= 0) return match.round;
   return 0;
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -753,5 +753,32 @@ describe('courtCount', () => {
 
   it('returns 1 for a truthy non-array like a string', () => {
     expect(courtCount("AB")).toBe(1);
+  });
+});
+
+describe('resolveRoundIndex', () => {
+  it('returns m.roundIndex when non-negative', () => {
+    expect(resolveRoundIndex({ roundIndex: 0 })).toBe(0);
+    expect(resolveRoundIndex({ roundIndex: 3 })).toBe(3);
+  });
+
+  it('falls back to numeric m.round when roundIndex is absent', () => {
+    expect(resolveRoundIndex({ round: 2 })).toBe(2);
+  });
+
+  it('clamps negative numeric round to 0 via fallback', () => {
+    expect(resolveRoundIndex({ round: -1 })).toBe(0);
+  });
+
+  it('returns 0 for pool matches with no roundIndex or numeric round', () => {
+    expect(resolveRoundIndex({ round: 'Pool A', status: 'completed' })).toBe(0);
+  });
+
+  it('returns 0 when match has no round fields at all', () => {
+    expect(resolveRoundIndex({})).toBe(0);
+  });
+
+  it('prefers roundIndex over numeric round', () => {
+    expect(resolveRoundIndex({ roundIndex: 1, round: 5 })).toBe(1);
   });
 });

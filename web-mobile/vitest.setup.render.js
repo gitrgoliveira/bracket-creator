@@ -28,11 +28,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount BEFORE restoring spies so act()/effect warnings emitted during
+  // React Testing Library teardown are captured and counted.
+  cleanup();
   const warns = warnSpy.mock?.calls ?? [];
   const errors = errorSpy.mock?.calls ?? [];
   warnSpy.mockRestore();
   errorSpy.mockRestore();
-  cleanup();
   if (warns.length > 0) {
     throw new Error(`Unexpected console.warn (${warns.length} call(s)):\n${warns.map((a) => a.join(' ')).join('\n')}`);
   }

@@ -375,7 +375,7 @@ function buildDisplayModel(rounds) {
     });
     // Match numbers: earliest round first (highest displayRound), then by position
     // extracted from the id suffix — mirrors the Excel FillInMatches order so
-    // card labels ("M 1", "M 2") match what referees see on the printed sheet.
+    // card labels ("M1", "M2") match what referees see on the printed sheet.
     // id format: "m-r{ROUND}-{POS}" — last segment is the 0-based within-round index.
     const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
     const numbered = [...real].sort((a, b) => {

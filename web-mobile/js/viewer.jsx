@@ -2250,7 +2250,7 @@ const PoolMatchRow = React.memo(({ m, onClick }) => {
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
-        {m.status === "completed" ? (scoreStr || "—") : "–"}
+        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-running" style={{ fontSize: 10 }}>●</span> : "–"}
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
@@ -2366,8 +2366,8 @@ function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPlayers })
                 } : {};
 
                 if (m.status !== "completed") {
-                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, "Pending")} className={`league-matrix__cell league-matrix__cell--pending${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, "Pending")} {...interactiveProps}>
-                    –
+                  return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--running" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
+                    {m.status === "running" ? <span className="bc-running" style={{ fontSize: 9 }}>●</span> : "–"}
                   </td>;
                 }
 
@@ -2474,7 +2474,7 @@ const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
         <span className="pool-match-numbered-row__name">{bName || "—"}</span>
       </div>
       <span className="pool-match-numbered-row__score">
-        {m.status === "completed" ? (scoreStr || "—") : "–"}
+        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-running" style={{ fontSize: 10 }}>●</span> : "–"}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>

@@ -289,39 +289,28 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
-			// Normalize the audit reason before entering the tx. A reason is
-			// meaningful only on a correction (completed → completed); drop it
-			// on any non-correction write so it is never persisted spuriously.
-			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
-			if results[i].Status != state.MatchStatusCompleted {
-				results[i].CorrectionReason = ""
-			}
-
 			// mp-ic5b: the correction-reason gate and the write run under the
 			// same per-comp lock so the status read is race-free against a
 			// concurrent PUT /score. Per-result transactions preserve the
 			// existing {succeeded, errors[]} partial-success response shape.
-			var itemErr error
-			if txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-				if results[i].Status == state.MatchStatusCompleted {
+			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
+			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
+				if results[i].Status != state.MatchStatusCompleted {
+					results[i].CorrectionReason = ""
+				} else {
 					existing := lookupMatchStatusUnderTx(stx, id, results[i].ID)
 					if existing == state.MatchStatusCompleted {
 						if results[i].CorrectionReason == "" {
-							itemErr = errors.New("correcting a completed match result requires a non-empty correctionReason")
-							return nil
+							return errors.New("correcting a completed match result requires a non-empty correctionReason")
 						}
 					} else {
 						results[i].CorrectionReason = "" // first finalization — not a correction
 					}
 				}
-				_, itemErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
-				return nil
-			}); txErr != nil {
-				errs = append(errs, scoreError{MatchID: results[i].ID, Error: txErr.Error()})
-				continue
-			}
-			if itemErr != nil {
-				errs = append(errs, scoreError{MatchID: results[i].ID, Error: itemErr.Error()})
+				_, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
+				return err
+			}); err != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
 			successful = append(successful, results[i])

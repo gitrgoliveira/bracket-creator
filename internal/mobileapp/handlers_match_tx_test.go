@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -33,9 +32,7 @@ import (
 // refactor could easily introduce a deadlock without anyone
 // noticing.
 func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "score-deadlock-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
 	eng := engine.New(store)
@@ -122,9 +119,7 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 // back its partial score-write. Throughout, the per-comp lock under
 // WithTransaction must never deadlock.
 func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "decision-deadlock-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
 	eng := engine.New(store)
@@ -214,9 +209,7 @@ func TestBulkScore_CorrectionGateRaceproof(t *testing.T) {
 	const rounds = 30 // repeat the race enough times to surface the old bug under -race
 	for round := range rounds {
 		func() {
-			tempDir, err := os.MkdirTemp("", "bulk-toctou-*")
-			require.NoError(t, err)
-			defer os.RemoveAll(tempDir)
+			tempDir := t.TempDir()
 			store, err := state.NewStore(tempDir)
 			require.NoError(t, err)
 			eng := engine.New(store)

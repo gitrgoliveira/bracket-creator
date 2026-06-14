@@ -659,15 +659,10 @@ describe('NotificationSettings', () => {
     }
   });
 
-  it('shows only the chime toggle when Notification API is unavailable', () => {
+  it('returns null when Notification API is unavailable and context is secure', () => {
     global.Notification = undefined;
     const result = NotificationSettings({});
-    // mp-4fd: chime toggle uses WebAudio, not Notification API, so it renders
-    // even when browser notifications are unavailable.
-    expect(result).not.toBeNull();
-    const str = JSON.stringify(result);
-    expect(str).toContain('chime-toggle');
-    expect(str).not.toContain('notification-toggle');
+    expect(result).toBeNull();
   });
 
   it('renders the toggle when Notification is available and permission is default', () => {
@@ -797,15 +792,11 @@ describe('NotificationSettings (reactive)', () => {
     expect(findWarn().length).toBe(1);
   });
 
-  it('shows only chime toggle when the API is unavailable AND the context is secure', () => {
+  it('returns null when the API is unavailable AND the context is secure', () => {
     global.Notification = undefined;
     Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
     const tree = runtime.mount(RS, {});
-    // mp-4fd: chime toggle (WebAudio) renders even when Notification API is absent.
-    expect(tree).not.toBeNull();
-    const str = JSON.stringify(tree);
-    expect(str).toContain('chime-toggle');
-    expect(str).not.toContain('notification-toggle');
+    expect(tree).toBeNull();
   });
 
   it('leaves the toggle OFF when enabling succeeds at the prompt but localStorage.setItem throws', async () => {

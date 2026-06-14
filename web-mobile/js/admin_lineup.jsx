@@ -71,33 +71,17 @@ function teamIdOf(team) {
 }
 
 // "Revise" is enabled when the current round's matches are all completed
-// AND the next round hasn't started yet. We use the in-memory competition
-// detail (pools + bracket) to evaluate that — when the shape isn't a
-// clean fit we fall back to "current round completed" and surface a
-// TODO for cleaner round-aware gating.
+// AND the next round hasn't started yet. Uses m.roundIndex (0-based
+// backend index stamped by compMatches) for precise round filtering.
 function canRevise(competition, round) {
   if (!competition || !window.compMatches) return false;
   const all = window.compMatches(competition);
-  // Heuristic: rounds in this codebase are usually "round" (bracket) or
-  // "poolName"-shaped strings on pool matches. Without a robust per-
-  // round filter, gate Revise on:
-  //   1) at least one match exists for the team's competition, AND
-  //   2) every running/scheduled match in round+1 hasn't started yet.
-  // TODO(T130): once the wire shape exposes a numeric round on every
-  // match, switch to a strict (round === r && completed) test.
-  const currentLabel = `Round ${round + 1}`;
-  const nextLabel = `Round ${round + 2}`;
-  // Fail closed if NO match in the comp uses the "Round N" label we
-  // expect — that means the wire format has drifted and the heuristic
-  // below is unreliable. Erring toward "cannot revise" is safer than
-  // surfacing a Revise button mid-round.
-  const recognisable = all.some(m => typeof m.round === "string" && /^Round \d+$/.test(m.round));
-  if (!recognisable) return false;
-  const inProgressNext = all.some(m => (m.status === "running" || m.status === "completed") && m.round === nextLabel);
+  const currentMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round);
+  const nextMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round + 1);
+  if (!currentMatches.length) return false;
+  const inProgressNext = nextMatches.some(m => m.status === "running" || m.status === "completed");
   if (inProgressNext) return false;
-  // Otherwise allow revise as long as no current-round match is still running
-  const currentRunning = all.some(m => m.status === "running" && m.round === currentLabel);
-  return !currentRunning;
+  return currentMatches.every(m => m.status === "completed");
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {

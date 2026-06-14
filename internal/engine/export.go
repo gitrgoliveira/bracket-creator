@@ -69,8 +69,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// 5. Names to Print sheet
 	helper.CreateNamesWithPoolToPrint(f, pools, comp.WithZekkenName, len(comp.Courts), playerCoords)
 
-	// 6. Tags sheet
-	if err := helper.CreateTagsSheet(f, pools); err != nil {
+	// 6. Tags sheet — pass publicURL so numbered tags get an embedded QR code.
+	// LoadTournament errors are silently ignored: a missing publicURL simply
+	// omits QR codes without aborting the export. CreateTagsSheet errors
+	// (e.g. Excel write failures) still propagate.
+	var publicURL string
+	if t, tErr := e.store.LoadTournament(); tErr == nil && t != nil {
+		publicURL = t.PublicURL
+	}
+	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
 		return nil, err
 	}
 

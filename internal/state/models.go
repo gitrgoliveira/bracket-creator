@@ -582,6 +582,13 @@ type MatchResult struct {
 	// password), "self-reported" (participant in self-run mode), or "" (legacy/
 	// unset). Set by the score handler; omitted from wire when empty.
 	ResultSource string `json:"resultSource,omitempty" yaml:"result_source,omitempty"`
+	// CorrectionReason is a mandatory audit justification when an operator
+	// overwrites a completed match result. Format: "<category>: <note>" (e.g.
+	// "Scoring error: wrong waza entered"). Only required on corrections
+	// (completed → completed); omitted on first completions. Append-only CSV
+	// column (rec index 19, the 20th column, after the original 19) and the
+	// bracket.json field keep older files fully compatible.
+	CorrectionReason string `json:"correctionReason,omitempty" yaml:"correction_reason,omitempty"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
@@ -689,6 +696,10 @@ type BracketMatch struct {
 	SubResults []SubMatchResult `json:"subResults,omitempty"`
 	// ResultSource mirrors MatchResult.ResultSource for bracket matches.
 	ResultSource string `json:"resultSource,omitempty"`
+	// CorrectionReason mirrors MatchResult.CorrectionReason for bracket
+	// matches, persisted in bracket.json for audit. Set when an operator
+	// overwrites a completed result (correction), omitted on first completion.
+	CorrectionReason string `json:"correctionReason,omitempty"`
 	// Display metadata (mp-7f2w) — additive, computed at generation time so the
 	// viewer can render the bracket with the SAME effective-round columns as the
 	// printed Excel Tree sheet (matches grouped by depth-from-root, structural

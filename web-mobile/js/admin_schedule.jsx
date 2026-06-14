@@ -685,7 +685,7 @@ function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
 // does not matter (safe in test/bundler contexts too).
-function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
+function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -726,6 +726,10 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+  // Audit reason for in-match lineup changes (allowDuringMatch=true + started).
+  // pendingPositions holds the positions map while the ReasonPrompt is open.
+  const [showLineupReasonPrompt, setShowLineupReasonPrompt] = useStateA(false);
+  const [pendingPositions, setPendingPositions] = useStateA(null);
 
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {
@@ -749,13 +753,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         } else {
           // No per-match entry — reflect the round default (fetch-and-show,
           // but do NOT set isMatchOverride so the label says "inheriting").
-          let round = 0;
-          if (typeof match.round === "string") {
-            const mr = /^Round\s+(\d+)$/.exec(match.round);
-            if (mr) round = parseInt(mr[1], 10) - 1;
-          } else if (typeof match.round === "number") {
-            round = match.round;
-          }
+          const round = window.resolveRoundIndex(match);
           try {
             const roundLineup = await window.API.fetchTeamLineup(compId, teamId, round);
             if (cancelled) return;
@@ -783,17 +781,23 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
   // read as locked rather than show an editable form that 409s on save.
   const matchStarted = match?.status === "running" || match?.status === "completed";
-  const isLocked = !!lockedAt || matchStarted;
+  // allowDuringMatch is the operator override (officiated mode): a table
+  // operator running behind can edit the lineup even after the match starts.
+  // The save then sends force=true so the backend bypasses the same freeze.
+  const isLocked = !allowDuringMatch && (!!lockedAt || matchStarted);
 
-  const save = async () => {
+  const doSave = async (positionsOut, reason) => {
     setError("");
     setSaving(true);
     try {
-      const positionsOut = {};
-      Object.entries(values).forEach(([k, v]) => {
-        if (v) positionsOut[k] = v;
-      });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), reason);
+      // Reflect exactly what was persisted. This is also what applies the
+      // copy-from-previous mid-match values: that path defers setValues until
+      // this confirmed save, so a cancelled ReasonPrompt never leaves stale
+      // copied values on screen.
+      const next = {};
+      positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
+      setValues(next);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast("Match lineup saved");
@@ -807,6 +811,22 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = () => {
+    const positionsOut = {};
+    Object.entries(values).forEach(([k, v]) => {
+      if (v) positionsOut[k] = v;
+    });
+    // Audit reason required when saving a lineup mid-match (allowDuringMatch
+    // + the match has started). Show the ReasonPrompt overlay; doSave fires
+    // after the operator confirms.
+    if (allowDuringMatch && matchStarted) {
+      setPendingPositions(positionsOut);
+      setShowLineupReasonPrompt(true);
+      return;
+    }
+    doSave(positionsOut, "");
   };
 
   // Copy from previous: probe sibling lineups on demand (deferred until click
@@ -844,7 +864,16 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         const v = (sourceLineup.positions || {})[p.key] || "";
         if (v) positionsOut[p.key] = v;
       });
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      // Like save(), require an audit reason when copying mid-match. Defer
+      // applying the copied values until the operator confirms — doSave then
+      // sets them from the persisted response. If the ReasonPrompt is
+      // cancelled, the form still reflects the actual saved lineup.
+      if (allowDuringMatch && matchStarted) {
+        setPendingPositions(positionsOut);
+        setShowLineupReasonPrompt(true);
+        return;
+      }
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), "");
       // Apply cloned values into local state
       const next = {};
       positions.forEach(p => {
@@ -919,6 +948,21 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         )}
       </div>
 
+      {/* Audit reason prompt for in-match lineup changes.
+          Shown when allowDuringMatch=true and the match has started.
+          Confirms a reason before calling doSave with force=true. */}
+      {showLineupReasonPrompt && (
+        <window.ReasonPrompt
+          label="Reason for lineup change"
+          presets={window.LINEUP_PRESETS || ["Late lineup", "Substitution", "Correction", "Other"]}
+          submitting={saving}
+          onConfirm={(r) => {
+            setShowLineupReasonPrompt(false);
+            doSave(pendingPositions || {}, r);
+          }}
+          onCancel={() => { setShowLineupReasonPrompt(false); setPendingPositions(null); }}
+        />
+      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {!isLocked && (
           <button
@@ -947,7 +991,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
 // MatchLineupPanel — modal overlay for per-match lineup editing. Renders
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
-function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
+function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal", allowDuringMatch = false }) {
   const m = match;
   // Find the competition this match belongs to so we can access teamSize,
   // players (roster), etc.
@@ -982,17 +1026,8 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
   // All matches for this competition (needed for "Copy from previous" candidate search).
   const allMatches = typeof window.compMatches === "function" ? window.compMatches(comp) : [];
 
-  return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      zIndex: 1000, padding: 16
-    }}>
-      <div style={{
-        background: "var(--bg, #fff)", borderRadius: 8,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
-        width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
-      }}>
+  const inner = (
+    <>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
             <div className="overline">
@@ -1000,10 +1035,12 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
             </div>
             <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-              Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then.
+              {allowDuringMatch
+                ? "Set who fights each position. You can change this even after the match has started."
+                : "Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then."}
             </div>
           </div>
-          <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+          <button className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
@@ -1020,6 +1057,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
@@ -1038,12 +1076,35 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose }) {
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
             )}
           </div>
         </div>
+    </>
+  );
+
+  // Inline (mp-c2yr): render in-flow inside the operator console's main
+  // column — no fixed overlay, no backdrop. The shiaijo page owns the
+  // surrounding card; here we just provide padding + scroll.
+  if (variant === "inline") {
+    return <div className="scoring-panel lineup-panel--inline" aria-label="Lineup for this match">{inner}</div>;
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000, padding: 16
+    }}>
+      <div style={{
+        background: "var(--bg, #fff)", borderRadius: 8,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
+        width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
+      }}>
+        {inner}
       </div>
     </div>
   );
@@ -1083,6 +1144,14 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
       btnClassName="score-edit-row__court score-edit-row__court--btn"
     />
   );
+}
+
+// Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
+function startPatch() {
+  return {
+    status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
+    score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
+  };
 }
 
 function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
@@ -1266,10 +1335,7 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
         // serializer treats as "no bouts scored yet"). The server routes this
         // through eng.StartMatchTx, so all start-gating (eligibility 409,
         // ≥players checks) still runs — a 409 throws and is caught below.
-        const startPatch = () => ({
-          status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
-          score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
-        });
+        // Defined at module level as window.startPatch for reuse across admin_*.jsx.
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
@@ -1597,6 +1663,11 @@ window.PerCourtBreakdown = PerCourtBreakdown;
 window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
+window.filterMatchesByCourt = filterMatchesByCourt;
+window.startPatch = startPatch;
+// Reused by the shiaijo operator console so team-match lineups can be set
+// without leaving that page (mp-c2yr).
+window.MatchLineupPanel = MatchLineupPanel;
 
 // ES exports for the vitest suite. computeCourtPaceStats,
 // filterMatchesByCourt, and CourtPacePanel use `export function`

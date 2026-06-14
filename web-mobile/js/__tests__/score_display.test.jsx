@@ -47,8 +47,8 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
     });
 
-    it('returns △ for a draw where scores were entered', () => {
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('△');
+    it('returns X for a draw even when scores were entered (canonical hikiwake glyph)', () => {
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('X');
     });
 
     it('falls back to numeric score when ippons arrays are empty AND score has no ippon letters', () => {
@@ -121,7 +121,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('appends (E) to a draw', () => {
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('△ (E)');
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('X (E)');
     });
 
     it('appends (E) to a no-score draw', () => {

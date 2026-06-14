@@ -1930,3 +1930,184 @@ func TestDiscardDrawHandler(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
 }
+
+// TestCompetitionCourtsInvariant verifies that every competition resolves to at
+// least one court: empty competition courts inherit the tournament's courts so
+// generated matches carry a real court label (otherwise the per-court Shiaijo
+// operator view at /admin/shiaijo/:court cannot surface them). See
+// resolveCompetitionCourts in handlers_tournament.go.
+func TestCompetitionCourtsInvariant(t *testing.T) {
+	// readBackCourts POSTs/loads a competition and returns its persisted courts.
+	postComp := func(t *testing.T, r *gin.Engine, body map[string]any) map[string]any {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusCreated, w.Code, "resp: %s", w.Body.String())
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got
+	}
+	courtsOf := func(comp map[string]any) []string {
+		raw, _ := comp["courts"].([]any)
+		out := make([]string, 0, len(raw))
+		for _, v := range raw {
+			out = append(out, v.(string))
+		}
+		return out
+	}
+
+	t.Run("empty courts inherit the tournament's courts", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "No Courts Comp"})
+		assert.Equal(t, []string{"A", "B", "C"}, courtsOf(comp),
+			"a competition created without courts must inherit the tournament's courts")
+
+		// Confirm it is persisted, not just echoed in the response.
+		reloaded, err := store.LoadCompetition(comp["id"].(string))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B", "C"}, reloaded.Courts)
+	})
+
+	t.Run("explicit competition courts are preserved", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "One Court Comp", "courts": []string{"B"}})
+		assert.Equal(t, []string{"B"}, courtsOf(comp),
+			"an explicit court selection must not be overridden by the tournament's courts")
+	})
+
+	t.Run("no tournament falls back to a single default court", func(t *testing.T) {
+		r, _, _, _, _ := setupTestRouter(t) // setupTestRouter saves no tournament
+		comp := postComp(t, r, map[string]any{"name": "Bootstrap Comp"})
+		assert.Equal(t, []string{"A"}, courtsOf(comp),
+			"with no tournament configured, an empty-courts competition defaults to court A")
+	})
+}
+
+// TestCheckUniqueCompFields tests the checkUniqueCompFields helper directly.
+func TestCheckUniqueCompFields(t *testing.T) {
+	_, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	seed := func(id, name, prefix string) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: name, NumberPrefix: prefix}))
+	}
+
+	t.Run("empty prefix is always exempt", func(t *testing.T) {
+		seed("pfx-empty-1", "EmptyPfx1", "")
+		seed("pfx-empty-2", "EmptyPfx2", "")
+		infraErr, valErr := checkUniqueCompFields(store, "NewComp", "", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
+		infraErr, valErr := checkUniqueCompFields(store, "AnotherNewComp", "  ", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("no collision for distinct prefixes", func(t *testing.T) {
+		seed("pfx-k", "KendoComp", "K")
+		infraErr, valErr := checkUniqueCompFields(store, "DistinctName", "M", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("collision detected (exact prefix match)", func(t *testing.T) {
+		seed("pfx-collision", "CollisionComp", "X")
+		_, err := checkUniqueCompFields(store, "UniqueName", "X", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "number prefix")
+		assert.Contains(t, err.Error(), "CollisionComp")
+	})
+
+	t.Run("collision detected (case-insensitive prefix)", func(t *testing.T) {
+		seed("pfx-case", "CaseComp", "Y")
+		_, err := checkUniqueCompFields(store, "AnotherUnique", "y", "")
+		assert.Error(t, err)
+	})
+
+	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
+		seed("pfx-self", "SelfComp", "Z")
+		infraErr, valErr := checkUniqueCompFields(store, "SelfComp", "Z", "pfx-self")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("collision detected (duplicate name)", func(t *testing.T) {
+		seed("name-col", "DuplicateName", "Q")
+		_, err := checkUniqueCompFields(store, "DuplicateName", "W", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "competition name")
+	})
+}
+
+// TestNumberPrefixUniquenessHandlers tests POST and PUT validation via HTTP.
+func TestNumberPrefixUniquenessHandlers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed an existing competition with prefix "K".
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "K",
+	}))
+
+	post := func(id, name, prefix string) *httptest.ResponseRecorder {
+		comp := state.Competition{ID: id, Name: name, NumberPrefix: prefix}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("POST with duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-post", "Another Kendo", "K")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+		stored, _ := store.LoadCompetition("pfx-dup-post")
+		assert.Nil(t, stored, "duplicate-prefix competition must not be persisted")
+	})
+
+	t.Run("POST with case-insensitive duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-case", "Lower Kendo", "k")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST with unique prefix succeeds", func(t *testing.T) {
+		w := post("pfx-unique", "Men Open", "M")
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+
+	t.Run("PUT can keep own prefix", func(t *testing.T) {
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open Updated", NumberPrefix: "K"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT with another competition's prefix is rejected 400", func(t *testing.T) {
+		// pfx-unique has prefix "M"; try to update pfx-existing to "M".
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "M"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+	})
+}

@@ -112,14 +112,21 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     const p = playerMap[side];
     return p || { id: side, name: side };
   };
+  // Pool daihyosen ("Pool X-DH-N") and tiebreaker ("Pool X-TB-N") bouts are
+  // single representative/ippon-shobu matches, scored as INDIVIDUAL even in a
+  // team competition — force compKind=""/teamSize=0 so ScoreEditorModal routes
+  // to the individual editor (one bout), not the 5-person team sheet. This
+  // mirrors the same override in viewer.jsx compMatches; without it, scoring a
+  // team pool-DH from the Pools tab opens the wrong (team) scorer.
+  const isSupplementary = /-(?:DH|TB)-\d+$/.test(m.id || "");
   return {
     ...m,
     sideA: toPlayer(m.sideA),
     sideB: toPlayer(m.sideB),
     compId: m.compId || (comp && comp.id) || "",
     compName: m.compName || (comp && comp.name) || "",
-    compKind: m.compKind || (comp && comp.kind) || "",
-    teamSize: m.teamSize ?? (comp && comp.teamSize) ?? 0,
+    compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
+    teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
   };

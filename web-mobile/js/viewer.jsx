@@ -567,6 +567,8 @@ const CHIME_SYNC_EVENT = "chimeMutedSync";
 // Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
 // instances and the watchlist bell stay visually in sync within one page.
 const NOTIF_SYNC_EVENT = "notifEnabledSync";
+// LocalStorage key for the browser notification opt-in toggle.
+const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 
 // Shared notification opt-in helpers used by both handleBellToggle and
 // AnnBellBtn to avoid duplicating the permission-check + localStorage +
@@ -616,7 +618,7 @@ function useChimeMuted() {
       window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next }));
     } catch (_e) { /* CustomEvent unavailable */ }
   };
-  return [muted, toggle];
+  return [muted, toggle, setMuted];
 }
 
 // Extract a side's display name from the normalised match shape.
@@ -1106,7 +1108,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
-  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
+  const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = async () => {
     const willEnable = chimeMuted; // currently muted → about to enable
@@ -1129,8 +1131,13 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     if (perm === "default") {
       let result;
       try { result = await Notification.requestPermission(); } catch (_e) {
-        // requestPermission() threw (rare) — revert the optimistic chime flip.
-        toggleChimeMuted();
+        // requestPermission() threw (rare) — revert the optimistic flip directly.
+        // toggleChimeMuted() would be a no-op here: its closure captured muted=true
+        // before the flip, so !muted === false — the revert computes the same value
+        // as the original flip. setChimeMuted(true) bypasses the stale closure.
+        setChimeMuted(true);
+        try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) {}
+        try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: true })); } catch (_e2) {}
         return;
       }
       if (result !== "granted") {
@@ -1234,7 +1241,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             onMatchClick={setSelectedMatch}
             chimeMuted={chimeMuted}
             toggleChimeMuted={handleBellToggle}
-            onFirstAdd={watchlist.length === 0 && chimeMuted ? handleBellToggle : undefined}
+            onFirstAdd={chimeMuted ? handleBellToggle : undefined}
           />
 
           {globalRunning.length > 0 && (
@@ -3677,9 +3684,6 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
 // Exported for unit testing.
 // ---------------------------------------------------------------------------
 
-// LocalStorage key for the notification opt-in toggle.
-const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
-
 // Pure helper: detect Notification API support.
 // Exported for unit testing.
 export function notificationSupported() {
@@ -3854,6 +3858,7 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
 // AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
 function AnnBellBtn() {
   const supported = notificationSupported();
+  const inFlight = useRefV(false);
   const [state, setState] = useState(() => {
     if (!supported) return "unsupported";
     if (Notification.permission === "denied") return "denied";
@@ -3877,14 +3882,20 @@ function AnnBellBtn() {
   if (state === "unsupported") return null;
 
   const toggle = async () => {
+    if (inFlight.current) return;
     if (state === "on") {
       notifDisable();
       setState("off");
       return;
     }
     if (state === "denied") return;
-    const result = await notifEnable();
-    setState(result); // "on", "off" (dismissed), or "denied" (blocked)
+    inFlight.current = true;
+    try {
+      const result = await notifEnable();
+      setState(result); // "on", "off" (dismissed), or "denied" (blocked)
+    } finally {
+      inFlight.current = false;
+    }
   };
 
   const BellIcon = window.BellIcon;

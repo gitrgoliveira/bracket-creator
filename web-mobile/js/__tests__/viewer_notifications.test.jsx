@@ -3,28 +3,7 @@
 // NOTIF_SYNC_EVENT broadcast — cover every return value branch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { notifEnable, notifDisable } from '../viewer.jsx';
-import { makeLocalStorageMock, makeThrowingLocalStorageMock } from './test_helpers.js';
-
-// ---------------------------------------------------------------------------
-// Notification mock helpers
-// ---------------------------------------------------------------------------
-
-function mockNotification({ permission = 'default', requestResult = 'granted', requestThrows = false } = {}) {
-  let _perm = permission;
-  const ctor = vi.fn();
-  Object.defineProperty(ctor, 'permission', {
-    get: () => _perm,
-    set: (v) => { _perm = v; },
-    configurable: true,
-  });
-  ctor.requestPermission = async () => {
-    if (requestThrows) throw new Error('blocked');
-    const r = requestResult;
-    if (r === 'granted' || r === 'denied') _perm = r;
-    return r;
-  };
-  global.Notification = ctor;
-}
+import { makeLocalStorageMock, makeThrowingLocalStorageMock, makeNotifMock } from './test_helpers.js';
 
 function installLS(mock) {
   Object.defineProperty(window, 'localStorage', { value: mock, writable: true, configurable: true });
@@ -71,7 +50,7 @@ describe('notification helpers', () => {
 
     it('returns "denied" and dispatches {detail:false} when permission is already denied', async () => {
       installLS(makeLocalStorageMock());
-      mockNotification({ permission: 'denied' });
+      global.Notification = makeNotifMock({ permission: 'denied' });
       const result = await notifEnable();
       expect(result).toBe('denied');
       expect(dispatchSpy).toHaveBeenCalledOnce();
@@ -81,7 +60,7 @@ describe('notification helpers', () => {
     it('returns "on" and dispatches {detail:true} when already granted + LS write succeeds', async () => {
       const ls = makeLocalStorageMock();
       installLS(ls);
-      mockNotification({ permission: 'granted' });
+      global.Notification = makeNotifMock({ permission: 'granted' });
       const result = await notifEnable();
       expect(result).toBe('on');
       expect(ls.setItem).toHaveBeenCalledWith('viewer.notifications.enabled', 'true');
@@ -93,7 +72,7 @@ describe('notification helpers', () => {
 
     it('returns "off" and dispatches {detail:false} when LS write throws', async () => {
       installLS(makeThrowingLocalStorageMock());
-      mockNotification({ permission: 'granted' });
+      global.Notification = makeNotifMock({ permission: 'granted' });
       const result = await notifEnable();
       expect(result).toBe('off');
       expect(dispatchSpy).toHaveBeenCalledOnce();
@@ -103,7 +82,7 @@ describe('notification helpers', () => {
     it('requests permission when "default", returns "on" on grant', async () => {
       const ls = makeLocalStorageMock();
       installLS(ls);
-      mockNotification({ permission: 'default', requestResult: 'granted' });
+      global.Notification = makeNotifMock({ permission: 'default', requestResult: 'granted' });
       const result = await notifEnable();
       expect(result).toBe('on');
       expect(dispatchSpy).toHaveBeenCalledOnce();
@@ -112,7 +91,7 @@ describe('notification helpers', () => {
 
     it('returns "denied" and dispatches {detail:false} when requestPermission resolves "denied"', async () => {
       installLS(makeLocalStorageMock());
-      mockNotification({ permission: 'default', requestResult: 'denied' });
+      global.Notification = makeNotifMock({ permission: 'default', requestResult: 'denied' });
       const result = await notifEnable();
       expect(result).toBe('denied');
       expect(dispatchSpy).toHaveBeenCalledOnce();
@@ -121,7 +100,7 @@ describe('notification helpers', () => {
 
     it('returns "off" and dispatches {detail:false} when requestPermission resolves "dismissed"', async () => {
       installLS(makeLocalStorageMock());
-      mockNotification({ permission: 'default', requestResult: 'dismissed' });
+      global.Notification = makeNotifMock({ permission: 'default', requestResult: 'dismissed' });
       const result = await notifEnable();
       expect(result).toBe('off');
       expect(dispatchSpy).toHaveBeenCalledOnce();
@@ -130,7 +109,7 @@ describe('notification helpers', () => {
 
     it('returns "off" when requestPermission throws', async () => {
       installLS(makeLocalStorageMock());
-      mockNotification({ permission: 'default', requestThrows: true });
+      global.Notification = makeNotifMock({ permission: 'default', requestThrows: true });
       const result = await notifEnable();
       expect(result).toBe('off');
       expect(dispatchSpy).not.toHaveBeenCalled();

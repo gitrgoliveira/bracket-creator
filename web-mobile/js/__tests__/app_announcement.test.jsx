@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
 import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
+import { makeNotifMock } from './test_helpers.js';
 
 // Helper: recursively search a React element tree (mock objects) for all
 // elements matching a predicate, returning them as a flat list.
@@ -759,19 +760,6 @@ describe('NotificationSettings', () => {
 // re-render after a state change (Copilot round-2 comments 3328780111 /
 // 3328780129). Uses the makeReactive() shim like reset.test.jsx.
 // ---------------------------------------------------------------------------
-
-// Builds a Notification mock whose .permission auto-updates after requestPermission resolves,
-// matching real browser behavior (unlike a plain { permission: 'default' } object).
-function makeNotifMock({ permission = 'default', requestResult = 'granted' } = {}) {
-  let _perm = permission;
-  const mock = Object.create(null);
-  Object.defineProperty(mock, 'permission', { get: () => _perm, configurable: true });
-  mock.requestPermission = vi.fn().mockImplementation(async () => {
-    if (requestResult === 'granted' || requestResult === 'denied') _perm = requestResult;
-    return requestResult;
-  });
-  return mock;
-}
 
 describe('NotificationSettings (reactive)', () => {
   let runtime, RS, realReact, origNotif, origSecure, origLS;

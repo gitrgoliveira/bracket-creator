@@ -611,19 +611,19 @@ function useChimeMuted() {
     window.addEventListener(CHIME_SYNC_EVENT, onSync);
     return () => window.removeEventListener(CHIME_SYNC_EVENT, onSync);
   }, []);
+  // Functional updater: `prev` is the current state at call time, not a
+  // captured closure value. This lets callers call toggle() twice (optimistic
+  // flip + revert on throw) without stale-closure issues.
   const toggle = () => {
-    const next = !muted;
-    setMuted(next);
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false");
-    } catch (_e) { /* storage unavailable — in-memory is fine */ }
-    // Notify other hook instances in the same page.
-    try {
-      window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next }));
-    } catch (_e) { /* CustomEvent unavailable */ }
+    setMuted(prev => {
+      const next = !prev;
+      if (typeof window === "undefined") return next;
+      try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) {}
+      try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) {}
+      return next;
+    });
   };
-  return [muted, toggle, setMuted];
+  return [muted, toggle];
 }
 
 // Extract a side's display name from the normalised match shape.
@@ -1113,7 +1113,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
-  const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
+  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
   const bellToggleInFlight = useRefV(false);
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = async () => {
@@ -1140,13 +1140,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
       if (perm === "default") {
         let result;
         try { result = await Notification.requestPermission(); } catch (_e) {
-          // requestPermission() threw (rare) — revert the optimistic flip directly.
-          // toggleChimeMuted() would be a no-op here: its closure captured muted=true
-          // before the flip, so !muted === false — the revert computes the same value
-          // as the original flip. setChimeMuted(true) bypasses the stale closure.
-          setChimeMuted(true);
-          try { window.localStorage.setItem(LS_CHIME_MUTED, "true"); } catch (_e2) {}
-          try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: true })); } catch (_e2) {}
+          // requestPermission() threw (rare) — revert the optimistic flip.
+          // toggle() uses a functional updater so prev=false (post-flip) → next=true.
+          toggleChimeMuted();
           return;
         }
         if (result !== "granted") {
@@ -3791,9 +3787,9 @@ export function NotificationSettings() {
 
   const handleToggle = async () => {
     if (inFlight.current) return;
-    if (enabled) { notifDisable(); setEnabled(false); return; }
     inFlight.current = true;
     try {
+      if (enabled) { notifDisable(); setEnabled(false); return; }
       // notifEnable() handles the permission prompt, persists the flag, and
       // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
       const outcome = await notifEnable();
@@ -3889,7 +3885,7 @@ function AnnBellBtn() {
     try {
       if (state === "on") { notifDisable(); setState("off"); return; }
       const result = await notifEnable();
-      setState(result); // "on", "off" (dismissed), "denied" (blocked), or "storage-failed"
+      setState(result === "storage-failed" ? "off" : result); // "on", "off" (dismissed), or "denied" (blocked)
     } finally {
       inFlight.current = false;
     }

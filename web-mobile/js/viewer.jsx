@@ -584,37 +584,36 @@ const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
 function dispatchNotif(enabled) {
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }
 }
-// Module-level guard prevents concurrent requestPermission() calls when multiple
-// components (handleBellToggle + AnnBellBtn) trigger notifEnable simultaneously.
-let notifEnableInFlight = false;
+// Shared promise: concurrent callers (handleBellToggle + AnnBellBtn) all await
+// the same permission dialog and get the same outcome instead of an immediate
+// "off" that can leave bells out of sync with the first call's actual result.
+let notifEnablePromise = null;
 export async function notifEnable() {
-  if (notifEnableInFlight) return "off";
-  notifEnableInFlight = true;
-  try {
-  if (typeof Notification === "undefined") return "off";
-  if (Notification.permission === "denied") {
-    dispatchNotif(false);
-    return "denied";
-  }
-  if (Notification.permission === "default") {
-    let r;
-    try { r = await Notification.requestPermission(); } catch (_e) {
+  if (notifEnablePromise) return notifEnablePromise;
+  notifEnablePromise = (async () => {
+    if (typeof Notification === "undefined") return "off";
+    if (Notification.permission === "denied") {
       dispatchNotif(false);
-      return "off";
+      return "denied";
     }
-    if (r !== "granted") {
-      dispatchNotif(false);
-      return r === "denied" ? "denied" : "off";
+    if (Notification.permission === "default") {
+      let r;
+      try { r = await Notification.requestPermission(); } catch (_e) {
+        dispatchNotif(false);
+        return "off";
+      }
+      if (r !== "granted") {
+        dispatchNotif(false);
+        return r === "denied" ? "denied" : "off";
+      }
     }
-  }
-  let stored = false;
-  try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) { /* quota — stored stays false, dispatch will reflect "off" */ }
-  // Dispatch with the actual stored value so listeners show the correct state.
-  dispatchNotif(stored);
-  return stored ? "on" : "off";
-  } finally {
-    notifEnableInFlight = false;
-  }
+    let stored = false;
+    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); stored = true; } catch (_e) { /* quota — stored stays false, dispatch will reflect "off" */ }
+    // Dispatch with the actual stored value so listeners show the correct state.
+    dispatchNotif(stored);
+    return stored ? "on" : "off";
+  })().finally(() => { notifEnablePromise = null; });
+  return notifEnablePromise;
 }
 export function notifDisable() {
   try {

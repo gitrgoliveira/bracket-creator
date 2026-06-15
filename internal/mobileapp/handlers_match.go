@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -740,7 +741,24 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // device), so a scorer reload starting back at rev=1 is never dropped.
 type runningRev struct {
 	Session string
+	Epoch   int64
 	Rev     int64
+}
+
+// parseSessionEpoch extracts the leading "<epochMillis>-..." prefix a client
+// stamps into RevSession. Returns 0 when absent/unparseable (legacy or
+// malformed input) — callers treat a 0 epoch as "unknown" and fall back to
+// allowing session takeover rather than dropping the write.
+func parseSessionEpoch(s string) int64 {
+	i := strings.IndexByte(s, '-')
+	if i <= 0 {
+		return 0
+	}
+	n, err := strconv.ParseInt(s[:i], 10, 64)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // runningRevStore is a process-lifetime, in-memory map that tracks the
@@ -774,6 +792,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		mid := c.Param("mid")
+		if len(mid) > MaxLenMatchID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "matchId too long"})
+			return
+		}
 
 		var req ScoreRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -837,18 +859,34 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// is already > the incoming Rev, the write is stale: return 200 so the
 		// client doesn't surface an error, but skip the engine write entirely. A
 		// higher-or-equal rev advances the mark and proceeds normally.
+		//
+		// Epoch ordering (cross-session): RevSession carries a "<epochMs>-<uuid>"
+		// prefix. When both epochs are known (non-zero), an incoming write from an
+		// OLDER epoch (smaller number) is the queued write of an evicted/prior
+		// session flushing after a newer session has taken over — drop it so it
+		// can't regress state. When either epoch is 0 (legacy/malformed session id)
+		// we fall back to allowing takeover, preserving prior behaviour.
 		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
 			revKey := id + ":" + mid
-			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
+			incoming := runningRev{Session: result.RevSession, Epoch: parseSessionEpoch(result.RevSession), Rev: result.Rev}
 			for {
 				existing, loaded := runningRevStore.LoadOrStore(revKey, incoming)
 				if !loaded {
 					break // first running write for this key
 				}
 				stored := existing.(runningRev)
-				// Only a same-session, lower rev is stale. A different session
-				// (reload / new device) always takes over.
-				if stored.Session == incoming.Session && result.Rev < stored.Rev {
+				if stored.Session == incoming.Session {
+					// Same session: a lower rev is a stale out-of-order delivery.
+					if result.Rev < stored.Rev {
+						c.JSON(http.StatusOK, gin.H{"stale": true})
+						return
+					}
+				} else if incoming.Epoch > 0 && stored.Epoch > 0 && incoming.Epoch < stored.Epoch {
+					// Different session with an OLDER epoch: this is an evicted
+					// session's late write (e.g. a reconnect flush) arriving after a
+					// newer session took over — drop it so it can't regress state.
+					// (When either epoch is unknown/0 we fall back to allowing the
+					// takeover, preserving legacy behaviour.)
 					c.JSON(http.StatusOK, gin.H{"stale": true})
 					return
 				}
@@ -1025,6 +1063,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundEngErr *engine.NotFoundError
 			if errors.As(engErr, &notFoundEngErr) {
+				// The match doesn't exist — drop any rev-guard entry this request
+				// created so fabricated match IDs can't grow runningRevStore
+				// unbounded (scoring is unauthenticated in self-run mode).
+				runningRevStore.Delete(id + ":" + mid)
 				c.JSON(http.StatusNotFound, gin.H{"error": engErr.Error()})
 				return
 			}

@@ -91,7 +91,6 @@ function SyncStatusPill({ isRunning }) {
   const [status, setStatus] = useStateA('synced');
   const mountedRef = useRefA(true);
   useEffectA(() => {
-    mountedRef.current = true;
     // window.subscribeSyncStatus is set by api_client.jsx when loaded.
     const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
     if (!subscribe) return;
@@ -119,7 +118,6 @@ function SyncStatusPill({ isRunning }) {
 
 function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
   const timerRef = useRefA(null);
-  const dirtyRef = useRefA(false);
 
   // cancelDebounce — call this before any explicit submit (Start / Finish /
   // Hantei / Decision) so the queued timer can't fire afterward.
@@ -137,12 +135,10 @@ function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mo
   // removePt, foul increment/decrement, draw toggle, encho change, team
   // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
   const markDirty = () => {
-    dirtyRef.current = true;
     if (!isRunningRef.current) return; // gate 1: never auto-start a scheduled match
     cancelDebounce();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      if (!dirtyRef.current) return; // gate 2: user action required
       if (!mountedRef || !mountedRef.current) return;
       // gate 3: re-check running at FIRE time. If the match was completed
       // during the debounce window (this operator's Finish cancels the timer,
@@ -150,7 +146,6 @@ function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mo
       // us), isRunningRef has flipped false on re-render — sending a
       // status:"running" autosave now would regress the completed result.
       if (!isRunningRef.current) return;
-      dirtyRef.current = false;
       // Fire-and-forget: errors swallowed; operator's explicit Finish is
       // the authoritative write.
       try {

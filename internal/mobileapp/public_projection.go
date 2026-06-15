@@ -69,10 +69,15 @@ func matchesForBroadcast(ms []state.MatchResult) []state.MatchResult {
 // stripMatchesAudit clears the audit free-text (CorrectionReason, DecisionReason)
 // on each pool match in place, for a PUBLIC viewer projection. Pass the deep copy
 // from LoadPoolMatches.
+// Rev/RevSession are also zeroed for consistency with matchForBroadcast; disk-loaded
+// matches already have these zero, so this is defense-in-depth rather than
+// functional correction.
 func stripMatchesAudit(ms []state.MatchResult) {
 	for i := range ms {
 		ms[i].CorrectionReason = ""
 		ms[i].DecisionReason = ""
+		ms[i].Rev = 0
+		ms[i].RevSession = ""
 	}
 }
 

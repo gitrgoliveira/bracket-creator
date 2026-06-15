@@ -45,13 +45,11 @@ function _nextRev(compID, matchID) {
     return next;
 }
 
-// One random session id per page load. Used as RevSession so the server's
-// rev-guard treats each fresh page load as an independent session (a reload
-// starting at rev=1 is never dropped as stale against a prior session's
-// high-water mark). jsdom-safe fallback for test environments.
-const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
-    ? crypto.randomUUID()
-    : `s${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+// Per-page-load session id, prefixed with a wall-clock epoch (ms) so the
+// server can order sessions: a later page load has a larger epoch and takes
+// over; an evicted session's late (queued) write has a smaller epoch and is
+// dropped. Format: "<epochMillis>-<random>". jsdom-safe fallback.
+const _revSession = `${Date.now()}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`;
 
 // ---------------------------------------------------------------------------
 // C2: Offline write queue
@@ -190,19 +188,16 @@ async function _flushQueue() {
                 _flushAttempt = 0;
                 _offlineFlag = false;
                 _recomputeSyncStatus();
-            } else if (anyFailed && !_flushRequested) {
-                // Schedule a backoff retry only if no immediate rerun is already
-                // pending (a pending rerun will re-attempt the failed writes now).
-                // Only a true network failure flips the pill to "Offline"; a server
-                // error keeps it "Syncing…".
-                _offlineFlag = networkFailed;
-                _recomputeSyncStatus();
-                const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
-                _flushAttempt++;
-                _flushTimer = setTimeout(_flushQueue, delay);
             } else if (anyFailed) {
                 _offlineFlag = networkFailed;
                 _recomputeSyncStatus();
+                if (!_flushRequested) {
+                    // Schedule a backoff retry only if no immediate rerun is already
+                    // pending (a pending rerun re-attempts the failed writes now).
+                    const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
+                    _flushAttempt++;
+                    _flushTimer = setTimeout(_flushQueue, delay);
+                }
             }
         } while (_flushRequested);
     } finally {
@@ -220,6 +215,9 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
     _writeQueue.set(_revKey(compID, matchID), { compID, matchID, payload, password });
     _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+    // A fresh user write resets the backoff counter so it doesn't inherit a
+    // stale max-backoff delay from a prior failure run (mirrors the online handler).
+    _flushAttempt = 0;
     _flushQueue();
 }
 
@@ -656,7 +654,7 @@ const API = {
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev — the guard is gated on status=running.
-        const isRunning = result?.status === 'running' || payload?.status === 'running';
+        const isRunning = payload?.status === 'running';
         if (isRunning) {
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;

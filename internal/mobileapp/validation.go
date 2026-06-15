@@ -78,6 +78,13 @@ const (
 
 	MaxLenSeedAssignmentName = 100
 
+	// MaxLenMatchID caps the byte length of the "mid" path parameter accepted
+	// by the score endpoint. Match IDs legitimately contain spaces (e.g.
+	// "Pool A-1"), so a charset regex is inappropriate — a length cap is the
+	// right defense-in-depth guard against abusive keys growing runningRevStore
+	// unbounded. 128 bytes covers any realistic match ID.
+	MaxLenMatchID = 128
+
 	// MaxBulkCheckInIDs is the upper bound on the participantIds array
 	// accepted by POST /competitions/:id/participants/checkin-bulk. A
 	// single per-comp write lock is held for the duration; 1000 is a

@@ -246,7 +246,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
   const firstAddFiredRef = useRefV(false);
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (watchlist.length === 0) firstAddFiredRef.current = false;
   }, [watchlist.length]);
 

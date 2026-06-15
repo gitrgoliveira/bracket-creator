@@ -661,13 +661,13 @@ let _permSubscribed = false;
 let _permGaveUp = false;
 function subscribePermissionChanges() {
   if (_permSubscribed || _permGaveUp) return;
-  _permSubscribed = true;
   try {
     const pq = navigator.permissions?.query?.({ name: "notifications" });
     // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
-    // Lock out only when we get a real promise; otherwise mark gave-up so we don't
-    // permanently hold _permSubscribed=true with no .catch() to reset it.
+    // Only mark subscribed once we have a real promise; otherwise mark gave-up so a
+    // subsequent AnnBellBtn mount can retry if the API becomes available later.
     if (!pq) { _permGaveUp = true; return; }
+    _permSubscribed = true;
     pq.then((s) => {
       const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }

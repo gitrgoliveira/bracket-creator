@@ -613,8 +613,10 @@ export async function notifEnable() {
         dispatchNotif(false);
         return r === "denied" ? "denied" : "off";
       }
+      // Only reachable after an async await — check cancel flag set by a
+      // concurrent notifDisable() call that arrived while the dialog was open.
+      if (notifCancelled) { dispatchNotif(false); return "off"; }
     }
-    if (notifCancelled) { dispatchNotif(false); return "off"; }
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* quota */ }
     // Read back the actual persisted value — setItem may have thrown while the key
     // was already "true" (locked/quota quota-exceeded on a pre-existing opt-in).
@@ -641,6 +643,24 @@ export function notifDisable() {
   try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
   dispatchNotif(nowEnabled);
   return nowEnabled;
+}
+
+// Module-level Permissions API singleton: dispatches NOTIF_SYNC_EVENT when the
+// browser permission changes externally (user visits browser settings mid-session).
+// AnnBellBtn calls this once per mount; no-op on subsequent mounts.
+let _permSubscribed = false;
+function subscribePermissionChanges() {
+  if (_permSubscribed) return;
+  _permSubscribed = true;
+  navigator.permissions?.query({ name: "notifications" })?.then((s) => {
+    s.addEventListener?.("change", () => {
+      if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
+      // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
+      let optIn = false;
+      try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
+      dispatchNotif(optIn);
+    });
+  })?.catch(() => {});
 }
 
 function useChimeMuted() {
@@ -3932,8 +3952,8 @@ function AnnBellBtn() {
   });
 
   // Sync with the watchlist bell and other AnnBellBtn instances on the page.
-  // Also subscribe to the Permissions API so external permission revokes
-  // (user visits browser settings mid-session) are caught proactively.
+  // External permission changes (user visits browser settings) arrive via
+  // NOTIF_SYNC_EVENT dispatched by the module-level subscribePermissionChanges singleton.
   useEffect(() => {
     if (!supported) return;
     const onSync = (e) => {
@@ -3942,30 +3962,10 @@ function AnnBellBtn() {
     };
     // CustomEvents dispatched on window are same-origin; no origin check needed.
     window.addEventListener(NOTIF_SYNC_EVENT, onSync);
-
-    // Progressive enhancement: listen for browser-level permission changes.
-    // navigator.permissions is not available in all environments; guard with ?..
-    let permStatus = null;
-    let cancelled = false;
-    const onPermChange = () => {
-      if (permStatus.state === "denied") { setState("denied"); return; }
-      if (permStatus.state === "prompt") { setState("off"); return; }
-      // "granted" — user re-granted in settings; re-read LS for persisted opt-in.
-      try {
-        const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
-        setState(optIn ? "on" : "off");
-      } catch (_e) { setState("off"); }
-    };
-    navigator.permissions?.query({ name: "notifications" })?.then((s) => {
-      if (cancelled) return;
-      permStatus = s;
-      s.addEventListener?.("change", onPermChange);
-    })?.catch(() => {});
-
+    // Wire up the singleton Permissions API observer (no-op if already registered).
+    subscribePermissionChanges();
     return () => {
-      cancelled = true;
       window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
-      if (permStatus) permStatus.removeEventListener?.("change", onPermChange);
     };
   }, []); // supported is a static boolean; the effect only wires up listeners once
 

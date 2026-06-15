@@ -732,19 +732,17 @@ function useChimeMuted() {
   // defined before the LS write and dispatch below. If upgrading Preact beyond
   // v10, verify this invariant still holds — the effect-based alternative is
   // a useEffect on `muted` for LS/dispatch, but it adds a render cycle delay.
+  const _applyMuted = (v) => {
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(LS_CHIME_MUTED, v ? "true" : "false"); } catch (_e) { /* ignore */ }
+    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: v })); } catch (_e) { /* ignore */ }
+  };
   const toggle = () => {
     let next;
     setMuted(prev => { next = !prev; return next; });
-    if (typeof window === "undefined") return;
-    try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) { /* ignore */ }
-    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) { /* ignore */ }
+    _applyMuted(next);
   };
-  const setChimeMuted = (value) => {
-    setMuted(value);
-    if (typeof window === "undefined") return;
-    try { window.localStorage.setItem(LS_CHIME_MUTED, value ? "true" : "false"); } catch (_e) { /* ignore */ }
-    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: value })); } catch (_e) { /* ignore */ }
-  };
+  const setChimeMuted = (value) => { setMuted(value); _applyMuted(value); };
   return [muted, toggle, setChimeMuted];
 }
 

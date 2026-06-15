@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
-import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
+import { AnnouncementBanner, AnnouncementCard, notificationSupported } from '../viewer.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 import { makeNotifMock, makeLocalStorageMock } from './test_helpers.js';
 
@@ -609,17 +609,45 @@ describe('diffAnnouncementSnapshot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// NotificationSettings component — settings toggle round-trip tests.
-// Uses the global React stub (non-reactive) since we only need static renders.
+// notificationSupported helper — pure export, no component needed.
 // ---------------------------------------------------------------------------
 
-describe('NotificationSettings', () => {
-  let originalNotification;
-  let originalWindowLocalStorage;
+describe('notificationSupported', () => {
+  let origNotif;
+  beforeEach(() => { origNotif = global.Notification; });
+  afterEach(() => { global.Notification = origNotif; });
 
-  beforeEach(() => {
-    originalNotification = global.Notification;
-    originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
+  it('returns false when Notification is undefined', () => {
+    global.Notification = undefined;
+    expect(notificationSupported()).toBe(false);
+  });
+
+  it('returns true when Notification is defined', () => {
+    global.Notification = { permission: 'default' };
+    expect(notificationSupported()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AnnBellBtn — live production component for bell-based notification opt-in.
+// Uses makeReactive() because AnnBellBtn uses a lazy useState initializer and
+// its state transitions are driven by NOTIF_SYNC_EVENT dispatch.
+// ---------------------------------------------------------------------------
+
+describe('AnnBellBtn', () => {
+  let runtime, AB, realReact, origNotif, origLS, origBellIcon;
+
+  beforeEach(async () => {
+    realReact = global.React;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    vi.resetModules();
+    ({ AnnBellBtn: AB } = await import('../viewer.jsx'));
+    origNotif = global.Notification;
+    origLS = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    origBellIcon = window.BellIcon;
+    // AnnBellBtn reads window.BellIcon; provide a minimal stub.
+    window.BellIcon = vi.fn(() => null);
     Object.defineProperty(window, 'localStorage', {
       value: makeLocalStorageMock(),
       writable: true, configurable: true,
@@ -627,184 +655,85 @@ describe('NotificationSettings', () => {
   });
 
   afterEach(() => {
-    global.Notification = originalNotification;
-    if (originalWindowLocalStorage) {
-      Object.defineProperty(window, 'localStorage', originalWindowLocalStorage);
-    } else {
-      Object.defineProperty(window, 'localStorage', { value: undefined, writable: true, configurable: true });
-    }
-  });
-
-  it('returns null when Notification API is unavailable and context is secure', () => {
-    global.Notification = undefined;
-    const result = NotificationSettings({});
-    expect(result).toBeNull();
-  });
-
-  it('renders the toggle when Notification is available and permission is default', () => {
-    global.Notification = { permission: 'default', requestPermission: vi.fn() };
-    const result = NotificationSettings({});
-    expect(result).not.toBeNull();
-    // Should render a card with a checkbox
-    const str = JSON.stringify(result);
-    expect(str).toContain('notification-settings');
-    expect(str).toContain('notification-toggle');
-  });
-
-  it('renders a blocked message when permission is denied', () => {
-    global.Notification = { permission: 'denied' };
-    const result = NotificationSettings({});
-    expect(result).not.toBeNull();
-    const str = JSON.stringify(result);
-    expect(str).toContain('notification-denied');
-  });
-
-  it('shows the insecure-context warning when window.isSecureContext is false', () => {
-    const orig = window.isSecureContext;
-    Object.defineProperty(window, 'isSecureContext', { value: false, writable: true, configurable: true });
-    global.Notification = { permission: 'default', requestPermission: vi.fn() };
-    const result = NotificationSettings({});
-    const str = JSON.stringify(result);
-    expect(str).toContain('notification-insecure-warning');
-    Object.defineProperty(window, 'isSecureContext', { value: orig, writable: true, configurable: true });
-  });
-
-  it('notificationSupported returns false when Notification is undefined', () => {
-    global.Notification = undefined;
-    expect(notificationSupported()).toBe(false);
-  });
-
-  it('notificationSupported returns true when Notification is defined', () => {
-    global.Notification = { permission: 'default' };
-    expect(notificationSupported()).toBe(true);
-  });
-
-  it('persists toggle state to localStorage', () => {
-    // Verify the mock localStorage (installed in beforeEach) round-trips correctly.
-    // This exercises the same LS_NOTIFICATIONS_ENABLED key path used by the component.
-    window.localStorage.setItem('viewer.notifications.enabled', 'true');
-    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('true');
-
-    window.localStorage.setItem('viewer.notifications.enabled', 'false');
-    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
-  });
-
-  // --- Two-click bug (Copilot comment 3328483825) -------------------------
-  // Stored opt-in is "true" but the browser permission has been reset to
-  // "default". The checkbox must render unchecked AND the first click must go
-  // down the "turning on" branch (request permission), not "turning off".
-  it('first click requests permission when opt-in was stored but permission is default', async () => {
-    window.localStorage.setItem('viewer.notifications.enabled', 'true');
-    const requestPermission = vi.fn().mockResolvedValue('granted');
-    global.Notification = { permission: 'default', requestPermission };
-
-    const tree = NotificationSettings({});
-    const toggle = findAll(tree, n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
-    expect(toggle).toBeDefined();
-    // enabled is gated on permission===granted, so the box renders unchecked.
-    expect(toggle.props.checked).toBe(false);
-
-    // First click → must request permission (turning-on branch), not flip off.
-    await toggle.props.onChange();
-    expect(requestPermission).toHaveBeenCalledTimes(1);
-  });
-
-  it('does NOT re-request permission on the first click when already granted (turning off)', async () => {
-    window.localStorage.setItem('viewer.notifications.enabled', 'true');
-    const requestPermission = vi.fn().mockResolvedValue('granted');
-    global.Notification = { permission: 'granted', requestPermission };
-
-    const tree = NotificationSettings({});
-    const toggle = findAll(tree, n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
-    // Stored true + granted → checkbox checked.
-    expect(toggle.props.checked).toBe(true);
-
-    // First click turns OFF — no permission prompt.
-    await toggle.props.onChange();
-    expect(requestPermission).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem('viewer.notifications.enabled')).toBe('false');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// NotificationSettings — reactive runtime, for behaviours that need a real
-// re-render after a state change (Copilot round-2 comments 3328780111 /
-// 3328780129). Uses the makeReactive() shim like reset.test.jsx.
-// ---------------------------------------------------------------------------
-
-describe('NotificationSettings (reactive)', () => {
-  let runtime, RS, realReact, origNotif, origSecure, origLS;
-
-  beforeEach(async () => {
-    realReact = global.React;
-    runtime = makeReactive();
-    global.React = runtime.React;
-    vi.resetModules();
-    ({ NotificationSettings: RS } = await import('../viewer.jsx'));
-    origNotif = global.Notification;
-    origSecure = Object.getOwnPropertyDescriptor(window, 'isSecureContext');
-    origLS = Object.getOwnPropertyDescriptor(window, 'localStorage');
-  });
-
-  afterEach(() => {
     runtime.unmount();
     global.React = realReact;
     global.Notification = origNotif;
-    if (origSecure) Object.defineProperty(window, 'isSecureContext', origSecure);
     if (origLS) Object.defineProperty(window, 'localStorage', origLS);
+    else Object.defineProperty(window, 'localStorage', { value: undefined, writable: true, configurable: true });
+    window.BellIcon = origBellIcon;
     vi.resetModules();
   });
 
-  const findToggle = () => findAll(runtime.currentTree(), n => n.props && n.props['data-testid'] === 'notification-toggle')[0];
-  const findWarn = () => findAll(runtime.currentTree(), n => n.props && n.props['data-testid'] === 'notification-insecure-warning');
+  const findBtn = () => findAll(runtime.currentTree(), n =>
+    n.props && typeof n.props.className === 'string' && n.props.className.includes('ann-bell-btn')
+  )[0];
 
-  it('shows the insecure-context warning even when the Notification API is unavailable', () => {
-    // Bare http:// browser that gates `Notification` on a secure context:
-    // both no API AND isSecureContext === false. The panel must still explain.
+  it('returns null when Notification API is unavailable', () => {
     global.Notification = undefined;
-    Object.defineProperty(window, 'isSecureContext', { value: false, configurable: true });
-    const tree = runtime.mount(RS, {});
-    expect(tree).not.toBeNull();
-    expect(findWarn().length).toBe(1);
-  });
-
-  it('returns null when the API is unavailable AND the context is secure', () => {
-    global.Notification = undefined;
-    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    const tree = runtime.mount(RS, {});
+    const tree = runtime.mount(AB, {});
     expect(tree).toBeNull();
   });
 
-  it('leaves the toggle OFF when enabling succeeds at the prompt but localStorage.setItem throws', async () => {
-    // Storage that throws on write — fireBrowserNotifications reads the flag at
-    // fire time, so an unpersisted "on" would be a checked box that never fires.
-    Object.defineProperty(window, 'localStorage', {
-      value: { getItem: () => null, setItem: () => { throw new Error('quota exceeded'); }, removeItem: () => {} },
-      writable: true, configurable: true,
-    });
-    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    global.Notification = makeNotifMock();
-
-    runtime.mount(RS, {});
-    expect(findToggle().props.checked).toBe(false);
-    await findToggle().props.onChange();
-    // Permission was granted, but persistence failed → keep the box OFF so the
-    // UI stays consistent with the (storage-backed) firing path.
-    expect(findToggle().props.checked).toBe(false);
+  it('returns null when BellIcon is not available', () => {
+    global.Notification = { permission: 'default', requestPermission: vi.fn() };
+    window.BellIcon = undefined;
+    const tree = runtime.mount(AB, {});
+    expect(tree).toBeNull();
   });
 
-  it('marks the toggle ON when enabling succeeds and storage persists', async () => {
-    const store = {};
-    Object.defineProperty(window, 'localStorage', {
-      value: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
-      writable: true, configurable: true,
-    });
-    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
-    global.Notification = makeNotifMock();
+  it('renders in off state when permission is default', () => {
+    global.Notification = { permission: 'default', requestPermission: vi.fn() };
+    runtime.mount(AB, {});
+    const btn = findBtn();
+    expect(btn).toBeDefined();
+    expect(btn.props['aria-pressed']).toBe(false);
+    expect(btn.props.className).not.toContain('ann-bell-btn--on');
+  });
 
-    runtime.mount(RS, {});
-    await findToggle().props.onChange();
-    expect(findToggle().props.checked).toBe(true);
-    expect(store['viewer.notifications.enabled']).toBe('true');
+  it('renders in denied state and is disabled when permission is denied', () => {
+    global.Notification = { permission: 'denied' };
+    runtime.mount(AB, {});
+    const btn = findBtn();
+    expect(btn).toBeDefined();
+    expect(btn.props.disabled).toBe(true);
+    expect(btn.props.className).toContain('ann-bell-btn--denied');
+  });
+
+  it('renders in on state when storedOptIn=true and permission=granted', () => {
+    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
+    global.Notification = { permission: 'granted', requestPermission: vi.fn() };
+    runtime.mount(AB, {});
+    const btn = findBtn();
+    expect(btn).toBeDefined();
+    expect(btn.props['aria-pressed']).toBe(true);
+    expect(btn.props.className).toContain('ann-bell-btn--on');
+  });
+
+  // --- Two-click guard: storedOptIn=true but permission=default --------------
+  // State must render "off" (permission not yet confirmed) and the first click
+  // must call requestPermission (enable path), not notifDisable (turn-off path).
+  it('state is off and first click requests permission when storedOptIn=true but permission=default', async () => {
+    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
+    const requestPermission = vi.fn().mockResolvedValue('granted');
+    global.Notification = { permission: 'default', requestPermission };
+    runtime.mount(AB, {});
+    const btn = findBtn();
+    expect(btn.props['aria-pressed']).toBe(false);
+    await btn.props.onClick();
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not request permission on click when already on (turns off via notifDisable)', async () => {
+    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
+    const requestPermission = vi.fn();
+    global.Notification = { permission: 'granted', requestPermission };
+    runtime.mount(AB, {});
+    expect(findBtn().props['aria-pressed']).toBe(true);
+    await findBtn().props.onClick();
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(ls.getItem('viewer.notifications.enabled')).toBe('false');
   });
 });

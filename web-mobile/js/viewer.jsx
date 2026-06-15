@@ -668,7 +668,7 @@ function subscribePermissionChanges() {
     // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
     // Lock out only when we get a real promise; otherwise mark gave-up so we don't
     // permanently hold _permSubscribed=true with no .catch() to reset it.
-    if (!pq) { _permSubscribed = false; _permGaveUp = true; return; }
+    if (!pq) { _permGaveUp = true; return; }
     pq.then((s) => {
       const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
@@ -687,7 +687,6 @@ function subscribePermissionChanges() {
     // pq.then() threw synchronously (non-conforming non-Promise pq) — give up
     // consistently with the !pq branch and the .catch() path above.
     _permGaveUp = true;
-    _permSubscribed = false;
   }
 }
 
@@ -738,7 +737,13 @@ function useChimeMuted() {
     try { window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false"); } catch (_e) { /* ignore */ }
     try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next })); } catch (_e) { /* ignore */ }
   };
-  return [muted, toggle];
+  const setChimeMuted = (value) => {
+    setMuted(value);
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(LS_CHIME_MUTED, value ? "true" : "false"); } catch (_e) { /* ignore */ }
+    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: value })); } catch (_e) { /* ignore */ }
+  };
+  return [muted, toggle, setChimeMuted];
 }
 
 // Extract a side's display name from the normalised match shape.
@@ -1229,7 +1234,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
-  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
+  const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
   const bellToggleInFlight = useRefV(false);
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
   const handleBellToggle = () => runOnce(bellToggleInFlight, async () => {
@@ -1249,7 +1254,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
     // chime stays enabled (chime-only mode) and on "on" everything is in sync.
     const outcome = await notifEnable();
     if (outcome === "off") {
-      toggleChimeMuted(); // revert optimistic flip
+      setChimeMuted(true); // revert optimistic flip — point-in-time snapshot avoids
+      // a second toggle() call which could land on the wrong value if another
+      // instance dispatched CHIME_SYNC_EVENT during the async permission dialog.
     }
   });
   const [alertMatch, setAlertMatch] = useState(null);
@@ -3809,131 +3816,10 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   );
 }
 
-// ---------------------------------------------------------------------------
-// NotificationSettings — viewer settings panel for browser push notifications.
-// NOT currently mounted in production UI — the notification toggle is now
-// integrated into BellIcon (WatchlistPanel) and AnnBellBtn.
-// Exported for unit testing only (app_announcement.test.jsx).
-// ---------------------------------------------------------------------------
-
 // Pure helper: detect Notification API support.
 // Exported for unit testing.
 export function notificationSupported() {
   return typeof Notification !== "undefined";
-}
-
-// NotificationSettings — "Enable browser notifications" toggle for the
-// viewer home settings area. Phases:
-//   1) Secure-context warning (edge case, normally hidden in production).
-//   2) Notification API unavailable — hide the toggle.
-//   3) Permission "denied" — show blocked state.
-//   4) Permission "default" or "granted" — show the opt-in toggle.
-//
-// Requests permission ONLY on a user click (the gesture gate). Never
-// calls requestPermission() automatically. Exported for unit testing.
-export function NotificationSettings() {
-  // Compute the initial permission outside useState so tests using the
-  // static React mock (which passes the value through unmodified rather
-  // than calling function initialisers) see the correct starting value.
-  const initialPermission = (typeof Notification === "undefined")
-    ? "unavailable"
-    : Notification.permission;
-
-  // Read the current permission state reactively: re-query after the user
-  // interacts with the native permission prompt. We keep a local state so
-  // the UI stays responsive without relying on a global re-render.
-  const [permission, setPermission] = useState(initialPermission);
-
-  let storedOptIn = false;
-  try {
-    storedOptIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
-  } catch (_e) { /* storage unavailable */ }
-  // Only treat the opt-in as enabled when the browser permission is ALSO
-  // still granted. If the user reset the site permission back to "default"
-  // (or "denied") since they last opted in, starting `enabled` at true would
-  // render the checkbox unchecked (checked={enabled && permission==="granted"})
-  // yet send the first click down the "turning off" branch — the user would
-  // have to click twice and never see the prompt. Gating on granted keeps the
-  // handler branch aligned with the visible checkbox state.
-  const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
-  const inFlight = useRefV(false);
-
-  // Phase 4: secure-context warning. In production the TLS proxy makes this
-  // false; it only matters for bare http:// (no proxy) access.
-  const insecure = typeof window !== "undefined" && window.isSecureContext === false;
-
-  // Phase 3 / Phase 4 ordering: when the API is unavailable we normally hide
-  // the panel entirely. BUT some browsers expose `Notification` only in a
-  // secure context, so a bare http:// page can have BOTH no API AND
-  // isSecureContext === false — which is the exact situation this panel is
-  // meant to explain. In that case render the warning (no toggle) instead of
-  // hiding. Only hide outright when the API is unavailable for some OTHER
-  // reason (secure context but an old/unsupported browser).
-  if (permission === "unavailable") {
-    if (!insecure) {
-      // Notification API unavailable and context is secure — hide the panel.
-      return null;
-    }
-    return (
-      <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
-        <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
-        <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
-          Browser notifications require a secure connection (https or localhost).
-        </div>
-      </div>
-    );
-  }
-
-  const handleToggle = () => runOnce(inFlight, async () => {
-    if (enabled) {
-      const nowEnabled = notifDisable();
-      setEnabled(nowEnabled);
-      setPermission(Notification.permission);
-      return;
-    }
-    // notifEnable() handles the permission prompt, persists the flag, and
-    // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
-    const outcome = await notifEnable();
-    setPermission(Notification.permission);
-    setEnabled(outcome === "on");
-  });
-
-  const denied = permission === "denied";
-
-  return (
-    <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
-      <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
-      {insecure && (
-        <div style={{ fontSize: 12, color: "var(--amber, #b45309)", marginBottom: 8 }} data-testid="notification-insecure-warning">
-          Browser notifications require a secure connection (https or localhost).
-        </div>
-      )}
-      {denied ? (
-        <div style={{ fontSize: 12, color: "var(--ink-3)" }} data-testid="notification-denied">
-          Browser notifications are blocked. Allow them in your browser settings, then reload.
-        </div>
-      ) : (
-        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={enabled && permission === "granted"}
-            onChange={handleToggle}
-            data-testid="notification-toggle"
-            disabled={insecure}
-          />
-          <span>
-            Enable browser notifications for announcements
-            {permission === "granted" && enabled && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(granted)</span>
-            )}
-            {permission === "default" && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(permission not yet requested)</span>
-            )}
-          </span>
-        </label>
-      )}
-    </div>
-  );
 }
 
 // Shared formatter so the synchronous initializer and the useEffect tick
@@ -3949,7 +3835,7 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
 }
 
 // AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
-function AnnBellBtn() {
+export function AnnBellBtn() {
   // viewer_watchlist.js is loaded before viewer.js in index.html; BellIcon
   // is always set by the time this component renders.
   const BellIcon = window.BellIcon;

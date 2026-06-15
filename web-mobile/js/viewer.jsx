@@ -652,15 +652,19 @@ let _permSubscribed = false;
 function subscribePermissionChanges() {
   if (_permSubscribed) return;
   _permSubscribed = true;
-  navigator.permissions?.query({ name: "notifications" })?.then((s) => {
-    s.addEventListener?.("change", () => {
-      if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
-      // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
-      let optIn = false;
-      try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
-      dispatchNotif(optIn);
-    });
-  })?.catch(() => { _permSubscribed = false; });
+  try {
+    navigator.permissions?.query?.({ name: "notifications" })?.then((s) => {
+      s.addEventListener?.("change", () => {
+        if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
+        // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
+        let optIn = false;
+        try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
+        dispatchNotif(optIn);
+      });
+    })?.catch(() => { _permSubscribed = false; });
+  } catch (_e) {
+    _permSubscribed = false;
+  }
 }
 
 function useChimeMuted() {

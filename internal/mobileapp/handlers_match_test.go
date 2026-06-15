@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2064,4 +2065,76 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 		assert.Equal(t, "admin", result.ResultSource)
 	})
+}
+
+// TestParseSessionEpoch validates all branches of the parseSessionEpoch helper:
+// invalid/missing inputs return 0; a valid past epoch is returned as-is;
+// a far-future epoch (>24h from now) is clamped to 0.
+func TestParseSessionEpoch(t *testing.T) {
+	pastEpoch := int64(1718000000000) // a fixed past timestamp (ms)
+	farFuture := fmt.Sprintf("%d-x", time.Now().UnixMilli()+100*24*3600*1000)
+
+	cases := []struct {
+		name  string
+		input string
+		want  int64
+	}{
+		{"empty string", "", 0},
+		{"no dash", "abc", 0},
+		{"leading dash only", "-123", 0},
+		{"non-numeric prefix", "12x3-uuid", 0},
+		{"negative prefix", "-5-uuid", 0},
+		{"valid past epoch", fmt.Sprintf("%d-uuid", pastEpoch), pastEpoch},
+		{"far-future epoch clamped", farFuture, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseSessionEpoch(tc.input)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestScoreHandler_FabricatedMid_TxNotFound verifies that a running-write for a
+// fabricated (non-existent) match ID returns 404 AND prunes any runningRevStore
+// entry that the request pre-populated, preventing unbounded growth from
+// unauthenticated self-run callers.
+//
+// The test exercises the txErr NotFoundError path: a competition with courts is
+// saved (so CheckCrossCompCourtBusy runs and looks up the match's court), but
+// the target match is never saved — CheckCrossCompCourtBusy's court-lookup
+// returns NotFoundError which propagates as txErr.
+func TestScoreHandler_FabricatedMid_TxNotFound(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "fabricated-comp"
+	fakeMid := "fake-mid-xyz"
+	matchKey := compID + ":" + fakeMid
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	// Intentionally do NOT save a match with ID fakeMid.
+
+	// Pre-seed the rev store to simulate the guard having already stored an
+	// entry (ensures the Delete is exercised, not just an absence check).
+	runningRevStore.Store(matchKey, runningRev{Session: "pre-seed", Rev: 1})
+
+	epoch := time.Now().UnixMilli()
+	payload, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"status":     "running",
+		"rev":        int64(2),
+		"revSession": fmt.Sprintf("%d-x", epoch),
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+fakeMid+"/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "fabricated mid must return 404")
+	_, present := runningRevStore.Load(matchKey)
+	assert.False(t, present, "runningRevStore entry must be pruned on txErr NotFound")
 }

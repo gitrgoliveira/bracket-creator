@@ -89,15 +89,12 @@ function SyncStatusPill({ isRunning }) {
   // running matches, so the pill carries no meaning otherwise. The render guard
   // is the `if (!isRunning) return null` below.
   const [status, setStatus] = useStateA('synced');
-  const mountedRef = useRefA(true);
   useEffectA(() => {
     // window.subscribeSyncStatus is set by api_client.jsx when loaded.
     const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
     if (!subscribe) return;
-    const unsub = subscribe((s) => {
-      if (mountedRef.current) setStatus(s);
-    });
-    return () => { mountedRef.current = false; unsub(); };
+    const unsub = subscribe((s) => setStatus(s));
+    return () => unsub();
   }, []);
 
   if (!isRunning) return null; // render guard: no visible pill unless running

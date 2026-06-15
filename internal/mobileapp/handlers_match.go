@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -741,7 +742,6 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // device), so a scorer reload starting back at rev=1 is never dropped.
 type runningRev struct {
 	Session string
-	Epoch   int64
 	Rev     int64
 }
 
@@ -756,6 +756,13 @@ func parseSessionEpoch(s string) int64 {
 	}
 	n, err := strconv.ParseInt(s[:i], 10, 64)
 	if err != nil || n < 0 {
+		return 0
+	}
+	// Reject an implausibly far-future epoch (client-supplied, unauthenticated
+	// in self-run mode): treat it as unknown (0) so it can't poison the guard
+	// into dropping every legitimate session as "older". 24h tolerates clock skew.
+	const maxFutureMS = int64(24 * 60 * 60 * 1000)
+	if n > time.Now().UnixMilli()+maxFutureMS {
 		return 0
 	}
 	return n
@@ -796,6 +803,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "matchId too long"})
 			return
 		}
+		// Composite key used by the rev-guard and broadcast coalescer; hoisted
+		// here so all four use-sites share a single allocation (FINDING 3).
+		matchKey := id + ":" + mid
 
 		var req ScoreRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -861,16 +871,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// higher-or-equal rev advances the mark and proceeds normally.
 		//
 		// Epoch ordering (cross-session): RevSession carries a "<epochMs>-<uuid>"
-		// prefix. When both epochs are known (non-zero), an incoming write from an
-		// OLDER epoch (smaller number) is the queued write of an evicted/prior
-		// session flushing after a newer session has taken over — drop it so it
-		// can't regress state. When either epoch is 0 (legacy/malformed session id)
-		// we fall back to allowing takeover, preserving prior behaviour.
+		// prefix. Epochs are computed inline via parseSessionEpoch. When both
+		// epochs are known (non-zero), an incoming write from an OLDER epoch is
+		// dropped. On the rare same-epoch tie (same millisecond), the rev is used
+		// as a tiebreaker so a lower rev can't lower the high-water mark. When
+		// either epoch is 0 (legacy/malformed) we allow takeover, preserving prior
+		// behaviour.
 		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
-			revKey := id + ":" + mid
-			incoming := runningRev{Session: result.RevSession, Epoch: parseSessionEpoch(result.RevSession), Rev: result.Rev}
+			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
 			for {
-				existing, loaded := runningRevStore.LoadOrStore(revKey, incoming)
+				existing, loaded := runningRevStore.LoadOrStore(matchKey, incoming)
 				if !loaded {
 					break // first running write for this key
 				}
@@ -881,16 +891,19 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						c.JSON(http.StatusOK, gin.H{"stale": true})
 						return
 					}
-				} else if incoming.Epoch > 0 && stored.Epoch > 0 && incoming.Epoch < stored.Epoch {
-					// Different session with an OLDER epoch: this is an evicted
-					// session's late write (e.g. a reconnect flush) arriving after a
-					// newer session took over — drop it so it can't regress state.
-					// (When either epoch is unknown/0 we fall back to allowing the
-					// takeover, preserving legacy behaviour.)
-					c.JSON(http.StatusOK, gin.H{"stale": true})
-					return
+				} else {
+					// Different session: order by epoch (page-load time). Drop an
+					// OLDER-epoch write (an evicted session's late reconnect flush).
+					// On the rare same-epoch tie (same millisecond), fall back to
+					// rev so a lower rev can't lower the high-water mark. When
+					// either epoch is unknown (0), allow takeover (legacy/malformed).
+					inE, stE := parseSessionEpoch(incoming.Session), parseSessionEpoch(stored.Session)
+					if inE > 0 && stE > 0 && (inE < stE || (inE == stE && result.Rev < stored.Rev)) {
+						c.JSON(http.StatusOK, gin.H{"stale": true})
+						return
+					}
 				}
-				if runningRevStore.CompareAndSwap(revKey, existing, incoming) {
+				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {
 					break
 				}
 				// Lost the CAS race — retry.
@@ -992,6 +1005,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundErr *engine.NotFoundError
 			if errors.As(txErr, &notFoundErr) {
+				// Match not found — drop any rev-guard entry this request created so
+				// fabricated match IDs can't grow runningRevStore unbounded (mirrors
+				// the engErr NotFoundError path; scoring is unauthenticated in
+				// self-run mode).
+				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
 				return
 			}
@@ -1066,7 +1084,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// The match doesn't exist — drop any rev-guard entry this request
 				// created so fabricated match IDs can't grow runningRevStore
 				// unbounded (scoring is unauthenticated in self-run mode).
-				runningRevStore.Delete(id + ":" + mid)
+				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": engErr.Error()})
 				return
 			}
@@ -1090,9 +1108,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// across many matches/competitions. A later correction that re-opens the
 		// match starts a fresh session anyway.
 		if !isRunning {
-			runningRevStore.Delete(id + ":" + mid)
+			runningRevStore.Delete(matchKey)
 		}
-		if coalescer.Allow(id+":"+mid, isRunning) {
+		if coalescer.Allow(matchKey, isRunning) {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"matchId":       mid,
@@ -1126,6 +1144,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 		tryAutoCompletePools(c, eng, hub, id)
 
+		// Don't echo internal write-ordering metadata back in the response.
+		result.Rev = 0
+		result.RevSession = ""
 		c.JSON(http.StatusOK, result)
 	})
 }

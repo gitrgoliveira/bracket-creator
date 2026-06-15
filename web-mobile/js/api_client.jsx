@@ -164,20 +164,21 @@ async function _flushQueue() {
                         // Success (HTTP 200, including a stale {stale:true} no-op) — remove
                         // from queue only if no newer write has replaced this descriptor.
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-                    } else if (res.status === 409) {
-                        // 409 is a real conflict (ineligible_competitor / court_busy /
-                        // side_mismatch / result_finalized), NOT a stale rev (stale is a
-                        // 200 {stale:true}). This queued running autosave can never
-                        // succeed, so discard rather than replay forever — the operator's
-                        // explicit Finish is authoritative. Log for devtools visibility.
+                    } else if (res.status >= 500 || res.status === 429) {
+                        // Transient server error — server is up but erroring; keep in
+                        // queue and retry with backoff, but this is NOT "offline".
+                        anyFailed = true;
+                    } else {
+                        // Non-retryable response (4xx): 409 conflict (ineligible_competitor
+                        // / court_busy / side_mismatch / result_finalized), 400 validation,
+                        // 401/403 auth, 413, etc. This queued running autosave can never
+                        // succeed, so discard rather than retry forever and wedge the pill
+                        // on "Syncing…" — the operator's explicit Finish is authoritative.
+                        // Log for devtools visibility.
                         res.json().then((body) => {
-                            console.warn('[sync] queued running write rejected (409):', body);
+                            console.warn(`[sync] queued running write rejected (${res.status}):`, body);
                         }).catch(() => {});
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-                    } else {
-                        // Other non-2xx (transient 5xx/429) — server is up but erroring;
-                        // keep in queue and retry with backoff, but this is NOT "offline".
-                        anyFailed = true;
                     }
                 } catch (_) {
                     // fetch rejected — the network is down.

@@ -170,7 +170,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
 // 3. Flush behaviour: 409 → discard, network error → keep + backoff
 // ---------------------------------------------------------------------------
 
-describe('_flushQueue: 409 conflict discards, network error retries', () => {
+describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () => {
     it('discards a queued write on a real 409 conflict (not retried)', async () => {
         // The 409 handler calls console.warn for devtools visibility — expect it.
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -200,6 +200,52 @@ describe('_flushQueue: 409 conflict discards, network error retries', () => {
             expect.objectContaining({ error: 'ineligible_competitor' })
         );
         warnSpy.mockRestore();
+    });
+
+    it('discards a queued write on a non-retryable 4xx (e.g. 400) — never retried forever', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+        let attempt = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            attempt++;
+            // A 400 (validation / bind error) can never succeed on retry.
+            return Promise.resolve({
+                ok: false,
+                status: 400,
+                json: () => Promise.resolve({ error: 'bad request' }),
+            });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+
+        const callsAfterDiscard = attempt;
+        // Advance well past every backoff step — no retry should ever fire.
+        await tick(20000);
+        expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
+        expect(warnSpy).toHaveBeenCalledWith(
+            '[sync] queued running write rejected (400):',
+            expect.objectContaining({ error: 'bad request' })
+        );
+        warnSpy.mockRestore();
+    });
+
+    it('keeps a queued write on a transient 5xx and retries with backoff', async () => {
+        let attempt = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+            attempt++;
+            if (attempt === 1) {
+                return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks(); // first attempt 503
+
+        // Advance past the 500ms backoff; the retry should succeed.
+        await tick(600);
+        expect(attempt).toBeGreaterThanOrEqual(2);
     });
 
     it('keeps a queued write on network error and schedules a retry', async () => {

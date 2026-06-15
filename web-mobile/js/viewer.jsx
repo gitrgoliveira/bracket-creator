@@ -3984,7 +3984,7 @@ function AnnBellBtn() {
       }
       const outcome = await notifEnable();
       // Mirror state directly so the button updates even if event dispatch failed.
-      setState(outcome === "on" ? "on" : outcome === "denied" ? "denied" : "off");
+      setState(outcome);
     } finally {
       inFlight.current = false;
     }

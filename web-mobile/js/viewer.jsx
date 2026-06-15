@@ -3852,7 +3852,7 @@ export function AnnBellBtn() {
     } catch (_e) { return "off"; }
   });
 
-  // Sync with the watchlist bell and other AnnBellBtn instances on the page.
+  // Sync with other AnnBellBtn instances on the page (watchlist bell is chime-only).
   // External permission changes (user visits browser settings) arrive via
   // NOTIF_SYNC_EVENT dispatched by the module-level subscribePermissionChanges singleton.
   useEffect(() => {

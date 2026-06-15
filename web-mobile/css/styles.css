@@ -2421,6 +2421,50 @@ a:hover {
   gap: 6px;
 }
 
+/* C2: Sync-status pill — appears in the scoring-panel header while a match
+   is running. Three variants: synced (accent/navy), syncing (ink-3), offline
+   (amber — distinct from red which is reserved for Aka and SSE errors).
+   COPY RULE: the word "live" must never appear in .sync-pill__label text. */
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-3);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.sync-status-pill .sync-pill__dot {
+  font-size: 8px;
+  line-height: 1;
+}
+.sync-status-pill .sync-pill__label {
+  line-height: 1.2;
+}
+/* synced — accent (navy) — positive/confirmed state */
+.sync-pill--synced {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 25%, transparent);
+  background: var(--accent-soft);
+}
+/* syncing — neutral ink, pulsing dot to indicate in-flight */
+.sync-pill--syncing {
+  color: var(--ink-2);
+  border-color: var(--line);
+  background: var(--surface);
+}
+/* offline — amber warning; no red (red is Aka/error-only per DESIGN.md) */
+.sync-pill--offline {
+  color: #92400e;         /* amber-900 on white: 7:1 contrast */
+  border-color: #f59e0b; /* amber-500 */
+  background: #fffbeb;   /* amber-50 */
+}
+
 .viewer__tabs {
   background: var(--surface);
   border-bottom: 1px solid var(--line);

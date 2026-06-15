@@ -26,6 +26,131 @@
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
 // ---------------------------------------------------------------------------
+// C2: Monotonic per-match revision counter
+// ---------------------------------------------------------------------------
+// Stamps "running" autosave writes so the server can drop out-of-order
+// delivery from a reconnect flush. The counter is per-matchId and increases
+// strictly monotonically within a page session. Completed writes do not use
+// it (the guard is gated to running status on the server too).
+// ---------------------------------------------------------------------------
+const _matchRevCounters = new Map(); // matchId → int
+function _nextRev(matchId) {
+    const next = (_matchRevCounters.get(matchId) || 0) + 1;
+    _matchRevCounters.set(matchId, next);
+    return next;
+}
+
+// ---------------------------------------------------------------------------
+// C2: Offline write queue
+// ---------------------------------------------------------------------------
+// Holds the latest pending "running" score write per match (last-write-wins).
+// On any network failure the write is queued here and retried on reconnect.
+// The queue never accumulates: a new write for the same match replaces any
+// existing entry, so only the latest state is ever flushed.
+//
+// Sync-status state is published via _syncStatus / _syncListeners so the UI
+// (SyncStatusPill) can render synced / syncing / offline without coupling to
+// any Preact component tree.
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {'synced'|'syncing'|'offline'} SyncStatusValue
+ */
+
+/** @type {Map<string, {compID: string, matchID: string, payload: object, password: string}>} */
+const _writeQueue = new Map(); // matchId → pending write descriptor
+let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
+const _syncListeners = new Set();
+
+function _setSyncStatus(s) {
+    if (_syncStatus === s) return;
+    _syncStatus = s;
+    for (const fn of _syncListeners) {
+        try { fn(s); } catch (_e) { /* swallow */ }
+    }
+}
+
+/**
+ * Subscribe to sync-status changes. Returns an unsubscribe function.
+ * @param {(status: SyncStatusValue) => void} fn
+ * @returns {() => void}
+ */
+function subscribeSyncStatus(fn) {
+    _syncListeners.add(fn);
+    // Replay current status so the subscriber can initialise its state.
+    try { fn(_syncStatus); } catch (_e) { /* swallow */ }
+    return () => _syncListeners.delete(fn);
+}
+
+let _flushTimer = null;
+const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
+let _flushAttempt = 0;
+
+async function _flushQueue() {
+    _flushTimer = null;
+    if (_writeQueue.size === 0) {
+        _setSyncStatus('synced');
+        return;
+    }
+    _setSyncStatus('syncing');
+    const entries = [..._writeQueue.entries()];
+    let anyFailed = false;
+    for (const [matchId, { compID, matchID, payload, password }] of entries) {
+        try {
+            const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok && res.status !== 409) {
+                // Non-conflict failure — keep in queue; 409 (stale rev / conflict) is
+                // a permanent failure for this write: discard it so we don't replay
+                // an outdated payload forever.
+                anyFailed = true;
+            } else {
+                // Success OR 409 (stale) — remove from queue.
+                _writeQueue.delete(matchId);
+            }
+        } catch (_) {
+            anyFailed = true;
+        }
+    }
+    if (_writeQueue.size === 0) {
+        _flushAttempt = 0;
+        _setSyncStatus('synced');
+    } else if (anyFailed) {
+        _setSyncStatus('offline');
+        const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
+        _flushAttempt++;
+        _flushTimer = setTimeout(_flushQueue, delay);
+    }
+}
+
+/**
+ * Enqueue a running-status write for offline-resilient delivery.
+ * Last-write-wins per matchId: any older pending write for the same match
+ * is replaced. Triggers an immediate flush attempt; on failure backs off and
+ * retries automatically.
+ */
+function enqueueRunningWrite(compID, matchID, payload, password) {
+    _writeQueue.set(matchID, { compID, matchID, payload, password });
+    _setSyncStatus('syncing');
+    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+    _flushQueue();
+}
+
+// Flush the queue whenever the browser comes back online.
+if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => {
+        if (_writeQueue.size > 0) {
+            _flushAttempt = 0;
+            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+            _flushQueue();
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Shared ref-counted SSE singleton
 // ---------------------------------------------------------------------------
 // All subscribeToEvents callers share ONE EventSource connection. A Set of
@@ -434,16 +559,51 @@ const API = {
     },
     async recordScore(compID, matchID, result, password, match) {
         const payload = toBackendMatchResult(result, match || result);
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(payload)
-        });
+
+        // C2: stamp monotonic rev on running-status writes so the server's
+        // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
+        // Completed writes do not need a rev — the guard is gated on status=running.
+        const isRunning = (result && result.status === 'running') ||
+            (payload && payload.status === 'running');
+        if (isRunning) {
+            payload.rev = _nextRev(matchID);
+        }
+
+        let res;
+        try {
+            res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch (_networkErr) {
+            // Network failure (offline / no connection). For running-status writes,
+            // queue for retry — last-write-wins semantics so only the latest state
+            // is ever flushed. Completed writes are not queued because they MUST
+            // be delivered; let callers handle the error with a toast.
+            if (isRunning) {
+                enqueueRunningWrite(compID, matchID, payload, password);
+                // Return a synthetic "ok" shape so callers that ignore the return
+                // value (debounced autosave) don't crash. The queued write will
+                // deliver asynchronously via _flushQueue.
+                return { stale: false, queued: true };
+            }
+            throw _networkErr;
+        }
+
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            // A stale-rev response (200 with {stale:true}) or a 409 from the
+            // server's rev guard means a newer write already landed. Silently
+            // ignore — the latest state is already on the server.
+            if (res.status === 200 && err.stale) return err;
+            if (res.status === 409 && isRunning) {
+                // 409 on a running write from the rev guard — discard, don't retry.
+                return { stale: true };
+            }
             // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
             // with a human-readable reason ("already fighting in match X on court Y").
             // Prefer reasonHuman, then reason, then the error code so the operator
@@ -968,8 +1128,11 @@ const API = {
     }
 };
 
-export { API };
+export { API, subscribeSyncStatus, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
+    // C2: expose sync-status pub/sub so components loaded as window.* globals
+    // (admin_scoring_modal.jsx, etc.) can subscribe without an ES import.
+    window.subscribeSyncStatus = subscribeSyncStatus;
 }

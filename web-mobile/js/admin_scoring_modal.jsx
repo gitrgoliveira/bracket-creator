@@ -69,6 +69,51 @@ import {
 // call-sites below).
 const AUTOSAVE_DEBOUNCE_MS = 300;
 
+// ---------------------------------------------------------------------------
+// C2: SyncStatusPill
+// ---------------------------------------------------------------------------
+// Small indicator rendered in the scoring-panel header while a match is
+// running. Subscribes to the write-queue sync status from api_client.jsx
+// (via window.subscribeSyncStatus) and reflects:
+//   synced     — last write landed; no queue pending
+//   syncing    — write in flight / in queue
+//   offline    — network down; queue retrying with backoff
+//
+// COPY RULE: NEVER use the word "live" in user-facing strings.
+// Colors use design tokens only (var(--...)) — no hardcoded hex.
+// ---------------------------------------------------------------------------
+function SyncStatusPill({ isRunning }) {
+  // Guard: do not render at all unless the match is running (no autosave
+  // fires while scheduled, and completed writes always proceed).
+  const [status, setStatus] = useStateA('synced');
+  const mountedRef = useRefA(true);
+  useEffectA(() => {
+    mountedRef.current = true;
+    // window.subscribeSyncStatus is set by api_client.jsx when loaded.
+    const subscribe = typeof window !== 'undefined' && window.subscribeSyncStatus;
+    if (!subscribe) return;
+    const unsub = subscribe((s) => {
+      if (mountedRef.current) setStatus(s);
+    });
+    return () => { mountedRef.current = false; unsub(); };
+  }, []);
+
+  if (!isRunning) return null;
+
+  const config = {
+    synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
+    syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
+    offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '⚠' },
+  };
+  const c = config[status] || config.synced;
+  return (
+    <span className={`sync-status-pill ${c.cls}`} data-testid="sync-status-pill" aria-label={`Score sync: ${c.label}`}>
+      <span className="sync-pill__dot" aria-hidden="true">{c.dot}</span>
+      <span className="sync-pill__label">{c.label}</span>
+    </span>
+  );
+}
+
 function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
   const timerRef = useRefA(null);
   const dirtyRef = useRefA(false);
@@ -483,6 +528,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
+            {/* C2: sync status indicator — only visible while the match is running */}
+            <SyncStatusPill isRunning={m.status === "running"} />
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
@@ -1361,6 +1408,8 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
               {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
             </div>
+            {/* C2: sync status indicator — only visible while the match is running */}
+            <SyncStatusPill isRunning={m.status === "running"} />
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
@@ -2022,6 +2071,7 @@ window.ScoreEditorModal = ScoreEditorModal;
 // behind the window.* pattern to match the rest of admin_*.jsx.
 export {
   useDebouncedRunningWrite,
+  SyncStatusPill,
   AUTOSAVE_DEBOUNCE_MS,
   resolveDecisionPassword,
   buildDecisionBody,

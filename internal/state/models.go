@@ -589,6 +589,14 @@ type MatchResult struct {
 	// column (rec index 19, the 20th column, after the original 19) and the
 	// bracket.json field keep older files fully compatible.
 	CorrectionReason string `json:"correctionReason,omitempty" yaml:"correction_reason,omitempty"`
+	// Rev is a client-monotonic revision counter carried on "running"-status
+	// autosave writes. The server uses it to drop stale in-flight writes that
+	// arrive out of order after a reconnect flush (C2 rev-guard). It is
+	// wire-only: never persisted to CSV or bracket.json (yaml:"-" and no CSV
+	// column), and not copied by copyMatchResults / copyBracket. Defaulting to
+	// 0 (omitempty) means any existing payload without the field is treated as
+	// unversioned and always proceeds.
+	Rev int64 `json:"rev,omitempty" yaml:"-"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths

@@ -281,6 +281,107 @@ func TestQuickScoreHandler(t *testing.T) {
 	})
 }
 
+// TestScoreHandler_RevGuard validates the C2 monotonic-revision guard for
+// "running" autosave writes:
+//
+//   - A stale running write (rev < stored high-water) is silently no-op'd
+//     (HTTP 200 with {"stale":true}); the stored result is unchanged.
+//   - A higher rev advances the mark and the write proceeds normally.
+//   - Rev==0 (unversioned) writes always proceed regardless of the mark.
+//   - Completed writes are never blocked by a stale rev.
+func TestScoreHandler_RevGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rg1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rg1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+
+	// Reset the global rev store so tests are isolated even when run as
+	// part of the full test suite (other test functions may have advanced
+	// the mark for the same key).
+	runningRevStore.Delete("rg1:PoolA-1")
+
+	scoreRunning := func(rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status": "running",
+			"rev":    rev,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	scoreCompleted := func() int {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"winner": "Alice", "ipponsA": []string{"M", "K"}, "ipponsB": []string{},
+			"status": "completed",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	loadWinner := func() string {
+		t.Helper()
+		ms, err := store.LoadPoolMatches("rg1")
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == "PoolA-1" {
+				return m.Winner
+			}
+		}
+		t.Fatal("match PoolA-1 not found")
+		return ""
+	}
+
+	t.Run("rev=0 (unversioned) always proceeds", func(t *testing.T) {
+		code, body := scoreRunning(0)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "unversioned write must not be marked stale")
+	})
+
+	t.Run("higher rev advances the mark and write proceeds", func(t *testing.T) {
+		code, body := scoreRunning(5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "higher rev should proceed, not be stale")
+	})
+
+	t.Run("same rev is not stale (equal rev always proceeds)", func(t *testing.T) {
+		code, body := scoreRunning(5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "equal rev should proceed")
+	})
+
+	t.Run("stale running write is dropped with stale=true, stored result unchanged", func(t *testing.T) {
+		// Send rev=3 after rev=5 is the stored mark — should be stale.
+		code, body := scoreRunning(3)
+		assert.Equal(t, http.StatusOK, code)
+		stale, ok := body["stale"].(bool)
+		assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	})
+
+	t.Run("completed write is never blocked by stale rev guard", func(t *testing.T) {
+		// Stored mark is 5. Completed writes carry no rev gate.
+		code := scoreCompleted()
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, "Alice", loadWinner(), "completed write must persist even after stale guard is set")
+	})
+}
+
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the
 // match-identity guard: a score/quick-score payload naming competitors that
 // differ from the stored pairing is rejected, and the stored match is left

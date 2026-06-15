@@ -226,7 +226,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 //   - a single unified picker (WatchPicker) that adds a player OR a dojo;
 //   - the hero card for the primary entity (implicit when 1, pinned when ≥2);
 //   - a bounded "watched upcoming" compact list when ≥2 entities are watched.
-function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, primaryNextMatch, upcoming, onMatchClick, chimeMuted, toggleChimeMuted, onFirstAdd }) {
+function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, primaryNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -328,10 +328,10 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       <div className="watchlist-card-head">
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
-        {toggleChimeMuted != null && (
+        {onBellToggle != null && (
           <button
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
-            onClick={toggleChimeMuted}
+            onClick={onBellToggle}
             aria-pressed={!chimeMuted}
             aria-label={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
             title={chimeMuted ? (typeof window.Notification !== "undefined" ? "Alerts muted — browser notifications also paused" : "Alerts muted") : "Alerts on — tap to mute"}

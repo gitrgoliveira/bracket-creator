@@ -625,7 +625,7 @@ export async function notifEnable() {
     }
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* quota */ }
     // Read back the actual persisted value — setItem may have thrown while the key
-    // was already "true" (locked/quota quota-exceeded on a pre-existing opt-in).
+    // was already "true" (locked or quota-exceeded on a pre-existing opt-in).
     // Dispatching the real stored state keeps bells in sync with what
     // fireNotification() will see, mirroring the same pattern in notifDisable().
     let stored = false;
@@ -1338,7 +1338,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             upcoming={watchedUpcoming}
             onMatchClick={setSelectedMatch}
             chimeMuted={chimeMuted}
-            toggleChimeMuted={handleBellToggle}
+            onBellToggle={handleBellToggle}
             onFirstAdd={chimeMuted ? handleBellToggle : undefined}
           />
 

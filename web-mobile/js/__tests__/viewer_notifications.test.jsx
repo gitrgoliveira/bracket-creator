@@ -1,5 +1,5 @@
 // mp-xhaa: unit tests for notifEnable/notifDisable helpers.
-// These pure helpers drive AnnBellBtn, NotificationSettings, and the
+// These pure helpers drive AnnBellBtn and the
 // NOTIF_SYNC_EVENT broadcast — cover every return value branch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { notifEnable, notifDisable, NOTIF_SYNC_EVENT } from '../viewer.jsx';

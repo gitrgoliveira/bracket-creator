@@ -214,14 +214,23 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
 }
 
 // Flush the queue whenever the browser comes back online.
+// Remove-then-add so re-evaluating this module (tests with resetModules, hot
+// reload, multi-bundle inclusion) replaces the listener instead of stacking up
+// orphaned ones bound to stale module state. The handler reference is parked on
+// `window` (which survives module re-eval) so the prior one can be detached.
 if (typeof window !== 'undefined') {
-    window.addEventListener('online', () => {
+    if (window.__bcOnlineFlushHandler) {
+        window.removeEventListener('online', window.__bcOnlineFlushHandler);
+    }
+    const onlineHandler = () => {
         if (_writeQueue.size > 0) {
             _flushAttempt = 0;
             if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
             _flushQueue();
         }
-    });
+    };
+    window.__bcOnlineFlushHandler = onlineHandler;
+    window.addEventListener('online', onlineHandler);
 }
 
 // ---------------------------------------------------------------------------

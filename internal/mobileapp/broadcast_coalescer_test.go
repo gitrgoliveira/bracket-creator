@@ -77,9 +77,16 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 // whether that serialisation is a bottleneck at the autosave rate (≤3.3/s
 // per court after C1's 300ms debounce).
 //
-// Measured result (2026-06-15, M-series Mac, -10 GOMAXPROCS): ~12.5µs/op for
-// a two-court write pair (6.3µs per single write). At ≤3.3 writes/s per court
-// the per-comp lock overhead is ~42µs/s — negligible. No tuning required.
+// Result (2026-06-15, M1 Pro, -10 GOMAXPROCS): ~47ms/op for a two-court write
+// PAIR, dominated by the engine's per-write CSV persist to the temp data dir
+// (real disk I/O), not by lock contention — the per-comp mutex is held only
+// for the in-memory critical section. At the ≤3.3 writes/s-per-court autosave
+// rate this is comfortably non-blocking. No tuning required.
+//
+// (An earlier draft used a per-goroutine fixed rev; under RunParallel that made
+// many out-of-order writes hit the rev-guard's stale fast path — skipping the
+// engine write entirely — so it under-measured. The constant rev below ensures
+// every request traverses the full guard + lock + engine path.)
 // ---------------------------------------------------------------------------
 func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 	r, store, _, _, tempDir := setupTestRouter(b)
@@ -99,13 +106,21 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 	runningRevStore.Delete("bench1:courtA-1")
 	runningRevStore.Delete("bench1:courtB-1")
 
-	makeRunningWrite := func(matchID, sideA, sideB string, rev int64) func() {
+	// A FIXED rev (not a monotonic per-write counter) is intentional here. Under
+	// b.RunParallel, monotonically-increasing revs would arrive out of order, so
+	// a lower rev landing after a higher one would be stale-rejected by the
+	// rev-guard on the fast path — skipping the engine write + per-comp lock
+	// entirely, which is exactly the cost this benchmark measures. A constant rev
+	// (equal revs always proceed) makes every request traverse the full
+	// guard + lock + engine path, giving a representative serialisation cost.
+	const benchRev = int64(1)
+	makeRunningWrite := func(matchID, sideA, sideB string) func() {
 		return func() {
 			payload, _ := json.Marshal(map[string]any{
 				"sideA": sideA, "sideB": sideB,
 				"ipponsA": []string{"M"}, "ipponsB": []string{},
 				"status": "running",
-				"rev":    rev,
+				"rev":    benchRev,
 			})
 			req, _ := http.NewRequest("PUT",
 				fmt.Sprintf("/api/competitions/bench1/matches/%s/score", matchID),
@@ -116,12 +131,11 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 		}
 	}
 
-	var revA, revB atomic.Int64
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		// Each goroutine alternates between the two courts.
-		courtA := makeRunningWrite("courtA-1", "Alice", "Bob", revA.Add(1))
-		courtB := makeRunningWrite("courtB-1", "Carol", "Dave", revB.Add(1))
+		courtA := makeRunningWrite("courtA-1", "Alice", "Bob")
+		courtB := makeRunningWrite("courtB-1", "Carol", "Dave")
 		for pb.Next() {
 			courtA()
 			courtB()

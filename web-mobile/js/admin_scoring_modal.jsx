@@ -103,7 +103,7 @@ function SyncStatusPill({ isRunning }) {
   const config = {
     synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
     syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
-    offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '⚠' },
+    offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '●' },
   };
   const c = config[status] || config.synced;
   return (

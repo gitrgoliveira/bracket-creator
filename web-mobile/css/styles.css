@@ -35,6 +35,14 @@
      reads at the call site; it resolves to the canonical palette red. */
   --danger: var(--red);
   --danger-soft: var(--red-soft);
+  /* Warning/caution — amber. Non-overlapping with --red (Aka/danger) and
+     --accent (navy/running) per DESIGN.md Principle 3. Used by the offline
+     sync pill, .alert--warn and .tag-badge--warn. */
+  --warn: #b45309;        /* amber-700: warning text/icon, >=4.5:1 on --warn-soft */
+  --warn-strong: #f59e0b; /* amber-500: saturated accent border (status pills) */
+  --warn-soft: #fffbeb;   /* amber-50: warning fill */
+  --warn-border: #fde68a; /* amber-200: warning hairline border */
+  --warn-ink: #78350f;    /* amber-900: strongest warning text, ~8:1 on --warn-soft */
   --white-side: #f6f7fb;
 
   --ink: #1a1d24;
@@ -2458,11 +2466,23 @@ a:hover {
   border-color: var(--line);
   background: var(--surface);
 }
+/* syncing dot pulses to signal the write is in flight (motion is the
+   primary in-flight signal, per DESIGN.md Principle 3). */
+.sync-pill--syncing .sync-pill__dot {
+  animation: sync-pill-pulse 1s ease-in-out infinite;
+}
+@keyframes sync-pill-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-pill--syncing .sync-pill__dot { animation: none; }
+}
 /* offline — amber warning; no red (red is Aka/error-only per DESIGN.md) */
 .sync-pill--offline {
-  color: #92400e;         /* amber-900 on white: 7:1 contrast */
-  border-color: #f59e0b; /* amber-500 */
-  background: #fffbeb;   /* amber-50 */
+  color: var(--warn-ink);
+  border-color: var(--warn-strong);
+  background: var(--warn-soft);
 }
 
 .viewer__tabs {
@@ -5606,9 +5626,9 @@ button.pool-match-row {
 }
 
 .alert--warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #78350f;
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
 }
 
 .alert--success {
@@ -5641,9 +5661,9 @@ button.pool-match-row {
 }
 
 .tag-badge--warn {
-  background: #fff8e1;
-  color: #b45309;
-  border-color: #fde68a;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-border);
 }
 
 .field__select {
@@ -5884,9 +5904,13 @@ button.pool-match-row {
 .msb-lab { display: block; font-size: 10px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
 abbr.msb-lab { text-decoration: none; cursor: help; }
 /* running-match highlight: navy running-signal language (DESIGN.md Principle 3).
-   --accent-soft fill (same token used by bc-match--running / sched-row--running);
-   inset left bar echoes the running-strip/match-card accent border without layout shift. */
-.msb-row--now { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+   --accent-soft fill (same token used by bc-match--running / sched-row--running)
+   plus a symmetric inset ring that reads as the active-row halo without a
+   one-sided accent stripe or any layout shift. */
+.msb-row--now {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
+}
 .msb-row--queued .msb-name { color: #9ca3af; }
 .msb-row--queued .msb-name--aka { color: #d4a5a8; }
 .msb-row--queued .msb-slot { color: #9ca3af; }

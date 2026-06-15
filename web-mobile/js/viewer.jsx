@@ -576,8 +576,9 @@ const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 // a custom DOM event dispatched on toggle — the native `storage` event only
 // fires across tabs, not within the same page.
 const CHIME_SYNC_EVENT = "chimeMutedSync";
-// Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
-// instances and the watchlist bell stay visually in sync within one page.
+// Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so all AnnBellBtn
+// instances stay visually in sync within one page. The watchlist bell is driven
+// by chimeMuted (chime-only) and does not subscribe to this event.
 export const NOTIF_SYNC_EVENT = "notifEnabledSync";
 
 // Notification opt-in helpers used by AnnBellBtn and handleBellToggle. Return values for notifEnable: "on" (granted + LS write
@@ -649,7 +650,6 @@ export function notifDisable() {
   let nowEnabled = false;
   try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
   dispatchNotif(nowEnabled);
-  return nowEnabled;
 }
 
 // Module-level Permissions API singleton: dispatches NOTIF_SYNC_EVENT when the
@@ -664,11 +664,14 @@ function subscribePermissionChanges() {
   try {
     const pq = navigator.permissions?.query?.({ name: "notifications" });
     // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
-    // Only mark subscribed once we have a real promise; otherwise mark gave-up so a
-    // subsequent AnnBellBtn mount can retry if the API becomes available later.
+    // Set _permGaveUp (not _permSubscribed) so future mounts skip retrying on a
+    // browser that permanently lacks the API.
     if (!pq) { _permGaveUp = true; return; }
-    _permSubscribed = true;
     pq.then((s) => {
+      // Only set _permSubscribed once the promise resolves and the listener is wired;
+      // a synchronous throw from pq.then() (non-conforming non-Promise) is caught
+      // below and sets _permGaveUp instead, keeping the two flags mutually exclusive.
+      _permSubscribed = true;
       const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
         // "granted" — re-read LS so the dispatched state matches what fireNotification sees.

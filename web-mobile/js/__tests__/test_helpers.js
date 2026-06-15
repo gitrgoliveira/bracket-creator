@@ -36,3 +36,14 @@ export function makeThrowingLocalStorageMock() {
     clear: () => {},
   };
 }
+
+// Both setItem and removeItem throw — simulates a fully locked/corrupted storage profile.
+export function makeFullyLockedLocalStorageMock(initial = {}) {
+  const store = { ...initial };
+  return {
+    getItem: vi.fn((k) => (k in store ? store[k] : null)),
+    setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
+    removeItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
+    clear: () => {},
+  };
+}

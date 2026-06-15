@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { notifEnable, notifDisable } from '../viewer.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
-import { makeLocalStorageMock, makeThrowingLocalStorageMock, makeNotifMock } from './test_helpers.js';
+import { makeLocalStorageMock, makeThrowingLocalStorageMock, makeFullyLockedLocalStorageMock, makeNotifMock } from './test_helpers.js';
 
 function installLS(mock) {
   Object.defineProperty(window, 'localStorage', { value: mock, writable: true, configurable: true });
@@ -84,13 +84,8 @@ describe('notification helpers', () => {
     it('returns "on" and dispatches {detail:true} when LS write throws but key was already "true"', async () => {
       // setItem throws (quota), but the key was already persisted "true" from a
       // previous opt-in. fireNotification() will read "true", so bells must show "on".
-      const store = { [LS_NOTIFICATIONS_ENABLED]: 'true' };
-      const ls = {
-        getItem: vi.fn((k) => (k in store ? store[k] : null)),
-        setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
-        removeItem: vi.fn((k) => { delete store[k]; }),
-        clear: () => {},
-      };
+      const ls = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
+      ls.setItem.mockImplementation(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); });
       installLS(ls);
       global.Notification = makeNotifMock({ permission: 'granted' });
       const result = await notifEnable();
@@ -179,13 +174,7 @@ describe('notification helpers', () => {
       // Storage completely locked (e.g. corrupted profile): neither setItem nor
       // removeItem can write. The read-back reflects the actual persisted state
       // so all bell instances stay in sync with what fireNotification() will see.
-      const store = { [LS_NOTIFICATIONS_ENABLED]: 'true' };
-      const ls = {
-        getItem: vi.fn((k) => (k in store ? store[k] : null)),
-        setItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
-        removeItem: vi.fn(() => { throw new DOMException('QuotaExceeded', 'QuotaExceededError'); }),
-        clear: () => {},
-      };
+      const ls = makeFullyLockedLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
       installLS(ls);
       notifDisable();
       expect(ls.removeItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED);

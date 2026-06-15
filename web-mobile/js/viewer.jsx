@@ -649,8 +649,11 @@ export function notifDisable() {
 // browser permission changes externally (user visits browser settings mid-session).
 // AnnBellBtn calls this once per mount; no-op on subsequent mounts.
 let _permSubscribed = false;
+// Set after the first query() rejection so permanently-unsupported browsers
+// (those that reject 'notifications' queries) don't retry on every AnnBellBtn mount.
+let _permGaveUp = false;
 function subscribePermissionChanges() {
-  if (_permSubscribed) return;
+  if (_permSubscribed || _permGaveUp) return;
   _permSubscribed = true;
   try {
     navigator.permissions?.query?.({ name: "notifications" })?.then((s) => {
@@ -666,7 +669,7 @@ function subscribePermissionChanges() {
       } else {
         s.onchange = handleChange;
       }
-    })?.catch(() => { _permSubscribed = false; });
+    })?.catch(() => { _permGaveUp = true; _permSubscribed = false; });
   } catch (_e) {
     _permSubscribed = false;
   }

@@ -190,4 +190,11 @@ type CompetitionTransactor interface {
 	// re-locking; the lock is released on return (success or error).
 	// Mirrors state.Store.WithTransaction.
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
+	// WithCourtExclusivityLock runs fn under the store's court-exclusivity
+	// mutex, which must be acquired BEFORE any per-comp lock. Use this to
+	// wrap a cross-competition court-busy check + WithTransaction pair so
+	// two concurrent match-starts on the same court in different
+	// competitions can't both pass the check before either commits (TOCTOU).
+	// Mirrors state.Store.WithCourtExclusivityLock.
+	WithCourtExclusivityLock(fn func() error) error
 }

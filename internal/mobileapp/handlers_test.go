@@ -2047,23 +2047,23 @@ func TestMatchHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	// PUT /api/competitions/:id/matches/:mid/score (not found)
+	// PUT /api/competitions/:id/matches/:mid/score (not found — match doesn't exist → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/c1/matches/not-exists/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Verify update
 	updatedMatches, _ := store.LoadPoolMatches("c1")
 	assert.Equal(t, "A", updatedMatches[0].Winner)
 
-	// PUT /api/competitions/:id/matches/:mid/score (invalid competition)
+	// PUT /api/competitions/:id/matches/:mid/score (invalid competition — not found → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/not-exists/matches/PoolA-1/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestMatchHandlers_BracketMatch(t *testing.T) {

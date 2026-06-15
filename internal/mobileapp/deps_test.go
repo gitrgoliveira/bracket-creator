@@ -144,6 +144,10 @@ func (stubCompetitionTransactor) WithTransaction(string, func(state.StoreTx) err
 	return nil
 }
 
+func (stubCompetitionTransactor) WithCourtExclusivityLock(fn func() error) error {
+	return fn()
+}
+
 // TestDepsInterfacesCompile is a compile-time guard that the consumer-
 // boundary interfaces (deps.go) are satisfied by both the stub
 // implementations above AND the production concrete types. If a method

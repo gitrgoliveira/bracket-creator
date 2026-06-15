@@ -39,10 +39,15 @@ func (e *IneligibleCompetitorError) Is(target error) bool {
 // *CourtBusyError that carries Court, MatchID, and CompID.
 var ErrCourtBusy = errors.New("court already has a running match")
 
-// CourtBusyError is returned by StartMatch / StartMatchTx when the
-// target court already has a running match in any competition.
-// Courts are tournament-global: one physical shiaijo can host only
-// one match at a time regardless of which competition owns it.
+// CourtBusyError is returned when the target court already has a running
+// match. Which competitions are scanned depends on the call site:
+//   - StartMatch (non-tx): scans all competitions via store.RunningMatchOnCourt.
+//   - CheckCrossCompCourtBusy (pre-tx gate): scans all competitions except compID.
+//   - StartMatchTx (tx path): scans only within compID — cross-competition
+//     conflicts are caught by CheckCrossCompCourtBusy before the tx begins.
+//
+// Courts are tournament-global: one physical shiaijo can host only one match at
+// a time regardless of which competition owns it.
 type CourtBusyError struct {
 	Court   string
 	MatchID string

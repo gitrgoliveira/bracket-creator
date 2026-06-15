@@ -784,96 +784,104 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			result.CorrectionReason = ""
 		}
 
-		// FR-035 court exclusivity: cross-competition check runs BEFORE
-		// WithTransaction to avoid a potential deadlock. Calling
-		// store.RunningMatchOnCourt while holding a write lock would deadlock
-		// if another competition is simultaneously in its own WithTransaction
-		// (both goroutines try to read-lock each other's mutex).
-		// Withdrawal decisions skip this gate — operators must record
-		// kiken/fusenpai regardless of court state.
 		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
-		if !isWithdrawal {
-			if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
-				var courtBusyErr *engine.CourtBusyError
-				if errors.As(err, &courtBusyErr) {
-					c.JSON(http.StatusConflict, gin.H{
-						"error":   "court_busy",
-						"court":   courtBusyErr.Court,
-						"matchId": courtBusyErr.MatchID,
-						"compId":  courtBusyErr.CompID,
-						"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
-					})
-				} else {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				}
-				return
-			}
-		}
 
-		// T156: run the score write + ineligibility update + lineup-freeze
-		// inside a single per-comp lock acquire via WithTransaction. The
-		// engine's RecordMatchResultWithIneligibilityTx dispatches every
-		// store call through `stx`, so no internal call re-acquires the
-		// lock (non-reentrant; nesting would deadlock).
-		//
-		// FR-035: intra-competition eligibility and court gate. Checks that
-		// no OTHER match in compID's own pool/bracket is running on the same
-		// court, plus participant ineligibility. Withdrawal decisions bypass
-		// so operators can record kiken on matches with ineligible participants.
+		// FR-035: WithCourtExclusivityLock serializes the cross-competition
+		// court-busy check + per-competition write under a tournament-level
+		// mutex so two concurrent match-starts on the same court in different
+		// competitions can't both pass the cross-comp check before either
+		// commits (TOCTOU). Withdrawal decisions skip the court gate — operators
+		// must record kiken/fusenpai regardless of court state.
 		var (
 			engStatus *domain.CompetitorStatus
 			engErr    error
 		)
-		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-			// mp-ba3: finalized guard runs under the per-comp lock to
-			// prevent TOCTOU races between concurrent anonymous submissions.
-			if resultSource == "self-reported" {
-				if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
-					engErr = err
-					return nil
+		txErr := tx.WithCourtExclusivityLock(func() error {
+			if !isWithdrawal {
+				if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
+					return err
 				}
 			}
-			// Correction audit: overwriting an already-completed result
-			// (completed -> completed) is a correction and requires a non-empty
-			// CorrectionReason for traceability. This applies to ANY decision
-			// type, including a withdrawal (kiken/fusenpai) submitted via /score
-			// — exempting those would let a finalized result be overwritten with
-			// no audit reason. The check runs inside the tx so the is-completed
-			// read is race-free (same lock). A first finalization (existing
-			// status is not completed) needs no reason.
-			if result.Status == state.MatchStatusCompleted {
-				existing := lookupMatchStatusUnderTx(stx, id, mid)
-				if existing == state.MatchStatusCompleted {
-					// Overwriting a finalized result is a correction — require a reason.
-					if result.CorrectionReason == "" {
-						engErr = &ValidationError{
-							Field:   "correctionReason",
-							Message: "correcting a completed match result requires a non-empty correctionReason",
-						}
+			// T156: run the score write + ineligibility update + lineup-freeze
+			// inside a single per-comp lock acquire via WithTransaction. The
+			// engine's RecordMatchResultWithIneligibilityTx dispatches every
+			// store call through `stx`, so no internal call re-acquires the
+			// lock (non-reentrant; nesting would deadlock).
+			//
+			// FR-035: intra-competition eligibility and court gate. Checks that
+			// no OTHER match in compID's own pool/bracket is running on the same
+			// court, plus participant ineligibility. Withdrawal decisions bypass
+			// so operators can record kiken on matches with ineligible participants.
+			return tx.WithTransaction(id, func(stx state.StoreTx) error {
+				// mp-ba3: finalized guard runs under the per-comp lock to
+				// prevent TOCTOU races between concurrent anonymous submissions.
+				if resultSource == "self-reported" {
+					if err := checkFinalizedUnderTx(stx, id, mid); err != nil {
+						engErr = err
 						return nil
 					}
-				} else {
-					// First finalization — not a correction. The contract says the
-					// reason is omitted here, so drop any client-supplied value.
-					result.CorrectionReason = ""
 				}
-			}
-			if !isWithdrawal {
-				if err := eng.StartMatchTx(stx, id, mid); err != nil {
-					engErr = err
-					return nil
+				// Correction audit: overwriting an already-completed result
+				// (completed -> completed) is a correction and requires a non-empty
+				// CorrectionReason for traceability. This applies to ANY decision
+				// type, including a withdrawal (kiken/fusenpai) submitted via /score
+				// — exempting those would let a finalized result be overwritten with
+				// no audit reason. The check runs inside the tx so the is-completed
+				// read is race-free (same lock). A first finalization (existing
+				// status is not completed) needs no reason.
+				if result.Status == state.MatchStatusCompleted {
+					existing := lookupMatchStatusUnderTx(stx, id, mid)
+					if existing == state.MatchStatusCompleted {
+						// Overwriting a finalized result is a correction — require a reason.
+						if result.CorrectionReason == "" {
+							engErr = &ValidationError{
+								Field:   "correctionReason",
+								Message: "correcting a completed match result requires a non-empty correctionReason",
+							}
+							return nil
+						}
+					} else {
+						// First finalization — not a correction. The contract says the
+						// reason is omitted here, so drop any client-supplied value.
+						result.CorrectionReason = ""
+					}
 				}
-			}
-			engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result)
-			// engErr is a normal application-level signal (AlreadyIneligible
-			// → 409, validation/not-found → other codes); we surface it
-			// after the tx returns. The score-write inside the tx already
-			// includes the K3 rollback for the AlreadyIneligible path —
-			// returning nil here commits whatever final state the engine
-			// settled on.
-			return nil
+				if !isWithdrawal {
+					if err := eng.StartMatchTx(stx, id, mid); err != nil {
+						engErr = err
+						return nil
+					}
+				}
+				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result)
+				// engErr is a normal application-level signal (AlreadyIneligible
+				// → 409, validation/not-found → other codes); we surface it
+				// after the tx returns. The score-write inside the tx already
+				// includes the K3 rollback for the AlreadyIneligible path —
+				// returning nil here commits whatever final state the engine
+				// settled on.
+				return nil
+			})
 		})
 		if txErr != nil {
+			// txErr carries errors from CheckCrossCompCourtBusy (cross-comp
+			// court conflict or match-not-found) or from the WithTransaction
+			// infrastructure itself (WAL commit failure, etc.).
+			var courtBusyErr *engine.CourtBusyError
+			if errors.As(txErr, &courtBusyErr) {
+				c.JSON(http.StatusConflict, gin.H{
+					"error":   "court_busy",
+					"court":   courtBusyErr.Court,
+					"matchId": courtBusyErr.MatchID,
+					"compId":  courtBusyErr.CompID,
+					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
+				})
+				return
+			}
+			var notFoundErr *engine.NotFoundError
+			if errors.As(txErr, &notFoundErr) {
+				c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
 			return
 		}

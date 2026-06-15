@@ -1504,9 +1504,17 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
+                # anyOf, not oneOf: MatchResult is an open schema (no required
+                # fields, no additionalProperties:false), so `{"stale":true}`
+                # also validates against it. oneOf demands exactly one match and
+                # would flag that as ambiguous in most JSON-Schema tooling. The
+                # stale branch pins additionalProperties:false so a stale marker
+                # is unambiguous; a real result still matches the MatchResult
+                # branch.
+                anyOf:
                   - $ref: '#/components/schemas/MatchResult'
                   - type: object
+                    additionalProperties: false
                     properties:
                       stale:
                         type: boolean

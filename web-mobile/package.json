@@ -29,6 +29,7 @@
   "overrides": {
     "eslint-plugin-react": {
       "eslint": "$eslint"
-    }
+    },
+    "vite": ">=8.0.16"
   }
 }

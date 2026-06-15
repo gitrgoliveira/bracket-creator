@@ -636,6 +636,14 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 // It checks court exclusivity with careful lock discipline: compID's data
 // is read via tx (which bypasses re-acquiring the already-held write lock),
 // while all other competitions are scanned via the store's public methods.
+//
+// Residual TOCTOU: the intra-comp check (via tx) and the cross-comp check
+// (via store.RunningMatchOnCourt) are not atomic with each other. Two
+// simultaneous StartMatchTx calls on different competitions but the same
+// court can both pass the check and both commit. This is an inherent
+// limitation of the per-competition lock model; at real tournament scale
+// (human operators, seconds between button presses) it is not a practical
+// risk, but it is worth noting for future per-court locking.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {
@@ -645,31 +653,39 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 		return nil
 	}
 	// Check compID's own matches via tx (avoids deadlock on non-reentrant mutex).
-	if occ := courtOccupiedInCompTx(tx, compID, court, matchID); occ != nil {
-		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
-	}
-	// Check all other competitions via the store (safe: their write locks are free).
-	occ, err := e.store.RunningMatchOnCourt(court, compID)
+	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
 	if err != nil {
 		return err
 	}
 	if occ != nil {
 		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
 	}
+	// Check all other competitions via the store (safe: their write locks are free).
+	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
+	if err != nil {
+		return err
+	}
+	if crossOcc != nil {
+		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
+	}
 	return nil
 }
 
 func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error) {
 	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID {
-				return m.Court, nil
-			}
+	if err != nil {
+		return "", err
+	}
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Court, nil
 		}
 	}
 	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return "", err
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == matchID {
@@ -678,37 +694,41 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 			}
 		}
 	}
-	return "", nil
+	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // courtOccupiedInCompTx scans compID's pool matches and bracket (via tx)
 // for any match — other than skipMatchID — that is Running on court.
-func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) *state.CourtOccupancy {
+func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) (*state.CourtOccupancy, error) {
 	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == skipMatchID || m.Status != state.MatchStatusRunning {
-				continue
-			}
-			if m.Court == court {
-				return &state.CourtOccupancy{CompID: compID, MatchID: m.ID}
-			}
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range poolMatches {
+		if m.ID == skipMatchID || m.Status != state.MatchStatusRunning {
+			continue
+		}
+		if m.Court == court {
+			return &state.CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
 		}
 	}
 	bracket, err := tx.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return nil, err
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == skipMatchID || bm.Status != state.MatchStatusRunning {
 					continue
 				}
 				if bm.Court == court {
-					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}
+					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
 				}
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {

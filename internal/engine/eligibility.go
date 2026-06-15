@@ -191,15 +191,19 @@ func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error
 // has no court assigned.
 func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 	poolMatches, err := e.store.LoadPoolMatches(compID)
-	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID {
-				return m.Court, nil
-			}
+	if err != nil {
+		return "", err
+	}
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Court, nil
 		}
 	}
 	bracket, err := e.store.LoadBracket(compID)
-	if err == nil && bracket != nil {
+	if err != nil {
+		return "", err
+	}
+	if bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == matchID {

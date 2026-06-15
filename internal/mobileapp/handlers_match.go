@@ -922,6 +922,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					"error":   "court_busy",
 					"court":   courtBusyErr.Court,
 					"matchId": courtBusyErr.MatchID,
+					"compId":  courtBusyErr.CompID,
 					"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
 				})
 				return

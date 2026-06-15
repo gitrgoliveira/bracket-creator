@@ -1496,6 +1496,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MatchResult'
+        '409':
+          description: |
+            Conflict — one of: court already has a running match (`court_busy`),
+            competitor ineligible (`ineligible_competitor`), result already finalised
+            (`result_finalized`), or downstream knockout already scored
+            (`downstream_knockout_scored`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/matches/{mid}/court:
     put:

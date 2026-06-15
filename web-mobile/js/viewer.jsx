@@ -599,11 +599,13 @@ let notifEnablePromise = null;
 // Set to true by notifDisable() while notifEnable() is awaiting the permission
 // dialog. Checked before the final LS write so a concurrent disable is not
 // overridden when the user approves the dialog after having already tapped disable.
+// Reset at the START of every notifEnable() call (before the in-flight guard) so
+// that a caller joining an existing promise also signals "I want notifications on".
 let notifCancelled = false;
 export async function notifEnable() {
+  notifCancelled = false; // reset before the guard: any new enable clears a prior cancel
   if (notifEnablePromise) return notifEnablePromise;
   notifEnablePromise = (async () => {
-    notifCancelled = false;
     if (typeof Notification === "undefined") { dispatchNotif(false); return "off"; }
     if (Notification.permission === "denied") {
       dispatchNotif(false);
@@ -680,8 +682,11 @@ function subscribePermissionChanges() {
       } else {
         s.onchange = handleChange;
       }
-    }).catch(() => { _permGaveUp = true; _permSubscribed = false; });
+    }).catch(() => { _permGaveUp = true; });
   } catch (_e) {
+    // pq.then() threw synchronously (non-conforming non-Promise pq) — give up
+    // consistently with the !pq branch and the .catch() path above.
+    _permGaveUp = true;
     _permSubscribed = false;
   }
 }
@@ -3982,13 +3987,11 @@ function AnnBellBtn() {
 
   const toggle = () => runOnce(inFlight, async () => {
     if (state === "on") {
-      const nowEnabled = notifDisable();
-      setState(nowEnabled ? "on" : "off");
+      notifDisable();
       return;
     }
-    const outcome = await notifEnable();
-    // Mirror state directly so the button updates even if event dispatch failed.
-    setState(outcome);
+    await notifEnable();
+    // State is driven by the NOTIF_SYNC_EVENT listener (onSync above).
   });
   return (
     <button

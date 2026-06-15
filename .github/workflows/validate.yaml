@@ -122,6 +122,35 @@ jobs:
           fail_ci_if_error: true
           use_oidc: true
 
+  #      _ ____    _____         _
+  #     | / ___|  |_   _|__  ___| |_
+  #  _  | \___ \    | |/ _ \/ __| __|
+  # | |_| |___) |   | |  __/\__ \ |_
+  #  \___/|____/    |_|\___||___/\__|
+  #
+  # Runs the web-mobile vitest suite (unit + render projects) so missing
+  # window.* references in component render paths are caught in CI.
+  test-js:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-mobile/package-lock.json
+
+      - name: Install JS dependencies
+        run: cd web-mobile && npm ci
+
+      - name: Run JS tests (unit + render)
+        run: cd web-mobile && npm test
+
   #   ____  ____  _____   _____         _
   #  |  _ \|  _ \|  ___| |_   _|__  ___| |_
   #  | |_) | | | | |_      | |/ _ \/ __| __|

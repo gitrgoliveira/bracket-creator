@@ -132,9 +132,9 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
   it('an ippon tap on a RUNNING match triggers exactly ONE debounced write after 300ms', async () => {
     renderModal(makeRunningMatch());
 
-    // Tap the "M" (Men) ippon button for AKA (right side). The buttons for
-    // each side both have the same label letters — AKA's controls are rendered
-    // second (idx=1 in `sides`). getAllByText('M')[1] gives AKA's M button.
+    // Tap an "M" (Men) ippon button. Both sides render an identical M button;
+    // this test is side-agnostic — any ippon tap on a running match must
+    // schedule exactly one debounced autosave — so we click the first one.
     const menButtons = screen.getAllByText('M');
     expect(menButtons.length).toBeGreaterThanOrEqual(1);
 

@@ -1042,6 +1042,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// C3: coalesce high-frequency running-status broadcasts (first-wins
 		// within 250ms); completed writes always broadcast unconditionally.
 		isRunning := result.Status == state.MatchStatusRunning
+		// Bound runningRevStore: once a match leaves the running state its rev
+		// high-water mark is dead (the guard only gates running writes), so drop
+		// the entry to keep the process-lifetime map from growing without bound
+		// across many matches/competitions. A later correction that re-opens the
+		// match starts a fresh session anyway.
+		if !isRunning {
+			runningRevStore.Delete(id + ":" + mid)
+		}
 		if coalescer.Allow(id+":"+mid, isRunning) {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,

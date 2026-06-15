@@ -477,6 +477,50 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 	})
 }
 
+// TestScoreHandler_RevGuard_PrunesOnCompletion verifies that the per-match
+// runningRevStore entry is deleted once the match leaves the running state, so
+// the process-lifetime map does not accumulate dead high-water marks.
+func TestScoreHandler_RevGuard_PrunesOnCompletion(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rgp1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rgp1", []state.MatchResult{
+		{ID: "PoolP-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	revKey := "rgp1:PoolP-1"
+	runningRevStore.Delete(revKey)
+
+	put := func(body map[string]any) int {
+		t.Helper()
+		payload, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rgp1/matches/PoolP-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// A running write with a session populates the rev store.
+	require.Equal(t, http.StatusOK, put(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"status": "running", "rev": 3, "revSession": "sess-p",
+	}))
+	_, present := runningRevStore.Load(revKey)
+	require.True(t, present, "running write must populate the rev store")
+
+	// A completed write must prune the entry.
+	require.Equal(t, http.StatusOK, put(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"winner": "Alice", "ipponsA": []string{"M", "K"}, "ipponsB": []string{},
+		"status": "completed",
+	}))
+	_, present = runningRevStore.Load(revKey)
+	assert.False(t, present, "completed write must prune the rev store entry")
+}
+
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the
 // match-identity guard: a score/quick-score payload naming competitors that
 // differ from the stored pairing is rejected, and the stored match is left

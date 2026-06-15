@@ -17,6 +17,19 @@ const { useState, useMemo } = React;
 const useRefV = React.useRef;
 const pluralize = window.pluralize;
 
+// Bell icon for the watchlist alert toggle (muted = diagonal slash).
+// Exported on window so AnnBellBtn in viewer.jsx can reuse it without duplication.
+function BellIcon({ muted, size = 17 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      {muted && <line x1="1" y1="1" x2="23" y2="23"/>}
+    </svg>
+  );
+}
+window.BellIcon = BellIcon;
+
 // WatchPicker — unified typeahead over the tournament roster that yields
 // EITHER a player pick or a whole-dojo pick. A single search box surfaces both
 // (matching dojos first, then matching players), so "Hagane" offers
@@ -213,7 +226,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 //   - a single unified picker (WatchPicker) that adds a player OR a dojo;
 //   - the hero card for the primary entity (implicit when 1, pinned when ≥2);
 //   - a bounded "watched upcoming" compact list when ≥2 entities are watched.
-function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, primaryNextMatch, upcoming, onMatchClick }) {
+function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, primaryNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -232,16 +245,34 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   const multi = count >= 2;
   const effectiveKey = effectivePrimaryKey(watchlist, primaryKey);
 
-  const addPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
+  const firstAddFiredRef = useRefV(false);
+  React.useLayoutEffect(() => {
+    if (watchlist.length === 0) firstAddFiredRef.current = false;
+  }, [watchlist.length]);
+
+  const maybeFirstAdd = () => {
+    if (!firstAddFiredRef.current && watchlist.length === 0 && onFirstAdd) {
+      firstAddFiredRef.current = true;
+      onFirstAdd();
+    }
+  };
+
+  const addPlayer = (p) => {
+    maybeFirstAdd();
+    setWatchlist(prev => addPlayerToWatchlist(prev, p));
+  };
   const addDojo = (d) => {
     if (!d || !d.name) return;
-    if (watchlist.some((e) => e.type === "dojo" && e.dojo === d.name)) return;
-    setWatchlist([...watchlist, { type: "dojo", dojo: d.name }]);
+    maybeFirstAdd();
+    setWatchlist(prev => {
+      if (prev.some((e) => e.type === "dojo" && e.dojo === d.name)) return prev;
+      return [...prev, { type: "dojo", dojo: d.name }];
+    });
   };
   const removeEntry = (entry) => {
     const k = entryKey(entry);
-    setWatchlist(watchlist.filter((e) => entryKey(e) !== k));
-    if (primaryKey === k) setPrimaryKey(""); // clear a now-orphaned pin
+    setWatchlist(prev => prev.filter((e) => entryKey(e) !== k));
+    if (primaryKey === k) setPrimaryKey("");
   };
   const togglePin = (entry) => {
     const k = entryKey(entry);
@@ -297,6 +328,17 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       <div className="watchlist-card-head">
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
+        {onBellToggle != null && (
+          <button
+            className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
+            onClick={onBellToggle}
+            aria-pressed={!chimeMuted}
+            aria-label={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
+            title={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
+          >
+            <BellIcon muted={chimeMuted} />
+          </button>
+        )}
       </div>
 
       {count === 0 ? (

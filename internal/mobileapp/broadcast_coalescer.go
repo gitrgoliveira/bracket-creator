@@ -40,24 +40,26 @@ func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
 
 // Allow returns true when the broadcast should proceed and false when it
 // should be coalesced (dropped). isRunning must be true for the rate-limit
-// to apply; all other writes pass through unconditionally.
-func (c *matchBroadcastCoalescer) Allow(matchID string, isRunning bool) bool {
+// to apply; all other writes pass through unconditionally. matchKey is the
+// competition-scoped key (compID:matchID) — callers must NOT pass a bare match
+// id, or two competitions sharing a match id would share a coalescing window.
+func (c *matchBroadcastCoalescer) Allow(matchKey string, isRunning bool) bool {
 	if !isRunning {
 		// A non-running (completed/terminal) broadcast always proceeds AND ends
 		// the match's coalescing window — drop its entry so the map stays bounded
 		// by the currently-running matches rather than growing for the process
 		// lifetime. A later correction that re-opens the match starts fresh.
 		c.mu.Lock()
-		delete(c.last, matchID)
+		delete(c.last, matchKey)
 		c.mu.Unlock()
 		return true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := time.Now()
-	if t, ok := c.last[matchID]; ok && now.Sub(t) < matchCoalesceWindow {
+	if t, ok := c.last[matchKey]; ok && now.Sub(t) < matchCoalesceWindow {
 		return false
 	}
-	c.last[matchID] = now
+	c.last[matchKey] = now
 	return true
 }

@@ -1266,3 +1266,28 @@ func TestScoreRequestValidate_RevSessionCap(t *testing.T) {
 		assert.Equal(t, "revSession", verr.Field)
 	})
 }
+
+// TestScoreRequestValidate_RevNonNegative verifies that a negative rev is
+// rejected (it would slip past the handler's Rev>0 guard and let a stale running
+// write clobber newer state), while rev==0 (unversioned opt-out) and positive
+// revs pass.
+func TestScoreRequestValidate_RevNonNegative(t *testing.T) {
+	t.Run("rev=0 (unversioned) passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 0}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("positive rev passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 42}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("negative rev rejected", func(t *testing.T) {
+		req := ScoreRequest{Rev: -1}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "rev", verr.Field)
+	})
+}

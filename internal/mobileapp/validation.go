@@ -381,6 +381,13 @@ func (r *ScoreRequest) Validate() error {
 	if err := validateMaxLen("revSession", r.RevSession, MaxLenEntityID); err != nil {
 		return err
 	}
+	// rev is a client-supplied monotonic counter. rev==0 is the intentional
+	// "unversioned" opt-out (guard skipped); a NEGATIVE rev would likewise slip
+	// past the Rev>0 gate, letting a stale running write clobber newer state, so
+	// reject it outright.
+	if r.Rev < 0 {
+		return &ValidationError{Field: "rev", Message: "must not be negative"}
+	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only
 	// check when both sides AND winner are present in the request —

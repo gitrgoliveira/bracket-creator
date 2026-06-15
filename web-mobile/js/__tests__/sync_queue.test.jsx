@@ -170,16 +170,19 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
 // 3. Flush behaviour: 409 → discard, network error → keep + backoff
 // ---------------------------------------------------------------------------
 
-describe('_flushQueue: 409 discards, network error retries', () => {
-    it('discards a queued write on 409 (stale rev from server)', async () => {
+describe('_flushQueue: 409 conflict discards, network error retries', () => {
+    it('discards a queued write on a real 409 conflict (not retried)', async () => {
+        // The 409 handler calls console.warn for devtools visibility — expect it.
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
         let attempt = 0;
         global.fetch = vi.fn().mockImplementation(() => {
             attempt++;
-            // Always return 409 — simulates the server having a newer rev.
+            // Always return 409 — simulates a real conflict (ineligible_competitor etc.).
             return Promise.resolve({
                 ok: false,
                 status: 409,
-                json: () => Promise.resolve({ error: 'stale_rev' }),
+                json: () => Promise.resolve({ error: 'ineligible_competitor' }),
             });
         });
 
@@ -190,6 +193,13 @@ describe('_flushQueue: 409 discards, network error retries', () => {
         // Advance timers — no retry should fire because the entry was discarded.
         await tick(1000);
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
+
+        // Verify the warn was emitted for devtools visibility.
+        expect(warnSpy).toHaveBeenCalledWith(
+            '[sync] queued running write rejected (409):',
+            expect.objectContaining({ error: 'ineligible_competitor' })
+        );
+        warnSpy.mockRestore();
     });
 
     it('keeps a queued write on network error and schedules a retry', async () => {

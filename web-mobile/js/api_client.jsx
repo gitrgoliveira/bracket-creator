@@ -140,15 +140,23 @@ async function _flushQueue() {
                 headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                 body: JSON.stringify(payload),
             });
-            if (!res.ok && res.status !== 409) {
-                // Non-conflict failure — keep in queue; 409 (stale rev / conflict) is
-                // a permanent failure for this write: discard it so we don't replay
-                // an outdated payload forever.
-                anyFailed = true;
-            } else {
-                // Success OR 409 (stale) — remove from queue only if no newer write
-                // has replaced this descriptor under the same key.
+            if (res.ok) {
+                // Success (HTTP 200, including a stale {stale:true} no-op) — remove
+                // from queue only if no newer write has replaced this descriptor.
                 if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+            } else if (res.status === 409) {
+                // 409 is a real conflict (ineligible_competitor / court_busy /
+                // side_mismatch / result_finalized), NOT a stale rev (stale is a
+                // 200 {stale:true}). This queued running autosave can never
+                // succeed, so discard rather than replay forever — the operator's
+                // explicit Finish is authoritative. Log for devtools visibility.
+                res.json().then((body) => {
+                    console.warn('[sync] queued running write rejected (409):', body);
+                }).catch(() => {});
+                if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+            } else {
+                // Other non-2xx — keep in queue and retry with backoff.
+                anyFailed = true;
             }
         } catch (_) {
             anyFailed = true;
@@ -604,8 +612,7 @@ const API = {
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev — the guard is gated on status=running.
-        const isRunning = (result && result.status === 'running') ||
-            (payload && payload.status === 'running');
+        const isRunning = result?.status === 'running' || payload?.status === 'running';
         if (isRunning) {
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
@@ -645,21 +652,19 @@ const API = {
             }
         }
 
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            // A stale-rev response (200 with {stale:true}) means a newer write
-            // already landed on the server. Silently ignore.
-            if (res.status === 200 && err.stale) return err;
-            // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
-            // with a human-readable reason ("already fighting in match X on court Y").
-            // Prefer reasonHuman, then reason, then the error code so the operator
-            // sees a useful message rather than the raw "ineligible_competitor" key.
-            if (err.error === "ineligible_competitor" || err.error === "already_ineligible") {
-                throw new Error(err.reasonHuman || err.reason || err.error || "Failed to record score");
-            }
-            throw new Error(err.error || "Failed to record score");
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+            // A stale running write is signalled by HTTP 200 {stale:true}
+            // (the server's rev-guard no-ops it). Returned as-is; the
+            // fire-and-forget autosave caller ignores the value.
+            return data;
         }
-        return res.json();
+        // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
+        // with a human-readable reason; prefer reasonHuman, then reason, then code.
+        if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
+            throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
+        }
+        throw new Error(data.error || "Failed to record score");
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen — server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is

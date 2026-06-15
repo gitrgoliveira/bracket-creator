@@ -378,6 +378,9 @@ func (r *ScoreRequest) Validate() error {
 	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
+	if err := validateMaxLen("revSession", r.RevSession, MaxLenEntityID); err != nil {
+		return err
+	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only
 	// check when both sides AND winner are present in the request —

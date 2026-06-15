@@ -1038,7 +1038,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// C3: coalesce high-frequency running-status broadcasts (first-wins
 		// within 250ms); completed writes always broadcast unconditionally.
 		isRunning := result.Status == state.MatchStatusRunning
-		if coalescer.Allow(mid, isRunning) {
+		if coalescer.Allow(id+":"+mid, isRunning) {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
 				"matchId":       mid,

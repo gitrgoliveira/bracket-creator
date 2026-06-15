@@ -56,6 +56,15 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 		assert.True(t, c.Allow("m2", true))  // m2 independent
 		assert.False(t, c.Allow("m2", true)) // m2 now coalesced
 	})
+
+	t.Run("competition-scoped keys are independent", func(t *testing.T) {
+		c := newMatchBroadcastCoalescer()
+		// Same bare match id "Pool A-1" in two different competitions must not
+		// share a coalesce window — the call site keys by compID:matchID.
+		assert.True(t, c.Allow("comp1:Pool A-1", true))
+		assert.False(t, c.Allow("comp1:Pool A-1", true)) // comp1 coalesced
+		assert.True(t, c.Allow("comp2:Pool A-1", true))  // comp2 independent
+	})
 }
 
 // ---------------------------------------------------------------------------

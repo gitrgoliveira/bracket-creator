@@ -25,5 +25,10 @@
   },
   "dependencies": {
     "preact-router": "^4.1.2"
+  },
+  "overrides": {
+    "eslint-plugin-react": {
+      "eslint": "$eslint"
+    }
   }
 }

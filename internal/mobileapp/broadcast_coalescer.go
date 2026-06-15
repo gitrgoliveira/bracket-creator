@@ -1,0 +1,55 @@
+package mobileapp
+
+import (
+	"sync"
+	"time"
+)
+
+// matchBroadcastCoalescer rate-limits match_updated SSE broadcasts for
+// "running"-status writes to ≤4/s per match (250ms minimum interval).
+//
+// C3: C1's 300ms client-side debounce already limits autosave writes to
+// ≤3.3/s per match, so this coalescer is defense-in-depth — it prevents
+// a reconnect flush (C2's offline queue) or any other burst from fanning
+// out more than 4 broadcasts/s to the full SSE subscriber pool.
+//
+// Semantics: first-wins within the window. If a running broadcast arrives
+// within 250ms of the previous one for the same match, Allow returns false
+// and the caller skips the fan-out. The next client-side debounce write
+// (~300ms later) will carry the freshest state, so the worst-case viewer
+// lag is one additional debounce period — acceptable for live scoring.
+//
+// Completed and other non-running broadcasts are never coalesced: Always
+// returns true for those. Call sites check status and pass isRunning=false
+// for completed writes.
+//
+// The coalescer is process-scoped and the times map is never pruned — in
+// practice it is bounded by the number of active matches (hundreds at most),
+// so the resident size is negligible.
+type matchBroadcastCoalescer struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+const matchCoalesceWindow = 250 * time.Millisecond
+
+func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
+	return &matchBroadcastCoalescer{last: make(map[string]time.Time)}
+}
+
+// Allow returns true when the broadcast should proceed and false when it
+// should be coalesced (dropped). isRunning must be true for the rate-limit
+// to apply; all other writes pass through unconditionally.
+func (c *matchBroadcastCoalescer) Allow(matchID string, isRunning bool) bool {
+	if !isRunning {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if t, ok := c.last[matchID]; ok && now.Sub(t) < matchCoalesceWindow {
+		return false
+	}
+	c.last[matchID] = now
+	return true
+}

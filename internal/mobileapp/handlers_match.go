@@ -752,6 +752,10 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 var runningRevStore sync.Map
 
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
+	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
+	// per match. Completed writes always proceed (isRunning=false).
+	coalescer := newMatchBroadcastCoalescer()
+
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -1019,11 +1023,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		// Broadcast match update with the full (post-merge) result so
 		// SSE consumers see the same payload they'd see on a re-fetch.
-		hub.Broadcast(EventMatchUpdated, gin.H{
-			"competitionId": id,
-			"matchId":       mid,
-			"result":        matchPtrForBroadcast(result),
-		})
+		// C3: coalesce high-frequency running-status broadcasts (first-wins
+		// within 250ms); completed writes always broadcast unconditionally.
+		isRunning := result.Status == state.MatchStatusRunning
+		if coalescer.Allow(mid, isRunning) {
+			hub.Broadcast(EventMatchUpdated, gin.H{
+				"competitionId": id,
+				"matchId":       mid,
+				"result":        matchPtrForBroadcast(result),
+			})
+		}
 		// T085/T092 — when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.

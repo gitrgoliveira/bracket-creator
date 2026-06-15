@@ -22,7 +22,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
+func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
 	tempDir, err := os.MkdirTemp("", "mobileapp-test-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tempDir) })

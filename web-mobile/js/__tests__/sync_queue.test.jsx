@@ -407,4 +407,34 @@ describe('recordScore: queues running writes on network failure', () => {
             API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)
         ).rejects.toThrow('Already fighting in match X');
     });
+
+    it('queues a running write on a retryable 5xx instead of falsely showing synced', async () => {
+        // A 5xx (or 429) for a running write is transient: queue it for retry so
+        // the sync pill reflects the unsynced state rather than flipping back to
+        // "Synced" (the autosave caller swallows throws). Non-retryable 4xx still
+        // throw — they won't succeed on retry.
+        let status = 'synced';
+        const unsub = subscribeSyncStatus((s) => { status = s; });
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 503,
+            json: () => Promise.resolve({ error: 'temporarily unavailable' }),
+        });
+
+        const result = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(result).toMatchObject({ queued: true });
+        expect(status).not.toBe('synced'); // pill is syncing/offline, not falsely synced
+        unsub();
+    });
+
+    it('queues a running write on 429 (rate limited)', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 429,
+            json: () => Promise.resolve({ error: 'rate limited' }),
+        });
+
+        const result = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(result).toMatchObject({ queued: true });
+    });
 });

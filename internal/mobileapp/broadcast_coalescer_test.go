@@ -161,10 +161,11 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 
 	// Count how many match_updated broadcasts the hub receives.
 	var broadcastCount atomic.Int64
-	// Subscribe to the hub so we can count broadcasts.
+	// Subscribe to the hub so we can count broadcasts. The single explicit
+	// Unsubscribe before wg.Wait() (below) closes the channel so the counting
+	// goroutine exits — that's the deterministic cleanup, so no defer is needed.
 	ch := hub.Subscribe()
 	require.NotNil(t, ch)
-	defer hub.Unsubscribe(ch)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

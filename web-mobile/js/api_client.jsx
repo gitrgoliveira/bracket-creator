@@ -693,6 +693,18 @@ const API = {
             // fire-and-forget autosave caller ignores the value.
             return data;
         }
+        // A running write that failed with a RETRYABLE server error (5xx / 429)
+        // is queued for offline-style retry. Without this the inflight counter
+        // drops to 0 and the pill flips back to "Synced" even though the latest
+        // score never reached the server (the autosave caller swallows the
+        // throw). Queuing keeps the pill on syncing/offline and re-delivers the
+        // latest state. Non-retryable 4xx are terminal (validation / conflict /
+        // finalized) — they won't succeed on retry, so they surface to explicit
+        // callers; the operator's authoritative Finish is the backstop.
+        if (isRunning && (res.status >= 500 || res.status === 429)) {
+            enqueueRunningWrite(compID, matchID, payload, password);
+            return { stale: false, queued: true };
+        }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
         // with a human-readable reason; prefer reasonHuman, then reason, then code.
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {

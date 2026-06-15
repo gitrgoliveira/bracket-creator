@@ -37,6 +37,11 @@ import (
 func matchForBroadcast(m state.MatchResult) state.MatchResult {
 	m.CorrectionReason = ""
 	m.DecisionReason = ""
+	// Rev / RevSession are internal write-ordering metadata (the latter a
+	// client session identifier); they must never leak onto the PUBLIC SSE
+	// stream. They're omitempty, so zeroing them drops them from the payload.
+	m.Rev = 0
+	m.RevSession = ""
 	return m
 }
 

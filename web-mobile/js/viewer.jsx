@@ -3970,6 +3970,7 @@ function AnnBellBtn() {
   }, []); // supported is a static boolean; the effect only wires up listeners once
 
   if (state === "unsupported") return null;
+  if (!BellIcon) return null; // viewer_watchlist.js failed to load
 
   const toggle = async () => {
     if (inFlight.current) return;

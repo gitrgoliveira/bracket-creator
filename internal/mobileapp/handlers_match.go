@@ -297,6 +297,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// same per-comp lock so the status read is race-free against a
 			// concurrent PUT /score. Per-result transactions preserve the
 			// existing {succeeded, errors[]} partial-success response shape.
+			// Court exclusivity (mp-95mg) is intentionally NOT enforced here:
+			// bulk-score is an admin batch-import/correction tool, not a live
+			// match-start path. It also bypasses StartMatchTx for the same
+			// reason — admin corrections are meant to override normal flow.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {

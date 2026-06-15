@@ -289,9 +289,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     // No-op when the side is already at the 2-ippon max: don't mark dirty or
     // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
     const cur = side === "a" ? aPts : bPts;
-    if (cur.length >= 2) return;
-    if (side === "a") setAPts((p) => [...p, letter]);
-    else setBPts((p) => [...p, letter]);
+    if (cur.length >= 2) return; // fast no-op path: don't mark dirty / autosave
+    // The functional updater re-checks the cap against the AUTHORITATIVE current
+    // state (p), not the render-closure cur — so the 2-ippon invariant holds even
+    // if addPt is called twice before a re-render (React batching / rapid taps).
+    if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
+    else setBPts((p) => p.length < 2 ? [...p, letter] : p);
     markScoringDirty(); // C1: trigger debounced autosave
   };
   const removePt = (side, idx) => {

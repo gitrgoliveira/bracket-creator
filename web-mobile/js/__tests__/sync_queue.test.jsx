@@ -530,4 +530,41 @@ describe('recordScore: completed write drains queued running autosave', () => {
         unsub2();
         expect(finalStatuses).toContain('synced');
     });
+
+    it('a FAILED completed write KEEPS the queued running snapshot (drain deferred to success)', async () => {
+        // Regression: the drain used to run pre-flight, so a completed write that
+        // failed (e.g. Finish while offline) discarded the last queued running
+        // snapshot — losing the operator's scores. The drain now runs only after
+        // the completed write is server-confirmed, so a failure preserves the
+        // snapshot for later delivery.
+        let online = false;
+        const delivered = [];
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            const body = JSON.parse(opts.body);
+            if (!online) {
+                // Offline: every write fails at the network layer.
+                return Promise.reject(new TypeError('network error'));
+            }
+            delivered.push(body.status);
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        // Step 1: running write fails → queued.
+        const queued = await API.recordScore('c1', 'm_keep', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        expect(queued).toMatchObject({ queued: true });
+
+        // Step 2: completed write while still offline → throws. It must NOT drain
+        // the queued running snapshot (the old pre-flight drain would have).
+        await expect(
+            API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null)
+        ).rejects.toThrow();
+
+        // Step 3: connection returns; the preserved snapshot flushes on the next
+        // backoff retry. Only the running write was ever queued — the failed
+        // completed write was not, so it does not reappear.
+        online = true;
+        await tick(600);
+        expect(delivered).toContain('running');
+        expect(delivered).not.toContain('completed');
+    });
 });

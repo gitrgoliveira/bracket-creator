@@ -657,14 +657,6 @@ const API = {
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev — the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
-        if (!isRunning) {
-            // A completed/terminal write supersedes any queued running autosave
-            // for this match — drop it so a stale flush can't revert the result.
-            if (_writeQueue.delete(_revKey(compID, matchID))) _recomputeSyncStatus();
-            // Prune the per-match rev counter so it doesn't accumulate for the
-            // page session across many matches/competitions.
-            _matchRevCounters.delete(_revKey(compID, matchID));
-        }
         if (isRunning) {
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
@@ -712,6 +704,17 @@ const API = {
 
         const data = await res.json().catch(() => ({}));
         if (res.ok) {
+            if (!isRunning) {
+                // A completed/terminal write that the server CONFIRMED supersedes
+                // any queued running autosave for this match — drain it now (and
+                // prune the per-match rev counter) so a stale flush can't later
+                // revert the finalized result. Deferred from pre-flight on purpose:
+                // if the completed PUT fails (e.g. Finish while offline) we KEEP the
+                // last queued running snapshot so it can still flush when the
+                // connection returns, instead of dropping the operator's scores.
+                if (_writeQueue.delete(_revKey(compID, matchID))) _recomputeSyncStatus();
+                _matchRevCounters.delete(_revKey(compID, matchID));
+            }
             // A stale running write is signalled by HTTP 200 {stale:true}
             // (the server's rev-guard no-ops it). Returned as-is; the
             // fire-and-forget autosave caller ignores the value.

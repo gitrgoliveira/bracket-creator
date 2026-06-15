@@ -1504,12 +1504,13 @@ paths:
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
               Extra fields: `playerId`, `reason`, `reasonHuman`.
             - `already_ineligible`: participant was already marked ineligible before this match.
-              Extra fields: `playerId`, `reason`, `reasonHuman`.
-            - `result_finalized`: the match result is locked because a downstream knockout
-              match has already been scored. Extra fields: `pool`, `finisher`.
+              Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
+            - `result_finalized`: the match result is already locked (self-reported only).
+              Extra fields: `message`.
             - `side_mismatch`: the submitted winner does not match either side of the match.
-            - `downstream_knockout_scored`: a downstream elimination match was already
-              scored; use `force=true` to override.
+              Extra fields: `message`.
+            - `downstream_knockout_scored`: a downstream elimination match was already scored.
+              Extra fields: `pool`, `finisher`, `matchId`, `message`.
           content:
             application/json:
               schema:
@@ -1531,13 +1532,13 @@ paths:
                     description: Court label (court_busy only).
                   matchId:
                     type: string
-                    description: Conflicting match ID (court_busy only).
+                    description: Conflicting match ID (court_busy, already_ineligible, downstream_knockout_scored).
                   compId:
                     type: string
                     description: Conflicting competition ID (court_busy only).
                   message:
                     type: string
-                    description: Human-readable detail (court_busy only).
+                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_scored).
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -1549,10 +1550,10 @@ paths:
                     description: Human-readable reason (ineligible_competitor / already_ineligible).
                   pool:
                     type: string
-                    description: Pool ID of the finalized match (result_finalized only).
+                    description: Pool ID containing the scored downstream match (downstream_knockout_scored only).
                   finisher:
                     type: string
-                    description: Match ID that finalized the result (result_finalized only).
+                    description: Match ID of the scored downstream match (downstream_knockout_scored only).
 
   /api/competitions/{id}/matches/{mid}/court:
     put:

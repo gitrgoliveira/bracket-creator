@@ -948,6 +948,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				})
 				return
 			}
+			var notFoundEngErr *engine.NotFoundError
+			if errors.As(engErr, &notFoundEngErr) {
+				c.JSON(http.StatusNotFound, gin.H{"error": engErr.Error()})
+				return
+			}
 			var valErr *ValidationError
 			if errors.As(engErr, &valErr) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})

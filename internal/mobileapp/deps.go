@@ -180,10 +180,9 @@ type Broadcaster interface {
 // CompetitionStore / TeamLineupStore / etc. interfaces at the
 // registration site, same pattern the other handler families use.
 //
-// Consumers (current): handlers_lineup.go (the PUT, T156). The score
-// and decision handlers are queued for migration once the engine
-// methods learn tx-aware variants; until then they hold the concrete
-// *engine.Engine which internally locks per-comp.
+// Consumers (current): handlers_lineup.go (the PUT, T156);
+// handlers_match.go (score, mp-95mg — wraps WithCourtExclusivityLock +
+// WithTransaction); handlers_decision.go (decision, T156).
 type CompetitionTransactor interface {
 	// WithTransaction runs fn under the per-competition write lock for
 	// compID. fn receives a state.StoreTx handle whose methods skip

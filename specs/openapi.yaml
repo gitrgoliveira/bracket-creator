@@ -1553,7 +1553,7 @@ paths:
                     description: Pool ID containing the scored downstream match (downstream_knockout_scored only).
                   finisher:
                     type: string
-                    description: Match ID of the scored downstream match (downstream_knockout_scored only).
+                    description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
 
   /api/competitions/{id}/matches/{mid}/court:
     put:

@@ -6,10 +6,8 @@ import (
 	"log"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -743,34 +741,13 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // for this slice.
 // runningRev is the per-match value stored in runningRevStore: the highest
 // Rev seen WITHIN a given client scoring session (RevSession). A write whose
-// RevSession differs from the stored one always takes over (new page load /
-// device), so a scorer reload starting back at rev=1 is never dropped.
+// RevSession differs from the stored one is treated as last-write-wins
+// (concurrent operators — multiple operators may score one shiaijo). The
+// completed-match regression guard is the real protection against a stale
+// running write reverting a finished result.
 type runningRev struct {
 	Session string
 	Rev     int64
-}
-
-// parseSessionEpoch extracts the leading "<epochMillis>-..." prefix a client
-// stamps into RevSession. Returns 0 when absent/unparseable (legacy or
-// malformed input) — callers treat a 0 epoch as "unknown" and fall back to
-// allowing session takeover rather than dropping the write.
-func parseSessionEpoch(s string) int64 {
-	i := strings.IndexByte(s, '-')
-	if i <= 0 {
-		return 0
-	}
-	n, err := strconv.ParseInt(s[:i], 10, 64)
-	if err != nil || n < 0 {
-		return 0
-	}
-	// Reject an implausibly far-future epoch (client-supplied, unauthenticated
-	// in self-run mode): treat it as unknown (0) so it can't poison the guard
-	// into dropping every legitimate session as "older". 24h tolerates clock skew.
-	const maxFutureMS = int64(24 * 60 * 60 * 1000)
-	if n > time.Now().UnixMilli()+maxFutureMS {
-		return 0
-	}
-	return n
 }
 
 // runningRevStore is a process-lifetime, in-memory map that tracks the
@@ -779,13 +756,16 @@ func parseSessionEpoch(s string) int64 {
 // (session + rev).
 //
 // C2 rev-guard: when a "running" write arrives with a Rev that is lower
-// than the stored high-water mark (within the same RevSession) we silently
+// than the stored high-water mark WITHIN THE SAME RevSession, we silently
 // no-op it (return 200). This prevents out-of-order delivery from a
 // reconnect flush overwriting a more-recent in-flight write. Writes from a
-// new RevSession always take over (reload / different device). Only
-// "running" writes are gated — completed writes and Rev==0 (unversioned)
-// writes always proceed so the guard never blocks explicit operator submits
-// or legacy clients.
+// DIFFERENT RevSession are treated as last-write-wins — multiple operators
+// may legitimately score the same shiaijo concurrently. The completed-match
+// regression guard (staleAfterComplete, inside the tx) is the authoritative
+// protection: it ensures a running write never reverts a finished match
+// regardless of session. Only "running" writes are gated — completed writes
+// and Rev==0 (unversioned) writes always proceed so the guard never blocks
+// explicit operator submits or legacy clients.
 //
 // The map is process-scoped and therefore reset on server restart; the
 // on-disk state is the ground truth. A mis-ordered running-write that
@@ -870,45 +850,31 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		//     unversioned and always proceed rather than collapse mixed clients
 		//     into the "" session and wrongly drop a reload starting at rev=1)
 		//
-		// If the stored high-water mark for this match (within the same session)
-		// is already > the incoming Rev, the write is stale: return 200 so the
-		// client doesn't surface an error, but skip the engine write entirely. A
-		// higher-or-equal rev advances the mark and proceeds normally.
+		// Same-session ordering: if the stored high-water mark for this match
+		// (within the same session) is already > the incoming Rev, the write is
+		// stale — return 200 so the client doesn't surface an error but skip the
+		// engine write entirely. A higher-or-equal rev advances the mark.
 		//
-		// Epoch ordering (cross-session): RevSession carries a "<epochMs>-<uuid>"
-		// prefix. Epochs are computed inline via parseSessionEpoch. When both
-		// epochs are known (non-zero), an incoming write from an OLDER epoch is
-		// dropped. On the rare same-epoch tie (same millisecond), the rev is used
-		// as a tiebreaker so a lower rev can't lower the high-water mark. When
-		// either epoch is 0 (legacy/malformed) we allow takeover, preserving prior
-		// behaviour.
+		// Different sessions (concurrent operators): last-write-wins. Multiple
+		// operators may legitimately score the same shiaijo simultaneously. The
+		// completed-match regression guard (staleAfterComplete, inside the tx)
+		// is the real protection against a running write reverting a finished match.
 		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
 			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
-			// Hoist epoch parse: incoming.Session is invariant across CAS retries.
-			inE := parseSessionEpoch(incoming.Session)
 			for {
 				existing, loaded := runningRevStore.LoadOrStore(matchKey, incoming)
 				if !loaded {
 					break // first running write for this key
 				}
 				stored := existing.(runningRev)
-				if stored.Session == incoming.Session {
-					// Same session: a lower rev is a stale out-of-order delivery.
-					if result.Rev < stored.Rev {
-						c.JSON(http.StatusOK, gin.H{"stale": true})
-						return
-					}
-				} else {
-					// Different session: order by epoch (page-load time). Drop an
-					// OLDER-epoch write (an evicted session's late reconnect flush).
-					// On the rare same-epoch tie (same millisecond), fall back to
-					// rev so a lower rev can't lower the high-water mark. When
-					// either epoch is unknown (0), allow takeover (legacy/malformed).
-					stE := parseSessionEpoch(stored.Session)
-					if inE > 0 && stE > 0 && (inE < stE || (inE == stE && result.Rev < stored.Rev)) {
-						c.JSON(http.StatusOK, gin.H{"stale": true})
-						return
-					}
+				// Same session: a lower rev is a stale out-of-order delivery (e.g.
+				// a reconnect flush). Drop it. DIFFERENT sessions are concurrent
+				// operators (multiple operators may score one shiaijo) — last write
+				// wins; the completed-match regression guard below still prevents a
+				// running write from reverting a finished match.
+				if stored.Session == incoming.Session && result.Rev < stored.Rev {
+					c.JSON(http.StatusOK, gin.H{"stale": true})
+					return
 				}
 				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {
 					break
@@ -1035,9 +1001,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if staleAfterComplete {
-			// The running write was re-added to runningRevStore by the rev-guard
-			// above (the completed write had deleted it); drop it again so the
-			// finished match's slot doesn't linger.
+			// The rev-guard above stored this running write's session+rev into
+			// runningRevStore (LoadOrStore) before we discovered, inside the
+			// transaction, that the match is already completed. Drop the entry now
+			// — no future running write can legitimately supersede a completed
+			// match, so retaining it would leak map memory.
 			runningRevStore.Delete(matchKey)
 			c.JSON(http.StatusOK, gin.H{"stale": true})
 			return

@@ -86,6 +86,14 @@ const AUTOSAVE_DEBOUNCE_MS = 300;
 // COPY RULE: NEVER use the word "live" in user-facing strings.
 // Colors use design tokens only (var(--...)) — no hardcoded hex.
 // ---------------------------------------------------------------------------
+
+// Module-level const — hoisted so the object is not rebuilt on every render.
+const SYNC_PILL_CONFIG = {
+  synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
+  syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
+  offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '●' },
+};
+
 function SyncStatusPill({ isRunning }) {
   // The component always mounts and subscribes to sync status (the subscription
   // is a single Set entry and replays the current value on subscribe). It only
@@ -103,12 +111,7 @@ function SyncStatusPill({ isRunning }) {
 
   if (!isRunning) return null; // render guard: no visible pill unless running
 
-  const config = {
-    synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
-    syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
-    offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '●' },
-  };
-  const c = config[status] || config.synced;
+  const c = SYNC_PILL_CONFIG[status] || SYNC_PILL_CONFIG.synced;
   return (
     <span className={`sync-status-pill ${c.cls}`} data-testid="sync-status-pill" aria-label={`Score sync: ${c.label}`}>
       <span className="sync-pill__dot" aria-hidden="true">{c.dot}</span>

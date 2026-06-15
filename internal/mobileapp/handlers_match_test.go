@@ -523,81 +523,6 @@ func TestScoreHandler_RevGuard_PrunesOnCompletion(t *testing.T) {
 	assert.False(t, present, "completed write must prune the rev store entry")
 }
 
-// TestScoreHandler_RevGuard_EpochOrdering validates the cross-session epoch
-// comparison added by Finding 1: an incoming write from an evicted (older-epoch)
-// session is dropped as stale when a newer-epoch session has already taken over.
-//
-// Sequence:
-//  1. "2000-aaaa" rev=1 → first write for the key, must proceed (stored).
-//  2. "1000-bbbb" rev=1 → older epoch, must be STALE (body["stale"]==true).
-//  3. "3000-cccc" rev=1 → newer epoch, must proceed (takes over).
-//
-// Also confirms that the existing tests (sessions without epoch prefix → epoch=0)
-// still pass: cross-session with both epochs 0 allows takeover (legacy behaviour).
-func TestScoreHandler_RevGuard_EpochOrdering(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rge1", Courts: []string{"A"}}))
-	require.NoError(t, store.SavePoolMatches("rge1", []state.MatchResult{
-		{ID: "PoolE-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
-	}))
-	// Isolate from other tests.
-	runningRevStore.Delete("rge1:PoolE-1")
-
-	scoreWith := func(revSession string, rev int64) (int, map[string]any) {
-		t.Helper()
-		payload, _ := json.Marshal(map[string]any{
-			"sideA": "Alice", "sideB": "Bob",
-			"ipponsA": []string{"M"}, "ipponsB": []string{},
-			"status":     "running",
-			"rev":        rev,
-			"revSession": revSession,
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/rge1/matches/PoolE-1/score", bytes.NewBuffer(payload))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		var body map[string]any
-		_ = json.Unmarshal(w.Body.Bytes(), &body)
-		return w.Code, body
-	}
-
-	t.Run("epoch=2000 rev=1 proceeds (first write)", func(t *testing.T) {
-		code, body := scoreWith("2000-aaaa", 1)
-		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "first write must proceed")
-	})
-
-	t.Run("epoch=1000 rev=1 is stale (older epoch evicted session)", func(t *testing.T) {
-		code, body := scoreWith("1000-bbbb", 1)
-		assert.Equal(t, http.StatusOK, code)
-		stale, ok := body["stale"].(bool)
-		assert.True(t, ok && stale, "older-epoch session's write must be stale")
-	})
-
-	t.Run("epoch=3000 rev=1 proceeds (newer epoch takes over)", func(t *testing.T) {
-		code, body := scoreWith("3000-cccc", 1)
-		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "newer-epoch session must take over")
-	})
-
-	t.Run("no-epoch sessions (epoch=0) still allow cross-session takeover", func(t *testing.T) {
-		// Reset to a no-epoch session at high rev, then send another no-epoch
-		// session at low rev — both have epoch=0 so the epoch guard is skipped
-		// and the takeover is allowed (legacy behaviour preserved).
-		runningRevStore.Delete("rge1:PoolE-1")
-		code, body := scoreWith("session-A", 10) // no epoch prefix
-		require.Equal(t, http.StatusOK, code)
-		require.Nil(t, body["stale"])
-
-		code, body = scoreWith("session-B", 1) // different no-epoch session
-		assert.Equal(t, http.StatusOK, code)
-		assert.Nil(t, body["stale"], "no-epoch cross-session must still allow takeover")
-	})
-}
-
 // TestScoreHandler_MidLengthCap verifies that the score endpoint rejects a
 // match ID that exceeds MaxLenMatchID bytes with HTTP 400.
 func TestScoreHandler_MidLengthCap(t *testing.T) {
@@ -2065,35 +1990,6 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 		assert.Equal(t, "admin", result.ResultSource)
 	})
-}
-
-// TestParseSessionEpoch validates all branches of the parseSessionEpoch helper:
-// invalid/missing inputs return 0; a valid past epoch is returned as-is;
-// a far-future epoch (>24h from now) is clamped to 0.
-func TestParseSessionEpoch(t *testing.T) {
-	pastEpoch := int64(1718000000000) // a fixed past timestamp (ms)
-	farFuture := fmt.Sprintf("%d-x", time.Now().UnixMilli()+100*24*3600*1000)
-
-	cases := []struct {
-		name  string
-		input string
-		want  int64
-	}{
-		{"empty string", "", 0},
-		{"no dash", "abc", 0},
-		{"leading dash only", "-123", 0},
-		{"non-numeric prefix", "12x3-uuid", 0},
-		{"negative prefix", "-5-uuid", 0},
-		{"valid past epoch", fmt.Sprintf("%d-uuid", pastEpoch), pastEpoch},
-		{"far-future epoch clamped", farFuture, 0},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseSessionEpoch(tc.input)
-			assert.Equal(t, tc.want, got)
-		})
-	}
 }
 
 // TestScoreHandler_FabricatedMid_TxNotFound verifies that a running-write for a

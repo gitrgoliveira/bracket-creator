@@ -45,11 +45,13 @@ function _nextRev(compID, matchID) {
     return next;
 }
 
-// Per-page-load session id, prefixed with a wall-clock epoch (ms) so the
-// server can order sessions: a later page load has a larger epoch and takes
-// over; an evicted session's late (queued) write has a smaller epoch and is
-// dropped. Format: "<epochMillis>-<random>". jsdom-safe fallback.
-const _revSession = `${Date.now()}-${(typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`;
+// Per-page-load scoring-session id. Identifies one client session so the
+// server's rev-guard can drop a single session's own out-of-order delivery
+// (a reconnect flush). Different sessions are concurrent operators — the
+// server treats those as last-write-wins. jsdom-safe fallback.
+const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `s${Math.random().toString(36).slice(2)}`;
 
 // ---------------------------------------------------------------------------
 // C2: Offline write queue
@@ -659,6 +661,9 @@ const API = {
             // A completed/terminal write supersedes any queued running autosave
             // for this match — drop it so a stale flush can't revert the result.
             if (_writeQueue.delete(_revKey(compID, matchID))) _recomputeSyncStatus();
+            // Prune the per-match rev counter so it doesn't accumulate for the
+            // page session across many matches/competitions.
+            _matchRevCounters.delete(_revKey(compID, matchID));
         }
         if (isRunning) {
             payload.rev = _nextRev(compID, matchID);

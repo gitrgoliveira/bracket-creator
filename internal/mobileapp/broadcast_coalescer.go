@@ -23,9 +23,10 @@ import (
 // returns true for those. Call sites check status and pass isRunning=false
 // for completed writes.
 //
-// The coalescer is process-scoped and the times map is never pruned — in
-// practice it is bounded by the number of active matches (hundreds at most),
-// so the resident size is negligible.
+// The coalescer is process-scoped. A match's entry is dropped when its first
+// non-running (completed/terminal) broadcast passes through Allow, so the map
+// is bounded by the set of currently-RUNNING matches (not every match the
+// process ever saw) — resident size stays negligible.
 type matchBroadcastCoalescer struct {
 	mu   sync.Mutex
 	last map[string]time.Time
@@ -42,6 +43,13 @@ func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
 // to apply; all other writes pass through unconditionally.
 func (c *matchBroadcastCoalescer) Allow(matchID string, isRunning bool) bool {
 	if !isRunning {
+		// A non-running (completed/terminal) broadcast always proceeds AND ends
+		// the match's coalescing window — drop its entry so the map stays bounded
+		// by the currently-running matches rather than growing for the process
+		// lifetime. A later correction that re-opens the match starts fresh.
+		c.mu.Lock()
+		delete(c.last, matchID)
+		c.mu.Unlock()
 		return true
 	}
 	c.mu.Lock()

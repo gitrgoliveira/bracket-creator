@@ -65,6 +65,22 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 		assert.False(t, c.Allow("comp1:Pool A-1", true)) // comp1 coalesced
 		assert.True(t, c.Allow("comp2:Pool A-1", true))  // comp2 independent
 	})
+
+	t.Run("non-running Allow prunes the match entry (bounded map)", func(t *testing.T) {
+		c := newMatchBroadcastCoalescer()
+		assert.True(t, c.Allow("m1", true)) // running write records the entry
+		c.mu.Lock()
+		_, present := c.last["m1"]
+		c.mu.Unlock()
+		require.True(t, present, "running broadcast must record an entry")
+
+		// A completed (non-running) broadcast proceeds AND prunes the entry.
+		assert.True(t, c.Allow("m1", false))
+		c.mu.Lock()
+		_, present = c.last["m1"]
+		c.mu.Unlock()
+		assert.False(t, present, "non-running broadcast must drop the entry to keep the map bounded")
+	})
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotificatio
 import { AnnouncementBanner, AnnouncementCard, notificationSupported } from '../viewer.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 import { makeNotifMock, makeLocalStorageMock } from './test_helpers.js';
+import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
 
 // Helper: recursively search a React element tree (mock objects) for all
 // elements matching a predicate, returning them as a flat list.
@@ -318,7 +319,7 @@ describe('fireBrowserNotifications', () => {
     setDocumentHidden(true);
 
     // Install a mock localStorage with the toggle pre-enabled.
-    const lsMock = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    const lsMock = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
     Object.defineProperty(window, 'localStorage', { value: lsMock, writable: true, configurable: true });
   });
 
@@ -367,7 +368,7 @@ describe('fireBrowserNotifications', () => {
 
   it('does NOT fire when the localStorage toggle is off', () => {
     // Override the mock localStorage (beforeEach sets 'true') to 'false'.
-    window.localStorage.setItem('viewer.notifications.enabled', 'false');
+    window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, 'false');
     fireBrowserNotifications([{ id: 'ann-5', message: 'Hello' }]);
     expect(NotificationMock).not.toHaveBeenCalled();
   });
@@ -700,7 +701,7 @@ describe('AnnBellBtn', () => {
   });
 
   it('renders in on state when storedOptIn=true and permission=granted', () => {
-    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    const ls = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
     Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
     global.Notification = { permission: 'granted', requestPermission: vi.fn() };
     runtime.mount(AB, {});
@@ -714,7 +715,7 @@ describe('AnnBellBtn', () => {
   // State must render "off" (permission not yet confirmed) and the first click
   // must call requestPermission (enable path), not notifDisable (turn-off path).
   it('state is off and first click requests permission when storedOptIn=true but permission=default', async () => {
-    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    const ls = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
     Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
     const requestPermission = vi.fn().mockResolvedValue('granted');
     global.Notification = { permission: 'default', requestPermission };
@@ -726,7 +727,7 @@ describe('AnnBellBtn', () => {
   });
 
   it('does not request permission on click when already on (turns off via notifDisable)', async () => {
-    const ls = makeLocalStorageMock({ 'viewer.notifications.enabled': 'true' });
+    const ls = makeLocalStorageMock({ [LS_NOTIFICATIONS_ENABLED]: 'true' });
     Object.defineProperty(window, 'localStorage', { value: ls, writable: true, configurable: true });
     const requestPermission = vi.fn();
     global.Notification = { permission: 'granted', requestPermission };
@@ -734,6 +735,6 @@ describe('AnnBellBtn', () => {
     expect(findBtn().props['aria-pressed']).toBe(true);
     await findBtn().props.onClick();
     expect(requestPermission).not.toHaveBeenCalled();
-    expect(ls.getItem('viewer.notifications.enabled')).toBe('false');
+    expect(ls.getItem(LS_NOTIFICATIONS_ENABLED)).toBe('false');
   });
 });

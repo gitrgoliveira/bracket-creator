@@ -654,13 +654,18 @@ function subscribePermissionChanges() {
   _permSubscribed = true;
   try {
     navigator.permissions?.query?.({ name: "notifications" })?.then((s) => {
-      s.addEventListener?.("change", () => {
+      const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
         // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
         let optIn = false;
         try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
         dispatchNotif(optIn);
-      });
+      };
+      if (typeof s.addEventListener === "function") {
+        s.addEventListener("change", handleChange);
+      } else {
+        s.onchange = handleChange;
+      }
     })?.catch(() => { _permSubscribed = false; });
   } catch (_e) {
     _permSubscribed = false;

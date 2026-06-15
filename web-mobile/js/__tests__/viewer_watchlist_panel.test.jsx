@@ -94,7 +94,7 @@ describe('WatchHeroCard', () => {
 });
 
 describe('WatchlistPanel', () => {
-  let runtime, WatchlistPanel, WatchHeroCard;
+  let runtime, WatchlistPanel, WatchHeroCard, WatchPicker;
   beforeEach(async () => {
     runtime = makeReactive();
     global.React = runtime.React;
@@ -106,7 +106,7 @@ describe('WatchlistPanel', () => {
     // (effectivePrimaryKey, entryKey, resolveEntryPlayerIds, addPlayerToWatchlist,
     // VSchedItem, WATCHLIST_MAX); the components live in viewer_watchlist.jsx.
     await import('../viewer.jsx');
-    ({ WatchlistPanel, WatchHeroCard } = await import('../viewer_watchlist.jsx'));
+    ({ WatchlistPanel, WatchHeroCard, WatchPicker } = await import('../viewer_watchlist.jsx'));
   });
   afterEach(() => { runtime.unmount(); global.React = realReact; vi.resetModules(); });
 
@@ -180,6 +180,38 @@ describe('WatchlistPanel', () => {
     expect(dojoChip).toBeTruthy();
     // Hagane Dojo has 2 members in ROSTER (p1, p3).
     expect(collectText(dojoChip)).toContain('Hagane Dojo (2)');
+  });
+
+  // onFirstAdd / maybeFirstAdd: fires exactly once per empty→add transition.
+  // Relies on WatchPicker appearing as an unexecuted child vnode — call its
+  // onPickPlayer prop directly to invoke addPlayer() → maybeFirstAdd().
+  it('onFirstAdd fires exactly once on the first player add when watchlist is empty', () => {
+    const onFirstAdd = vi.fn();
+    runtime.mount(WatchlistPanel, baseProps({ onFirstAdd }));
+    const picker = findAll(runtime.currentTree(), (n) => n.type === WatchPicker)[0];
+    picker.props.onPickPlayer(ROSTER[0]);
+    expect(onFirstAdd).toHaveBeenCalledOnce();
+  });
+
+  it('onFirstAdd does not fire on subsequent adds in the same session', () => {
+    const onFirstAdd = vi.fn();
+    runtime.mount(WatchlistPanel, baseProps({ onFirstAdd }));
+    const picker = findAll(runtime.currentTree(), (n) => n.type === WatchPicker)[0];
+    picker.props.onPickPlayer(ROSTER[0]);
+    picker.props.onPickPlayer(ROSTER[1]);
+    expect(onFirstAdd).toHaveBeenCalledOnce();
+  });
+
+  it('onFirstAdd fires again after the watchlist is cleared and the panel remounts', () => {
+    const onFirstAdd = vi.fn();
+    // First session: add from empty → fires once.
+    runtime.mount(WatchlistPanel, baseProps({ onFirstAdd }));
+    findAll(runtime.currentTree(), (n) => n.type === WatchPicker)[0].props.onPickPlayer(ROSTER[0]);
+    expect(onFirstAdd).toHaveBeenCalledOnce();
+    // Simulate watchlist cleared → panel remounts (hookSlots reset, mount effect re-runs).
+    runtime.mount(WatchlistPanel, baseProps({ onFirstAdd }));
+    findAll(runtime.currentTree(), (n) => n.type === WatchPicker)[0].props.onPickPlayer(ROSTER[1]);
+    expect(onFirstAdd).toHaveBeenCalledTimes(2);
   });
 });
 

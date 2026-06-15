@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
 import { AnnouncementBanner, AnnouncementCard, NotificationSettings, notificationSupported } from '../viewer.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
-import { makeNotifMock } from './test_helpers.js';
+import { makeNotifMock, makeLocalStorageMock } from './test_helpers.js';
 
 // Helper: recursively search a React element tree (mock objects) for all
 // elements matching a predicate, returning them as a flat list.
@@ -304,19 +304,6 @@ describe('fireBrowserNotifications', () => {
 
   const setDocumentHidden = (val) => {
     Object.defineProperty(document, 'hidden', { value: val, writable: true, configurable: true });
-  };
-
-  // Create a minimal in-memory localStorage stub for tests that need it.
-  // window.localStorage is undefined in this jsdom/node environment so we
-  // install a mock on window directly in each test suite that reads it.
-  const makeLocalStorageMock = (initialEntries = {}) => {
-    const store = { ...initialEntries };
-    return {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = String(v); },
-      removeItem: (k) => { delete store[k]; },
-      clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
-    };
   };
 
   beforeEach(() => {
@@ -629,17 +616,6 @@ describe('diffAnnouncementSnapshot', () => {
 describe('NotificationSettings', () => {
   let originalNotification;
   let originalWindowLocalStorage;
-
-  // Minimal in-memory localStorage stub (same pattern as fireBrowserNotifications suite).
-  const makeLocalStorageMock = (initialEntries = {}) => {
-    const store = { ...initialEntries };
-    return {
-      getItem: (k) => (k in store ? store[k] : null),
-      setItem: (k, v) => { store[k] = String(v); },
-      removeItem: (k) => { delete store[k]; },
-      clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
-    };
-  };
 
   beforeEach(() => {
     originalNotification = global.Notification;

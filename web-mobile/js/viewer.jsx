@@ -660,7 +660,7 @@ function subscribePermissionChanges() {
       try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
       dispatchNotif(optIn);
     });
-  })?.catch(() => {});
+  })?.catch(() => { _permSubscribed = false; });
 }
 
 function useChimeMuted() {
@@ -1086,10 +1086,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const WatchlistPanel = window.WatchlistPanel ?? (() => null);
   const t = tournament;
   const comps = t.competitions || [];
-  const completedCount = useMemo(
-    () => comps.filter((c) => c.status === "completed").length,
-    [comps]
-  );
+  const completedCount = comps.filter((c) => c.status === "completed").length;
   const compsByDate = useMemo(() => {
     const map = {};
     comps.forEach((c) => {

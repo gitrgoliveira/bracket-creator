@@ -408,11 +408,12 @@ describe('recordScore: queues running writes on network failure', () => {
         ).rejects.toThrow('Already fighting in match X');
     });
 
-    it('queues a running write on a retryable 5xx instead of falsely showing synced', async () => {
+    it('queues a running 5xx as "syncing" (server up — not "offline" or falsely "synced")', async () => {
         // A 5xx (or 429) for a running write is transient: queue it for retry so
         // the sync pill reflects the unsynced state rather than flipping back to
-        // "Synced" (the autosave caller swallows throws). Non-retryable 4xx still
-        // throw — they won't succeed on retry.
+        // "Synced" (the autosave caller swallows throws). And because the network
+        // is UP (the server responded), the pill must be "syncing", never
+        // "offline". Non-retryable 4xx still throw — they won't succeed on retry.
         let status = 'synced';
         const unsub = subscribeSyncStatus((s) => { status = s; });
         global.fetch = vi.fn().mockResolvedValue({
@@ -422,8 +423,9 @@ describe('recordScore: queues running writes on network failure', () => {
         });
 
         const result = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        await flushMicrotasks(); // let the queued flush attempt run
         expect(result).toMatchObject({ queued: true });
-        expect(status).not.toBe('synced'); // pill is syncing/offline, not falsely synced
+        expect(status).toBe('syncing'); // server up but erroring — not offline, not synced
         unsub();
     });
 

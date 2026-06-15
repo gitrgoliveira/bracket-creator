@@ -278,6 +278,10 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const bTotal = bPts.filter((x) => x !== "•").length;
 
   const addPt = (side, letter) => {
+    // No-op when the side is already at the 2-ippon max: don't mark dirty or
+    // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
+    const cur = side === "a" ? aPts : bPts;
+    if (cur.length >= 2) return;
     if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
     else setBPts((p) => p.length < 2 ? [...p, letter] : p);
     markScoringDirty(); // C1: trigger debounced autosave

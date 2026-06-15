@@ -79,8 +79,11 @@ const _syncListeners = new Set();
 // even when the queue is empty (i.e. the write succeeded and was removed from
 // the queue but the fetch hasn't resolved yet).
 let _inflightRunning = 0;
-// Set to true when a flush attempt ends with at least one network failure.
-// Cleared back to false when a flush drains the queue successfully.
+// Set to true ONLY when a flush attempt ends with at least one true NETWORK
+// failure (fetch rejected — connection down). A non-2xx server response (e.g. a
+// transient 5xx/429) keeps the write queued for retry but is NOT "offline": the
+// network is up, so the pill stays "Syncing…" rather than "Offline". Cleared
+// back to false when a flush drains the queue or no network failure occurs.
 let _offlineFlag = false;
 
 function _setSyncStatus(s) {
@@ -147,7 +150,8 @@ async function _flushQueue() {
             // identity before deleting so a newer write (a fresh object literal set
             // under the same key by enqueueRunningWrite) is not accidentally removed.
             const entries = [..._writeQueue.entries()];
-            let anyFailed = false;
+            let anyFailed = false;      // any failure → keep in queue + backoff
+            let networkFailed = false;  // fetch rejected → connection down → "offline"
             for (const [key, descriptor] of entries) {
                 const { compID, matchID, payload, password } = descriptor;
                 try {
@@ -171,11 +175,14 @@ async function _flushQueue() {
                         }).catch(() => {});
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     } else {
-                        // Other non-2xx — keep in queue and retry with backoff.
+                        // Other non-2xx (transient 5xx/429) — server is up but erroring;
+                        // keep in queue and retry with backoff, but this is NOT "offline".
                         anyFailed = true;
                     }
                 } catch (_) {
+                    // fetch rejected — the network is down.
                     anyFailed = true;
+                    networkFailed = true;
                 }
             }
             if (_writeQueue.size === 0) {
@@ -185,13 +192,15 @@ async function _flushQueue() {
             } else if (anyFailed && !_flushRequested) {
                 // Schedule a backoff retry only if no immediate rerun is already
                 // pending (a pending rerun will re-attempt the failed writes now).
-                _offlineFlag = true;
+                // Only a true network failure flips the pill to "Offline"; a server
+                // error keeps it "Syncing…".
+                _offlineFlag = networkFailed;
                 _recomputeSyncStatus();
                 const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
                 _flushAttempt++;
                 _flushTimer = setTimeout(_flushQueue, delay);
             } else if (anyFailed) {
-                _offlineFlag = true;
+                _offlineFlag = networkFailed;
                 _recomputeSyncStatus();
             }
         } while (_flushRequested);

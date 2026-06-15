@@ -467,10 +467,10 @@ func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 		assert.Nil(t, body["stale"], "a new session must never be dropped as stale")
 	})
 
-	t.Run("session B rev=0 (prior write) is also stale in session B now", func(t *testing.T) {
-		// After session B landed rev=1, a session-B write with rev=0 would be
-		// dropped — BUT rev=0 is unversioned (guard is gated on Rev > 0), so
-		// it must always proceed.
+	t.Run("session B rev=0 is unversioned and always proceeds", func(t *testing.T) {
+		// Even though session B's stored mark is rev=1, a rev=0 write is
+		// unversioned (the guard is gated on Rev > 0), so it must proceed
+		// rather than be dropped as stale.
 		code, body := scoreRunningWithSession("session-B", 0)
 		assert.Equal(t, http.StatusOK, code)
 		assert.Nil(t, body["stale"], "rev=0 is unversioned and must always proceed")

@@ -2,7 +2,7 @@
 // These pure helpers drive AnnBellBtn, NotificationSettings, and the
 // NOTIF_SYNC_EVENT broadcast — cover every return value branch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { notifEnable, notifDisable } from '../viewer.jsx';
+import { notifEnable, notifDisable, NOTIF_SYNC_EVENT } from '../viewer.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
 import { makeLocalStorageMock, makeThrowingLocalStorageMock, makeFullyLockedLocalStorageMock, makeNotifMock } from './test_helpers.js';
 
@@ -68,7 +68,7 @@ describe('notification helpers', () => {
       expect(ls.setItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED, 'true');
       expect(dispatchSpy).toHaveBeenCalledOnce();
       const evt = dispatchSpy.mock.calls[0][0];
-      expect(evt.type).toBe('notifEnabledSync');
+      expect(evt.type).toBe(NOTIF_SYNC_EVENT);
       expect(evt.detail).toBe(true);
     });
 
@@ -160,7 +160,7 @@ describe('notification helpers', () => {
       expect(ls.getItem).toHaveBeenCalledWith(LS_NOTIFICATIONS_ENABLED);
       expect(dispatchSpy).toHaveBeenCalledOnce();
       const evt = dispatchSpy.mock.calls[0][0];
-      expect(evt.type).toBe('notifEnabledSync');
+      expect(evt.type).toBe(NOTIF_SYNC_EVENT);
       expect(evt.detail).toBe(false);
     });
 

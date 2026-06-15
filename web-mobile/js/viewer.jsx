@@ -578,13 +578,19 @@ const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 const CHIME_SYNC_EVENT = "chimeMutedSync";
 // Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so AnnBellBtn
 // instances and the watchlist bell stay visually in sync within one page.
-const NOTIF_SYNC_EVENT = "notifEnabledSync";
+export const NOTIF_SYNC_EVENT = "notifEnabledSync";
 
 // Notification opt-in helpers used by AnnBellBtn, NotificationSettings, and
 // handleBellToggle. Return values for notifEnable: "on" (granted + LS write
 // succeeded), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
 function dispatchNotif(enabled) {
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }
+}
+// Guards an async handler against concurrent re-entry. ref is a useRef(false).
+async function runOnce(ref, fn) {
+  if (ref.current) return;
+  ref.current = true;
+  try { return await fn(); } finally { ref.current = false; }
 }
 // Shared promise: concurrent callers (handleBellToggle + AnnBellBtn) all await
 // the same permission dialog and get the same outcome instead of an immediate
@@ -656,7 +662,12 @@ function subscribePermissionChanges() {
   if (_permSubscribed || _permGaveUp) return;
   _permSubscribed = true;
   try {
-    navigator.permissions?.query?.({ name: "notifications" })?.then((s) => {
+    const pq = navigator.permissions?.query?.({ name: "notifications" });
+    // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
+    // Lock out only when we get a real promise; otherwise mark gave-up so we don't
+    // permanently hold _permSubscribed=true with no .catch() to reset it.
+    if (!pq) { _permSubscribed = false; _permGaveUp = true; return; }
+    pq.then((s) => {
       const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
         // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
@@ -669,7 +680,7 @@ function subscribePermissionChanges() {
       } else {
         s.onchange = handleChange;
       }
-    })?.catch(() => { _permGaveUp = true; _permSubscribed = false; });
+    }).catch(() => { _permGaveUp = true; _permSubscribed = false; });
   } catch (_e) {
     _permSubscribed = false;
   }
@@ -1216,32 +1227,26 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const [chimeMuted, toggleChimeMuted] = useChimeMuted();
   const bellToggleInFlight = useRefV(false);
   // Bell button: toggle chime and keep browser-notification opt-in in sync.
-  const handleBellToggle = async () => {
-    if (bellToggleInFlight.current) return;
-    bellToggleInFlight.current = true;
-    try {
-      const willEnable = chimeMuted; // currently muted → about to enable
-      toggleChimeMuted(); // optimistic flip
-      if (!willEnable) {
-        // Muting: disable browser notifications too so they don't keep firing.
-        // notifDisable() is a pure LS+event op; runs even when the Notification
-        // API is absent (e.g. bare http) so the opt-in flag stays in sync.
-        notifDisable();
-        return;
-      }
-      if (!notificationSupported()) return; // enabling path requires the API
-      // Delegate to notifEnable() which handles permission request, LS write, and
-      // NOTIF_SYNC_EVENT dispatch. Revert the optimistic chime flip only when the
-      // user dismissed the prompt or LS write failed ("off"); on "denied" the
-      // chime stays enabled (chime-only mode) and on "on" everything is in sync.
-      const outcome = await notifEnable();
-      if (outcome === "off") {
-        toggleChimeMuted(); // revert optimistic flip
-      }
-    } finally {
-      bellToggleInFlight.current = false;
+  const handleBellToggle = () => runOnce(bellToggleInFlight, async () => {
+    const willEnable = chimeMuted; // currently muted → about to enable
+    toggleChimeMuted(); // optimistic flip
+    if (!willEnable) {
+      // Muting: disable browser notifications too so they don't keep firing.
+      // notifDisable() is a pure LS+event op; runs even when the Notification
+      // API is absent (e.g. bare http) so the opt-in flag stays in sync.
+      notifDisable();
+      return;
     }
-  };
+    if (!notificationSupported()) return; // enabling path requires the API
+    // Delegate to notifEnable() which handles permission request, LS write, and
+    // NOTIF_SYNC_EVENT dispatch. Revert the optimistic chime flip only when the
+    // user dismissed the prompt or LS write failed ("off"); on "denied" the
+    // chime stays enabled (chime-only mode) and on "on" everything is in sync.
+    const outcome = await notifEnable();
+    if (outcome === "off") {
+      toggleChimeMuted(); // revert optimistic flip
+    }
+  });
   const [alertMatch, setAlertMatch] = useState(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [secondaryAlert, setSecondaryAlert] = useState(null);
@@ -3874,25 +3879,19 @@ export function NotificationSettings() {
     );
   }
 
-  const handleToggle = async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    try {
-      if (enabled) {
-        const nowEnabled = notifDisable();
-        setEnabled(nowEnabled);
-        setPermission(Notification.permission);
-        return;
-      }
-      // notifEnable() handles the permission prompt, persists the flag, and
-      // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
-      const outcome = await notifEnable();
+  const handleToggle = () => runOnce(inFlight, async () => {
+    if (enabled) {
+      const nowEnabled = notifDisable();
+      setEnabled(nowEnabled);
       setPermission(Notification.permission);
-      setEnabled(outcome === "on");
-    } finally {
-      inFlight.current = false;
+      return;
     }
-  };
+    // notifEnable() handles the permission prompt, persists the flag, and
+    // dispatches NOTIF_SYNC_EVENT so AnnBellBtn instances update immediately.
+    const outcome = await notifEnable();
+    setPermission(Notification.permission);
+    setEnabled(outcome === "on");
+  });
 
   const denied = permission === "denied";
 
@@ -3981,22 +3980,16 @@ function AnnBellBtn() {
   if (state === "unsupported") return null;
   if (!BellIcon) return null; // viewer_watchlist.js failed to load
 
-  const toggle = async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    try {
-      if (state === "on") {
-        const nowEnabled = notifDisable();
-        setState(nowEnabled ? "on" : "off");
-        return;
-      }
-      const outcome = await notifEnable();
-      // Mirror state directly so the button updates even if event dispatch failed.
-      setState(outcome);
-    } finally {
-      inFlight.current = false;
+  const toggle = () => runOnce(inFlight, async () => {
+    if (state === "on") {
+      const nowEnabled = notifDisable();
+      setState(nowEnabled ? "on" : "off");
+      return;
     }
-  };
+    const outcome = await notifEnable();
+    // Mirror state directly so the button updates even if event dispatch failed.
+    setState(outcome);
+  });
   return (
     <button
       className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}

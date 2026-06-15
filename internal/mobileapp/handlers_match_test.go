@@ -304,7 +304,30 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 	// the mark for the same key).
 	runningRevStore.Delete("rg1:PoolA-1")
 
+	// The guard is scoped to a non-empty RevSession, so the helper sends one;
+	// all subtests below operate within this single session.
 	scoreRunning := func(rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status":     "running",
+			"rev":        rev,
+			"revSession": "rg-sess",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	// scoreRunningNoSession sends Rev>0 but no RevSession — the guard must treat
+	// it as unversioned and always proceed (defends against partial-rollout /
+	// older clients collapsing into the "" session).
+	scoreRunningNoSession := func(rev int64) (int, map[string]any) {
 		t.Helper()
 		payload, _ := json.Marshal(map[string]any{
 			"sideA": "Alice", "sideB": "Bob",
@@ -372,6 +395,15 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 		assert.Equal(t, http.StatusOK, code)
 		stale, ok := body["stale"].(bool)
 		assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	})
+
+	t.Run("rev>0 without a RevSession is unversioned (always proceeds)", func(t *testing.T) {
+		// Stored mark for session "rg-sess" is 5. A sessionless write with a
+		// lower rev=1 must NOT be compared against it — missing RevSession is
+		// treated as unversioned, so it proceeds rather than being dropped.
+		code, body := scoreRunningNoSession(1)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "a Rev without a RevSession must never be marked stale")
 	})
 
 	t.Run("completed write is never blocked by stale rev guard", func(t *testing.T) {

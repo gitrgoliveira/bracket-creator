@@ -119,8 +119,9 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 			payload, _ := json.Marshal(map[string]any{
 				"sideA": sideA, "sideB": sideB,
 				"ipponsA": []string{"M"}, "ipponsB": []string{},
-				"status": "running",
-				"rev":    benchRev,
+				"status":     "running",
+				"rev":        benchRev,
+				"revSession": "bench-sess",
 			})
 			req, _ := http.NewRequest("PUT",
 				fmt.Sprintf("/api/competitions/bench1/matches/%s/score", matchID),
@@ -207,15 +208,17 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	// Second running write immediately after — should be coalesced (no broadcast).
 	assert.Equal(t, http.StatusOK, scoreRunning(2))
 
-	// Give the goroutine a moment to drain the channel.
-	time.Sleep(10 * time.Millisecond)
-	afterRunning := broadcastCount.Load()
-	assert.Equal(t, int64(1), afterRunning, "second running write within 250ms should be coalesced")
+	// The first write's broadcast reaches the subscriber goroutine
+	// asynchronously; wait on the observable count rather than a fixed sleep
+	// (flaky on slow/contended CI). The second write is coalesced synchronously
+	// in the handler (no broadcast enqueued), so the count settles at exactly 1.
+	require.Eventually(t, func() bool { return broadcastCount.Load() == 1 }, time.Second, time.Millisecond,
+		"first running write should broadcast exactly once; second is coalesced within 250ms")
 
 	// Completed write — always broadcasts regardless of coalesce window.
 	assert.Equal(t, http.StatusOK, scoreCompleted())
-	time.Sleep(10 * time.Millisecond)
+	require.Eventually(t, func() bool { return broadcastCount.Load() >= 2 }, time.Second, time.Millisecond,
+		"completed write must always broadcast")
 	hub.Unsubscribe(ch)
 	wg.Wait()
-	assert.GreaterOrEqual(t, broadcastCount.Load(), int64(2), "completed write must always broadcast")
 }

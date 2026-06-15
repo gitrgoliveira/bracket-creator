@@ -828,12 +828,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// Only gated when:
 		//   - status is "running" (autosave writes; completed writes always win)
 		//   - the incoming Rev > 0 (client opted in; Rev==0 means unversioned)
+		//   - RevSession is non-empty (the guard is scoped to a session; a Rev
+		//     without a session can't be safely compared, so treat it as
+		//     unversioned and always proceed rather than collapse mixed clients
+		//     into the "" session and wrongly drop a reload starting at rev=1)
 		//
-		// If the stored high-water mark for this match is already >= the
-		// incoming Rev, the write is stale: return 200 so the client doesn't
-		// surface an error, but skip the engine write entirely. A higher-or-
-		// equal rev advances the mark and proceeds normally.
-		if result.Status == state.MatchStatusRunning && result.Rev > 0 {
+		// If the stored high-water mark for this match (within the same session)
+		// is already > the incoming Rev, the write is stale: return 200 so the
+		// client doesn't surface an error, but skip the engine write entirely. A
+		// higher-or-equal rev advances the mark and proceeds normally.
+		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
 			revKey := id + ":" + mid
 			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
 			for {

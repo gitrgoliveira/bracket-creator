@@ -268,6 +268,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// Only successfully-recorded results go into the SSE broadcast so
 		// clients never patch with values the engine rejected.
 		var successful []state.MatchResult
+		// Collect eligibility changes so we can broadcast
+		// EventCompetitorStatusUpdated for every kiken/fusenpai result in
+		// the batch — mirrors the single-score handler (T085/T092).
+		var eligibilityUpdates []*domain.CompetitorStatus
 
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
@@ -294,6 +298,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// concurrent PUT /score. Per-result transactions preserve the
 			// existing {succeeded, errors[]} partial-success response shape.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
+			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
 				if results[i].Status != state.MatchStatusCompleted {
 					results[i].CorrectionReason = ""
@@ -307,13 +312,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 						results[i].CorrectionReason = "" // first finalization — not a correction
 					}
 				}
-				_, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
+				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
+				if err == nil {
+					capturedStatus = status
+				}
 				return err
 			}); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
 			successful = append(successful, results[i])
+			if capturedStatus != nil {
+				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
+			}
 		}
 
 		if len(successful) > 0 {
@@ -322,6 +333,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				"results":       matchesForBroadcast(successful),
 			})
 			tryAutoCompletePools(c, eng, hub, id)
+		}
+		for _, status := range eligibilityUpdates {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
+				"competitionId": id,
+				"status":        status,
+			})
 		}
 		c.JSON(http.StatusOK, gin.H{"succeeded": len(successful), "errors": errs})
 	})

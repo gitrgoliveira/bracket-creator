@@ -139,13 +139,15 @@ func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID strin
 // server.go) as the auth boundary; a richer role check lands when
 // per-role auth is implemented.
 //
-// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
+// The `tx CompetitionTransactor` parameter is the T156 hook.
 // The PUT body wraps its three store calls — load comp (for teamSize),
 // set lineup, reload lineup (for the response) — in one
 // WithTransaction so they all commit under a single per-comp lock
-// acquire. `*state.Store` satisfies all three interfaces
-// (TeamLineupStore + CompetitionStore + CompetitionTransactor) so
-// wiring stays drop-in.
+// acquire. `hub Broadcaster` receives an EventLineupUpdated after
+// each successful write so SSE clients can re-fetch lineup data live.
+// `*state.Store` satisfies all four interfaces (TeamLineupStore +
+// CompetitionStore + CompetitionTransactor + Broadcaster) so wiring
+// stays drop-in.
 func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)

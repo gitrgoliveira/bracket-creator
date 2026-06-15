@@ -22,15 +22,21 @@ func TestMatchForBroadcast_StripsAuditAndCopies(t *testing.T) {
 		CorrectionReason: "wrong waza entered",
 		DecisionReason:   "kiken: medial knee injury to Tanaka",
 		DecisionBy:       "aka",
+		Rev:              7,
+		RevSession:       "client-session-abc",
 	}
 	got := matchForBroadcast(orig)
 
 	assert.Empty(t, got.CorrectionReason, "broadcast copy must not carry the correction reason")
 	assert.Empty(t, got.DecisionReason, "broadcast copy must not carry the decision reason (can name competitors / carry medical detail)")
+	assert.Zero(t, got.Rev, "broadcast copy must not carry internal write-ordering Rev")
+	assert.Empty(t, got.RevSession, "broadcast copy must not leak the client RevSession identifier")
 	assert.Equal(t, "aka", got.DecisionBy, "DecisionBy is an enum that drives rendering — must be preserved")
 	assert.Equal(t, "Pool A-0", got.ID, "non-audit fields preserved")
 	assert.Equal(t, "wrong waza entered", orig.CorrectionReason, "caller's original must be untouched")
 	assert.Equal(t, "kiken: medial knee injury to Tanaka", orig.DecisionReason, "caller's original must be untouched")
+	assert.EqualValues(t, 7, orig.Rev, "caller's original Rev must be untouched")
+	assert.Equal(t, "client-session-abc", orig.RevSession, "caller's original RevSession must be untouched")
 }
 
 func TestMatchPtrForBroadcast_NilStaysNil(t *testing.T) {

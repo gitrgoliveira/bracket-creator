@@ -217,6 +217,19 @@ function resolveDecisionPassword(propPassword) {
   return propPassword || "";
 }
 
+// Guard for actions with a HARD prerequisite on server-side persistence
+// (e.g. the daihyosen pre-save). window.API.recordScore returns a
+// discriminated { queued: true } result when a running write could only be
+// enqueued (offline / retryable 5xx) instead of being confirmed by the
+// server. A confirmed write returns the MatchResult object; a same-session
+// out-of-order write returns { stale: true } (the server already holds an
+// equal-or-newer state, so dependent reads are safe and we do NOT abort).
+// Throws "score_not_synced" only on the queued case so the caller aborts
+// rather than running its dependent request against stale server state.
+function assertRunningWritePersisted(saveRes) {
+  if (saveRes && saveRes.queued) throw new Error("score_not_synced");
+}
+
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
 // wire shape (decision/decisionBy/decisionReason/encho/force) against a
 // moving server contract. `force` is the T103/T104 override flag used when
@@ -835,6 +848,7 @@ export {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
+  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,

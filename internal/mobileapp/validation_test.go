@@ -1242,3 +1242,52 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 		})
 	}
 }
+
+// TestScoreRequestValidate_RevSessionCap verifies that an over-long revSession
+// (> MaxLenRevSession=64) is rejected with a 400-mapped ValidationError, while
+// empty (legacy clients) and UUID-length (36 chars) values pass.
+func TestScoreRequestValidate_RevSessionCap(t *testing.T) {
+	t.Run("empty revSession passes (legacy clients)", func(t *testing.T) {
+		req := ScoreRequest{RevSession: ""}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("UUID-length revSession passes", func(t *testing.T) {
+		req := ScoreRequest{RevSession: "550e8400-e29b-41d4-a716-446655440000"}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("over-long revSession rejected", func(t *testing.T) {
+		req := ScoreRequest{RevSession: strings.Repeat("x", 65)}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "revSession", verr.Field)
+	})
+}
+
+// TestScoreRequestValidate_RevNonNegative verifies that a negative rev is
+// rejected (it would slip past the handler's Rev>0 guard and let a stale running
+// write clobber newer state), while rev==0 (unversioned opt-out) and positive
+// revs pass.
+func TestScoreRequestValidate_RevNonNegative(t *testing.T) {
+	t.Run("rev=0 (unversioned) passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 0}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("positive rev passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 42}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("negative rev rejected", func(t *testing.T) {
+		req := ScoreRequest{Rev: -1}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "rev", verr.Field)
+	})
+}

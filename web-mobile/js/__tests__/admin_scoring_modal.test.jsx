@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
+  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   shouldShowEnchoMaxBanner,
@@ -47,6 +48,36 @@ describe('resolveDecisionPassword', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
     expect(resolveDecisionPassword(null)).toBe('');
+  });
+});
+
+describe('assertRunningWritePersisted (daihyosen pre-save prerequisite guard)', () => {
+  // recordScore returns a discriminated { queued: true } when a running write
+  // could only be enqueued (offline / retryable 5xx), NOT server-confirmed.
+  // Actions with a hard prerequisite on persistence (the daihyosen pre-save)
+  // must abort on that case rather than proceed against stale server state.
+  it('throws "score_not_synced" when the write was only queued', () => {
+    expect(() => assertRunningWritePersisted({ queued: true })).toThrow('score_not_synced');
+  });
+
+  it('does not throw for a server-confirmed MatchResult', () => {
+    expect(() => assertRunningWritePersisted({ id: 'm1', status: 'running' })).not.toThrow();
+  });
+
+  it('does not throw for a same-session stale 200 (server already holds equal-or-newer state)', () => {
+    // A { stale: true } result means the server no-op'd an out-of-order write
+    // because it already has an equal-or-newer state — dependent reads are safe,
+    // so daihyosen should proceed, not abort.
+    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
+  });
+
+  it('does not throw for null/undefined (no result to inspect)', () => {
+    expect(() => assertRunningWritePersisted(null)).not.toThrow();
+    expect(() => assertRunningWritePersisted(undefined)).not.toThrow();
+  });
+
+  it('does not throw when queued is falsy', () => {
+    expect(() => assertRunningWritePersisted({ queued: false })).not.toThrow();
   });
 });
 

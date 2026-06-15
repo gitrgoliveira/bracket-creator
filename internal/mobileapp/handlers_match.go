@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -619,6 +620,13 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 		}
 	}
 
+	// Anonymous self-run writes are treated as unversioned: clear any client-
+	// supplied rev/revSession so they don't engage the same-session rev-guard at
+	// all and simply apply (last-write-wins among peers). A participant has no
+	// need to order their own writes, and this keeps a crafted revSession from
+	// interfering with another session's rev ordering.
+	req.Rev = 0
+	req.RevSession = ""
 	return "self-reported", true
 }
 
@@ -733,13 +741,61 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // NOT migrated: the partial-success error array semantics need a
 // per-result tx (or a different commit shape) and that's out of scope
 // for this slice.
+// runningRev is the per-match value stored in runningRevStore: the highest
+// Rev seen WITHIN a given client scoring session (RevSession). A write whose
+// RevSession differs from the stored one is treated as last-write-wins
+// (concurrent operators — multiple operators may score one shiaijo). The
+// completed-match regression guard is the real protection against a stale
+// running write reverting a finished result.
+type runningRev struct {
+	Session string
+	Rev     int64
+}
+
+// runningRevStore is a process-lifetime, in-memory map that tracks the
+// highest client-side revision number (Rev) seen for each running-status
+// write on a given match. Key is "compID:matchID". Value is a runningRev
+// (session + rev).
+//
+// C2 rev-guard: when a "running" write arrives with a Rev that is lower
+// than the stored high-water mark WITHIN THE SAME RevSession, we silently
+// no-op it (return 200). This prevents out-of-order delivery from a
+// reconnect flush overwriting a more-recent in-flight write. Writes from a
+// DIFFERENT RevSession are treated as last-write-wins — multiple operators
+// may legitimately score the same shiaijo concurrently. The completed-match
+// regression guard (staleAfterComplete, inside the tx) is the authoritative
+// protection: it ensures a running write never reverts a finished match
+// regardless of session. Only "running" writes are gated — completed writes
+// and Rev==0 (unversioned) writes always proceed so the guard never blocks
+// explicit operator submits or legacy clients.
+//
+// The map is process-scoped and therefore reset on server restart; the
+// on-disk state is the ground truth. A mis-ordered running-write that
+// slips through after a restart is harmless: the operator's explicit
+// Finish is the authoritative write and carries no rev constraint.
+var runningRevStore sync.Map
+
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
+	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
+	// per match. Completed writes always proceed (isRunning=false).
+	coalescer := newMatchBroadcastCoalescer()
+
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
 		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			// Use the shared validateMaxLen helper for a consistent
+			// ValidationError-style body ("matchId: must be <= N characters")
+			// that includes the limit, matching the other mobileapp handlers.
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Composite key used by the rev-guard and broadcast coalescer; hoisted
+		// here so all four use-sites share a single allocation (FINDING 3).
+		matchKey := id + ":" + mid
 
 		var req ScoreRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -788,6 +844,50 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			result.CorrectionReason = ""
 		}
 
+		// C2 rev-guard: drop stale "running" autosave writes that arrive
+		// out of order after a reconnect flush.
+		//
+		// Only gated when:
+		//   - status is "running" (autosave writes; completed writes always win)
+		//   - the incoming Rev > 0 (client opted in; Rev==0 means unversioned)
+		//   - RevSession is non-empty (the guard is scoped to a session; a Rev
+		//     without a session can't be safely compared, so treat it as
+		//     unversioned and always proceed rather than collapse mixed clients
+		//     into the "" session and wrongly drop a reload starting at rev=1)
+		//
+		// Same-session ordering: if the stored high-water mark for this match
+		// (within the same session) is already > the incoming Rev, the write is
+		// stale — return 200 so the client doesn't surface an error but skip the
+		// engine write entirely. A higher-or-equal rev advances the mark.
+		//
+		// Different sessions (concurrent operators): last-write-wins. Multiple
+		// operators may legitimately score the same shiaijo simultaneously. The
+		// completed-match regression guard (staleAfterComplete, inside the tx)
+		// is the real protection against a running write reverting a finished match.
+		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
+			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
+			for {
+				existing, loaded := runningRevStore.LoadOrStore(matchKey, incoming)
+				if !loaded {
+					break // first running write for this key
+				}
+				stored := existing.(runningRev)
+				// Same session: a lower rev is a stale out-of-order delivery (e.g.
+				// a reconnect flush). Drop it. DIFFERENT sessions are concurrent
+				// operators (multiple operators may score one shiaijo) — last write
+				// wins; the completed-match regression guard below still prevents a
+				// running write from reverting a finished match.
+				if stored.Session == incoming.Session && result.Rev < stored.Rev {
+					c.JSON(http.StatusOK, gin.H{"stale": true})
+					return
+				}
+				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {
+					break
+				}
+				// Lost the CAS race — retry.
+			}
+		}
+
 		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 
 		// FR-035: WithCourtExclusivityLock serializes the cross-competition
@@ -797,8 +897,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// commits (TOCTOU). Withdrawal decisions skip the court gate — operators
 		// must record kiken/fusenpai regardless of court state.
 		var (
-			engStatus *domain.CompetitorStatus
-			engErr    error
+			engStatus          *domain.CompetitorStatus
+			engErr             error
+			staleAfterComplete bool
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			if !isWithdrawal {
@@ -850,6 +951,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						result.CorrectionReason = ""
 					}
 				}
+				// Bracket integrity: a running-status write must never revert an
+				// already-completed match (e.g. a stale autosave queued before
+				// Finish and flushed afterward). Applies to ALL callers (the
+				// self-reported finalized guard above only covers anonymous mode).
+				// No-op it as a stale write so the client's flush discards it.
+				if result.Status == state.MatchStatusRunning &&
+					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
+					staleAfterComplete = true
+					return nil
+				}
 				if !isWithdrawal {
 					if err := eng.StartMatchTx(stx, id, mid); err != nil {
 						engErr = err
@@ -883,10 +994,25 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundErr *engine.NotFoundError
 			if errors.As(txErr, &notFoundErr) {
+				// Match not found — drop any rev-guard entry this request created so
+				// fabricated match IDs can't grow runningRevStore unbounded (mirrors
+				// the engErr NotFoundError path; scoring is unauthenticated in
+				// self-run mode).
+				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
+		if staleAfterComplete {
+			// The rev-guard above stored this running write's session+rev into
+			// runningRevStore (LoadOrStore) before we discovered, inside the
+			// transaction, that the match is already completed. Drop the entry now
+			// — no future running write can legitimately supersede a completed
+			// match, so retaining it would leak map memory.
+			runningRevStore.Delete(matchKey)
+			c.JSON(http.StatusOK, gin.H{"stale": true})
 			return
 		}
 		if engErr != nil {
@@ -954,6 +1080,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundEngErr *engine.NotFoundError
 			if errors.As(engErr, &notFoundEngErr) {
+				// The match doesn't exist — drop any rev-guard entry this request
+				// created so fabricated match IDs can't grow runningRevStore
+				// unbounded (scoring is unauthenticated in self-run mode).
+				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": engErr.Error()})
 				return
 			}
@@ -968,11 +1098,24 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 
 		// Broadcast match update with the full (post-merge) result so
 		// SSE consumers see the same payload they'd see on a re-fetch.
-		hub.Broadcast(EventMatchUpdated, gin.H{
-			"competitionId": id,
-			"matchId":       mid,
-			"result":        matchPtrForBroadcast(result),
-		})
+		// C3: coalesce high-frequency running-status broadcasts (first-wins
+		// within 250ms); completed writes always broadcast unconditionally.
+		isRunning := result.Status == state.MatchStatusRunning
+		// Bound runningRevStore: once a match leaves the running state its rev
+		// high-water mark is dead (the guard only gates running writes), so drop
+		// the entry to keep the process-lifetime map from growing without bound
+		// across many matches/competitions. A later correction that re-opens the
+		// match starts a fresh session anyway.
+		if !isRunning {
+			runningRevStore.Delete(matchKey)
+		}
+		if coalescer.Allow(matchKey, isRunning) {
+			hub.Broadcast(EventMatchUpdated, gin.H{
+				"competitionId": id,
+				"matchId":       mid,
+				"result":        matchPtrForBroadcast(result),
+			})
+		}
 		// T085/T092 — when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.
@@ -1000,6 +1143,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 		tryAutoCompletePools(c, eng, hub, id)
 
+		// Don't echo internal write-ordering metadata back in the response.
+		result.Rev = 0
+		result.RevSession = ""
 		c.JSON(http.StatusOK, result)
 	})
 }

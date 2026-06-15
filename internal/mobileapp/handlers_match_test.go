@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,6 +281,275 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "exceeds maximum")
 	})
+}
+
+// TestScoreHandler_RevGuard validates the C2 monotonic-revision guard for
+// "running" autosave writes:
+//
+//   - A stale running write (rev < stored high-water) is silently no-op'd
+//     (HTTP 200 with {"stale":true}); the stored result is unchanged.
+//   - A higher rev advances the mark and the write proceeds normally.
+//   - Rev==0 (unversioned) writes always proceed regardless of the mark.
+//   - Completed writes are never blocked by a stale rev.
+func TestScoreHandler_RevGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rg1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rg1", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+
+	// Reset the global rev store so tests are isolated even when run as
+	// part of the full test suite (other test functions may have advanced
+	// the mark for the same key).
+	runningRevStore.Delete("rg1:PoolA-1")
+
+	// The guard is scoped to a non-empty RevSession, so the helper sends one;
+	// all subtests below operate within this single session.
+	scoreRunning := func(rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status":     "running",
+			"rev":        rev,
+			"revSession": "rg-sess",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	// scoreRunningNoSession sends Rev>0 but no RevSession — the guard must treat
+	// it as unversioned and always proceed (defends against partial-rollout /
+	// older clients collapsing into the "" session).
+	scoreRunningNoSession := func(rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status": "running",
+			"rev":    rev,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	scoreCompleted := func() int {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"winner": "Alice", "ipponsA": []string{"M", "K"}, "ipponsB": []string{},
+			"status": "completed",
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rg1/matches/PoolA-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	loadWinner := func() string {
+		t.Helper()
+		ms, err := store.LoadPoolMatches("rg1")
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == "PoolA-1" {
+				return m.Winner
+			}
+		}
+		t.Fatal("match PoolA-1 not found")
+		return ""
+	}
+
+	t.Run("rev=0 (unversioned) always proceeds", func(t *testing.T) {
+		code, body := scoreRunning(0)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "unversioned write must not be marked stale")
+	})
+
+	t.Run("higher rev advances the mark and write proceeds", func(t *testing.T) {
+		code, body := scoreRunning(5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "higher rev should proceed, not be stale")
+	})
+
+	t.Run("same rev is not stale (equal rev always proceeds)", func(t *testing.T) {
+		code, body := scoreRunning(5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "equal rev should proceed")
+	})
+
+	t.Run("stale running write is dropped with stale=true, stored result unchanged", func(t *testing.T) {
+		// Send rev=3 after rev=5 is the stored mark — should be stale.
+		code, body := scoreRunning(3)
+		assert.Equal(t, http.StatusOK, code)
+		stale, ok := body["stale"].(bool)
+		assert.True(t, ok && stale, "stale running write must return {stale:true}")
+	})
+
+	t.Run("rev>0 without a RevSession is unversioned (always proceeds)", func(t *testing.T) {
+		// Stored mark for session "rg-sess" is 5. A sessionless write with a
+		// lower rev=1 must NOT be compared against it — missing RevSession is
+		// treated as unversioned, so it proceeds rather than being dropped.
+		code, body := scoreRunningNoSession(1)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "a Rev without a RevSession must never be marked stale")
+	})
+
+	t.Run("completed write is never blocked by stale rev guard", func(t *testing.T) {
+		// Stored mark is 5. Completed writes carry no rev gate.
+		code := scoreCompleted()
+		assert.Equal(t, http.StatusOK, code)
+		assert.Equal(t, "Alice", loadWinner(), "completed write must persist even after stale guard is set")
+	})
+}
+
+// TestScoreHandler_RevGuard_SessionTakeover validates that a write from a NEW
+// RevSession always proceeds even when the stored high-water mark (from a prior
+// session) has a higher Rev. This models a page reload or a different device
+// starting a fresh session at rev=1 — it must never be dropped as stale.
+func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rgs1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rgs1", []state.MatchResult{
+		{ID: "PoolS-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	// Isolate from any other test runs that may have touched this key.
+	runningRevStore.Delete("rgs1:PoolS-1")
+
+	scoreRunningWithSession := func(revSession string, rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status":     "running",
+			"rev":        rev,
+			"revSession": revSession,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rgs1/matches/PoolS-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	t.Run("session A advances to rev=5", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-A", 5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "initial write must proceed")
+	})
+
+	t.Run("session A rev=3 is stale (same session, lower rev)", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-A", 3)
+		assert.Equal(t, http.StatusOK, code)
+		stale, ok := body["stale"].(bool)
+		assert.True(t, ok && stale, "lower rev in same session must be stale")
+	})
+
+	t.Run("session B rev=1 proceeds (new session takes over despite A being at rev=5)", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-B", 1)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "a new session must never be dropped as stale")
+	})
+
+	t.Run("session B rev=0 is unversioned and always proceeds", func(t *testing.T) {
+		// Even though session B's stored mark is rev=1, a rev=0 write is
+		// unversioned (the guard is gated on Rev > 0), so it must proceed
+		// rather than be dropped as stale.
+		code, body := scoreRunningWithSession("session-B", 0)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "rev=0 is unversioned and must always proceed")
+	})
+}
+
+// TestScoreHandler_RevGuard_PrunesOnCompletion verifies that the per-match
+// runningRevStore entry is deleted once the match leaves the running state, so
+// the process-lifetime map does not accumulate dead high-water marks.
+func TestScoreHandler_RevGuard_PrunesOnCompletion(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rgp1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rgp1", []state.MatchResult{
+		{ID: "PoolP-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	revKey := "rgp1:PoolP-1"
+	runningRevStore.Delete(revKey)
+
+	put := func(body map[string]any) int {
+		t.Helper()
+		payload, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rgp1/matches/PoolP-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// A running write with a session populates the rev store.
+	require.Equal(t, http.StatusOK, put(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"status": "running", "rev": 3, "revSession": "sess-p",
+	}))
+	_, present := runningRevStore.Load(revKey)
+	require.True(t, present, "running write must populate the rev store")
+
+	// A completed write must prune the entry.
+	require.Equal(t, http.StatusOK, put(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"winner": "Alice", "ipponsA": []string{"M", "K"}, "ipponsB": []string{},
+		"status": "completed",
+	}))
+	_, present = runningRevStore.Load(revKey)
+	assert.False(t, present, "completed write must prune the rev store entry")
+}
+
+// TestScoreHandler_MidLengthCap verifies that the score endpoint rejects a
+// match ID that exceeds MaxLenMatchID bytes with HTTP 400.
+func TestScoreHandler_MidLengthCap(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "midcap1", Courts: []string{"A"}}))
+
+	longMid := strings.Repeat("x", MaxLenMatchID+1) // 129 'x' characters
+
+	payload, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"status": "running",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/midcap1/matches/"+longMid+"/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var body map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &body)
+	// Shared validateMaxLen helper → consistent ValidationError body that
+	// names the field and includes the limit.
+	assert.Contains(t, body["error"], "matchId")
+	assert.Contains(t, body["error"], fmt.Sprintf("must be <= %d", MaxLenMatchID))
 }
 
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the
@@ -1722,4 +1993,191 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
 		assert.Equal(t, "admin", result.ResultSource)
 	})
+}
+
+// TestScoreHandler_FabricatedMid_TxNotFound verifies that a running-write for a
+// fabricated (non-existent) match ID returns 404 AND prunes any runningRevStore
+// entry that the request pre-populated, preventing unbounded growth from
+// unauthenticated self-run callers.
+//
+// The test exercises the txErr NotFoundError path: a competition with courts is
+// saved (so CheckCrossCompCourtBusy runs and looks up the match's court), but
+// the target match is never saved — CheckCrossCompCourtBusy's court-lookup
+// returns NotFoundError which propagates as txErr.
+func TestScoreHandler_FabricatedMid_TxNotFound(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "fabricated-comp"
+	fakeMid := "fake-mid-xyz"
+	matchKey := compID + ":" + fakeMid
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	// Intentionally do NOT save a match with ID fakeMid.
+
+	// Pre-seed the rev store to simulate the guard having already stored an
+	// entry (ensures the Delete is exercised, not just an absence check).
+	runningRevStore.Store(matchKey, runningRev{Session: "pre-seed", Rev: 1})
+
+	epoch := time.Now().UnixMilli()
+	payload, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"ipponsA": []string{"M"}, "ipponsB": []string{},
+		"status":     "running",
+		"rev":        int64(2),
+		"revSession": fmt.Sprintf("%d-x", epoch),
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+fakeMid+"/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "fabricated mid must return 404")
+	_, present := runningRevStore.Load(matchKey)
+	assert.False(t, present, "runningRevStore entry must be pruned on txErr NotFound")
+}
+
+// TestScoreHandler_RunningWriteCannotRevertCompleted verifies the bracket-
+// integrity guard that prevents a stale running-status autosave from reverting
+// an already-completed match result:
+//
+//  1. PUT a completed write (winner=Alice) → HTTP 200, match stored as completed.
+//  2. PUT a running write (status=running, with a rev + revSession) for the
+//     same match → expect HTTP 200 with body {"stale":true}.
+//  3. The stored match status must STILL be "completed" (not reverted).
+//  4. runningRevStore must have NO lingering entry for the match key.
+func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "rv-revert"
+	matchID := "PoolA-1"
+	matchKey := compID + ":" + matchID
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: matchID, SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+
+	// Ensure the rev-store is clean for this key.
+	runningRevStore.Delete(matchKey)
+
+	// Step 1: finalize the match.
+	completedPayload, _ := json.Marshal(map[string]any{
+		"sideA":   "Alice",
+		"sideB":   "Bob",
+		"winner":  "Alice",
+		"ipponsA": []string{"M", "K"},
+		"ipponsB": []string{},
+		"status":  "completed",
+	})
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(completedPayload))
+	req1.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w1, req1)
+	require.Equal(t, http.StatusOK, w1.Code, "completed write must succeed")
+
+	// Verify the match is completed on disk.
+	loadStatus := func() state.MatchStatus {
+		t.Helper()
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == matchID {
+				return m.Status
+			}
+		}
+		t.Fatalf("match %s not found", matchID)
+		return ""
+	}
+	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "match must be completed after step 1")
+
+	// Step 2: attempt a stale running autosave (simulating a write queued
+	// before Finish that was flushed after).
+	epoch := time.Now().UnixMilli()
+	runningPayload, _ := json.Marshal(map[string]any{
+		"sideA":      "Alice",
+		"sideB":      "Bob",
+		"ipponsA":    []string{"M"},
+		"ipponsB":    []string{},
+		"status":     "running",
+		"rev":        int64(1),
+		"revSession": fmt.Sprintf("%d-x", epoch),
+	})
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(runningPayload))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+
+	// Step 3: the server must return 200 with stale=true.
+	assert.Equal(t, http.StatusOK, w2.Code, "stale running write must return 200")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
+	stale, ok := body["stale"].(bool)
+	assert.True(t, ok && stale, "stale running write must return {stale:true}")
+
+	// Step 4: match must still be completed — not reverted to running.
+	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "running write must not revert a completed match")
+
+	// Step 5: no lingering runningRevStore entry.
+	_, revPresent := runningRevStore.Load(matchKey)
+	assert.False(t, revPresent, "runningRevStore must have no entry after stale running write on completed match")
+}
+
+// TestSelfRunPolicy_NoRevMetadata verifies that an anonymous self-run write
+// has its Rev and RevSession zeroed by enforceSelfRunPolicy before the
+// rev-guard runs. This prevents a malicious participant from injecting a
+// near-future epoch into runningRevStore and poisoning the guard so that
+// every subsequent legitimate admin autosave looks "older" and gets dropped.
+//
+// Requires a non-empty tournament password so that a request with no
+// X-Tournament-Password header is treated as an anonymous caller (not admin).
+func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Self-run tournament with a non-empty password. An unauthenticated
+	// request (no X-Tournament-Password) is the anonymous self-run path.
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Mode: "self-run", Courts: []string{"A"}}))
+	compID := "sr-epoch"
+	matchID := "PoolA-1"
+	matchKey := compID + ":" + matchID
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: matchID, SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	runningRevStore.Delete(matchKey)
+
+	// Attempt to inject a near-future epoch via an anonymous self-run running
+	// write. If the policy does NOT zero Rev/RevSession, the rev-guard stores
+	// this entry and subsequent admin autosaves from an older epoch get dropped.
+	futureEpoch := time.Now().UnixMilli() + 60_000 // 60s in the future
+	payload, _ := json.Marshal(map[string]any{
+		"sideA":      "Alice",
+		"sideB":      "Bob",
+		"ipponsA":    []string{"M"},
+		"ipponsB":    []string{},
+		"status":     "running",
+		"rev":        int64(9999),
+		"revSession": fmt.Sprintf("%d-attacker", futureEpoch),
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(payload))
+	// Deliberately omit X-Tournament-Password to be the anonymous path.
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// The runningRevStore must NOT contain the attacker's epoch/rev.
+	// If enforceSelfRunPolicy zeroed Rev and RevSession the guard ran with
+	// Rev==0, which is the "unversioned" opt-out — no entry is stored.
+	val, present := runningRevStore.Load(matchKey)
+	if present {
+		stored := val.(runningRev)
+		assert.Equal(t, int64(0), stored.Rev, "self-run write must not populate runningRevStore with attacker rev")
+		assert.Empty(t, stored.Session, "self-run write must not populate runningRevStore with attacker session")
+	}
+	// (If not present at all, the guard skipped storage — also correct.)
 }

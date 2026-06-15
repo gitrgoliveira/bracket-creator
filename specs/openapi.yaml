@@ -1491,11 +1491,39 @@ paths:
               $ref: '#/components/schemas/MatchResult'
       responses:
         '200':
-          description: Result recorded.
+          description: |
+            Result recorded. On a normal write the body is the updated MatchResult.
+            When a running-write autosave is a no-op the body is `{"stale":true}`
+            (the `stale` field set, all other MatchResult fields absent). This
+            happens in two cases: (a) the rev-guard drops it as a same-session
+            out-of-order delivery (a lower rev than one already applied for that
+            client session, e.g. a reconnect flush), or (b) the match is already
+            completed, so a running write must not revert the final result.
+            Different client sessions are concurrent operators — the server
+            applies those last-write-wins, never stale.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                # anyOf, not oneOf: MatchResult is an open schema (no required
+                # fields, no additionalProperties:false), so `{"stale":true}`
+                # also validates against it. oneOf demands exactly one match and
+                # would flag that as ambiguous in most JSON-Schema tooling. The
+                # stale branch pins additionalProperties:false so a stale marker
+                # is unambiguous; a real result still matches the MatchResult
+                # branch.
+                anyOf:
+                  - $ref: '#/components/schemas/MatchResult'
+                  - type: object
+                    additionalProperties: false
+                    properties:
+                      stale:
+                        type: boolean
+                        description: >
+                          true when a running-write autosave was a no-op — either
+                          dropped by the rev-guard as a same-session out-of-order
+                          delivery, or rejected because the match is already
+                          completed. Omitted on normal responses.
+                    required: [stale]
         '409':
           description: |
             Conflict — one of six codes returned in the `error` field:
@@ -2662,6 +2690,25 @@ components:
       properties:
         id:
           type: string
+        rev:
+          type: integer
+          format: int64
+          writeOnly: true
+          description: >
+            Optional client-monotonic revision counter, stamped only on
+            "running"-status autosave writes. The server's rev-guard uses it
+            (scoped to revSession) to drop out-of-order delivery from a
+            reconnect flush. Never returned in responses or public projections.
+        revSession:
+          type: string
+          maxLength: 64
+          writeOnly: true
+          description: >
+            Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
+            with "running" autosave writes. It lets the server's rev-guard drop a
+            single session's own out-of-order delivery (a reconnect flush). Writes
+            from different sessions are concurrent operators and apply
+            last-write-wins. Never returned in responses or public projections.
         sideA:
           type: string
           maxLength: 100

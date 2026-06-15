@@ -75,8 +75,18 @@ const (
 	MaxLenChangeReason      = MaxLenDecisionReason
 	MaxLenEligibilityReason = 200
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
+	// MaxLenRevSession caps ScoreRequest.RevSession (an opaque session id, e.g.
+	// a 36-char UUID; 64 leaves headroom).
+	MaxLenRevSession = 64
 
 	MaxLenSeedAssignmentName = 100
+
+	// MaxLenMatchID caps the byte length of the "mid" path parameter accepted
+	// by the score endpoint. Match IDs legitimately contain spaces (e.g.
+	// "Pool A-1"), so a charset regex is inappropriate — a length cap is the
+	// right defense-in-depth guard against abusive keys growing runningRevStore
+	// unbounded. 128 bytes covers any realistic match ID.
+	MaxLenMatchID = 128
 
 	// MaxBulkCheckInIDs is the upper bound on the participantIds array
 	// accepted by POST /competitions/:id/participants/checkin-bulk. A
@@ -377,6 +387,16 @@ func (r *ScoreRequest) Validate() error {
 	// trailing/leading whitespace.
 	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
+	}
+	if err := validateMaxLen("revSession", r.RevSession, MaxLenRevSession); err != nil {
+		return err
+	}
+	// rev is a client-supplied monotonic counter. rev==0 is the intentional
+	// "unversioned" opt-out (guard skipped); a NEGATIVE rev would likewise slip
+	// past the Rev>0 gate, letting a stale running write clobber newer state, so
+	// reject it outright.
+	if r.Rev < 0 {
+		return &ValidationError{Field: "rev", Message: "must not be negative"}
 	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only

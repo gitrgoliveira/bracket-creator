@@ -5883,8 +5883,10 @@ button.pool-match-row {
   font-size: 16px; font-weight: 800; height: auto; }
 .msb-lab { display: block; font-size: 10px; font-weight: 600; color: #6b7280; letter-spacing: .04em; }
 abbr.msb-lab { text-decoration: none; cursor: help; }
-/* running-match highlight */
-.msb-row--now { background: #fef3c7; }
+/* running-match highlight: navy running-signal language (DESIGN.md Principle 3).
+   --accent-soft fill (same token used by bc-match--running / sched-row--running);
+   inset left bar echoes the running-strip/match-card accent border without layout shift. */
+.msb-row--now { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .msb-row--queued .msb-name { color: #9ca3af; }
 .msb-row--queued .msb-name--aka { color: #d4a5a8; }
 .msb-row--queued .msb-slot { color: #9ca3af; }

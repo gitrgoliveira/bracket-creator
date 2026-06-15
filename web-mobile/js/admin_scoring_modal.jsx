@@ -83,8 +83,11 @@ const AUTOSAVE_DEBOUNCE_MS = 300;
 // Colors use design tokens only (var(--...)) — no hardcoded hex.
 // ---------------------------------------------------------------------------
 function SyncStatusPill({ isRunning }) {
-  // Guard: do not render at all unless the match is running (no autosave
-  // fires while scheduled, and completed writes always proceed).
+  // The component always mounts and subscribes to sync status (the subscription
+  // is a single Set entry and replays the current value on subscribe). It only
+  // renders a VISIBLE pill while the match is running — autosave fires only on
+  // running matches, so the pill carries no meaning otherwise. The render guard
+  // is the `if (!isRunning) return null` below.
   const [status, setStatus] = useStateA('synced');
   const mountedRef = useRefA(true);
   useEffectA(() => {
@@ -98,7 +101,7 @@ function SyncStatusPill({ isRunning }) {
     return () => { mountedRef.current = false; unsub(); };
   }, []);
 
-  if (!isRunning) return null;
+  if (!isRunning) return null; // render guard: no visible pill unless running
 
   const config = {
     synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },

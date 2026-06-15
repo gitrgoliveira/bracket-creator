@@ -268,6 +268,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// Only successfully-recorded results go into the SSE broadcast so
 		// clients never patch with values the engine rejected.
 		var successful []state.MatchResult
+		// Collect eligibility changes so we can broadcast
+		// EventCompetitorStatusUpdated for every kiken/fusenpai result in
+		// the batch — mirrors the single-score handler (T085/T092).
+		var eligibilityUpdates []*domain.CompetitorStatus
 
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
@@ -275,19 +279,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 		force := c.Query("force") == "true"
-
-		// Correction-reason audit gate (parity with PUT /score): overwriting an
-		// already-completed result is a correction and must carry a non-empty
-		// CorrectionReason. Without this, bulk-score is a silent bypass of the
-		// single-score gate — a finalized result could be rewritten with no
-		// audit trail. The status is snapshotted once before the loop rather
-		// than read under each write's lock, so a narrow TOCTOU remains: if a
-		// concurrent admin PUT /score finalizes a match between this snapshot
-		// and our RecordMatchResult call, the reason can be stripped. This is
-		// audit-trail only (the write itself is atomic and authenticated) and
-		// closes the common single-admin case; the per-result-transaction fix
-		// for the concurrent-admin window is tracked in bead mp-ic5b.
-		statusBefore := matchStatusSnapshot(store, id)
 
 		for i := range results {
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
@@ -302,27 +293,37 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
-			// Normalize + gate the audit reason exactly as the single-score path
-			// does. A reason is meaningful only on a correction (completed →
-			// completed); drop it on any non-correction write.
+			// mp-ic5b: the correction-reason gate and the write run under the
+			// same per-comp lock so the status read is race-free against a
+			// concurrent PUT /score. Per-result transactions preserve the
+			// existing {succeeded, errors[]} partial-success response shape.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
-			if results[i].Status == state.MatchStatusCompleted {
-				if statusBefore[results[i].ID] == state.MatchStatusCompleted {
-					if results[i].CorrectionReason == "" {
-						errs = append(errs, scoreError{MatchID: results[i].ID, Error: "correcting a completed match result requires a non-empty correctionReason"})
-						continue
-					}
+			var capturedStatus *domain.CompetitorStatus
+			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
+				if results[i].Status != state.MatchStatusCompleted {
+					results[i].CorrectionReason = ""
 				} else {
-					results[i].CorrectionReason = "" // first finalization — not a correction
+					existing := lookupMatchStatusUnderTx(stx, id, results[i].ID)
+					if existing == state.MatchStatusCompleted {
+						if results[i].CorrectionReason == "" {
+							return errors.New("correcting a completed match result requires a non-empty correctionReason")
+						}
+					} else {
+						results[i].CorrectionReason = "" // first finalization — not a correction
+					}
 				}
-			} else {
-				results[i].CorrectionReason = ""
-			}
-
-			if err := eng.RecordMatchResult(id, results[i].ID, &results[i]); err != nil {
+				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
+				if err == nil {
+					capturedStatus = status
+				}
+				return err
+			}); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
-			} else {
-				successful = append(successful, results[i])
+				continue
+			}
+			successful = append(successful, results[i])
+			if capturedStatus != nil {
+				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
 			}
 		}
 
@@ -332,6 +333,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				"results":       matchesForBroadcast(successful),
 			})
 			tryAutoCompletePools(c, eng, hub, id)
+		}
+		for _, status := range eligibilityUpdates {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
+				"competitionId": id,
+				"status":        status,
+			})
 		}
 		c.JSON(http.StatusOK, gin.H{"succeeded": len(successful), "errors": errs})
 	})
@@ -695,30 +702,6 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 		}
 	}
 	return ""
-}
-
-// matchStatusSnapshot returns a matchID→status map for every pool and bracket
-// match in compID. It is the bulk-score equivalent of lookupMatchStatusUnderTx:
-// the bulk handler reads it once before its write loop to enforce the
-// correction-reason audit gate (an overwrite of an already-completed result
-// must carry a reason). Read errors are best-effort — a missing entry reads as
-// "" (not completed), so a transient load failure relaxes the gate rather than
-// rejecting an otherwise-valid batch, matching lookupMatchStatusUnderTx.
-func matchStatusSnapshot(store CompetitionStore, compID string) map[string]state.MatchStatus {
-	snapshot := map[string]state.MatchStatus{}
-	if poolMatches, err := store.LoadPoolMatches(compID); err == nil {
-		for i := range poolMatches {
-			snapshot[poolMatches[i].ID] = poolMatches[i].Status
-		}
-	}
-	if bracket, err := store.LoadBracket(compID); err == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for i := range round {
-				snapshot[round[i].ID] = round[i].Status
-			}
-		}
-	}
-	return snapshot
 }
 
 // registerScoreHandler wires the `PUT /competitions/:id/matches/:mid/score`

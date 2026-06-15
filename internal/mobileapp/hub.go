@@ -43,6 +43,7 @@ const (
 	EventAnnouncement  EventType = "announcement"
 	EventDrawGenerated EventType = "draw_generated"
 	EventDrawDiscarded EventType = "draw_discarded"
+	EventLineupUpdated EventType = "lineup_updated"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

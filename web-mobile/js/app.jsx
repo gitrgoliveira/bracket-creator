@@ -725,6 +725,13 @@ function App() {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
             jitteredTimeout(load, listJitter);
+        } else if (event.type === "lineup_updated") {
+            // A team lineup was saved or deleted by an operator. The lineup
+            // data is not part of the competition object, so patchCompetitionData
+            // / setSelectedCompData won't help — instead we dispatch a window
+            // CustomEvent that useTeamLineups hooks can subscribe to directly
+            // (same pattern as competitor-status-updated in patch.jsx).
+            window.dispatchEvent(new CustomEvent("lineup-updated", { detail: event.data }));
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];

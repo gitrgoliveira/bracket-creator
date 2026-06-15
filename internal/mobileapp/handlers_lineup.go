@@ -139,14 +139,16 @@ func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID strin
 // server.go) as the auth boundary; a richer role check lands when
 // per-role auth is implemented.
 //
-// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
+// The `tx CompetitionTransactor` parameter is the T156 hook.
 // The PUT body wraps its three store calls — load comp (for teamSize),
 // set lineup, reload lineup (for the response) — in one
 // WithTransaction so they all commit under a single per-comp lock
-// acquire. `*state.Store` satisfies all three interfaces
-// (TeamLineupStore + CompetitionStore + CompetitionTransactor) so
-// wiring stays drop-in.
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor) {
+// acquire. `hub Broadcaster` receives an EventLineupUpdated after
+// each successful write so SSE clients can re-fetch lineup data.
+// `*state.Store` satisfies the first three interfaces (TeamLineupStore +
+// CompetitionStore + CompetitionTransactor); the SSE hub satisfies
+// Broadcaster and is wired separately in production.
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -256,6 +258,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.JSON(http.StatusOK, persistedLineup)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
@@ -272,6 +275,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
@@ -397,6 +401,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.JSON(http.StatusOK, persistedLineup)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
@@ -413,6 +418,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 }
 

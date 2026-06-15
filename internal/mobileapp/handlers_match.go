@@ -620,9 +620,11 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 		}
 	}
 
-	// Anonymous self-run writes must not carry rev-ordering metadata — a
-	// participant could otherwise inject a near-future epoch into runningRevStore
-	// and make every legitimate admin autosave look "older" and get dropped.
+	// Anonymous self-run writes are treated as unversioned: clear any client-
+	// supplied rev/revSession so they don't engage the same-session rev-guard at
+	// all and simply apply (last-write-wins among peers). A participant has no
+	// need to order their own writes, and this keeps a crafted revSession from
+	// interfering with another session's rev ordering.
 	req.Rev = 0
 	req.RevSession = ""
 	return "self-reported", true

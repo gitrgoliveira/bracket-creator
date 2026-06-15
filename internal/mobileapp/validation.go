@@ -75,7 +75,8 @@ const (
 	MaxLenChangeReason      = MaxLenDecisionReason
 	MaxLenEligibilityReason = 200
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
-	// MaxLenRevSession caps ScoreRequest.RevSession ("<epochMs>-<uuid>", ~50 bytes).
+	// MaxLenRevSession caps ScoreRequest.RevSession (an opaque session id, e.g.
+	// a 36-char UUID; 64 leaves headroom).
 	MaxLenRevSession = 64
 
 	MaxLenSeedAssignmentName = 100

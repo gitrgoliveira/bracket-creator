@@ -1495,10 +1495,12 @@ paths:
             Result recorded. On a normal write the body is the updated MatchResult.
             When a running-write autosave is a no-op the body is `{"stale":true}`
             (the `stale` field set, all other MatchResult fields absent). This
-            happens in two cases: (a) the rev-guard drops it as out-of-order or
-            superseded (a lower rev within the same session, or an older-epoch
-            session's late write), or (b) the match is already completed, so a
-            running write must not revert the final result.
+            happens in two cases: (a) the rev-guard drops it as a same-session
+            out-of-order delivery (a lower rev than one already applied for that
+            client session, e.g. a reconnect flush), or (b) the match is already
+            completed, so a running write must not revert the final result.
+            Different client sessions are concurrent operators — the server
+            applies those last-write-wins, never stale.
           content:
             application/json:
               schema:
@@ -1510,9 +1512,9 @@ paths:
                         type: boolean
                         description: >
                           true when a running-write autosave was a no-op — either
-                          dropped by the rev-guard as out-of-order/superseded, or
-                          rejected because the match is already completed. Omitted
-                          on normal responses.
+                          dropped by the rev-guard as a same-session out-of-order
+                          delivery, or rejected because the match is already
+                          completed. Omitted on normal responses.
                     required: [stale]
         '409':
           description: |
@@ -2694,11 +2696,11 @@ components:
           maxLength: 64
           writeOnly: true
           description: >
-            Optional per-page-load scoring-session id ("<epochMillis>-<uuid>")
-            sent with "running" autosave writes. The epoch prefix lets the
-            server order sessions so an evicted session's late write can't
-            overwrite a newer one. Never returned in responses or public
-            projections.
+            Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
+            with "running" autosave writes. It lets the server's rev-guard drop a
+            single session's own out-of-order delivery (a reconnect flush). Writes
+            from different sessions are concurrent operators and apply
+            last-write-wins. Never returned in responses or public projections.
         sideA:
           type: string
           maxLength: 100

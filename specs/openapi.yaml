@@ -1491,11 +1491,24 @@ paths:
               $ref: '#/components/schemas/MatchResult'
       responses:
         '200':
-          description: Result recorded.
+          description: |
+            Result recorded. On a normal write the body is the updated MatchResult.
+            When a stale running-write autosave is a no-op (the match is already
+            completed), the body is `{"stale":true}` and the `stale` field is set;
+            all other MatchResult fields are absent.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - $ref: '#/components/schemas/MatchResult'
+                  - type: object
+                    properties:
+                      stale:
+                        type: boolean
+                        description: >
+                          true when a stale running-write autosave was a no-op; the
+                          field is omitted on normal responses.
+                    required: [stale]
         '409':
           description: |
             Conflict — one of six codes returned in the `error` field:

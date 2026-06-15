@@ -622,6 +622,11 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 		}
 	}
 
+	// Anonymous self-run writes must not carry rev-ordering metadata — a
+	// participant could otherwise inject a near-future epoch into runningRevStore
+	// and make every legitimate admin autosave look "older" and get dropped.
+	req.Rev = 0
+	req.RevSession = ""
 	return "self-reported", true
 }
 
@@ -879,6 +884,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// behaviour.
 		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
 			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
+			// Hoist epoch parse: incoming.Session is invariant across CAS retries.
+			inE := parseSessionEpoch(incoming.Session)
 			for {
 				existing, loaded := runningRevStore.LoadOrStore(matchKey, incoming)
 				if !loaded {
@@ -897,7 +904,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					// On the rare same-epoch tie (same millisecond), fall back to
 					// rev so a lower rev can't lower the high-water mark. When
 					// either epoch is unknown (0), allow takeover (legacy/malformed).
-					inE, stE := parseSessionEpoch(incoming.Session), parseSessionEpoch(stored.Session)
+					stE := parseSessionEpoch(stored.Session)
 					if inE > 0 && stE > 0 && (inE < stE || (inE == stE && result.Rev < stored.Rev)) {
 						c.JSON(http.StatusOK, gin.H{"stale": true})
 						return
@@ -919,8 +926,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// commits (TOCTOU). Withdrawal decisions skip the court gate — operators
 		// must record kiken/fusenpai regardless of court state.
 		var (
-			engStatus *domain.CompetitorStatus
-			engErr    error
+			engStatus          *domain.CompetitorStatus
+			engErr             error
+			staleAfterComplete bool
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			if !isWithdrawal {
@@ -972,6 +980,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						result.CorrectionReason = ""
 					}
 				}
+				// Bracket integrity: a running-status write must never revert an
+				// already-completed match (e.g. a stale autosave queued before
+				// Finish and flushed afterward). Applies to ALL callers (the
+				// self-reported finalized guard above only covers anonymous mode).
+				// No-op it as a stale write so the client's flush discards it.
+				if result.Status == state.MatchStatusRunning &&
+					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
+					staleAfterComplete = true
+					return nil
+				}
 				if !isWithdrawal {
 					if err := eng.StartMatchTx(stx, id, mid); err != nil {
 						engErr = err
@@ -1014,6 +1032,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
+		if staleAfterComplete {
+			// The running write was re-added to runningRevStore by the rev-guard
+			// above (the completed write had deleted it); drop it again so the
+			// finished match's slot doesn't linger.
+			runningRevStore.Delete(matchKey)
+			c.JSON(http.StatusOK, gin.H{"stale": true})
 			return
 		}
 		if engErr != nil {

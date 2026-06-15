@@ -655,6 +655,11 @@ const API = {
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev — the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
+        if (!isRunning) {
+            // A completed/terminal write supersedes any queued running autosave
+            // for this match — drop it so a stale flush can't revert the result.
+            if (_writeQueue.delete(_revKey(compID, matchID))) _recomputeSyncStatus();
+        }
         if (isRunning) {
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
@@ -683,7 +688,7 @@ const API = {
                     // Return a synthetic "ok" shape so callers that ignore the return
                     // value (debounced autosave) don't crash. The queued write will
                     // deliver asynchronously via _flushQueue.
-                    return { stale: false, queued: true };
+                    return { queued: true };
                 }
                 throw _networkErr;
             }
@@ -711,7 +716,7 @@ const API = {
         // callers; the operator's authoritative Finish is the backstop.
         if (isRunning && (res.status >= 500 || res.status === 429)) {
             enqueueRunningWrite(compID, matchID, payload, password);
-            return { stale: false, queued: true };
+            return { queued: true };
         }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
         // with a human-readable reason; prefer reasonHuman, then reason, then code.

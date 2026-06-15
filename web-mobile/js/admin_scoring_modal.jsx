@@ -136,7 +136,7 @@ function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mo
     cancelDebounce();
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      if (!mountedRef || !mountedRef.current) return;
+      if (!mountedRef.current) return;
       // gate 3: re-check running at FIRE time. If the match was completed
       // during the debounce window (this operator's Finish cancels the timer,
       // but an SSE update or another operator can complete it out from under
@@ -283,8 +283,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     // schedule an autosave PUT / SSE fan-out for a tap that changes nothing.
     const cur = side === "a" ? aPts : bPts;
     if (cur.length >= 2) return;
-    if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
-    else setBPts((p) => p.length < 2 ? [...p, letter] : p);
+    if (side === "a") setAPts((p) => [...p, letter]);
+    else setBPts((p) => [...p, letter]);
     markScoringDirty(); // C1: trigger debounced autosave
   };
   const removePt = (side, idx) => {

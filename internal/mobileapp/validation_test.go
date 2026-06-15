@@ -1244,7 +1244,7 @@ func TestIsSelfRunReportableSubDecision(t *testing.T) {
 }
 
 // TestScoreRequestValidate_RevSessionCap verifies that an over-long revSession
-// (> MaxLenEntityID=64) is rejected with a 400-mapped ValidationError, while
+// (> MaxLenRevSession=64) is rejected with a 400-mapped ValidationError, while
 // empty (legacy clients) and UUID-length (36 chars) values pass.
 func TestScoreRequestValidate_RevSessionCap(t *testing.T) {
 	t.Run("empty revSession passes (legacy clients)", func(t *testing.T) {

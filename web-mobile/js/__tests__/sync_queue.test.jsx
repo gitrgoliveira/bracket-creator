@@ -486,3 +486,48 @@ describe('recordScore: queues running writes on network failure', () => {
         expect(result).toMatchObject({ queued: true });
     });
 });
+
+// ---------------------------------------------------------------------------
+// 7. Completed recordScore drains a previously-queued running write
+// ---------------------------------------------------------------------------
+
+describe('recordScore: completed write drains queued running autosave', () => {
+    it('a queued running write is removed when a completed write for the same match succeeds', async () => {
+        // Step 1: enqueue a running write by failing the network call.
+        let callCount = 0;
+        global.fetch = vi.fn().mockImplementation((_url, opts) => {
+            callCount++;
+            const body = JSON.parse(opts.body);
+            if (body.status === 'running' && callCount === 1) {
+                // First running write fails (network down) → queued.
+                return Promise.reject(new TypeError('network error'));
+            }
+            // Completed write (and any subsequent flush attempt) succeeds.
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+
+        // Trigger the queued running write.
+        const runningResult = await API.recordScore('c1', 'm_drain', { status: 'running' }, 'pw', null);
+        expect(runningResult).toMatchObject({ queued: true });
+
+        // The queue should contain an entry for this match.
+        // (We can't inspect _writeQueue directly, but the sync status will be
+        // 'syncing' or 'offline', not 'synced', while the entry is in the queue.)
+        const statuses = [];
+        const unsub = subscribeSyncStatus((s) => statuses.push(s));
+        // Drain microtasks so the backoff state is established.
+        await flushMicrotasks();
+        unsub();
+
+        // Step 2: a completed write for the same match should drain the queue.
+        await API.recordScore('c1', 'm_drain', { status: 'completed', winner: 'Alice' }, 'pw', null);
+        await flushMicrotasks();
+
+        // After the completed write, the queue should be empty and status synced.
+        const finalStatuses = [];
+        const unsub2 = subscribeSyncStatus((s) => finalStatuses.push(s));
+        await flushMicrotasks();
+        unsub2();
+        expect(finalStatuses).toContain('synced');
+    });
+});

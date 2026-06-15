@@ -2138,3 +2138,147 @@ func TestScoreHandler_FabricatedMid_TxNotFound(t *testing.T) {
 	_, present := runningRevStore.Load(matchKey)
 	assert.False(t, present, "runningRevStore entry must be pruned on txErr NotFound")
 }
+
+// TestScoreHandler_RunningWriteCannotRevertCompleted verifies the bracket-
+// integrity guard that prevents a stale running-status autosave from reverting
+// an already-completed match result:
+//
+//  1. PUT a completed write (winner=Alice) → HTTP 200, match stored as completed.
+//  2. PUT a running write (status=running, with a rev + revSession) for the
+//     same match → expect HTTP 200 with body {"stale":true}.
+//  3. The stored match status must STILL be "completed" (not reverted).
+//  4. runningRevStore must have NO lingering entry for the match key.
+func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "rv-revert"
+	matchID := "PoolA-1"
+	matchKey := compID + ":" + matchID
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: matchID, SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+
+	// Ensure the rev-store is clean for this key.
+	runningRevStore.Delete(matchKey)
+
+	// Step 1: finalize the match.
+	completedPayload, _ := json.Marshal(map[string]any{
+		"sideA":   "Alice",
+		"sideB":   "Bob",
+		"winner":  "Alice",
+		"ipponsA": []string{"M", "K"},
+		"ipponsB": []string{},
+		"status":  "completed",
+	})
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(completedPayload))
+	req1.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w1, req1)
+	require.Equal(t, http.StatusOK, w1.Code, "completed write must succeed")
+
+	// Verify the match is completed on disk.
+	loadStatus := func() state.MatchStatus {
+		t.Helper()
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == matchID {
+				return m.Status
+			}
+		}
+		t.Fatalf("match %s not found", matchID)
+		return ""
+	}
+	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "match must be completed after step 1")
+
+	// Step 2: attempt a stale running autosave (simulating a write queued
+	// before Finish that was flushed after).
+	epoch := time.Now().UnixMilli()
+	runningPayload, _ := json.Marshal(map[string]any{
+		"sideA":      "Alice",
+		"sideB":      "Bob",
+		"ipponsA":    []string{"M"},
+		"ipponsB":    []string{},
+		"status":     "running",
+		"rev":        int64(1),
+		"revSession": fmt.Sprintf("%d-x", epoch),
+	})
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(runningPayload))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+
+	// Step 3: the server must return 200 with stale=true.
+	assert.Equal(t, http.StatusOK, w2.Code, "stale running write must return 200")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
+	stale, ok := body["stale"].(bool)
+	assert.True(t, ok && stale, "stale running write must return {stale:true}")
+
+	// Step 4: match must still be completed — not reverted to running.
+	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "running write must not revert a completed match")
+
+	// Step 5: no lingering runningRevStore entry.
+	_, revPresent := runningRevStore.Load(matchKey)
+	assert.False(t, revPresent, "runningRevStore must have no entry after stale running write on completed match")
+}
+
+// TestSelfRunPolicy_NoRevMetadata verifies that an anonymous self-run write
+// has its Rev and RevSession zeroed by enforceSelfRunPolicy before the
+// rev-guard runs. This prevents a malicious participant from injecting a
+// near-future epoch into runningRevStore and poisoning the guard so that
+// every subsequent legitimate admin autosave looks "older" and gets dropped.
+//
+// Requires a non-empty tournament password so that a request with no
+// X-Tournament-Password header is treated as an anonymous caller (not admin).
+func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Self-run tournament with a non-empty password. An unauthenticated
+	// request (no X-Tournament-Password) is the anonymous self-run path.
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Mode: "self-run", Courts: []string{"A"}}))
+	compID := "sr-epoch"
+	matchID := "PoolA-1"
+	matchKey := compID + ":" + matchID
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: matchID, SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	runningRevStore.Delete(matchKey)
+
+	// Attempt to inject a near-future epoch via an anonymous self-run running
+	// write. If the policy does NOT zero Rev/RevSession, the rev-guard stores
+	// this entry and subsequent admin autosaves from an older epoch get dropped.
+	futureEpoch := time.Now().UnixMilli() + 60_000 // 60s in the future
+	payload, _ := json.Marshal(map[string]any{
+		"sideA":      "Alice",
+		"sideB":      "Bob",
+		"ipponsA":    []string{"M"},
+		"ipponsB":    []string{},
+		"status":     "running",
+		"rev":        int64(9999),
+		"revSession": fmt.Sprintf("%d-attacker", futureEpoch),
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(payload))
+	// Deliberately omit X-Tournament-Password to be the anonymous path.
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// The runningRevStore must NOT contain the attacker's epoch/rev.
+	// If enforceSelfRunPolicy zeroed Rev and RevSession the guard ran with
+	// Rev==0, which is the "unversioned" opt-out — no entry is stored.
+	val, present := runningRevStore.Load(matchKey)
+	if present {
+		stored := val.(runningRev)
+		assert.Equal(t, int64(0), stored.Rev, "self-run write must not populate runningRevStore with attacker rev")
+		assert.Empty(t, stored.Session, "self-run write must not populate runningRevStore with attacker session")
+	}
+	// (If not present at all, the guard skipped storage — also correct.)
+}

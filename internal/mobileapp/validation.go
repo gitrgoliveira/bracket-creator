@@ -75,6 +75,8 @@ const (
 	MaxLenChangeReason      = MaxLenDecisionReason
 	MaxLenEligibilityReason = 200
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
+	// MaxLenRevSession caps ScoreRequest.RevSession ("<epochMs>-<uuid>", ~50 bytes).
+	MaxLenRevSession = 64
 
 	MaxLenSeedAssignmentName = 100
 
@@ -385,7 +387,7 @@ func (r *ScoreRequest) Validate() error {
 	if err := validateMaxLen("correctionReason", strings.TrimSpace(r.CorrectionReason), MaxLenCorrectionReason); err != nil {
 		return err
 	}
-	if err := validateMaxLen("revSession", r.RevSession, MaxLenEntityID); err != nil {
+	if err := validateMaxLen("revSession", r.RevSession, MaxLenRevSession); err != nil {
 		return err
 	}
 	// rev is a client-supplied monotonic counter. rev==0 is the intentional

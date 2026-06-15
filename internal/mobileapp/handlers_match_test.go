@@ -546,7 +546,10 @@ func TestScoreHandler_MidLengthCap(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	assert.Contains(t, body["error"], "matchId too long")
+	// Shared validateMaxLen helper → consistent ValidationError body that
+	// names the field and includes the limit.
+	assert.Contains(t, body["error"], "matchId")
+	assert.Contains(t, body["error"], fmt.Sprintf("must be <= %d", MaxLenMatchID))
 }
 
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the

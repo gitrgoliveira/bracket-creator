@@ -786,8 +786,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		mid := c.Param("mid")
-		if len(mid) > MaxLenMatchID {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "matchId too long"})
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			// Use the shared validateMaxLen helper for a consistent
+			// ValidationError-style body ("matchId: must be <= N characters")
+			// that includes the limit, matching the other mobileapp handlers.
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		// Composite key used by the rev-guard and broadcast coalescer; hoisted

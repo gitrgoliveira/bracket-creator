@@ -34,6 +34,34 @@ func (e *IneligibleCompetitorError) Is(target error) bool {
 	return target == ErrIneligibleCompetitor
 }
 
+// ErrCourtBusy is the sentinel error matched by
+// errors.Is(err, engine.ErrCourtBusy). The concrete value is a
+// *CourtBusyError that carries Court, MatchID, and CompID.
+var ErrCourtBusy = errors.New("court already has a running match")
+
+// CourtBusyError is returned when the target court already has a running
+// match. Which competitions are scanned depends on the call site:
+//   - StartMatch (non-tx): scans all competitions via store.RunningMatchOnCourt.
+//   - CheckCrossCompCourtBusy (pre-tx gate): scans all competitions except compID.
+//   - StartMatchTx (tx path): scans only within compID — cross-competition
+//     conflicts are caught by CheckCrossCompCourtBusy before the tx begins.
+//
+// Courts are tournament-global: one physical shiaijo can host only one match at
+// a time regardless of which competition owns it.
+type CourtBusyError struct {
+	Court   string
+	MatchID string
+	CompID  string
+}
+
+func (e *CourtBusyError) Error() string {
+	return fmt.Sprintf("court %q already has running match %s (competition %s)", e.Court, e.MatchID, e.CompID)
+}
+
+func (e *CourtBusyError) Is(target error) bool {
+	return target == ErrCourtBusy
+}
+
 // AlreadyIneligibleError is returned by RecordDecision when the
 // intended loser already carries Eligible:false from a *different*
 // match — indicating two operators on different courts concurrently
@@ -127,6 +155,9 @@ func (e *Engine) CheckEligibility(compID string, playerIDs []string) error {
 //
 // FR-035, T084.
 func (e *Engine) StartMatch(compID, matchID string) error {
+	if err := e.checkCourtExclusivity(compID, matchID, ""); err != nil {
+		return err
+	}
 	if err := e.checkSimultaneousMatch(compID, matchID); err != nil {
 		return err
 	}
@@ -135,6 +166,79 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 		return err
 	}
 	return e.checkEligibilityExcludingMatch(compID, ids, matchID)
+}
+
+// checkCourtExclusivity rejects StartMatch when the target match's court
+// already has a running match anywhere in the tournament. skipCompID is
+// the competition whose data the caller already holds a write lock for
+// (passed to store.RunningMatchOnCourt to avoid re-locking a non-reentrant
+// mutex). Pass "" when calling outside a WithTransaction body.
+func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error {
+	court, err := e.lookupMatchCourt(compID, matchID)
+	if err != nil {
+		return err
+	}
+	if court == "" {
+		return nil
+	}
+	occ, err := e.store.RunningMatchOnCourt(court, skipCompID)
+	if err != nil {
+		return err
+	}
+	if occ != nil && (occ.CompID != compID || occ.MatchID != matchID) {
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	}
+	return nil
+}
+
+// CheckCrossCompCourtBusy checks whether the court assigned to matchID is
+// currently occupied by a running match in a different competition.
+// It MUST be called before entering WithTransaction for compID: calling
+// store.RunningMatchOnCourt while holding a per-comp write lock risks a
+// circular-wait deadlock if another competition is simultaneously in its
+// own WithTransaction (both goroutines try to read-lock each other's mutex).
+func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
+	court, err := e.lookupMatchCourt(compID, matchID)
+	if err != nil || court == "" {
+		return err
+	}
+	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
+	if err != nil {
+		return err
+	}
+	if crossOcc != nil {
+		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
+	}
+	return nil
+}
+
+// lookupMatchCourt returns the court assigned to matchID in compID's pool
+// matches or bracket. Returns "" (not an error) when the match exists but
+// has no court assigned.
+func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Court, nil
+		}
+	}
+	bracket, err := e.store.LoadBracket(compID)
+	if err != nil {
+		return "", err
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID {
+					return bm.Court, nil
+				}
+			}
+		}
+	}
+	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // checkSimultaneousMatch returns an *IneligibleCompetitorError if either

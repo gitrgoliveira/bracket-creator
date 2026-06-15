@@ -55,6 +55,10 @@ func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string) error {
 	return nil
 }
 
+func (stubScoringEngine) CheckCrossCompCourtBusy(string, string) error {
+	return nil
+}
+
 func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata, bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }
@@ -138,6 +142,10 @@ type stubCompetitionTransactor struct{}
 
 func (stubCompetitionTransactor) WithTransaction(string, func(state.StoreTx) error) error {
 	return nil
+}
+
+func (stubCompetitionTransactor) WithCourtExclusivityLock(fn func() error) error {
+	return fn()
 }
 
 // TestDepsInterfacesCompile is a compile-time guard that the consumer-

@@ -130,6 +130,11 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			u := *match
 			u.SubResults = filtered
+			// Court exclusivity (mp-95mg) is not required here: DELETE /daihyosen
+			// only proceeds when the DH sub is an unscored placeholder (the guard
+			// above rejects if the sub has ippons, a winner, or a non-daihyosen
+			// decision), which means the parent match is still in MatchStatusRunning
+			// — no cross-comp conflict can be introduced by this write.
 			u.Status = state.MatchStatusRunning
 			// Clear ALL DH-derived match-level result/decision metadata so the
 			// match returns to a clean running state. MatchResult.Decision has no
@@ -237,6 +242,11 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 
 			// Append the placeholder to the match's SubResults and persist via
 			// the Tx score path so the append commits under the held lock.
+			// Court exclusivity (mp-95mg) is not required here: AddDaihyosen
+			// returns ErrNotTied unless the parent match is in a tied completed-
+			// bouts state (i.e. already MatchStatusRunning on the court). The
+			// court slot was committed when the match was first started via the
+			// score endpoint, which holds WithCourtExclusivityLock.
 			u := *match
 			u.SubResults = append(append([]state.SubMatchResult{}, match.SubResults...), *sub)
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress

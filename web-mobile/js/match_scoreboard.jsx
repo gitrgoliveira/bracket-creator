@@ -39,11 +39,27 @@ export function boutHansokuMark(foulCount) {
 export function useTeamLineups(match, competition, roundIndex) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
+  const [lineupVersion, setLineupVersion] = useSB(0);
 
   const compId = (competition && competition.id) || match?.compId;
   const matchId = match?.id;
   const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
   const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
+
+  // Subscribe to lineup-updated window CustomEvent (dispatched by app.jsx when
+  // the backend emits an SSE lineup_updated for this competition). Incrementing
+  // lineupVersion causes the fetch effect below to re-run and pick up the new
+  // lineup without a full page reload.
+  useEB(() => {
+    if (!compId) return;
+    const handler = (e) => {
+      if (!e.detail || e.detail.competitionId === compId) {
+        setLineupVersion(v => v + 1);
+      }
+    };
+    window.addEventListener("lineup-updated", handler);
+    return () => window.removeEventListener("lineup-updated", handler);
+  }, [compId]);
 
   useEB(() => {
     // Clear stale lineups immediately so the previous match's names never leak
@@ -100,7 +116,7 @@ export function useTeamLineups(match, competition, roundIndex) {
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round]);
+  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion]);
 
   return { lineupA, lineupB };
 }

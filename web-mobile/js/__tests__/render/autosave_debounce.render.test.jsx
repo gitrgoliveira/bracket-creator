@@ -152,6 +152,35 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
     expect(patch.score?.live).toBe(true);
   });
 
+  it('does NOT fire a running autosave if the match completes during the debounce window', async () => {
+    const running = makeRunningMatch();
+    const { rerender } = renderModal(running);
+
+    const menButtons = screen.getAllByText('M');
+    await act(async () => { fireEvent.click(menButtons[0]); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+
+    // The match is completed out from under the operator (an SSE update or
+    // another operator) BEFORE the 300ms debounce fires — re-render completed.
+    const completed = { ...running, status: 'completed' };
+    await act(async () => {
+      rerender(
+        <ScoreEditorModal
+          match={completed}
+          onClose={vi.fn()}
+          onSubmit={makeOnSubmit(completed)}
+          password=""
+        />,
+      );
+    });
+
+    // Advance past the debounce. The fire-time isRunning re-check (gate 3) must
+    // suppress the now-stale running write so it can't regress the completed
+    // result.
+    await act(async () => { vi.advanceTimersByTime(350); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+  });
+
   it('rapid double-tap coalesces into ONE write (trailing-edge debounce)', async () => {
     renderModal(makeRunningMatch());
 

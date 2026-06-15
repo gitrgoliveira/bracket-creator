@@ -144,6 +144,12 @@ function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mo
       timerRef.current = null;
       if (!dirtyRef.current) return; // gate 2: user action required
       if (!mountedRef || !mountedRef.current) return;
+      // gate 3: re-check running at FIRE time. If the match was completed
+      // during the debounce window (this operator's Finish cancels the timer,
+      // but an SSE update or another operator can complete it out from under
+      // us), isRunningRef has flipped false on re-render — sending a
+      // status:"running" autosave now would regress the completed result.
+      if (!isRunningRef.current) return;
       dirtyRef.current = false;
       // Fire-and-forget: errors swallowed; operator's explicit Finish is
       // the authoritative write.

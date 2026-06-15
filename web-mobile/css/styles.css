@@ -3588,6 +3588,74 @@ button.pool-match-row {
   color: var(--ink-3);
 }
 
+.viewer__results-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.viewer-nav-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.viewer-nav-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  min-width: 0;
+}
+
+.viewer-nav-card:hover {
+  background: var(--bg-2);
+}
+
+.viewer-nav-card__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.viewer-nav-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.viewer-nav-card__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+
+.viewer-nav-card__sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-nav-card__chev {
+  color: var(--ink-3);
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
 .seed-row__input {
   width: 60px;
   padding: 4px 8px;
@@ -6845,6 +6913,21 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
+.ann-bell-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.ann-bell-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.1); }
+.ann-bell-btn--on { color: rgba(255, 255, 255, 0.95); }
+.ann-bell-btn--denied { opacity: 0.35; cursor: default; }
 
 @media (max-width: 480px) {
   .announcement-overlay {
@@ -7153,6 +7236,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-1);
   letter-spacing: -0.01em;
 }
+.watchlist-bell-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.watchlist-bell-btn:hover { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 30%); }
+.watchlist-bell-btn--muted {
+  background: transparent;
+  color: var(--ink-3);
+}
+.watchlist-bell-btn--muted:hover { background: var(--line); color: var(--ink-2); }
 
 /* vsched inside the watchlist card: flat row list, no nested card boxes.
    Regular items become hairline-separated rows; running items keep their

@@ -5,6 +5,7 @@ import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './m
 // Re-export the shared scoreboard primitives so existing tests that import them
 // from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
 export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
+import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const StatusBadge = window.StatusBadge;
@@ -275,12 +276,23 @@ function useWatchlist() {
     return migrated;
   });
   const persist = (next) => {
-    const normalized = normalizeWatchlist(next);
-    setList(normalized);
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized));
-    } catch (_e) { /* ignore — in-memory state remains valid for the session */ }
+    // Capture the normalized value from inside the updater so the LS write
+    // can happen outside (side effects must not live in state updaters).
+    // Preact 10 executes functional updaters synchronously within the useState
+    // setter call, so normalized and changed are always set before the LS write below.
+    // Same reliance as useChimeMuted.toggle — revisit if upgrading Preact beyond v10.
+    let normalized;
+    let changed = false;
+    setList(prevList => {
+      const resolved = typeof next === "function" ? next(prevList) : next;
+      if (resolved === prevList) return prevList; // same-reference: no re-render, skip LS write
+      changed = true;
+      normalized = normalizeWatchlist(resolved);
+      return normalized;
+    });
+    if (changed && typeof window !== "undefined") {
+      try { window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(normalized)); } catch (_e) { /* ignore */ }
+    }
   };
   return [list, persist];
 }
@@ -560,18 +572,150 @@ function buildRoster(competitions) {
 const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 
 // Hook: chime-muted preference backed by localStorage.
-// Multiple instances (ViewerHome + NotificationSettings) stay in sync via
+// useChimeMuted syncs across multiple ViewerHome mounts via
 // a custom DOM event dispatched on toggle — the native `storage` event only
 // fires across tabs, not within the same page.
 const CHIME_SYNC_EVENT = "chimeMutedSync";
+// Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so all AnnBellBtn
+// instances stay visually in sync within one page. The watchlist bell is driven
+// by chimeMuted (chime-only) and does not subscribe to this event.
+export const NOTIF_SYNC_EVENT = "notifEnabledSync";
+
+// Notification opt-in helpers used by AnnBellBtn and handleBellToggle. Return values for notifEnable: "on" (granted + LS write
+// succeeded), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
+function dispatchNotif(enabled) {
+  try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }
+}
+// Guards an async handler against concurrent re-entry. ref is a useRef(false).
+async function runOnce(ref, fn) {
+  if (ref.current) return;
+  ref.current = true;
+  try { return await fn(); } finally { ref.current = false; }
+}
+// Shared promise: concurrent callers (handleBellToggle + AnnBellBtn) all await
+// the same permission dialog and get the same outcome instead of an immediate
+// "off" that can leave bells out of sync with the first call's actual result.
+let notifEnablePromise = null;
+// Set to true by notifDisable() while notifEnable() is awaiting the permission
+// dialog. Checked before the final LS write so a concurrent disable is not
+// overridden when the user approves the dialog after having already tapped disable.
+// Reset at the START of every notifEnable() call (before the in-flight guard) so
+// that a caller joining an existing promise also signals "I want notifications on".
+let notifCancelled = false;
+export async function notifEnable() {
+  notifCancelled = false; // reset before the guard: any new enable clears a prior cancel
+  if (notifEnablePromise) return notifEnablePromise;
+  notifEnablePromise = (async () => {
+    if (typeof Notification === "undefined") { dispatchNotif(false); return "off"; }
+    if (Notification.permission === "denied") {
+      dispatchNotif(false);
+      return "denied";
+    }
+    if (Notification.permission === "default") {
+      let r;
+      try { r = await Notification.requestPermission(); } catch (_e) {
+        dispatchNotif(false);
+        return "off";
+      }
+      if (r !== "granted") {
+        dispatchNotif(false);
+        return r === "denied" ? "denied" : "off";
+      }
+      // Only reachable after an async await — check cancel flag set by a
+      // concurrent notifDisable() call that arrived while the dialog was open.
+      if (notifCancelled) { dispatchNotif(false); return "off"; }
+    }
+    try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* quota */ }
+    // Read back the actual persisted value — setItem may have thrown while the key
+    // was already "true" (locked or quota-exceeded on a pre-existing opt-in).
+    // Dispatching the real stored state keeps bells in sync with what
+    // fireNotification() will see, mirroring the same pattern in notifDisable().
+    let stored = false;
+    try { stored = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e2) { /* ignore */ }
+    dispatchNotif(stored);
+    return stored ? "on" : "off";
+  })().finally(() => { notifEnablePromise = null; });
+  return notifEnablePromise;
+}
+export function notifDisable() {
+  notifCancelled = true; // cancel any in-flight notifEnable() before the LS write
+  try {
+    window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false");
+  } catch (_e) {
+    // If setItem fails (quota), try removing the key so fireNotification won't see "true".
+    try { window.localStorage.removeItem(LS_NOTIFICATIONS_ENABLED); } catch (_e2) { /* storage locked */ }
+  }
+  // Dispatch the actual persisted state so listeners don't show "off" when the
+  // key is still "true" (i.e. both setItem and removeItem failed).
+  let nowEnabled = false;
+  try { nowEnabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* ignore */ }
+  dispatchNotif(nowEnabled);
+}
+
+// Module-level Permissions API singleton: dispatches NOTIF_SYNC_EVENT when the
+// browser permission changes externally (user visits browser settings mid-session).
+// AnnBellBtn calls this once per mount; no-op on subsequent mounts.
+let _permSubscribed = false;
+// Set after the first query() rejection so permanently-unsupported browsers
+// (those that reject 'notifications' queries) don't retry on every AnnBellBtn mount.
+let _permGaveUp = false;
+function subscribePermissionChanges() {
+  if (_permSubscribed || _permGaveUp) return;
+  try {
+    const pq = navigator.permissions?.query?.({ name: "notifications" });
+    // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
+    // Set _permGaveUp (not _permSubscribed) so future mounts skip retrying on a
+    // browser that permanently lacks the API.
+    if (!pq) { _permGaveUp = true; return; }
+    pq.then((s) => {
+      // Only set _permSubscribed once the promise resolves and the listener is wired;
+      // a synchronous throw from pq.then() (non-conforming non-Promise) is caught
+      // below and sets _permGaveUp instead, keeping the two flags mutually exclusive.
+      _permSubscribed = true;
+      const handleChange = () => {
+        if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
+        // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
+        let optIn = false;
+        try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
+        dispatchNotif(optIn);
+      };
+      if (typeof s.addEventListener === "function") {
+        s.addEventListener("change", handleChange);
+      } else {
+        s.onchange = handleChange;
+      }
+    }).catch(() => { _permGaveUp = true; });
+  } catch (_e) {
+    // pq.then() threw synchronously (non-conforming non-Promise pq) — give up
+    // consistently with the !pq branch and the .catch() path above.
+    _permGaveUp = true;
+  }
+}
 
 function useChimeMuted() {
   const [muted, setMuted] = useState(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === "undefined") return true;
     try {
-      return window.localStorage.getItem(LS_CHIME_MUTED) === "true";
-    } catch (_e) { return false; }
+      // Chime is opt-in: absent/null key → muted. The user opts in via
+      // handleBellToggle; onFirstAdd triggers it automatically on the first
+      // watchlist entry. Stored "false" = chime enabled (inverted for ergonomics:
+      // "muted=false" means sound is on).
+      const stored = window.localStorage.getItem(LS_CHIME_MUTED);
+      return stored !== "false";
+    } catch (_e) { return true; }
   });
+  // Write the default once after mount so future default changes don't silently
+  // flip returning users who never stored a preference. Kept out of the useState
+  // initializer to avoid side effects during render (initializers can re-run on
+  // strict-mode double-invocation / remounts).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (window.localStorage.getItem(LS_CHIME_MUTED) === null) {
+        window.localStorage.setItem(LS_CHIME_MUTED, "true");
+      }
+    } catch (_e) { /* ignore */ }
+  }, []);
   // Sync across same-page instances via custom event.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -579,19 +723,27 @@ function useChimeMuted() {
     window.addEventListener(CHIME_SYNC_EVENT, onSync);
     return () => window.removeEventListener(CHIME_SYNC_EVENT, onSync);
   }, []);
-  const toggle = () => {
-    const next = !muted;
-    setMuted(next);
+  // Functional updater: `prev` is the current state at call time, not a
+  // captured closure value. This lets callers call toggle() twice (optimistic
+  // flip + revert on throw) without stale-closure issues.
+  // `next` is captured from inside the updater and read after setMuted returns.
+  // Preact 10 (hooks.umd.js in vendor/) executes functional updaters
+  // synchronously within the useState setter call, so `next` is always
+  // defined before the LS write and dispatch below. If upgrading Preact beyond
+  // v10, verify this invariant still holds — the effect-based alternative is
+  // a useEffect on `muted` for LS/dispatch, but it adds a render cycle delay.
+  const _applyMuted = (v) => {
     if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(LS_CHIME_MUTED, next ? "true" : "false");
-    } catch (_e) { /* storage unavailable — in-memory is fine */ }
-    // Notify other hook instances in the same page.
-    try {
-      window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: next }));
-    } catch (_e) { /* CustomEvent unavailable */ }
+    try { window.localStorage.setItem(LS_CHIME_MUTED, v ? "true" : "false"); } catch (_e) { /* ignore */ }
+    try { window.dispatchEvent(new CustomEvent(CHIME_SYNC_EVENT, { detail: v })); } catch (_e) { /* ignore */ }
   };
-  return [muted, toggle];
+  const toggle = () => {
+    let next;
+    setMuted(prev => { next = !prev; return next; });
+    _applyMuted(next);
+  };
+  const setChimeMuted = (value) => { setMuted(value); _applyMuted(value); };
+  return [muted, toggle, setChimeMuted];
 }
 
 // Extract a side's display name from the normalised match shape.
@@ -967,6 +1119,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const WatchlistPanel = window.WatchlistPanel ?? (() => null);
   const t = tournament;
   const comps = t.competitions || [];
+  const completedCount = comps.filter((c) => c.status === "completed").length;
   const compsByDate = useMemo(() => {
     const map = {};
     comps.forEach((c) => {
@@ -999,7 +1152,7 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
 
   // Add a single player to the watchlist (dedup by id). Used by the deep link.
-  const addWatchPlayer = (p) => setWatchlist(addPlayerToWatchlist(watchlist, p));
+  const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
 
   // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
   // links from QR codes exactly once. Adding to the watchlist is
@@ -1081,7 +1234,31 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.
-  const [chimeMuted] = useChimeMuted();
+  const [chimeMuted, toggleChimeMuted, setChimeMuted] = useChimeMuted();
+  const bellToggleInFlight = useRefV(false);
+  // Bell button: toggle chime and keep browser-notification opt-in in sync.
+  const handleBellToggle = () => runOnce(bellToggleInFlight, async () => {
+    const willEnable = chimeMuted; // currently muted → about to enable
+    toggleChimeMuted(); // optimistic flip
+    if (!willEnable) {
+      // Muting: disable browser notifications too so they don't keep firing.
+      // notifDisable() is a pure LS+event op; runs even when the Notification
+      // API is absent (e.g. bare http) so the opt-in flag stays in sync.
+      notifDisable();
+      return;
+    }
+    if (!notificationSupported()) return; // enabling path requires the API
+    // Delegate to notifEnable() which handles permission request, LS write, and
+    // NOTIF_SYNC_EVENT dispatch. Revert the optimistic chime flip only when the
+    // user dismissed the prompt or LS write failed ("off"); on "denied" the
+    // chime stays enabled (chime-only mode) and on "on" everything is in sync.
+    const outcome = await notifEnable();
+    if (outcome === "off") {
+      setChimeMuted(true); // revert optimistic flip — point-in-time snapshot avoids
+      // a second toggle() call which could land on the wrong value if another
+      // instance dispatched CHIME_SYNC_EVENT during the async permission dialog.
+    }
+  });
   const [alertMatch, setAlertMatch] = useState(null);
   const [alertDismissed, setAlertDismissed] = useState(false);
   const [secondaryAlert, setSecondaryAlert] = useState(null);
@@ -1172,6 +1349,9 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             primaryNextMatch={primaryNextMatch}
             upcoming={watchedUpcoming}
             onMatchClick={setSelectedMatch}
+            chimeMuted={chimeMuted}
+            onBellToggle={handleBellToggle}
+            onFirstAdd={chimeMuted ? handleBellToggle : undefined}
           />
 
           {globalRunning.length > 0 && (
@@ -1183,33 +1363,29 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
             </div>
           )}
 
-          <button
-            className="vlist-item vlist-item--row"
-            onClick={onOpenSchedule}
-          >
-            <span className="vlist-item__icon">🗓</span>
-            <div className="vlist-item__rowbody">
-              <div className="vlist-item__rowtitle">Full schedule</div>
-              <div className="vlist-item__rowsub">{pluralize(allMatches.filter(hasBothSides).length, "match", "matches")} across {pluralize((tournament.courts || []).length, "shiaijo (court)", "shiaijo (courts)")} · search by player or team</div>
-            </div>
-            <span className="vlist-item__rowchev">→</span>
-          </button>
-
-          {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
-          {onOpenResults && comps.some((c) => c.status === "completed") && (
-            <button
-              className="vlist-item vlist-item--row"
-              onClick={onOpenResults}
-              data-testid="open-results-btn"
-            >
-              <span className="vlist-item__icon">🏅</span>
-              <div className="vlist-item__rowbody">
-                <div className="vlist-item__rowtitle">Results</div>
-                <div className="vlist-item__rowsub">All competition placings</div>
+          <div className="viewer-nav-row">
+            <button className="viewer-nav-card" onClick={onOpenSchedule}>
+              <span className="viewer-nav-card__icon">🗓</span>
+              <div className="viewer-nav-card__text">
+                <div className="viewer-nav-card__title">Full schedule</div>
+                <div className="viewer-nav-card__sub">{pluralize(bothSidesMatches.length, "match", "matches")} · {pluralize((tournament.courts || []).length, "court", "courts")}</div>
               </div>
-              <span className="vlist-item__rowchev">→</span>
+              <span className="viewer-nav-card__chev">→</span>
             </button>
-          )}
+
+            {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
+            {onOpenResults && completedCount > 0 && (
+              <button className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
+                <span className="viewer-nav-card__icon">🏅</span>
+                <div className="viewer-nav-card__text">
+                  <div className="viewer-nav-card__title">Results</div>
+                  <div className="viewer-nav-card__sub">All placings</div>
+                </div>
+                <span className="viewer__results-badge" aria-label={`${completedCount} completed`}>{completedCount}</span>
+                <span className="viewer-nav-card__chev">→</span>
+              </button>
+            )}
+          </div>
 
           {dates.length === 0 ? (
             <>
@@ -1316,9 +1492,6 @@ function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOpenSched
               (viewer) keeps its tab and stays interactive. Collapsed by
               default (mp-mjaq) since most viewers are spectators; only
               tournament operators need these links. */}
-          {/* mp-cw1: Browser push notification opt-in toggle — settings belong at the
-              bottom of the page, not between the watchlist and live-match signals. */}
-          <NotificationSettings />
 
           <DisplayModes tournament={t} />
           {window.VersionFooter && <window.VersionFooter />}
@@ -1766,7 +1939,7 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                   <span key={k} className="pmf__chip pmf__chip--dojo">
                     <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
                     {entry.dojo}
-                    <button onClick={() => { setWatchlist((prev) => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
+                    <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
                   </span>
                 );
               }
@@ -1777,12 +1950,12 @@ function ViewerCompetition({ tournament, competition, pools, poolMatches, standi
                 <span key={k} className="pmf__chip">
                   {number && <span className="num-prefix">{number}</span>}
                   {name}
-                  <button onClick={() => { setWatchlist((prev) => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
+                  <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
                 </span>
               );
             })}
             {compWatchlist.length > 1 && (
-              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist((prev) => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
+              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist(prev => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
             )}
           </div>
         )}
@@ -3643,171 +3816,10 @@ function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId })
   );
 }
 
-// ---------------------------------------------------------------------------
-// NotificationSettings — viewer settings panel for browser push notifications.
-// Exported for unit testing.
-// ---------------------------------------------------------------------------
-
-// LocalStorage key for the notification opt-in toggle.
-const LS_NOTIFICATIONS_ENABLED = "viewer.notifications.enabled";
-
 // Pure helper: detect Notification API support.
 // Exported for unit testing.
 export function notificationSupported() {
   return typeof Notification !== "undefined";
-}
-
-// NotificationSettings — "Enable browser notifications" toggle for the
-// viewer home settings area. Phases:
-//   1) Secure-context warning (edge case, normally hidden in production).
-//   2) Notification API unavailable — hide the toggle.
-//   3) Permission "denied" — show blocked state.
-//   4) Permission "default" or "granted" — show the opt-in toggle.
-//
-// Requests permission ONLY on a user click (the gesture gate). Never
-// calls requestPermission() automatically. Exported for unit testing.
-export function NotificationSettings() {
-  // mp-4fd: chime preference for the on-deck match alert.
-  const [chimeMuted, toggleChimeMuted] = useChimeMuted();
-
-  // Compute the initial permission outside useState so tests using the
-  // static React mock (which passes the value through unmodified rather
-  // than calling function initialisers) see the correct starting value.
-  const initialPermission = (typeof Notification === "undefined")
-    ? "unavailable"
-    : Notification.permission;
-
-  // Read the current permission state reactively: re-query after the user
-  // interacts with the native permission prompt. We keep a local state so
-  // the UI stays responsive without relying on a global re-render.
-  const [permission, setPermission] = useState(initialPermission);
-
-  let storedOptIn = false;
-  try {
-    storedOptIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
-  } catch (_e) { /* storage unavailable */ }
-  // Only treat the opt-in as enabled when the browser permission is ALSO
-  // still granted. If the user reset the site permission back to "default"
-  // (or "denied") since they last opted in, starting `enabled` at true would
-  // render the checkbox unchecked (checked={enabled && permission==="granted"})
-  // yet send the first click down the "turning off" branch — the user would
-  // have to click twice and never see the prompt. Gating on granted keeps the
-  // handler branch aligned with the visible checkbox state.
-  const [enabled, setEnabled] = useState(storedOptIn && initialPermission === "granted");
-
-  // Phase 4: secure-context warning. In production the TLS proxy makes this
-  // false; it only matters for bare http:// (no proxy) access.
-  const insecure = typeof window !== "undefined" && window.isSecureContext === false;
-
-  // Phase 3 / Phase 4 ordering: when the API is unavailable we normally hide
-  // the panel entirely. BUT some browsers expose `Notification` only in a
-  // secure context, so a bare http:// page can have BOTH no API AND
-  // isSecureContext === false — which is the exact situation this panel is
-  // meant to explain. In that case render the warning (no toggle) instead of
-  // hiding. Only hide outright when the API is unavailable for some OTHER
-  // reason (secure context but an old/unsupported browser).
-  // mp-4fd: the chime toggle uses WebAudio, not the Notification API, so it
-  // must remain visible even when browser notifications are unavailable.
-  const chimeToggle = (
-    <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13, marginTop: 10 }}>
-      <input
-        type="checkbox"
-        checked={!chimeMuted}
-        onChange={toggleChimeMuted}
-        data-testid="chime-toggle"
-      />
-      <span>Play a sound when your match is up next</span>
-    </label>
-  );
-
-  if (permission === "unavailable") {
-    if (!insecure) {
-      // Notification API unavailable but context is secure — hide the
-      // notification toggle but still show the chime toggle.
-      return (
-        <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
-          <div className="section-title" style={{ marginTop: 0 }}>Match alerts</div>
-          {chimeToggle}
-        </div>
-      );
-    }
-    return (
-      <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
-        <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
-        <div style={{ fontSize: 12, color: "var(--amber, #b45309)" }} data-testid="notification-insecure-warning">
-          Browser notifications require a secure connection (https or localhost).
-        </div>
-        {chimeToggle}
-      </div>
-    );
-  }
-
-  const handleToggle = async () => {
-    if (enabled) {
-      // Turning off: just persist the preference.
-      try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "false"); } catch (_e) { /* storage unavailable */ }
-      setEnabled(false);
-      return;
-    }
-    // Turning on: request permission first (this is the user-gesture gate).
-    if (Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result !== "granted") return; // user denied — don't toggle on
-    } else {
-      setPermission(Notification.permission);
-    }
-    // Only mark the toggle ON if the preference actually persisted.
-    // fireBrowserNotifications() reads this localStorage flag at fire time, so
-    // an unpersisted "on" would render a checked box that never fires (storage
-    // throwing → flag missing → firing path reads opt-out). Keep the UI honest
-    // with the firing path: if persistence failed, leave the toggle off.
-    let persisted = false;
-    try {
-      window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true");
-      persisted = true;
-    } catch (_e) { /* storage unavailable — keep toggle off */ }
-    setEnabled(persisted);
-  };
-
-  const denied = permission === "denied";
-
-  return (
-    <div className="card" data-testid="notification-settings" style={{ marginBottom: 16, padding: 14 }}>
-      <div className="section-title" style={{ marginTop: 0 }}>Notifications</div>
-      {insecure && (
-        <div style={{ fontSize: 12, color: "var(--amber, #b45309)", marginBottom: 8 }} data-testid="notification-insecure-warning">
-          Browser notifications require a secure connection (https or localhost).
-        </div>
-      )}
-      {denied ? (
-        <div style={{ fontSize: 12, color: "var(--ink-3)" }} data-testid="notification-denied">
-          Browser notifications are blocked. Allow them in your browser settings, then reload.
-        </div>
-      ) : (
-        <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={enabled && permission === "granted"}
-            onChange={handleToggle}
-            data-testid="notification-toggle"
-            disabled={insecure}
-          />
-          <span>
-            Enable browser notifications for announcements
-            {permission === "granted" && enabled && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(granted)</span>
-            )}
-            {permission === "default" && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "var(--ink-3)" }}>(permission not yet requested)</span>
-            )}
-          </span>
-        </label>
-      )}
-      {/* mp-4fd: chime opt-out for the on-deck match alert (shared variable). */}
-      {chimeToggle}
-    </div>
-  );
 }
 
 // Shared formatter so the synchronous initializer and the useEffect tick
@@ -3820,6 +3832,65 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   const seconds = totalSeconds % 60;
   const paddedSeconds = seconds.toString().padStart(2, "0");
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
+}
+
+// AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
+export function AnnBellBtn() {
+  // viewer_watchlist.js is loaded before viewer.js in index.html; BellIcon
+  // is always set by the time this component renders.
+  const BellIcon = window.BellIcon;
+  const supported = notificationSupported();
+  const inFlight = useRefV(false);
+  const [state, setState] = useState(() => {
+    if (!supported) return "unsupported";
+    if (Notification.permission === "denied") return "denied";
+    try {
+      const optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+      return (optIn && Notification.permission === "granted") ? "on" : "off";
+    } catch (_e) { return "off"; }
+  });
+
+  // Sync with other AnnBellBtn instances on the page (watchlist bell is chime-only).
+  // External permission changes (user visits browser settings) arrive via
+  // NOTIF_SYNC_EVENT dispatched by the module-level subscribePermissionChanges singleton.
+  useEffect(() => {
+    if (!supported) return;
+    const onSync = (e) => {
+      if (Notification.permission === "denied") { setState("denied"); return; }
+      setState((e.detail && Notification.permission === "granted") ? "on" : "off");
+    };
+    // CustomEvents dispatched on window are same-origin; no origin check needed.
+    window.addEventListener(NOTIF_SYNC_EVENT, onSync);
+    // Wire up the singleton Permissions API observer (no-op if already registered).
+    subscribePermissionChanges();
+    return () => {
+      window.removeEventListener(NOTIF_SYNC_EVENT, onSync);
+    };
+  }, []); // supported is a static boolean; the effect only wires up listeners once
+
+  if (state === "unsupported") return null;
+  if (!BellIcon) return null; // viewer_watchlist.js failed to load
+
+  const toggle = () => runOnce(inFlight, async () => {
+    if (state === "on") {
+      notifDisable();
+      return;
+    }
+    await notifEnable();
+    // State is driven by the NOTIF_SYNC_EVENT listener (onSync above).
+  });
+  return (
+    <button
+      className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
+      onClick={toggle}
+      disabled={state === "denied"}
+      aria-pressed={state === "on"}
+      aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
+      title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
+    >
+      <BellIcon muted={state !== "on"} size={13} />
+    </button>
+  );
 }
 
 // AnnouncementCard — renders a single announcement card with its own
@@ -3859,6 +3930,7 @@ function AnnouncementCard({ ann, onDismiss }) {
       </div>
       <div className="announcement-banner__meta">
         <span className="announcement-banner__badge">{timeLeft}</span>
+        <AnnBellBtn />
         <button
           className="announcement-banner__dismiss"
           onClick={() => onDismiss(ann.id)}
@@ -4029,8 +4101,6 @@ window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
 window.currentMatchOf = currentMatchOf;
-window.NotificationSettings = NotificationSettings;
-window.LS_NOTIFICATIONS_ENABLED = LS_NOTIFICATIONS_ENABLED;
 // mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
 // (those files don't ES-import viewer.jsx; they pick globals off window).
 window.linkBase = linkBase;

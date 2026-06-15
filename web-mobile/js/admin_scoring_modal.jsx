@@ -20,6 +20,7 @@ import {
   TermAS,
   GlossaryHintAS,
   resolveDecisionPassword,
+  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,
@@ -1888,7 +1889,16 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 // stays "running"); the backend derives the tie from the
                 // saved SubResults, so a freshly-scored-but-unsaved tie
                 // would otherwise be rejected as not_tied.
-                await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
+                //
+                // recordScore returns { queued: true } when the write could
+                // only be enqueued (offline / retryable 5xx) instead of being
+                // confirmed by the server. Daihyosen is a hard prerequisite on
+                // that persistence, so a queued (unconfirmed) save MUST abort the
+                // flow — otherwise recordDaihyosen runs against the stale
+                // server-side SubResults. The queued write still delivers in the
+                // background, so a retry succeeds once the connection is back.
+                const saveRes = await window.API.recordScore(m.compId, m.id, buildPatch("running"), resolveDecisionPassword(password), m);
+                assertRunningWritePersisted(saveRes); // abort if the save was only queued, not server-confirmed
                 await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password));
                 if (!mountedRef.current) return;
                 // Closing + reopening is the cleanest cross-cutting refresh
@@ -1902,6 +1912,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                 if (msg === "not_tied") userMsg = "Daihyosen needs a tie on IV and PW (this encounter already has a winner)";
                 else if (msg === "pool_match") userMsg = "Daihyosen is only for knockout matches";
                 else if (msg === "insufficient_eligibility") userMsg = "Not enough eligible competitors for a representative bout";
+                else if (msg === "score_not_synced") userMsg = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
                 else if (!userMsg) userMsg = "Could not add a representative bout";
                 setDaihyosenErr(userMsg);
               } finally {
@@ -2082,13 +2093,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
 
 window.ScoreEditorModal = ScoreEditorModal;
 
-// ES exports for the vitest suite — pure helpers only. Components stay
-// behind the window.* pattern to match the rest of admin_*.jsx.
+// ES exports for the vitest suite. Most are pure helpers, but the list also
+// includes a few test-only component/hook exports (SyncStatusPill,
+// useDebouncedRunningWrite) that the render tests mount directly. The primary
+// component (ScoreEditorModal) still ships via the window.* pattern to match
+// the rest of admin_*.jsx — these named exports are a test seam, not an
+// architectural guarantee that components are exported.
 export {
   useDebouncedRunningWrite,
   SyncStatusPill,
   AUTOSAVE_DEBOUNCE_MS,
   resolveDecisionPassword,
+  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   makeSubmitDecision,

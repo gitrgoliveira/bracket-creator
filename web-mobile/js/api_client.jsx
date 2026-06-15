@@ -690,9 +690,15 @@ const API = {
                 // be delivered; let callers handle the error with a toast.
                 if (isRunning) {
                     enqueueRunningWrite(compID, matchID, payload, password);
-                    // Return a synthetic "ok" shape so callers that ignore the return
-                    // value (debounced autosave) don't crash. The queued write will
-                    // deliver asynchronously via _flushQueue.
+                    // Return a DISCRIMINATED { queued: true } result. The write was
+                    // NOT confirmed by the server — only enqueued for async delivery
+                    // via _flushQueue (last-write-wins). Fire-and-forget callers
+                    // (debounced autosave) ignore the value. Any caller that awaits a
+                    // running write as a HARD PREREQUISITE for a dependent request
+                    // MUST branch on `.queued` and treat it as "not yet persisted"
+                    // rather than success — see the daihyosen pre-save in
+                    // admin_scoring_modal.jsx, which aborts on a queued save so it
+                    // never runs recordDaihyosen against stale server-side scores.
                     return { queued: true };
                 }
                 throw _networkErr;
@@ -721,6 +727,8 @@ const API = {
         // callers; the operator's authoritative Finish is the backstop.
         if (isRunning && (res.status >= 500 || res.status === 429)) {
             enqueueRunningWrite(compID, matchID, payload, password);
+            // Discriminated { queued: true } — not server-confirmed; see the
+            // network-error branch above for the full caller contract.
             return { queued: true };
         }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor

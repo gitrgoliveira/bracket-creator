@@ -221,6 +221,49 @@ describe('_flushQueue: 409 conflict discards, network error retries', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 3b. Single-in-flight serialization: overlapping triggers must not start a
+//     second concurrent flush loop or duplicate PUTs.
+// ---------------------------------------------------------------------------
+
+describe('_flushQueue: single-in-flight serialization', () => {
+    it('a trigger during an in-flight flush does not overlap or duplicate PUTs', async () => {
+        // Each fetch returns a promise we resolve manually, so we can hold a
+        // flush "in flight" while we fire a second trigger.
+        const resolvers = [];
+        global.fetch = vi.fn().mockImplementation(() =>
+            new Promise((resolve) => {
+                resolvers.push(() => resolve({ ok: true, json: () => Promise.resolve({}) }));
+            }),
+        );
+
+        // First enqueue starts a flush; its fetch is now pending (in flight).
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1 }, 'pw');
+        await flushMicrotasks();
+        expect(global.fetch).toHaveBeenCalledTimes(1); // one PUT in flight
+
+        // A second enqueue for the SAME match while the flush is in flight must
+        // NOT start an overlapping loop — no duplicate PUT yet. It replaces the
+        // queued descriptor (last-write-wins, rev:2) and sets the rerun flag.
+        enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2 }, 'pw');
+        await flushMicrotasks();
+        expect(global.fetch).toHaveBeenCalledTimes(1); // still one — no overlap
+
+        // Resolve the in-flight (rev:1) fetch. The identity check leaves the
+        // newer rev:2 descriptor in the queue; the loop reruns once and issues
+        // exactly one more PUT for it.
+        resolvers.shift()();
+        await flushMicrotasks();
+        expect(global.fetch).toHaveBeenCalledTimes(2); // rerun for the newer write
+
+        // Resolve the rerun's fetch; the queue drains and no further PUTs fire.
+        resolvers.shift()();
+        await flushMicrotasks();
+        await tick(0);
+        expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+});
+
+// ---------------------------------------------------------------------------
 // 4. subscribeSyncStatus: state transitions
 // ---------------------------------------------------------------------------
 

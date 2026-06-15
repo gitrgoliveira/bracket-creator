@@ -117,61 +117,86 @@ function subscribeSyncStatus(fn) {
 let _flushTimer = null;
 const FLUSH_BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
 let _flushAttempt = 0;
+// Single-in-flight guard. _flushQueue's body awaits network I/O, so without a
+// lock a second trigger (a rapid enqueue, an `online` event, or a backoff timer
+// firing mid-flush) would start an OVERLAPPING loop iterating the same snapshot
+// — duplicate PUTs and corrupted backoff state. Instead, a trigger that arrives
+// while a flush is running sets _flushRequested; the running loop reruns once it
+// finishes so newly-queued or still-failed writes are retried without overlap.
+let _flushInProgress = false;
+let _flushRequested = false;
 
 async function _flushQueue() {
-    _flushTimer = null;
-    if (_writeQueue.size === 0) {
-        _offlineFlag = false;
-        _recomputeSyncStatus();
-        return;
-    }
-    _recomputeSyncStatus();
-    // Snapshot the current entries. Each descriptor is the object reference
-    // stored in the map at the time of the snapshot. After an await, we check
-    // identity before deleting so a newer write (a fresh object literal set
-    // under the same key by enqueueRunningWrite) is not accidentally removed.
-    const entries = [..._writeQueue.entries()];
-    let anyFailed = false;
-    for (const [key, descriptor] of entries) {
-        const { compID, matchID, payload, password } = descriptor;
-        try {
-            const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-                body: JSON.stringify(payload),
-            });
-            if (res.ok) {
-                // Success (HTTP 200, including a stale {stale:true} no-op) — remove
-                // from queue only if no newer write has replaced this descriptor.
-                if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-            } else if (res.status === 409) {
-                // 409 is a real conflict (ineligible_competitor / court_busy /
-                // side_mismatch / result_finalized), NOT a stale rev (stale is a
-                // 200 {stale:true}). This queued running autosave can never
-                // succeed, so discard rather than replay forever — the operator's
-                // explicit Finish is authoritative. Log for devtools visibility.
-                res.json().then((body) => {
-                    console.warn('[sync] queued running write rejected (409):', body);
-                }).catch(() => {});
-                if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-            } else {
-                // Other non-2xx — keep in queue and retry with backoff.
-                anyFailed = true;
+    if (_flushInProgress) { _flushRequested = true; return; }
+    _flushInProgress = true;
+    try {
+        do {
+            _flushRequested = false;
+            // Clear any pending backoff timer so a rerun never leaves an orphaned
+            // timer that would later trigger a redundant flush.
+            if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+
+            if (_writeQueue.size === 0) {
+                _offlineFlag = false;
+                _recomputeSyncStatus();
+                continue;
             }
-        } catch (_) {
-            anyFailed = true;
-        }
-    }
-    if (_writeQueue.size === 0) {
-        _flushAttempt = 0;
-        _offlineFlag = false;
-        _recomputeSyncStatus();
-    } else if (anyFailed) {
-        _offlineFlag = true;
-        _recomputeSyncStatus();
-        const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
-        _flushAttempt++;
-        _flushTimer = setTimeout(_flushQueue, delay);
+            _recomputeSyncStatus();
+            // Snapshot the current entries. Each descriptor is the object reference
+            // stored in the map at the time of the snapshot. After an await, we check
+            // identity before deleting so a newer write (a fresh object literal set
+            // under the same key by enqueueRunningWrite) is not accidentally removed.
+            const entries = [..._writeQueue.entries()];
+            let anyFailed = false;
+            for (const [key, descriptor] of entries) {
+                const { compID, matchID, payload, password } = descriptor;
+                try {
+                    const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+                        body: JSON.stringify(payload),
+                    });
+                    if (res.ok) {
+                        // Success (HTTP 200, including a stale {stale:true} no-op) — remove
+                        // from queue only if no newer write has replaced this descriptor.
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                    } else if (res.status === 409) {
+                        // 409 is a real conflict (ineligible_competitor / court_busy /
+                        // side_mismatch / result_finalized), NOT a stale rev (stale is a
+                        // 200 {stale:true}). This queued running autosave can never
+                        // succeed, so discard rather than replay forever — the operator's
+                        // explicit Finish is authoritative. Log for devtools visibility.
+                        res.json().then((body) => {
+                            console.warn('[sync] queued running write rejected (409):', body);
+                        }).catch(() => {});
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                    } else {
+                        // Other non-2xx — keep in queue and retry with backoff.
+                        anyFailed = true;
+                    }
+                } catch (_) {
+                    anyFailed = true;
+                }
+            }
+            if (_writeQueue.size === 0) {
+                _flushAttempt = 0;
+                _offlineFlag = false;
+                _recomputeSyncStatus();
+            } else if (anyFailed && !_flushRequested) {
+                // Schedule a backoff retry only if no immediate rerun is already
+                // pending (a pending rerun will re-attempt the failed writes now).
+                _offlineFlag = true;
+                _recomputeSyncStatus();
+                const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
+                _flushAttempt++;
+                _flushTimer = setTimeout(_flushQueue, delay);
+            } else if (anyFailed) {
+                _offlineFlag = true;
+                _recomputeSyncStatus();
+            }
+        } while (_flushRequested);
+    } finally {
+        _flushInProgress = false;
     }
 }
 

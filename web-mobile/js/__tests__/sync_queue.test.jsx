@@ -339,14 +339,19 @@ describe('recordScore: queues running writes on network failure', () => {
         ).rejects.toThrow();
     });
 
-    it('returns stale silently on 409 for running writes', async () => {
+    it('throws on 409 for running writes (real operator errors must not be swallowed)', async () => {
+        // Finding #2: the old 409-swallow for running writes is removed. A real
+        // 409 (ineligible_competitor, court_busy, side_mismatch, result_finalized)
+        // must propagate as a thrown error so the UI can surface it to the operator.
+        // The stale-rev signal from the server is HTTP 200 with {stale:true}, not 409.
         global.fetch = vi.fn().mockResolvedValue({
             ok: false,
             status: 409,
-            json: () => Promise.resolve({ error: 'stale_rev' }),
+            json: () => Promise.resolve({ error: 'ineligible_competitor', reasonHuman: 'Already fighting in match X' }),
         });
 
-        const result = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
-        expect(result).toMatchObject({ stale: true });
+        await expect(
+            API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)
+        ).rejects.toThrow('Already fighting in match X');
     });
 });

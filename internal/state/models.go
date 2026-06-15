@@ -590,13 +590,20 @@ type MatchResult struct {
 	// bracket.json field keep older files fully compatible.
 	CorrectionReason string `json:"correctionReason,omitempty" yaml:"correction_reason,omitempty"`
 	// Rev is a client-monotonic revision counter carried on "running"-status
-	// autosave writes. The server uses it to drop stale in-flight writes that
-	// arrive out of order after a reconnect flush (C2 rev-guard). It is
-	// wire-only: never persisted to CSV or bracket.json (yaml:"-" and no CSV
-	// column), and not copied by copyMatchResults / copyBracket. Defaulting to
-	// 0 (omitempty) means any existing payload without the field is treated as
-	// unversioned and always proceeds.
+	// autosave writes. The server uses it (scoped to RevSession) to drop stale
+	// in-flight writes that arrive out of order after a reconnect flush
+	// (C2 rev-guard). It is wire-only: never serialized to CSV (no column) nor
+	// to bracket.json (which uses BracketMatch), and yaml:"-" keeps it out of
+	// config persistence. A plain value copy of MatchResult carries it in
+	// memory, which is harmless. Defaulting to 0 (omitempty) means a payload
+	// without the field is treated as unversioned and always proceeds.
 	Rev int64 `json:"rev,omitempty" yaml:"-"`
+	// RevSession identifies the client scoring session (one per page load,
+	// random). The rev-guard compares Rev ONLY within the same RevSession; a
+	// write from a new session (page reload / different device) always takes
+	// over rather than being dropped as stale against a high-water mark left
+	// by a prior session. Same wire-only persistence guarantees as Rev.
+	RevSession string `json:"revSession,omitempty" yaml:"-"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths

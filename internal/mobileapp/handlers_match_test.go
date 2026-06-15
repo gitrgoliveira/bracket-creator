@@ -382,6 +382,69 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 	})
 }
 
+// TestScoreHandler_RevGuard_SessionTakeover validates that a write from a NEW
+// RevSession always proceeds even when the stored high-water mark (from a prior
+// session) has a higher Rev. This models a page reload or a different device
+// starting a fresh session at rev=1 — it must never be dropped as stale.
+func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "rgs1", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches("rgs1", []state.MatchResult{
+		{ID: "PoolS-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+	// Isolate from any other test runs that may have touched this key.
+	runningRevStore.Delete("rgs1:PoolS-1")
+
+	scoreRunningWithSession := func(revSession string, rev int64) (int, map[string]any) {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"sideA": "Alice", "sideB": "Bob",
+			"ipponsA": []string{"M"}, "ipponsB": []string{},
+			"status":     "running",
+			"rev":        rev,
+			"revSession": revSession,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rgs1/matches/PoolS-1/score", bytes.NewBuffer(payload))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+
+	t.Run("session A advances to rev=5", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-A", 5)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "initial write must proceed")
+	})
+
+	t.Run("session A rev=3 is stale (same session, lower rev)", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-A", 3)
+		assert.Equal(t, http.StatusOK, code)
+		stale, ok := body["stale"].(bool)
+		assert.True(t, ok && stale, "lower rev in same session must be stale")
+	})
+
+	t.Run("session B rev=1 proceeds (new session takes over despite A being at rev=5)", func(t *testing.T) {
+		code, body := scoreRunningWithSession("session-B", 1)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "a new session must never be dropped as stale")
+	})
+
+	t.Run("session B rev=0 (prior write) is also stale in session B now", func(t *testing.T) {
+		// After session B landed rev=1, a session-B write with rev=0 would be
+		// dropped — BUT rev=0 is unversioned (guard is gated on Rev > 0), so
+		// it must always proceed.
+		code, body := scoreRunningWithSession("session-B", 0)
+		assert.Equal(t, http.StatusOK, code)
+		assert.Nil(t, body["stale"], "rev=0 is unversioned and must always proceed")
+	})
+}
+
 // TestScoreHandlers_RejectSideMismatch pins the HTTP 409 mapping for the
 // match-identity guard: a score/quick-score payload naming competitors that
 // differ from the stored pairing is rejected, and the stored match is left

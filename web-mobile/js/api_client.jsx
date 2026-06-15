@@ -29,16 +29,29 @@ import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buil
 // C2: Monotonic per-match revision counter
 // ---------------------------------------------------------------------------
 // Stamps "running" autosave writes so the server can drop out-of-order
-// delivery from a reconnect flush. The counter is per-matchId and increases
-// strictly monotonically within a page session. Completed writes do not use
-// it (the guard is gated to running status on the server too).
+// delivery from a reconnect flush. The counter is per (compID, matchID) and
+// increases strictly monotonically within a page session. Completed writes
+// do not use it (the guard is gated to running status on the server too).
 // ---------------------------------------------------------------------------
-const _matchRevCounters = new Map(); // matchId → int
-function _nextRev(matchId) {
-    const next = (_matchRevCounters.get(matchId) || 0) + 1;
-    _matchRevCounters.set(matchId, next);
+
+/** Composite key for per-(compID, matchID) maps. Prevents collisions across competitions. */
+function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
+
+const _matchRevCounters = new Map(); // compID:matchID → int
+function _nextRev(compID, matchID) {
+    const key = _revKey(compID, matchID);
+    const next = (_matchRevCounters.get(key) || 0) + 1;
+    _matchRevCounters.set(key, next);
     return next;
 }
+
+// One random session id per page load. Used as RevSession so the server's
+// rev-guard treats each fresh page load as an independent session (a reload
+// starting at rev=1 is never dropped as stale against a prior session's
+// high-water mark). jsdom-safe fallback for test environments.
+const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `s${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 
 // ---------------------------------------------------------------------------
 // C2: Offline write queue
@@ -58,9 +71,17 @@ function _nextRev(matchId) {
  */
 
 /** @type {Map<string, {compID: string, matchID: string, payload: object, password: string}>} */
-const _writeQueue = new Map(); // matchId → pending write descriptor
+const _writeQueue = new Map(); // compID:matchID → pending write descriptor
 let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
 const _syncListeners = new Set();
+
+// Count of in-flight running writes (online path). Drives the syncing pill
+// even when the queue is empty (i.e. the write succeeded and was removed from
+// the queue but the fetch hasn't resolved yet).
+let _inflightRunning = 0;
+// Set to true when a flush attempt ends with at least one network failure.
+// Cleared back to false when a flush drains the queue successfully.
+let _offlineFlag = false;
 
 function _setSyncStatus(s) {
     if (_syncStatus === s) return;
@@ -68,6 +89,17 @@ function _setSyncStatus(s) {
     for (const fn of _syncListeners) {
         try { fn(s); } catch (_e) { /* swallow */ }
     }
+}
+
+/**
+ * Recompute and publish the correct sync status from current state:
+ *   offline  — _offlineFlag is set and the queue still has entries
+ *   syncing  — any in-flight running write OR the queue is non-empty
+ *   synced   — otherwise
+ */
+function _recomputeSyncStatus() {
+    if (_offlineFlag && _writeQueue.size > 0) { _setSyncStatus('offline'); return; }
+    _setSyncStatus((_inflightRunning > 0 || _writeQueue.size > 0) ? 'syncing' : 'synced');
 }
 
 /**
@@ -89,13 +121,19 @@ let _flushAttempt = 0;
 async function _flushQueue() {
     _flushTimer = null;
     if (_writeQueue.size === 0) {
-        _setSyncStatus('synced');
+        _offlineFlag = false;
+        _recomputeSyncStatus();
         return;
     }
-    _setSyncStatus('syncing');
+    _recomputeSyncStatus();
+    // Snapshot the current entries. Each descriptor is the object reference
+    // stored in the map at the time of the snapshot. After an await, we check
+    // identity before deleting so a newer write (a fresh object literal set
+    // under the same key by enqueueRunningWrite) is not accidentally removed.
     const entries = [..._writeQueue.entries()];
     let anyFailed = false;
-    for (const [matchId, { compID, matchID, payload, password }] of entries) {
+    for (const [key, descriptor] of entries) {
+        const { compID, matchID, payload, password } = descriptor;
         try {
             const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
                 method: 'PUT',
@@ -108,8 +146,9 @@ async function _flushQueue() {
                 // an outdated payload forever.
                 anyFailed = true;
             } else {
-                // Success OR 409 (stale) — remove from queue.
-                _writeQueue.delete(matchId);
+                // Success OR 409 (stale) — remove from queue only if no newer write
+                // has replaced this descriptor under the same key.
+                if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
             }
         } catch (_) {
             anyFailed = true;
@@ -117,9 +156,11 @@ async function _flushQueue() {
     }
     if (_writeQueue.size === 0) {
         _flushAttempt = 0;
-        _setSyncStatus('synced');
+        _offlineFlag = false;
+        _recomputeSyncStatus();
     } else if (anyFailed) {
-        _setSyncStatus('offline');
+        _offlineFlag = true;
+        _recomputeSyncStatus();
         const delay = FLUSH_BACKOFF_MS[Math.min(_flushAttempt, FLUSH_BACKOFF_MS.length - 1)];
         _flushAttempt++;
         _flushTimer = setTimeout(_flushQueue, delay);
@@ -133,8 +174,8 @@ async function _flushQueue() {
  * retries automatically.
  */
 function enqueueRunningWrite(compID, matchID, payload, password) {
-    _writeQueue.set(matchID, { compID, matchID, payload, password });
-    _setSyncStatus('syncing');
+    _writeQueue.set(_revKey(compID, matchID), { compID, matchID, payload, password });
+    _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
     _flushQueue();
 }
@@ -566,44 +607,49 @@ const API = {
         const isRunning = (result && result.status === 'running') ||
             (payload && payload.status === 'running');
         if (isRunning) {
-            payload.rev = _nextRev(matchID);
+            payload.rev = _nextRev(compID, matchID);
+            payload.revSession = _revSession;
+            _inflightRunning++;
+            _recomputeSyncStatus();
         }
 
         let res;
         try {
-            res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tournament-Password': password
-                },
-                body: JSON.stringify(payload)
-            });
-        } catch (_networkErr) {
-            // Network failure (offline / no connection). For running-status writes,
-            // queue for retry — last-write-wins semantics so only the latest state
-            // is ever flushed. Completed writes are not queued because they MUST
-            // be delivered; let callers handle the error with a toast.
-            if (isRunning) {
-                enqueueRunningWrite(compID, matchID, payload, password);
-                // Return a synthetic "ok" shape so callers that ignore the return
-                // value (debounced autosave) don't crash. The queued write will
-                // deliver asynchronously via _flushQueue.
-                return { stale: false, queued: true };
+            try {
+                res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Tournament-Password': password
+                    },
+                    body: JSON.stringify(payload)
+                });
+            } catch (_networkErr) {
+                // Network failure (offline / no connection). For running-status writes,
+                // queue for retry — last-write-wins semantics so only the latest state
+                // is ever flushed. Completed writes are not queued because they MUST
+                // be delivered; let callers handle the error with a toast.
+                if (isRunning) {
+                    enqueueRunningWrite(compID, matchID, payload, password);
+                    // Return a synthetic "ok" shape so callers that ignore the return
+                    // value (debounced autosave) don't crash. The queued write will
+                    // deliver asynchronously via _flushQueue.
+                    return { stale: false, queued: true };
+                }
+                throw _networkErr;
             }
-            throw _networkErr;
+        } finally {
+            if (isRunning) {
+                _inflightRunning--;
+                _recomputeSyncStatus();
+            }
         }
 
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            // A stale-rev response (200 with {stale:true}) or a 409 from the
-            // server's rev guard means a newer write already landed. Silently
-            // ignore — the latest state is already on the server.
+            // A stale-rev response (200 with {stale:true}) means a newer write
+            // already landed on the server. Silently ignore.
             if (res.status === 200 && err.stale) return err;
-            if (res.status === 409 && isRunning) {
-                // 409 on a running write from the rev guard — discard, don't retry.
-                return { stale: true };
-            }
             // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
             // with a human-readable reason ("already fighting in match X on court Y").
             // Prefer reasonHuman, then reason, then the error code so the operator

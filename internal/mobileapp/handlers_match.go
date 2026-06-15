@@ -734,16 +734,28 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // NOT migrated: the partial-success error array semantics need a
 // per-result tx (or a different commit shape) and that's out of scope
 // for this slice.
+// runningRev is the per-match value stored in runningRevStore: the highest
+// Rev seen WITHIN a given client scoring session (RevSession). A write whose
+// RevSession differs from the stored one always takes over (new page load /
+// device), so a scorer reload starting back at rev=1 is never dropped.
+type runningRev struct {
+	Session string
+	Rev     int64
+}
+
 // runningRevStore is a process-lifetime, in-memory map that tracks the
 // highest client-side revision number (Rev) seen for each running-status
-// write on a given match. Key is "compID:matchID". Value is int64.
+// write on a given match. Key is "compID:matchID". Value is a runningRev
+// (session + rev).
 //
 // C2 rev-guard: when a "running" write arrives with a Rev that is lower
-// than the stored high-water mark we silently no-op it (return 200). This
-// prevents out-of-order delivery from a reconnect flush overwriting a
-// more-recent in-flight write. Only "running" writes are gated — completed
-// writes and Rev==0 (unversioned) writes always proceed so the guard never
-// blocks explicit operator submits or legacy clients.
+// than the stored high-water mark (within the same RevSession) we silently
+// no-op it (return 200). This prevents out-of-order delivery from a
+// reconnect flush overwriting a more-recent in-flight write. Writes from a
+// new RevSession always take over (reload / different device). Only
+// "running" writes are gated — completed writes and Rev==0 (unversioned)
+// writes always proceed so the guard never blocks explicit operator submits
+// or legacy clients.
 //
 // The map is process-scoped and therefore reset on server restart; the
 // on-disk state is the ground truth. A mis-ordered running-write that
@@ -823,23 +835,23 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// equal rev advances the mark and proceeds normally.
 		if result.Status == state.MatchStatusRunning && result.Rev > 0 {
 			revKey := id + ":" + mid
+			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
 			for {
-				existing, loaded := runningRevStore.LoadOrStore(revKey, result.Rev)
+				existing, loaded := runningRevStore.LoadOrStore(revKey, incoming)
 				if !loaded {
-					// Key didn't exist — stored the initial value, proceed.
-					break
+					break // first running write for this key
 				}
-				stored := existing.(int64)
-				if result.Rev < stored {
-					// Stale running write — no-op; 200 so the client doesn't retry.
+				stored := existing.(runningRev)
+				// Only a same-session, lower rev is stale. A different session
+				// (reload / new device) always takes over.
+				if stored.Session == incoming.Session && result.Rev < stored.Rev {
 					c.JSON(http.StatusOK, gin.H{"stale": true})
 					return
 				}
-				// Advance the high-water mark atomically.
-				if runningRevStore.CompareAndSwap(revKey, existing, result.Rev) {
+				if runningRevStore.CompareAndSwap(revKey, existing, incoming) {
 					break
 				}
-				// Lost the race — retry the CAS.
+				// Lost the CAS race — retry.
 			}
 		}
 

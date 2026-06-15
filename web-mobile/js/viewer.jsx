@@ -580,8 +580,7 @@ const CHIME_SYNC_EVENT = "chimeMutedSync";
 // instances and the watchlist bell stay visually in sync within one page.
 export const NOTIF_SYNC_EVENT = "notifEnabledSync";
 
-// Notification opt-in helpers used by AnnBellBtn, NotificationSettings, and
-// handleBellToggle. Return values for notifEnable: "on" (granted + LS write
+// Notification opt-in helpers used by AnnBellBtn and handleBellToggle. Return values for notifEnable: "on" (granted + LS write
 // succeeded), "off" (dismissed / threw / localStorage failed), "denied" (permanently blocked).
 function dispatchNotif(enabled) {
   try { window.dispatchEvent(new CustomEvent(NOTIF_SYNC_EVENT, { detail: enabled })); } catch (_e) { /* ignore */ }

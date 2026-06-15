@@ -334,7 +334,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
             onClick={onBellToggle}
             aria-pressed={!chimeMuted}
             aria-label={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
-            title={chimeMuted ? (typeof window.Notification !== "undefined" ? "Alerts muted — browser notifications also paused" : "Alerts muted") : "Alerts on — tap to mute"}
+            title={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
           >
             <BellIcon muted={chimeMuted} />
           </button>

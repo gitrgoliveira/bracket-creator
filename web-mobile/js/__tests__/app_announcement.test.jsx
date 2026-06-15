@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { isAnnouncementActive, filterActiveAnnouncements, fireBrowserNotifications, diffAnnouncementSnapshot } from '../app.jsx';
 import { AnnouncementBanner, AnnouncementCard, notificationSupported } from '../viewer.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
-import { makeNotifMock, makeLocalStorageMock } from './test_helpers.js';
+import { makeLocalStorageMock } from './test_helpers.js';
 import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
 
 // Helper: recursively search a React element tree (mock objects) for all

@@ -144,10 +144,10 @@ func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID strin
 // set lineup, reload lineup (for the response) — in one
 // WithTransaction so they all commit under a single per-comp lock
 // acquire. `hub Broadcaster` receives an EventLineupUpdated after
-// each successful write so SSE clients can re-fetch lineup data live.
-// `*state.Store` satisfies all four interfaces (TeamLineupStore +
-// CompetitionStore + CompetitionTransactor + Broadcaster) so wiring
-// stays drop-in.
+// each successful write so SSE clients can re-fetch lineup data.
+// `*state.Store` satisfies the first three interfaces (TeamLineupStore +
+// CompetitionStore + CompetitionTransactor); the SSE hub satisfies
+// Broadcaster and is wired separately in production.
 func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)

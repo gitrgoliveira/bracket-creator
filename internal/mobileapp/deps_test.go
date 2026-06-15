@@ -55,6 +55,10 @@ func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string) error {
 	return nil
 }
 
+func (stubScoringEngine) CheckCrossCompCourtBusy(string, string) error {
+	return nil
+}
+
 func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata, bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }

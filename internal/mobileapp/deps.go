@@ -83,6 +83,12 @@ type ScoringEngine interface {
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// CheckCrossCompCourtBusy checks whether the court for matchID is
+	// already occupied by a running match in a different competition.
+	// Must be called before entering WithTransaction to avoid a deadlock
+	// (store.RunningMatchOnCourt acquires read locks on other competitions;
+	// calling it while holding a write lock risks a circular wait).
+	CheckCrossCompCourtBusy(compID, matchID string) error
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. Used by
 	// the dedicated POST /decision endpoint (T090). When the prior

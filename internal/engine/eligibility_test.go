@@ -1153,7 +1153,12 @@ func TestStartMatchTx_CourtExclusivity(t *testing.T) {
 		assert.Equal(t, "P-0", courtErr.MatchID)
 	})
 
-	t.Run("court busy in different competition blocks via tx path", func(t *testing.T) {
+	// Cross-competition court detection is intentionally NOT performed inside
+	// StartMatchTx: calling store.RunningMatchOnCourt (which acquires read locks
+	// on all other competitions) while holding compID's write lock via
+	// WithTransaction risks a circular-wait deadlock. The check is split: callers
+	// must invoke CheckCrossCompCourtBusy BEFORE entering WithTransaction.
+	t.Run("court busy in different competition does NOT block via tx path", func(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 
 		createTestCompetition(t, store, "comp1", "league", 3)
@@ -1166,18 +1171,74 @@ func TestStartMatchTx_CourtExclusivity(t *testing.T) {
 			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
+		// StartMatchTx only performs the intra-comp check; it should NOT return
+		// ErrCourtBusy for a cross-comp conflict (that is caught pre-tx by
+		// CheckCrossCompCourtBusy — tested below).
 		var engErr error
 		txErr := store.WithTransaction("comp2", func(tx state.StoreTx) error {
 			engErr = eng.StartMatchTx(tx, "comp2", "P-0")
 			return nil
 		})
 		require.NoError(t, txErr)
-		require.Error(t, engErr)
-		assert.True(t, errors.Is(engErr, ErrCourtBusy), "want ErrCourtBusy, got %v", engErr)
+		assert.NoError(t, engErr, "StartMatchTx must not block on cross-comp court conflict (pre-tx check handles it)")
+	})
+}
+
+// TestCheckCrossCompCourtBusy verifies that CheckCrossCompCourtBusy detects
+// cross-competition court occupancy when called before entering WithTransaction.
+func TestCheckCrossCompCourtBusy(t *testing.T) {
+	t.Run("no conflict when court is free", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp1", "P-0"))
+	})
+
+	t.Run("no conflict when no other competition uses the court", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+		// Court A is busy in comp1 but comp2's match is on court B — no conflict.
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp2", "P-0"))
+	})
+
+	t.Run("conflict when other competition has a running match on same court", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.CheckCrossCompCourtBusy("comp2", "P-0")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
 
 		var courtErr *CourtBusyError
-		require.ErrorAs(t, engErr, &courtErr)
+		require.ErrorAs(t, err, &courtErr)
 		assert.Equal(t, "A", courtErr.Court)
 		assert.Equal(t, "comp1", courtErr.CompID)
+	})
+
+	t.Run("no error when match has no court assigned", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: ""},
+		}))
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp1", "P-0"))
 	})
 }

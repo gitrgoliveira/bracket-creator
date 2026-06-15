@@ -801,22 +801,42 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			result.CorrectionReason = ""
 		}
 
+		// FR-035 court exclusivity: cross-competition check runs BEFORE
+		// WithTransaction to avoid a potential deadlock. Calling
+		// store.RunningMatchOnCourt while holding a write lock would deadlock
+		// if another competition is simultaneously in its own WithTransaction
+		// (both goroutines try to read-lock each other's mutex).
+		// Withdrawal decisions skip this gate — operators must record
+		// kiken/fusenpai regardless of court state.
+		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
+		if !isWithdrawal {
+			if err := eng.CheckCrossCompCourtBusy(id, mid); err != nil {
+				var courtBusyErr *engine.CourtBusyError
+				if errors.As(err, &courtBusyErr) {
+					c.JSON(http.StatusConflict, gin.H{
+						"error":   "court_busy",
+						"court":   courtBusyErr.Court,
+						"matchId": courtBusyErr.MatchID,
+						"compId":  courtBusyErr.CompID,
+						"message": fmt.Sprintf("Court %s already has a running match (%s). Finish that match before starting a new one.", courtBusyErr.Court, courtBusyErr.MatchID),
+					})
+				} else {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				}
+				return
+			}
+		}
+
 		// T156: run the score write + ineligibility update + lineup-freeze
 		// inside a single per-comp lock acquire via WithTransaction. The
 		// engine's RecordMatchResultWithIneligibilityTx dispatches every
 		// store call through `stx`, so no internal call re-acquires the
 		// lock (non-reentrant; nesting would deadlock).
 		//
-		// FR-035: pre-flight eligibility gate. A "fought" or "hikiwake"
-		// score is the act of starting/finishing real play — refuse it
-		// when a participant is marked ineligible by a *different*
-		// match. Kiken/fusenpai go through this same endpoint to record
-		// a new withdrawal on this match (decisionBy chooses the
-		// loser); StartMatchTx excludes status sourced from this match
-		// so the undo path is permitted, and we additionally skip the
-		// gate entirely for withdrawal-type decisions so the operator
-		// can record kiken on a match whose other participant is
-		// already ineligible.
+		// FR-035: intra-competition eligibility and court gate. Checks that
+		// no OTHER match in compID's own pool/bracket is running on the same
+		// court, plus participant ineligibility. Withdrawal decisions bypass
+		// so operators can record kiken on matches with ineligible participants.
 		var (
 			engStatus *domain.CompetitorStatus
 			engErr    error
@@ -855,7 +875,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					result.CorrectionReason = ""
 				}
 			}
-			isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
 			if !isWithdrawal {
 				if err := eng.StartMatchTx(stx, id, mid); err != nil {
 					engErr = err

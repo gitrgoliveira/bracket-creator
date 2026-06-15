@@ -1498,14 +1498,61 @@ paths:
                 $ref: '#/components/schemas/MatchResult'
         '409':
           description: |
-            Conflict — one of: court already has a running match (`court_busy`),
-            competitor ineligible (`ineligible_competitor`), result already finalised
-            (`result_finalized`), or downstream knockout already scored
-            (`downstream_knockout_scored`).
+            Conflict — one of six codes returned in the `error` field:
+            - `court_busy`: court already has a running match in this or another competition.
+              Extra fields: `court`, `matchId`, `compId`, `message`.
+            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
+              Extra fields: `playerId`, `reason`, `reasonHuman`.
+            - `already_ineligible`: participant was already marked ineligible before this match.
+              Extra fields: `playerId`, `reason`, `reasonHuman`.
+            - `result_finalized`: the match result is locked because a downstream knockout
+              match has already been scored. Extra fields: `pool`, `finisher`.
+            - `side_mismatch`: the submitted winner does not match either side of the match.
+            - `downstream_knockout_scored`: a downstream elimination match was already
+              scored; use `force=true` to override.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - court_busy
+                      - ineligible_competitor
+                      - already_ineligible
+                      - result_finalized
+                      - side_mismatch
+                      - downstream_knockout_scored
+                    description: Machine-readable conflict code.
+                  court:
+                    type: string
+                    description: Court label (court_busy only).
+                  matchId:
+                    type: string
+                    description: Conflicting match ID (court_busy only).
+                  compId:
+                    type: string
+                    description: Conflicting competition ID (court_busy only).
+                  message:
+                    type: string
+                    description: Human-readable detail (court_busy only).
+                  playerId:
+                    type: string
+                    description: Ineligible participant ID (ineligible_competitor / already_ineligible).
+                  reason:
+                    type: string
+                    description: Decision that caused ineligibility (ineligible_competitor / already_ineligible).
+                  reasonHuman:
+                    type: string
+                    description: Human-readable reason (ineligible_competitor / already_ineligible).
+                  pool:
+                    type: string
+                    description: Pool ID of the finalized match (result_finalized only).
+                  finisher:
+                    type: string
+                    description: Match ID that finalized the result (result_finalized only).
 
   /api/competitions/{id}/matches/{mid}/court:
     put:

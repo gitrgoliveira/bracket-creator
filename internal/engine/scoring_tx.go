@@ -632,18 +632,13 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 	return nil
 }
 
-// checkCourtExclusivityTx is the tx-aware twin of checkCourtExclusivity.
-// It checks court exclusivity with careful lock discipline: compID's data
-// is read via tx (which bypasses re-acquiring the already-held write lock),
-// while all other competitions are scanned via the store's public methods.
-//
-// Residual TOCTOU: the intra-comp check (via tx) and the cross-comp check
-// (via store.RunningMatchOnCourt) are not atomic with each other. Two
-// simultaneous StartMatchTx calls on different competitions but the same
-// court can both pass the check and both commit. This is an inherent
-// limitation of the per-competition lock model; at real tournament scale
-// (human operators, seconds between button presses) it is not a practical
-// risk, but it is worth noting for future per-court locking.
+// checkCourtExclusivityTx checks that no OTHER match in compID's own pool or
+// bracket is already running on the same court. The cross-competition check is
+// intentionally omitted here: calling store.RunningMatchOnCourt (which acquires
+// read locks on other competitions) while holding compID's write lock via
+// WithTransaction risks a circular-wait deadlock if another competition is
+// simultaneously in its own WithTransaction. The cross-competition check is
+// performed by CheckCrossCompCourtBusy before WithTransaction is entered.
 func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
 	court, err := lookupMatchCourtTx(tx, compID, matchID)
 	if err != nil {
@@ -652,21 +647,12 @@ func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID strin
 	if court == "" {
 		return nil
 	}
-	// Check compID's own matches via tx (avoids deadlock on non-reentrant mutex).
 	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
 	if err != nil {
 		return err
 	}
 	if occ != nil {
 		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
-	}
-	// Check all other competitions via the store (safe: their write locks are free).
-	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
-	if err != nil {
-		return err
-	}
-	if crossOcc != nil {
-		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
 	}
 	return nil
 }

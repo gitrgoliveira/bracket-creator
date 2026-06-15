@@ -186,6 +186,27 @@ func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error
 	return nil
 }
 
+// CheckCrossCompCourtBusy checks whether the court assigned to matchID is
+// currently occupied by a running match in a different competition.
+// It MUST be called before entering WithTransaction for compID: calling
+// store.RunningMatchOnCourt while holding a per-comp write lock risks a
+// circular-wait deadlock if another competition is simultaneously in its
+// own WithTransaction (both goroutines try to read-lock each other's mutex).
+func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
+	court, err := e.lookupMatchCourt(compID, matchID)
+	if err != nil || court == "" {
+		return err
+	}
+	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
+	if err != nil {
+		return err
+	}
+	if crossOcc != nil {
+		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
+	}
+	return nil
+}
+
 // lookupMatchCourt returns the court assigned to matchID in compID's pool
 // matches or bracket. Returns "" (not an error) when the match exists but
 // has no court assigned.

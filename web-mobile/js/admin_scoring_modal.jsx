@@ -48,10 +48,14 @@ import {
 // progress without waiting for the explicit Finish button.
 //
 // Gates (ALL must pass for any network call to fire):
-//   1. match.status === "running" — never auto-start a scheduled match.
-//   2. markDirty() was called at least once since mount / last explicit
-//      submit — prop-driven re-renders (SSE updates) never set the dirty
-//      flag, so there is no SSE→write→SSE feedback loop.
+//   1. SCHEDULE-time: match.status === "running" — never auto-start a
+//      scheduled match. markDirty() is only ever called from user-driven
+//      scoring handlers (addPt, fouls, draw, encho…), never from prop/SSE-
+//      driven re-renders, so there is no SSE→write→SSE feedback loop.
+//   2. FIRE-time: the component is still mounted.
+//   3. FIRE-time: match.status is STILL "running". If the match completed
+//      during the ~300ms debounce window (an SSE update or another operator),
+//      the queued running write is suppressed so it can't revert the result.
 //
 // cancelDebounce() must be called before any explicit Start / Finish submit
 // so a queued running-write can't land after (or over) the final patch.

@@ -1493,9 +1493,12 @@ paths:
         '200':
           description: |
             Result recorded. On a normal write the body is the updated MatchResult.
-            When a stale running-write autosave is a no-op (the match is already
-            completed), the body is `{"stale":true}` and the `stale` field is set;
-            all other MatchResult fields are absent.
+            When a running-write autosave is a no-op the body is `{"stale":true}`
+            (the `stale` field set, all other MatchResult fields absent). This
+            happens in two cases: (a) the rev-guard drops it as out-of-order or
+            superseded (a lower rev within the same session, or an older-epoch
+            session's late write), or (b) the match is already completed, so a
+            running write must not revert the final result.
           content:
             application/json:
               schema:
@@ -1506,8 +1509,10 @@ paths:
                       stale:
                         type: boolean
                         description: >
-                          true when a stale running-write autosave was a no-op; the
-                          field is omitted on normal responses.
+                          true when a running-write autosave was a no-op — either
+                          dropped by the rev-guard as out-of-order/superseded, or
+                          rejected because the match is already completed. Omitted
+                          on normal responses.
                     required: [stale]
         '409':
           description: |
@@ -2675,6 +2680,25 @@ components:
       properties:
         id:
           type: string
+        rev:
+          type: integer
+          format: int64
+          writeOnly: true
+          description: >
+            Optional client-monotonic revision counter, stamped only on
+            "running"-status autosave writes. The server's rev-guard uses it
+            (scoped to revSession) to drop out-of-order delivery from a
+            reconnect flush. Never returned in responses or public projections.
+        revSession:
+          type: string
+          maxLength: 64
+          writeOnly: true
+          description: >
+            Optional per-page-load scoring-session id ("<epochMillis>-<uuid>")
+            sent with "running" autosave writes. The epoch prefix lets the
+            server order sessions so an evicted session's late write can't
+            overwrite a newer one. Never returned in responses or public
+            projections.
         sideA:
           type: string
           maxLength: 100

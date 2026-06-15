@@ -41,6 +41,73 @@ import {
   LINEUP_PRESETS,
 } from './admin_scoring_shared.jsx';
 
+// useDebouncedRunningWrite — shared autosave hook used by BOTH ScoreEditorModal
+// and TeamScoreEditorModal. On every user-driven scoring mutation the caller
+// invokes markDirty(); the hook schedules a single trailing-edge write
+// (debounced ~300ms) with a "running" patch so viewers receive per-point
+// progress without waiting for the explicit Finish button.
+//
+// Gates (ALL must pass for any network call to fire):
+//   1. match.status === "running" — never auto-start a scheduled match.
+//   2. markDirty() was called at least once since mount / last explicit
+//      submit — prop-driven re-renders (SSE updates) never set the dirty
+//      flag, so there is no SSE→write→SSE feedback loop.
+//
+// cancelDebounce() must be called before any explicit Start / Finish submit
+// so a queued running-write can't land after (or over) the final patch.
+//
+// The hook does NOT call doSubmit (which sets submitting=true and would
+// disable the UI). Background writes are fire-and-forget with their own
+// error swallowing — operators must not see save-indicator churn on every
+// single ippon tap.
+//
+// Design note on buildPatchRef: buildPatch reads aPts/bPts/fouls etc. from
+// the enclosing component's closure. Because the timeout fires asynchronously
+// we must capture the *latest* version of buildPatch rather than the one that
+// existed when markDirty was called. The caller keeps buildPatchRef.current
+// updated on every render (see the comment near useDebouncedRunningWrite
+// call-sites below).
+const AUTOSAVE_DEBOUNCE_MS = 300;
+
+function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
+  const timerRef = useRefA(null);
+  const dirtyRef = useRefA(false);
+
+  // cancelDebounce — call this before any explicit submit (Start / Finish /
+  // Hantei / Decision) so the queued timer can't fire afterward.
+  const cancelDebounce = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // Clear on unmount so the closure can't fire after the component is gone.
+  useEffectA(() => () => { cancelDebounce(); }, []);
+
+  // markDirty — call from every user-driven mutation handler (addPt,
+  // removePt, foul increment/decrement, draw toggle, encho change, team
+  // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
+  const markDirty = () => {
+    dirtyRef.current = true;
+    if (!isRunningRef.current) return; // gate 1: never auto-start a scheduled match
+    cancelDebounce();
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (!dirtyRef.current) return; // gate 2: user action required
+      if (!mountedRef || !mountedRef.current) return;
+      dirtyRef.current = false;
+      // Fire-and-forget: errors swallowed; operator's explicit Finish is
+      // the authoritative write.
+      try {
+        const p = onSubmitRef.current(buildPatchRef.current("running"));
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch (_) { /* swallow */ }
+    }, AUTOSAVE_DEBOUNCE_MS);
+  };
+
+  return { markDirty, cancelDebounce };
+}
 
 function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
@@ -114,6 +181,20 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // only external/parent-driven unmount.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // C1: refs updated each render so the debounce callback always sees the
+  // latest buildPatch / onSubmit / running-status even though the hook is
+  // called early (before buildPatch is defined in this component body).
+  const _autosaveIsRunningRef = useRefA(false);
+  const _autosaveBuildPatchRef = useRefA(null);
+  const _autosaveOnSubmitRef = useRefA(null);
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+    isRunningRef: _autosaveIsRunningRef,
+    buildPatchRef: _autosaveBuildPatchRef,
+    onSubmitRef: _autosaveOnSubmitRef,
+    mountedRef,
+  });
+
   useEffectA(() => {
     if (!m.compId) return;
     let cancelled = false;
@@ -154,10 +235,12 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   const addPt = (side, letter) => {
     if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
     else setBPts((p) => p.length < 2 ? [...p, letter] : p);
+    markScoringDirty(); // C1: trigger debounced autosave
   };
   const removePt = (side, idx) => {
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
+    markScoringDirty(); // C1
   };
 
   // FR-033: when the operator has marked overtime, attach the encho block
@@ -196,6 +279,11 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
     const ippons = winnerSide === "a" ? aFinal : bFinal;
     return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
   };
+  // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
+  // running-status so the debounce callback never reads a stale closure.
+  _autosaveIsRunningRef.current = m.status === "running";
+  _autosaveBuildPatchRef.current = buildPatch;
+  _autosaveOnSubmitRef.current = onSubmit;
 
   // Hantei submit: tied scoreline (with or without encho). Operator picks a
   // side; we send a completed patch with the chosen side as winner, the
@@ -221,6 +309,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   };
 
   const doSubmit = async (fn) => {
+    cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
     setSubmitting(true);
     try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };
@@ -236,20 +325,24 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // the OPPONENT and resets this side's counter to 0.
   const sides = [
     {
-      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls, setFouls: setBFouls,
+      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls,
+      setFouls: (v) => { setBFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(bFouls, aPts, bPts);
         setBFouls(r.fouls);
         setAPts(r.opponentPts);
+        markScoringDirty(); // C1
       },
       color: "shiro", label: "SHIRO (White)",
     },
     {
-      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls, setFouls: setAFouls,
+      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls,
+      setFouls: (v) => { setAFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(aFouls, bPts, aPts);
         setAFouls(r.fouls);
         setBPts(r.opponentPts);
+        markScoringDirty(); // C1
       },
       color: "aka", label: "AKA (Red)",
     },
@@ -306,7 +399,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
   // Scoring shortcuts (Enter/M/K/D/T/H/X, plus S in Naginata) are skipped when any interactive
   // element (input, button, link, …) has focus so native activation still works.
   const kbRef = React.useRef(null);
-  kbRef.current = { submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt };
+  kbRef.current = { submitting, canFinish, isDrawToggled, isKnockoutPhase, aTotal, bTotal, handleDismiss, onPrev, onNext, onSubmit, onSubmitAndNext, buildPatch, addPt, doSubmit, isNaginata, decidedByHantei, isComplete, correctionReason, setShowCorrectionPrompt, markScoringDirty, cancelScoringDebounce };
 
   useEffectA(() => {
     const onKeyDown = (ev) => {
@@ -362,8 +455,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
         // No hikiwake in a knockout match — leave the key inert there.
         if (s.isKnockoutPhase && !s.isDrawToggled) return;
         const r = decideDrawToggle({ isDrawToggled: s.isDrawToggled, aTotal: s.aTotal, bTotal: s.bTotal });
-        if (r.action === "cancel") setIsDrawToggled(false);
-        else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
+        if (r.action === "cancel") { setIsDrawToggled(false); s.markScoringDirty(); } // C1
+        else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); s.markScoringDirty(); } // C1
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -504,8 +597,8 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                           data-testid="scoring-modal-mark-draw"
                           onClick={() => {
                             const r = decideDrawToggle({ isDrawToggled, aTotal, bTotal });
-                            if (r.action === "cancel") setIsDrawToggled(false);
-                            else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); }
+                            if (r.action === "cancel") { setIsDrawToggled(false); markScoringDirty(); } // C1
+                            else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
                           }}
                           disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
                           title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw — decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
@@ -808,6 +901,18 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
 
+  // C1: debounced autosave refs (same pattern as ScoreEditorModal).
+  // Updated after buildPatch is defined below.
+  const _autosaveIsRunningRefT = useRefA(false);
+  const _autosaveBuildPatchRefT = useRefA(null);
+  const _autosaveOnSubmitRefT = useRefA(null);
+  const { markDirty: markScoringDirtyT, cancelDebounce: cancelScoringDebounceT } = useDebouncedRunningWrite({
+    isRunningRef: _autosaveIsRunningRefT,
+    buildPatchRef: _autosaveBuildPatchRefT,
+    onSubmitRef: _autosaveOnSubmitRefT,
+    mountedRef,
+  });
+
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
   const onRemoveDaihyosen = async () => {
@@ -1027,7 +1132,10 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
     });
   }
   const [subs, setSubs] = useStateA(initSubsRef.current);
-  const updateSub = (idx, fn) => setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s));
+  // C1: updateSub is the single choke-point for all sub-bout state
+  // mutations. Calling markScoringDirtyT() here captures every edit
+  // (pts add/remove, fouls, fusensho, draw) without repetition.
+  const updateSub = (idx, fn) => { setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s)); markScoringDirtyT(); };
 
   // T096/FR-031: per-bout Fusensho — award a 2-0 default win to the
   // present side. Re-clicking the active side undoes the fusensho and
@@ -1164,8 +1272,14 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
       ...correctionBlock,
     };
   };
+  // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
+  // running-status for TeamScoreEditorModal.
+  _autosaveIsRunningRefT.current = m.status === "running";
+  _autosaveBuildPatchRefT.current = buildPatch;
+  _autosaveOnSubmitRefT.current = onSubmit;
 
   const doSubmit = async (fn) => {
+    cancelScoringDebounceT(); // C1: cancel pending autosave before explicit submit
     setSubmitting(true);
     try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };
@@ -1907,6 +2021,8 @@ window.ScoreEditorModal = ScoreEditorModal;
 // ES exports for the vitest suite — pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
 export {
+  useDebouncedRunningWrite,
+  AUTOSAVE_DEBOUNCE_MS,
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,

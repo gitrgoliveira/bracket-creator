@@ -108,7 +108,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     const mountedRef = useRefSh(true);
     useEffectSh(() => {
-        window.scrollTo(0, 0);
+        if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
         return () => { mountedRef.current = false; };
     }, []);
 

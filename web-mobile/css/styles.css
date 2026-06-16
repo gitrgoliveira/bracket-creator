@@ -7260,7 +7260,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .app-version-link {
   display: inline-flex;
   align-items: center;
-  color: inherit;
   text-decoration: none;
 }
 .app-version-link svg {

@@ -1382,7 +1382,7 @@ export function VersionFooter() {
   const parts = [];
   if (commitShort) parts.push(commitShort);
   if (info.buildDate) parts.push(info.buildDate);
-  
+
   const versionText = isSemver ? versionStr : parts.join(' · ');
 
   return (

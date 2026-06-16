@@ -107,7 +107,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const court = (routeCourt || "").trim();
 
     const mountedRef = useRefSh(true);
-    useEffectSh(() => () => { mountedRef.current = false; }, []);
+    useEffectSh(() => {
+        window.scrollTo(0, 0);
+        return () => { mountedRef.current = false; };
+    }, []);
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`

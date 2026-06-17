@@ -547,20 +547,7 @@ function App() {
     });
   }, []);
 
-  useE(() => {
-    // Fetch once; store on window for VersionFooter to poll.
-    // Use false (not null) as the "fetched, no data" sentinel so the
-    // interval in VersionFooter can distinguish undefined (not yet done)
-    // from false (done, nothing to show) and always clears itself.
-    // fetchVersion() never rejects — api_client catches internally — so
-    // no .catch() is needed. Cancelled flag guards the window assignment
-    // against the (unlikely) case where App is re-mounted in tests.
-    let cancelled = false;
-    window.API.fetchVersion().then((info) => {
-      if (!cancelled) window.appVersionInfo = info ?? false;
-    });
-    return () => { cancelled = true; };
-  }, []);
+
 
   // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
   // (spec 004) can read the elevated-password bits at destructive call sites
@@ -1352,27 +1339,29 @@ function CreateTournament({ onCreated, authConfig }) {
   );
 }
 
+let versionPromise = null;
+
 export function VersionFooter() {
-  // Initialize from window.appVersionInfo if already set (e.g. fast-loading page
-  // where App's fetch resolved before this component mounts). Treat the false
-  // sentinel ("fetched, no data") as null so the render guard below hides the footer.
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
+
   React.useEffect(() => {
-    // window.appVersionInfo is either:
-    //   undefined — fetch not yet started/completed → poll
-    //   false     — fetch done, no data (null result or network error) → stop, show nothing
-    //   object    — fetch done with version data → show footer
     if (window.appVersionInfo !== undefined) {
       setInfo(window.appVersionInfo || null);
       return;
     }
-    const interval = setInterval(() => {
-      if (window.appVersionInfo !== undefined) {
-        setInfo(window.appVersionInfo || null);
-        clearInterval(interval);
-      }
-    }, 100);
-    return () => clearInterval(interval);
+
+    if (!versionPromise) {
+      versionPromise = window.API.fetchVersion().then((res) => {
+        window.appVersionInfo = res ?? false;
+        return res ?? false;
+      });
+    }
+
+    let cancelled = false;
+    versionPromise.then((res) => {
+      if (!cancelled) setInfo(res || null);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   if (!info || !info.version) return null;

@@ -60,9 +60,10 @@ describe('VersionFooter', () => {
     expect(runtime.currentTree()).toBeNull();
 
     // resolve the promise
-    await runtime.act(async () => {
-      resolveFetch({ version: 'v2.0.0' });
-    });
+    resolveFetch({ version: 'v2.0.0' });
+    // flush microtask queue
+    await Promise.resolve();
+    await Promise.resolve();
 
     const treeStr = JSON.stringify(runtime.currentTree());
     expect(treeStr).toContain('v2.0.0');

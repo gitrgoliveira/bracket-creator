@@ -61,9 +61,8 @@ describe('VersionFooter', () => {
 
     // resolve the promise
     resolveFetch({ version: 'v2.0.0' });
-    // flush microtask queue
-    await Promise.resolve();
-    await Promise.resolve();
+    // flush all pending promise .then() chains
+    await new Promise(process.nextTick);
 
     const treeStr = JSON.stringify(runtime.currentTree());
     expect(treeStr).toContain('v2.0.0');

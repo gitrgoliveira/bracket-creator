@@ -15,6 +15,7 @@ describe('VersionFooter', () => {
     runtime.unmount();
     global.React = realReact;
     delete window.appVersionInfo;
+    delete window.API;
   });
 
   it('renders a semver version with GitHub link', () => {
@@ -44,5 +45,26 @@ describe('VersionFooter', () => {
     runtime.mount(VersionFooter, {});
 
     expect(runtime.currentTree()).toBeNull();
+  });
+
+  it('fetches version info on demand if missing and renders it', async () => {
+    // leave window.appVersionInfo undefined
+    let resolveFetch;
+    window.API = {
+      fetchVersion: () => new Promise(res => { resolveFetch = res; })
+    };
+
+    runtime.mount(VersionFooter, {});
+    // initially null because promise is pending
+    expect(runtime.currentTree()).toBeNull();
+
+    // resolve the promise
+    await runtime.act(async () => {
+      resolveFetch({ version: 'v2.0.0' });
+    });
+
+    const treeStr = JSON.stringify(runtime.currentTree());
+    expect(treeStr).toContain('v2.0.0');
+    expect(treeStr).toContain('app-version-link');
   });
 });

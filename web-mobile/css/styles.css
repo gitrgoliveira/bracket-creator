@@ -7251,6 +7251,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: flex;
   justify-content: center;
   align-items: center;
+  flex-wrap: wrap;
   font-size: 11px;
   /* --ink-4 (#6c7480) is only 4.44:1 on --bg — just under AA. Step to the
      darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
@@ -7263,6 +7264,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: inline-flex;
   align-items: center;
   text-decoration: none;
+}
+.app-version-link:hover {
+  text-decoration: underline;
 }
 .app-version-link svg {
   margin-right: 4px;

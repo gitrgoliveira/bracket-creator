@@ -547,8 +547,6 @@ function App() {
     });
   }, []);
 
-
-
   // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
   // (spec 004) can read the elevated-password bits at destructive call sites
   // without prop-drilling authConfig through every admin component.
@@ -1344,20 +1342,27 @@ export function VersionFooter() {
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
 
   React.useEffect(() => {
+    // window.appVersionInfo is either:
+    //   undefined — fetch not yet started/completed
+    //   false     — fetch done, no data (null result or network error)
+    //   object    — fetch done with version data
     if (window.appVersionInfo !== undefined) {
       setInfo(window.appVersionInfo || null);
       return;
     }
 
-    if (!window._versionPromise) {
-      window._versionPromise = window.API.fetchVersion().then((res) => {
+    if (!window.API?.fetchVersion) return;
+
+    if (!window.versionPromise) {
+      window.versionPromise = window.API.fetchVersion().then((res) => {
+        // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
         window.appVersionInfo = res ?? false;
         return res ?? false;
       });
     }
 
     let cancelled = false;
-    window._versionPromise.then((res) => {
+    window.versionPromise.then((res) => {
       if (!cancelled) setInfo(res || null);
     });
     return () => { cancelled = true; };

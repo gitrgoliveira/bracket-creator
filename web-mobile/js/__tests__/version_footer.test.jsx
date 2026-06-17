@@ -15,7 +15,7 @@ describe('VersionFooter', () => {
     runtime.unmount();
     global.React = realReact;
     delete window.appVersionInfo;
-    delete window._versionPromise;
+    delete window.versionPromise;
     delete window.API;
   });
 

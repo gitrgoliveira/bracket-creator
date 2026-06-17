@@ -1339,7 +1339,6 @@ function CreateTournament({ onCreated, authConfig }) {
   );
 }
 
-let versionPromise = null;
 
 export function VersionFooter() {
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
@@ -1350,15 +1349,15 @@ export function VersionFooter() {
       return;
     }
 
-    if (!versionPromise) {
-      versionPromise = window.API.fetchVersion().then((res) => {
+    if (!window._versionPromise) {
+      window._versionPromise = window.API.fetchVersion().then((res) => {
         window.appVersionInfo = res ?? false;
         return res ?? false;
       });
     }
 
     let cancelled = false;
-    versionPromise.then((res) => {
+    window._versionPromise.then((res) => {
       if (!cancelled) setInfo(res || null);
     });
     return () => { cancelled = true; };

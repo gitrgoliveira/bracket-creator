@@ -801,17 +801,20 @@ function App() {
   }, []);
 
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
-  if (!tournament) return (
-    <CreateTournament
-      authConfig={authConfig}
-      onCreated={(t, p) => {
-        setTournament(t);
-        setAuthed(true);
-        setMode("admin");
-        setPassword(p);
-      }}
-    />
-  );
+  if (!tournament) {
+    if (authConfig === null) return <window.LoadingSpinner text="Loading..." />;
+    return (
+      <CreateTournament
+        authConfig={authConfig}
+        onCreated={(t, p) => {
+          setTournament(t);
+          setAuthed(true);
+          setMode("admin");
+          setPassword(p);
+        }}
+      />
+    );
+  }
 
   // T060: /display family — public, read-only TV / lobby / overlay
   // surfaces. Short-circuit before viewer/admin so no auth prompt is
@@ -1222,6 +1225,10 @@ function CreateTournament({ onCreated, authConfig }) {
   // which loads before app.js per index.html.
   const decideNumericUpdate = window.decideNumericUpdate;
 
+  if (saving) {
+    return <window.LoadingSpinner text="Creating tournament..." />;
+  }
+
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
@@ -1324,11 +1331,8 @@ function CreateTournament({ onCreated, authConfig }) {
               </div>
             </div>
           )}
-          {/* Disable submit until authConfig is known (null = loading) so a
-              locked-mode deployment doesn't submit without X-Tournament-Password.
-              The null window lasts at most one HTTP round-trip on startup. */}
-          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving || authConfig === null} style={{ marginTop: 16 }}>
-            {saving ? "Creating…" : authConfig === null ? "Loading…" : "Create Tournament"}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" style={{ marginTop: 16 }}>
+            Create Tournament
           </button>
         </form>
       </div>

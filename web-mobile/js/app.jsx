@@ -547,21 +547,6 @@ function App() {
     });
   }, []);
 
-  useE(() => {
-    // Fetch once; store on window for VersionFooter to poll.
-    // Use false (not null) as the "fetched, no data" sentinel so the
-    // interval in VersionFooter can distinguish undefined (not yet done)
-    // from false (done, nothing to show) and always clears itself.
-    // fetchVersion() never rejects — api_client catches internally — so
-    // no .catch() is needed. Cancelled flag guards the window assignment
-    // against the (unlikely) case where App is re-mounted in tests.
-    let cancelled = false;
-    window.API.fetchVersion().then((info) => {
-      if (!cancelled) window.appVersionInfo = info ?? false;
-    });
-    return () => { cancelled = true; };
-  }, []);
-
   // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
   // (spec 004) can read the elevated-password bits at destructive call sites
   // without prop-drilling authConfig through every admin component.
@@ -1352,46 +1337,58 @@ function CreateTournament({ onCreated, authConfig }) {
   );
 }
 
-function VersionFooter() {
-  // Initialize from window.appVersionInfo if already set (e.g. fast-loading page
-  // where App's fetch resolved before this component mounts). Treat the false
-  // sentinel ("fetched, no data") as null so the render guard below hides the footer.
+
+export function VersionFooter() {
   const [info, setInfo] = React.useState(window.appVersionInfo || null);
+
   React.useEffect(() => {
     // window.appVersionInfo is either:
-    //   undefined — fetch not yet started/completed → poll
-    //   false     — fetch done, no data (null result or network error) → stop, show nothing
-    //   object    — fetch done with version data → show footer
+    //   undefined — fetch not yet started/completed
+    //   false     — fetch done, no data (null result or network error)
+    //   object    — fetch done with version data
     if (window.appVersionInfo !== undefined) {
       setInfo(window.appVersionInfo || null);
       return;
     }
-    const interval = setInterval(() => {
-      if (window.appVersionInfo !== undefined) {
-        setInfo(window.appVersionInfo || null);
-        clearInterval(interval);
-      }
-    }, 100);
-    return () => clearInterval(interval);
+
+    if (!window.API?.fetchVersion) return;
+
+    if (!window.versionPromise) {
+      window.versionPromise = window.API.fetchVersion().then((res) => {
+        // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
+        window.appVersionInfo = res ?? false;
+        return res ?? false;
+      });
+    }
+
+    let cancelled = false;
+    window.versionPromise.then((res) => {
+      if (!cancelled) setInfo(res || null);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   if (!info || !info.version) return null;
   const versionStr = info.version;
   const isSemver = /^v?\d+\.\d+\.\d+/.test(versionStr);
-  if (isSemver) {
-    return (
-      <div className="app-version-footer" data-testid="app-version-footer">
-        {versionStr}
-      </div>
-    );
-  }
   const commitShort = info.gitCommit ? info.gitCommit.slice(0, 7) : '';
   const parts = [];
   if (commitShort) parts.push(commitShort);
   if (info.buildDate) parts.push(info.buildDate);
+
+  const versionText = isSemver ? versionStr : parts.join(' · ');
+
   return (
     <div className="app-version-footer" data-testid="app-version-footer">
-      {parts.join(' · ')}
+      {versionText}
+      {" · "}
+      <a href="https://github.com/gitrgoliveira/bracket-creator" target="_blank" rel="noopener noreferrer" className="app-version-link">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+          <path d="M9 18c-4.51 2-5-2-7-2" />
+        </svg>
+        GitHub
+      </a>
     </div>
   );
 }

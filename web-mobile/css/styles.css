@@ -7248,7 +7248,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* App version footer at the bottom of pages */
 .app-version-footer {
-  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
   font-size: 11px;
   /* --ink-4 (#6c7480) is only 4.44:1 on --bg — just under AA. Step to the
      darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
@@ -7256,6 +7259,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-2);
   padding: 16px 0;
   margin-top: 32px;
+}
+.app-version-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.app-version-link:hover {
+  text-decoration: underline;
+}
+.app-version-link svg {
+  margin-right: 4px;
 }
 
 /* ---------- Pool standings draw-pos default (replaces inline styles) ---------- */

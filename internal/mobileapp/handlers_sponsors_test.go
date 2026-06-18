@@ -55,7 +55,7 @@ func sponsorTestSetup(t *testing.T) (*gin.Engine, string, func()) {
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
 	res := resources.NewResources(nil, mockFS)
-	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 	return router, tempDir, func() { _ = os.RemoveAll(tempDir) }
 }
 
@@ -370,7 +370,7 @@ func TestPostSponsor_NoTournament(t *testing.T) {
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
 	res := resources.NewResources(nil, mockFS)
-	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	body, ct := buildSponsorUpload(t, "Acme", "", "x.png", tinyPNG)
 	w := httptest.NewRecorder()
@@ -408,7 +408,7 @@ func TestPostSponsor_SelfRunMode_RejectsAnonymous(t *testing.T) {
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
 	res := resources.NewResources(nil, mockFS)
-	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	body, ct := buildSponsorUpload(t, "Acme", "", "x.png", tinyPNG)
 	w := httptest.NewRecorder()

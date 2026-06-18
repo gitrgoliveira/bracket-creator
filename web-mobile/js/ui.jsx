@@ -441,6 +441,15 @@ function Icon({ name, size = 16, className }) {
   );
 }
 
+function LoadingSpinner({ text = "Loading..." }) {
+  return (
+    <div className="loading-page" role="status" aria-live="polite">
+      <div className="loading-spinner" aria-hidden="true"></div>
+      <div className="loading-text">{text}</div>
+    </div>
+  );
+}
+
 // Hook: register an Escape key listener that always calls the latest onClose
 // without re-registering on every render (listener registered once, ref kept fresh).
 function useEscapeToClose(onClose) {
@@ -475,7 +484,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -494,5 +503,6 @@ if (typeof window !== "undefined") {
   window.promptDialog = promptDialog;
   window.DialogHost = DialogHost;
   window.Icon = Icon;
+  window.LoadingSpinner = LoadingSpinner;
 }
 

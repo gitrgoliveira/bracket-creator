@@ -800,7 +800,7 @@ function App() {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
   }, []);
 
-  if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
+  if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
   if (!tournament) return (
     <CreateTournament
       authConfig={authConfig}
@@ -896,7 +896,7 @@ function App() {
         // the app.jsx render tree doesn't need a static import.
         window.GlossaryPage
           ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
-          : <div className="loading">Loading glossary…</div>
+          : <window.LoadingSpinner text="Loading glossary…" />
       ) : viewerScreen === "reset" ? (
         // Password reset surface. Lives in reset.jsx; mounted through
         // window.ResetPasswordForm following the per-screen-file
@@ -915,7 +915,7 @@ function App() {
                 setMode("admin");
               }}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : viewerScreen === "register" ? (
         window.RegistrationForm
           ? <window.RegistrationForm
@@ -925,7 +925,7 @@ function App() {
                 setViewerCompId(null);
               }}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : viewerScreen === "results" ? (
         // mp-koqh: public results summary — all competition placings.
         window.AllWinnersView
@@ -934,7 +934,7 @@ function App() {
               onBack={() => setViewerScreen("home")}
               tweaks={THEME}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : (
         <window.ViewerHome
           tournament={tournament}

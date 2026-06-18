@@ -30,7 +30,7 @@ func TestVersionEndpoint(t *testing.T) {
 	}
 	res := resources.NewResources(nil, mockFS)
 
-	r, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	r, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/version", nil)

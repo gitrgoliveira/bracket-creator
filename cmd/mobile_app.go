@@ -168,7 +168,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	}
 	hub := mobileapp.NewHubWithLimits(mobileapp.DefaultHistorySize, maxClients)
 
-	r, _ := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub)
+	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub)
 
 	// Explicit http.Server with timeouts (mp-663 Phase 2). r.Run uses a
 	// zero-value http.Server, which has no read/write/idle timeouts and
@@ -193,6 +193,8 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	// (the `case msg, ok := <-ch` arm sees !ok). Without this, Shutdown
 	// hangs until httpShutdownTimeout elapses on every SIGTERM.
 	srv.RegisterOnShutdown(hub.Close)
+	// Stop the per-IP rate limiter cleanup goroutine.
+	srv.RegisterOnShutdown(apiLimiter.Close)
 
 	serveErr := make(chan error, 1)
 	go func() {

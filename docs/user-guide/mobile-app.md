@@ -19,6 +19,8 @@ TOURNAMENT_DATA_DIR=/path/to/data PORT=8082 bracket-creator mobile-app
 | `--folder` / `-f` | `TOURNAMENT_DATA_DIR` | `.` |
 | `--port` / `-p` | `PORT` | `8080` |
 | `--bind` / `-b` | `BIND_ADDRESS` | `localhost` |
+| (none) | `API_RATE_LIMIT` | `5000` |
+| (none) | `API_RATE_LIMIT_BURST` | `10000` |
 
 An explicit flag always wins over the env var.
 

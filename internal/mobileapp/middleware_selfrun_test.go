@@ -42,7 +42,7 @@ func setupSelfRunRouter(t *testing.T, store *state.Store, verifier PasswordVerif
 		"web-mobile/index.html": {Data: []byte("<html>test</html>")},
 	}
 	res := resources.NewResources(nil, mockFS)
-	r, _ := NewRouterWithHub(store, eng, res, verifier, NewHub())
+	r, _, _ := NewRouterWithHub(store, eng, res, verifier, NewHub())
 	return r
 }
 

@@ -259,10 +259,10 @@ The `mobile-app` command starts a real-time tournament management server you can
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
-The `--folder`, `--port`, and `--bind` flags are also read from `TOURNAMENT_DATA_DIR`, `PORT`, and `BIND_ADDRESS` respectively (flag takes precedence):
+The `--folder`, `--port`, and `--bind` flags are also read from `TOURNAMENT_DATA_DIR`, `PORT`, and `BIND_ADDRESS` respectively (flag takes precedence). You can also configure the global API rate limit via environment variables:
 
 ```bash
-TOURNAMENT_DATA_DIR=/path PORT=8082 bracket-creator mobile-app
+API_RATE_LIMIT=5000 API_RATE_LIMIT_BURST=10000 TOURNAMENT_DATA_DIR=/path PORT=8082 bracket-creator mobile-app
 ```
 
 Or with the Makefile:

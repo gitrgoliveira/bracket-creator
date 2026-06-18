@@ -31,7 +31,7 @@ func brandingTestSetup(t *testing.T) (*gin.Engine, string, func()) {
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}
 	res := resources.NewResources(nil, mockFS)
-	router, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
 	return router, tempDir, func() { _ = os.RemoveAll(tempDir) }
 }
 

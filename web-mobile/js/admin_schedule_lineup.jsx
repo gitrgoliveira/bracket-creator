@@ -210,22 +210,29 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
 
   const copyFromPrevious = async () => {
     setCopying(true);
+    setError("");
     try {
-      // savedLineups: fetch all per-match lineup keys for this team in this comp.
-      // We ask the API for all per-match lineup headers so we can filter
-      // by "has a saved lineup" without fetching the full positions map.
+      // There is no bulk "lineup headers" endpoint, so probe each sibling match
+      // for this team in parallel. A null result means that sibling has no saved
+      // lineup; we keep the fetched lineup objects so the chosen source needs no
+      // second round-trip.
+      const siblings = allMatches.filter(m => m.id !== matchId && matchInvolvesTeam(m));
+      const results = await Promise.all(
+        siblings.map(s =>
+          window.API.fetchMatchLineup(compId, teamId, s.id)
+            .then(l => ({ matchId: s.id, lineup: l }))
+            .catch(() => ({ matchId: s.id, lineup: null }))
+        )
+      );
       const savedLineups = {};
-      try {
-        const headers = await window.API.fetchMatchLineupHeaders(compId, teamId);
-        (headers || []).forEach(h => { savedLineups[h.matchId] = true; });
-      } catch (_e) { /* no headers endpoint — fall through with empty map */ }
+      results.forEach(({ matchId: mid, lineup }) => { if (lineup) savedLineups[mid] = lineup; });
 
       const source = pickCopySource(allMatches, matchId, [teamId, ...teamKeys], savedLineups);
       if (!source) {
         setError("No previous match found to copy from.");
         return;
       }
-      const sourceLineup = await window.API.fetchMatchLineup(compId, teamId, source.id);
+      const sourceLineup = savedLineups[source.id];
       if (!sourceLineup) {
         setError("Previous lineup is empty or unavailable.");
         return;
@@ -239,7 +246,9 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         setPendingPositions(next);
         setShowLineupReasonPrompt(true);
       } else {
-        setValues(next);
+        // doSave applies the copied values from the persisted server response on
+        // success, so we deliberately do NOT setValues eagerly here — a failed
+        // save must not leave unpersisted copied values on screen.
         await doSave(next, "");
       }
     } catch (e) {

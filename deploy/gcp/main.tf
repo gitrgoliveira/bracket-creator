@@ -28,7 +28,10 @@ provider "google" {
 
 locals {
   # Sanitise hostname for use as a resource-name prefix (RFC 1035).
-  name_prefix = replace(lower(var.hostname), ".", "-")
+  # GCP resource names are capped at 63 chars and may not end in a hyphen.
+  # Resource names append suffixes up to ~10 chars (e.g. "-allow-web"), so cap
+  # the prefix at 53 and strip any trailing hyphens left by truncation.
+  name_prefix = replace(substr(replace(lower(var.hostname), ".", "-"), 0, 53), "/-+$/", "")
 
   # Default zone to region-a when the caller omits the variable.
   effective_zone = (

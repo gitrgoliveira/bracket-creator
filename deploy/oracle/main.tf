@@ -168,12 +168,11 @@ resource "oci_core_public_ip" "app" {
   lifetime       = "RESERVED"
   display_name   = "${local.name_prefix}-ip"
 
-  # Attach to the VNIC after the instance is created (see lifecycle below).
+  # Attach to the instance's primary private IP (discovered via the data
+  # sources below). No ignore_changes here: if the instance/VNIC is ever
+  # replaced, Terraform must re-attach the reserved IP to the new private IP,
+  # otherwise the deployment would be left without a reachable public address.
   private_ip_id = data.oci_core_private_ips.app_vnic.private_ips[0].id
-
-  lifecycle {
-    ignore_changes = [private_ip_id]
-  }
 }
 
 # Discover the primary VNIC private IP so we can attach the reserved public IP.

@@ -102,7 +102,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
                   </div>
                 )}
               </div>
-              <button
+              <button type="button"
                 className="btn btn--danger"
                 disabled={busy}
                 onClick={() => handleDelete(i, s.name)}

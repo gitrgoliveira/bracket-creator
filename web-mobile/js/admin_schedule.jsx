@@ -355,7 +355,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
                 style={{ width: 80 }}
               />
             </div>
-            <button className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
+            <button type="button" className="btn btn--primary" onClick={autoSchedule} disabled={autoSaving} style={{ alignSelf: "flex-end" }}>
               {autoSaving ? "Scheduling…" : "Auto-schedule competition"}
             </button>
             {durationEstimate && (
@@ -418,7 +418,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
               {tournament.competitions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             {hasAnyFilter && (
-              <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>
             )}
             {/* T042 (US1, FR-001/FR-002): the court-scope badge mirrors the
                 operator's active filter. The "Show all courts" link clears
@@ -429,7 +429,7 @@ function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, onViewer
             {effectiveCourt && (
               <span className="bc-court-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 14, background: "var(--bg-2, #eef2f7)", fontSize: 12, fontWeight: 600 }}>
                 Showing {window.Term ? React.createElement(window.Term, { name: "shiaijo" }, "Shiaijo") : "Shiaijo"} {effectiveCourt}
-                <button
+                <button type="button"
                   className="btn btn--ghost btn--sm"
                   style={{ padding: "0 6px", fontSize: 11, fontWeight: 500 }}
                   onClick={() => {
@@ -553,7 +553,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
             />
           </form>
         ) : (
-          <button
+          <button type="button"
             className="tw-match__time tw-match__time--editable"
             onClick={(e) => { e.stopPropagation(); if (onTimeChange) { setTimeVal(m.scheduledAt || ""); setEditingTime(true); } }}
             title="Click to set time"
@@ -965,7 +965,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {!isLocked && (
-          <button
+          <button type="button"
             className="btn btn--primary btn--sm"
             onClick={save}
             disabled={saving || copying || roster.length === 0}
@@ -973,7 +973,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
             {saving ? "Saving…" : "Save lineup"}
           </button>
         )}
-        <button
+        <button type="button"
           className="btn btn--sm"
           onClick={copyFromPrevious}
           disabled={!hasSiblings || copying || saving || isLocked}
@@ -1040,7 +1040,7 @@ function MatchLineupPanel({ match, tournament, password, showToast, onClose, var
                 : "Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then."}
             </div>
           </div>
-          <button className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
@@ -1216,10 +1216,10 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
           </select>
         )}
         <div className="seg">
-          <button className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-          <button className={statusFilter === "running" ? "is-active" : ""} onClick={() => setStatusFilter("running")}>Now</button>
-          <button className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
-          <button className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
+          <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
+          <button type="button" className={statusFilter === "running" ? "is-active" : ""} onClick={() => setStatusFilter("running")}>Now</button>
+          <button type="button" className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
+          <button type="button" className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
         </div>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{pluralize(filtered.length, "match", "matches")}</span>
       </div>
@@ -1279,12 +1279,12 @@ function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, pa
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <button className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
+                <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setOpenMatch(m)}>
                   {m.status === "completed" ? "Correct" : "Score"}
                 </button>
                 {/* mp-bkg: show Lineup button only for team competitions */}
                 {(m.compKind === "team" || (m.teamSize || 0) > 0) && (
-                  <button
+                  <button type="button"
                     className="btn btn--ghost btn--sm"
                     style={{ fontSize: 11 }}
                     onClick={() => setLineupMatch(m)}
@@ -1431,7 +1431,7 @@ function AdminExport({ c, t, password }) {
       <div className="card">
         <div className="card__title" style={{ marginBottom: 8 }}>Export {c.name}</div>
         <div className="card__sub" style={{ marginBottom: 14 }}>Generate the official Excel workbook used during the day.</div>
-        <button className="btn btn--primary btn--full" onClick={downloadXlsx}>Download .xlsx</button>
+        <button type="button" className="btn btn--primary btn--full" onClick={downloadXlsx}>Download .xlsx</button>
         <div className="field__hint" style={{ marginTop: 10 }}>Includes pool draws, pool matches, and elimination brackets with linked formulas.</div>
       </div>
       <div className="card">
@@ -1439,7 +1439,7 @@ function AdminExport({ c, t, password }) {
         <div className="card__sub" style={{ marginBottom: 14 }}>Players & spectators see this competition's bracket, schedule and results.</div>
         <div style={{ display: "flex", gap: 8 }}>
           <input className="input" value={url} readOnly style={{ flex: 1 }} />
-          <button className="btn" onClick={copyUrl}>Copy</button>
+          <button type="button" className="btn" onClick={copyUrl}>Copy</button>
         </div>
       </div>
     </div>

@@ -335,11 +335,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-upnext__time">{upNext.scheduledAt || "—"} · {upNext.compName}</div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
-                                            <button className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => startMatch(upNext)}>
+                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => startMatch(upNext)}>
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
                                             {isTeamMatch(upNext) && (
-                                                <button className="btn btn--sm" onClick={() => setLineupMatch(upNext)}
+                                                <button type="button" className="btn btn--sm" onClick={() => setLineupMatch(upNext)}
                                                     title="Set the team lineup before starting">
                                                     Enter lineup
                                                 </button>
@@ -347,7 +347,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             {/* Optional: announce the call to spectators/competitors.
                                                 Never required — Start match works on its own. */}
                                             {window.API && typeof window.API.sendAnnouncement === "function" && (
-                                                <button
+                                                <button type="button"
                                                     className="btn btn--sm"
                                                     disabled={callingKey === matchKey(upNext)}
                                                     onClick={() => callToCourt(upNext)}
@@ -358,7 +358,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 </button>
                                             )}
                                             {window.API && typeof window.API.updateMatchTime === "function" && (
-                                                <button className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Run the next match first, then return here">Defer</button>
+                                                <button type="button" className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Run the next match first, then return here">Defer</button>
                                             )}
                                         </div>
                                         {startError && <div className="shiaijo-upnext__error" role="alert">{startError}</div>}
@@ -484,10 +484,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             the queue on Shiaijo {pendingMove.to}.
                         </p>
                         <div className="shiaijo-move-confirm__actions">
-                            <button className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
+                            <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
                                 Cancel
                             </button>
-                            <button className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
+                            <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
                                 {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
                             </button>
                         </div>
@@ -575,10 +575,10 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
                     />
                 )}
                 {onEnterLineup && isTeamMatch(m) && m.status === "scheduled" && (
-                    <button className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
                 )}
                 {onSkip && m.status === "scheduled" && (
-                    <button className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Run the next match first, then return here">Defer</button>
+                    <button type="button" className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Run the next match first, then return here">Defer</button>
                 )}
             </div>
         </div>

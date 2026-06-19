@@ -615,7 +615,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     <div className="remaining-matches" style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 12, background: "var(--bg-2, #fafafa)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>Remaining matches for {playerName}</div>
-        {onClose && <button className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕</button>}
+        {onClose && <button type="button" className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕</button>}
       </div>
       {err && <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{err}</div>}
       {matches === null && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading…</div>}
@@ -637,7 +637,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
                     {m.phase === "pool" ? m.poolName : m.round}{m.court ? ` · Shiaijo ${m.court}` : ""}{m.scheduledAt ? ` · ${m.scheduledAt}` : ""}
                   </span>
                 </div>
-                <button
+                <button type="button"
                   className="btn btn--sm"
                   onClick={() => award(m)}
                   disabled={busyId === m.id}
@@ -669,11 +669,11 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">{label} Fouls</div>
       <div className="foul-counter__controls">
-        <button className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );

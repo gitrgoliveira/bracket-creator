@@ -650,7 +650,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (!c) return (
       <div className="page">
         <div className="comp-shell-actions">
-          <button className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
         </div>
         <div className="empty">
           <h3>Competition not available</h3>
@@ -670,7 +670,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (adminLoading && !detail) return (
       <div className="page">
         <div className="comp-shell-actions">
-          <button className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
         </div>
         <window.LoadingSpinner text="Loading details..." />
       </div>
@@ -735,7 +735,7 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal__head">
           <div className="modal__title">{title}</div>
-          {dismissable && <button className="modal__close" onClick={onClose} aria-label="Close">&times;</button>}
+          {dismissable && <button type="button" className="modal__close" onClick={onClose} aria-label="Close">&times;</button>}
         </div>
         <div className="modal__body">
           {phase === "confirm" && <>
@@ -772,12 +772,12 @@ function StartAllModal({ state, onConfirm, onRetry, onClose }) {
         </div>
         <div className="modal__foot">
           {phase === "confirm" && <>
-            <button className="btn btn--ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+            <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+            <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
           </>}
           {phase === "result" && <>
-            {failed.length > 0 && <button className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
-            <button className="btn" onClick={onClose}>Close</button>
+            {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
+            <button type="button" className="btn" onClick={onClose}>Close</button>
           </>}
         </div>
       </div>

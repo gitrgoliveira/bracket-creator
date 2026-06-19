@@ -731,7 +731,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       )}
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
+          <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
       <div className="row" style={{ alignItems: "start" }}>
@@ -806,14 +806,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   </ul>
                 </div>
               )}
-              <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
+              <button type="button" className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
             </div>
           )}
           {allTags.length > 0 && (
             <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
+              <button type="button" className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
               {allTags.map(t => (
-                <button key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+                <button type="button" key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
               ))}
             </div>
           )}
@@ -841,10 +841,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="field__label" style={{ fontSize: 11 }}>Dan grade</div>
                     <input className="input" style={{ width: 100 }} value={addDanGrade} onChange={e => setAddDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <button className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
+                  <button type="button" className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
                     {addLoading ? "Adding…" : "Add"}
                   </button>
-                  <button className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); }}>Cancel</button>
+                  <button type="button" className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); }}>Cancel</button>
                 </div>
               )}
             </div>
@@ -875,8 +875,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   </div>
                   <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
-                    <button className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
+                    <button type="button" className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
+                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
                       {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -958,7 +958,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       <div className="seed-row__dojo">
                         {p.dojo}
                         {c.checkInEnabled && dojoFirstRowSet.has(p.id ?? p.name) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
-                          <button
+                          <button type="button"
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
                             onClick={() => bulkCheckInDojo(p.dojo)}
@@ -969,10 +969,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
+                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       {(isSetup || isDrawReady) && (
-                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput
@@ -1000,7 +1000,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
                 <br />* Dan = kendo grade (optional)
-                <br /><button className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+                <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -1032,7 +1032,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           {importSummary && (
             <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
-              <button className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
             </div>
           )}
 
@@ -1045,7 +1045,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 ))}
               </ul>
               <div style={{ display: "flex", gap: 8 }}>
-                <button
+                <button type="button"
                   className="btn btn--sm"
                   data-testid="near-dup-dismiss"
                   onClick={() => setNearDupPending(null)}
@@ -1082,7 +1082,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                   <div className="field__hint">Preview of {Math.min(lines.length, previewLimit)} of {lines.length} rows</div>
                   {lines.length > 10 && (
-                    <button className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
+                    <button type="button" className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
                       {showAllPreview ? "Show less" : "Show all"}
                     </button>
                   )}

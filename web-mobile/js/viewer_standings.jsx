@@ -96,7 +96,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   const heading = swissStandingsHeading(c, poolMatches);
   const winner = isFinal && standings.length > 0 ? standings[0] : null;
 
-  if (loading) return <div className="loading">Loading standings…</div>;
+  if (loading) return <window.LoadingSpinner text="Loading standings…" />;
   if (error) return <div className="alert alert--error">{error}</div>;
 
   return (

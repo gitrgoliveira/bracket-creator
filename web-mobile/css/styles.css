@@ -7807,7 +7807,50 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 @media (max-width: 900px) {
   .shiaijo { grid-template-columns: 1fr; }
-  /* Scoring on top, queue below (brief: tablet portrait = stacked). */
-  .shiaijo__main { order: 0; }
+  /* Stack layout for tablet portrait mode (queue below scoring). */
   .shiaijo__queue { order: 1; }
+}
+
+/* ---------- Loading Spinner ---------- */
+.loading-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  padding: 40px;
+  color: var(--ink);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--line);
+  border-left-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+  .loading-page,
+  .loading-text {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+  }
 }

@@ -265,7 +265,7 @@ export function diffAnnouncementSnapshot(seenRef, list) {
 }
 
 function App() {
-  const [tournament, setTournament] = useS(null);
+  const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
   const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
@@ -364,7 +364,7 @@ function App() {
   // and omit X-Tournament-Password on the bootstrap POST. The
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
-  const [authConfig, setAuthConfig] = useS(null);
+  const [authConfig, setAuthConfig] = useS(undefined);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -466,6 +466,7 @@ function App() {
       }
     } catch (e) {
       console.error("Failed to load tournament", e);
+      setTournament(null); // Explicitly transition from undefined to null so the gate opens
     } finally {
       setLoading(false);
     }
@@ -800,18 +801,28 @@ function App() {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
   }, []);
 
-  if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
-  if (!tournament) return (
-    <CreateTournament
-      authConfig={authConfig}
-      onCreated={(t, p) => {
-        setTournament(t);
-        setAuthed(true);
-        setMode("admin");
-        setPassword(p);
-      }}
-    />
-  );
+  if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
+
+  // Gate ALL rendering on the initial data load. The spinner stays visible
+  // until both fetchTournament and fetchAuthConfig have resolved (setting
+  // their respective state variables from undefined to their loaded values).
+  if (tournament === undefined || authConfig === undefined) {
+    return <window.LoadingSpinner text="Loading..." />;
+  }
+
+  if (tournament === null) {
+    return (
+      <CreateTournament
+        authConfig={authConfig}
+        onCreated={(t, p) => {
+          setTournament(t);
+          setAuthed(true);
+          setMode("admin");
+          setPassword(p);
+        }}
+      />
+    );
+  }
 
   // T060: /display family — public, read-only TV / lobby / overlay
   // surfaces. Short-circuit before viewer/admin so no auth prompt is
@@ -896,7 +907,7 @@ function App() {
         // the app.jsx render tree doesn't need a static import.
         window.GlossaryPage
           ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
-          : <div className="loading">Loading glossary…</div>
+          : <window.LoadingSpinner text="Loading glossary…" />
       ) : viewerScreen === "reset" ? (
         // Password reset surface. Lives in reset.jsx; mounted through
         // window.ResetPasswordForm following the per-screen-file
@@ -915,7 +926,7 @@ function App() {
                 setMode("admin");
               }}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : viewerScreen === "register" ? (
         window.RegistrationForm
           ? <window.RegistrationForm
@@ -925,7 +936,7 @@ function App() {
                 setViewerCompId(null);
               }}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : viewerScreen === "results" ? (
         // mp-koqh: public results summary — all competition placings.
         window.AllWinnersView
@@ -934,7 +945,7 @@ function App() {
               onBack={() => setViewerScreen("home")}
               tweaks={THEME}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
       ) : (
         <window.ViewerHome
           tournament={tournament}
@@ -1222,6 +1233,10 @@ function CreateTournament({ onCreated, authConfig }) {
   // which loads before app.js per index.html.
   const decideNumericUpdate = window.decideNumericUpdate;
 
+  if (saving) {
+    return <window.LoadingSpinner text="Creating tournament..." />;
+  }
+
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
@@ -1324,11 +1339,8 @@ function CreateTournament({ onCreated, authConfig }) {
               </div>
             </div>
           )}
-          {/* Disable submit until authConfig is known (null = loading) so a
-              locked-mode deployment doesn't submit without X-Tournament-Password.
-              The null window lasts at most one HTTP round-trip on startup. */}
-          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving || authConfig === null} style={{ marginTop: 16 }}>
-            {saving ? "Creating…" : authConfig === null ? "Loading…" : "Create Tournament"}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" style={{ marginTop: 16 }}>
+            Create Tournament
           </button>
         </form>
       </div>

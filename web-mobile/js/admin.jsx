@@ -672,7 +672,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         <div className="comp-shell-actions">
           <button className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
         </div>
-        <div className="loading">Loading details...</div>
+        <window.LoadingSpinner text="Loading details..." />
       </div>
     );
 

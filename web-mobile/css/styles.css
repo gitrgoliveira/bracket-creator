@@ -7820,9 +7820,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   min-height: 50vh;
   padding: 40px;
   color: var(--ink);
-  /* Delay the fade-in to prevent flashing on fast loads */
-  opacity: 0;
-  animation: fade-in-delayed 0.2s var(--ease-out) 200ms forwards;
 }
 
 .loading-spinner {

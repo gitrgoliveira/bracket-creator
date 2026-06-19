@@ -265,7 +265,7 @@ export function diffAnnouncementSnapshot(seenRef, list) {
 }
 
 function App() {
-  const [tournament, setTournament] = useS(null);
+  const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
   const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
@@ -364,7 +364,7 @@ function App() {
   // and omit X-Tournament-Password on the bootstrap POST. The
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
-  const [authConfig, setAuthConfig] = useS(null);
+  const [authConfig, setAuthConfig] = useS(undefined);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -466,6 +466,7 @@ function App() {
       }
     } catch (e) {
       console.error("Failed to load tournament", e);
+      setTournament(null); // Explicitly transition from undefined to null so the gate opens
     } finally {
       setLoading(false);
     }
@@ -801,8 +802,15 @@ function App() {
   }, []);
 
   if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
-  if (!tournament) {
-    if (authConfig === null) return <window.LoadingSpinner text="Loading..." />;
+
+  // Gate ALL rendering on the initial data load. The spinner stays visible
+  // until both fetchTournament and fetchAuthConfig have resolved (setting
+  // their respective state variables to either an object or null).
+  if (tournament === undefined || authConfig === undefined) {
+    return <window.LoadingSpinner text="Loading..." />;
+  }
+
+  if (tournament === null) {
     return (
       <CreateTournament
         authConfig={authConfig}

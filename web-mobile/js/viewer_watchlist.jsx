@@ -1,10 +1,12 @@
 // viewer_watchlist.jsx — the watchlist personalisation UI, extracted from
 // viewer.jsx to keep that file's component count manageable (mp-42rg follow-up).
 //
-// Sharing model (matches the rest of web-mobile/js): files are compiled
-// individually by esbuild and loaded as ordered <script type="module"> tags,
-// so cross-file code is shared via `window.*`, NOT ES imports (those would
-// 404 in the browser — the served file is .js, the import path is .jsx).
+// Sharing model: this module keeps its OWN <script type="module"> tag in
+// index.html because viewer.js does NOT import it (unlike the other viewer_*
+// modules, which viewer.js is the sole entry for). It shares code with viewer.jsx
+// via `window.*` reads at RENDER time to break the runtime cycle with
+// viewer_home.jsx — NOT because ES imports would fail: the server rewrites
+// `/dist/X.jsx` → the compiled `X.js`, so `import "./X.jsx"` resolves fine.
 //
 // This file and viewer_home.jsx form a runtime CYCLE: ViewerHome (in
 // viewer_home.jsx) renders WatchlistPanel (here), while these components

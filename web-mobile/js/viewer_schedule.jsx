@@ -245,8 +245,12 @@ export function TWMatch({ m, highlight, _tweaks, onClick }) {
   // separately because the accent-color styling below keys off qp===1.
   const qp = Number(m.queuePosition);
   const queuePill = (window.queueLabelCompact || localQueueLabelCompact)(m);
+  // Render an interactive <button> only when there is a real click handler;
+  // otherwise a plain <div> so the row is not focusable and not announced as a
+  // button to keyboard / screen-reader users (a no-op button is confusing).
+  const Tag = onClick ? "button" : "div";
   return (
-    <button className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
+    <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">{m.scheduledAt || "—"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
@@ -272,7 +276,7 @@ export function TWMatch({ m, highlight, _tweaks, onClick }) {
         {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
         {m.status === "running" && <span className="bc-running">●</span>}
       </div>
-    </button>
+    </Tag>
   );
 }
 

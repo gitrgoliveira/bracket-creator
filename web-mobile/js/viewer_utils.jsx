@@ -1,9 +1,12 @@
 // viewer_utils.jsx — utility helpers extracted from viewer.jsx (mp-pxxc step 1).
 // Pure file split: no behaviour change.
 //
-// Sharing model: files are compiled individually by esbuild and loaded as
-// ordered <script type="module"> tags. This file MUST be listed in index.html
-// BEFORE viewer_watchlist.js and viewer.js.
+// Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
+// the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
+// specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
+// index.html and imports this module — do NOT give it its own <script type="module">
+// tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
+// it twice (double-load; same class as mp-zd1v).
 
 // TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.

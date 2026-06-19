@@ -1,9 +1,12 @@
 // viewer_notifications.jsx — notification-settings + announcement UI extracted
 // from viewer.jsx (mp-pxxc step 8). Pure file split: no behaviour change.
 //
-// Sharing model: files are compiled individually by esbuild and loaded as
-// ordered <script type="module"> tags. This file MUST be listed in index.html
-// AFTER viewer_alerts.js (its dep) and BEFORE viewer.js.
+// Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
+// the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
+// specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
+// index.html and imports this module — do NOT give it its own <script type="module">
+// tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
+// it twice (double-load; same class as mp-zd1v).
 //
 // Exports: notificationSupported, AnnBellBtn, AnnouncementCard, AnnouncementBanner.
 // window.AnnouncementCard and window.AnnouncementBanner are set here (moved from

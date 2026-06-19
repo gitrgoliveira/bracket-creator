@@ -434,7 +434,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
                 {list.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches</div>
                 ) : list.map((m) => (
-                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={() => tweaks.onMatchClick && tweaks.onMatchClick(m)} />
+                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={tweaks.onMatchClick ? () => tweaks.onMatchClick(m) : undefined} />
                 ))}
               </div>
             </div>

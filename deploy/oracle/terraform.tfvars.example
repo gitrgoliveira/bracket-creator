@@ -1,0 +1,16 @@
+tenancy_ocid        = "ocid1.tenancy.oc1..aaaa..."
+compartment_ocid    = "ocid1.tenancy.oc1..aaaa..." # or a child compartment
+region              = "us-ashburn-1"
+availability_domain = "Uocm:US-ASHBURN-AD-1"
+
+instance_image_ocid = "ocid1.image.oc1.iad.aaaa..." # Ubuntu 22.04 Minimal aarch64
+
+hostname   = "tournament.example.com"
+ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
+
+# Optional — restrict SSH to your IP
+# operator_cidrs = ["203.0.113.10/32"]
+
+# Optional — locked password mode (hash must be bcrypt; see README)
+# lock_password            = true
+# tournament_password_hash = "$2b$12$..."

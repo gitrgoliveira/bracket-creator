@@ -17,7 +17,7 @@
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 // ── window stubs ─────────────────────────────────────────────────────────────
 // Split into:

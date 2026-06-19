@@ -97,7 +97,7 @@ ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 # operator_cidrs = ["203.0.113.10/32"]
 
 # Optional — locked password mode
-# lock_password            = "true"
+# lock_password            = true
 # tournament_password_hash = "$2b$12$..."
 ```
 
@@ -180,7 +180,7 @@ Backup.
 | `instance_image_ocid` | — | Ubuntu 22.04 Arm64 image OCID |
 | `hostname` | — | FQDN for the app |
 | `image_ref` | PDF mobile image | Multi-arch Docker tag |
-| `lock_password` | `"false"` | Enable bcrypt locked mode |
+| `lock_password` | `false` | Enable bcrypt locked mode |
 | `tournament_password_hash` | `""` | Bcrypt hash (sensitive) |
 | `sse_max_clients` | `5000` | SSE subscriber cap |
 | `api_rate_limit` | `1000` | Global API requests/sec limit (conservative default; raise for larger events) |

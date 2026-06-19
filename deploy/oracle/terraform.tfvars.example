@@ -12,5 +12,5 @@ ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 # operator_cidrs = ["203.0.113.10/32"]
 
 # Optional — locked password mode (hash must be bcrypt; see README)
-# lock_password            = "true"
+# lock_password            = true
 # tournament_password_hash = "$2b$12$..."

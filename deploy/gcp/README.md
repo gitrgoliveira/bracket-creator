@@ -56,7 +56,7 @@ ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 # image_ref = "ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest"
 
 # Optional — locked password mode
-# lock_password            = "true"
+# lock_password            = true
 # tournament_password_hash = "$2b$12$..."
 ```
 
@@ -132,7 +132,7 @@ gcloud compute disks snapshot <disk-name> \
 | `zone` | `""` (auto) | Zone within the region |
 | `hostname` | — | FQDN for the app |
 | `image_ref` | lean mobile image | Docker image tag |
-| `lock_password` | `"false"` | Enable bcrypt locked mode |
+| `lock_password` | `false` | Enable bcrypt locked mode |
 | `tournament_password_hash` | `""` | Bcrypt hash (sensitive) |
 | `sse_max_clients` | `5000` | SSE subscriber cap |
 | `api_rate_limit` | `500` | Global API requests/sec limit (conservative default; raise for larger events) |

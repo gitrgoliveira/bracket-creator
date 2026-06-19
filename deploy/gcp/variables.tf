@@ -72,17 +72,17 @@ variable "image_ref" {
 
 variable "lock_password" {
   description = <<-EOT
-    Set to "true" to enable bcrypt locked-mode auth.
-    When true, TOURNAMENT_PASSWORD_HASH must also be provided.
+    Set to true to enable bcrypt locked-mode auth.
+    When true, tournament_password_hash must also be provided.
     When false, the plaintext password in tournament-data/tournament.md is used.
   EOT
-  type        = string
-  default     = "false"
+  type        = bool
+  default     = false
 }
 
 variable "tournament_password_hash" {
   description = <<-EOT
-    Bcrypt hash of the admin password, used when lock_password = "true".
+    Bcrypt hash of the admin password, used when lock_password = true.
     Generate with: htpasswd -bnBC 12 "" '<password>' | tr -d ':\n'
     This value is written to app.env (chmod 600, root-owned) on the VM.
     Mark as sensitive in your tfvars — never commit the plaintext.

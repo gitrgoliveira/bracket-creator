@@ -76,16 +76,16 @@ variable "image_ref" {
 
 variable "lock_password" {
   description = <<-EOT
-    Set to "true" to enable bcrypt locked-mode auth.
+    Set to true to enable bcrypt locked-mode auth.
     When true, tournament_password_hash must also be provided.
   EOT
-  type        = string
-  default     = "false"
+  type        = bool
+  default     = false
 }
 
 variable "tournament_password_hash" {
   description = <<-EOT
-    Bcrypt hash of the admin password, used when lock_password = "true".
+    Bcrypt hash of the admin password, used when lock_password = true.
     Generate: htpasswd -bnBC 12 "" '<password>' | tr -d ':\n'
     Written to app.env (chmod 600, root-owned) by cloud-init.
     Mark sensitive in your tfvars — never commit the plaintext.

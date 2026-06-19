@@ -15,5 +15,5 @@ ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 # image_ref = "ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest"
 
 # Optional — locked password mode (hash must be bcrypt; see README)
-# lock_password            = "true"
+# lock_password            = true
 # tournament_password_hash = "$2b$12$..."

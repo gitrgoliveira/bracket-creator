@@ -17,7 +17,7 @@ import { AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx
 import { mymatchQueueLabel, MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
 import { deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, AwardsView, FightingSpiritSection } from './viewer_awards.jsx';
-import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming, ViewerSchedule } from './viewer_schedule.jsx';
+import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming } from './viewer_schedule.jsx';
 import { ViewerCompetition, ViewerOverview } from './viewer_competition.jsx';
 import { ViewerHome, shouldShowRegister } from './viewer_home.jsx';
 
@@ -43,7 +43,6 @@ if (typeof window !== 'undefined') {
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
 window.isPlayerWatched = isPlayerWatched;
-window.ViewerSchedule = ViewerSchedule;
 window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;

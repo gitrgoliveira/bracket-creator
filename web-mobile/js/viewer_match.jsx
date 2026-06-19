@@ -61,7 +61,7 @@ export function subBoutLabel(sub, index) {
 // serves as defense-in-depth if that ever changes. (The "N before yours"
 // wording lives in mymatchQueueLabel — followed-player context only.)
 // Exported so viewer_schedule.jsx's TWMatch shares this single definition.
-export function _localQueueLabelCompact(m) {
+export function localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;
   const qp = Number(m.queuePosition);
   if (!Number.isFinite(qp) || qp <= 0) return null;
@@ -176,7 +176,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // "…before yours" phrasing is reserved for the followed-player next-match
   // banner (mymatchQueueLabel), which has a real "you" context.
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
-    ? (window.queueLabelCompact ? window.queueLabelCompact(m) : _localQueueLabelCompact(m))
+    ? (window.queueLabelCompact ? window.queueLabelCompact(m) : localQueueLabelCompact(m))
     : null;
   return (
     <button className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>

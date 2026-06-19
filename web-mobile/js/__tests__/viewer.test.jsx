@@ -567,6 +567,25 @@ describe('TournamentInfo', () => {
     expect(collectText(treePlain)).toContain('See the notice board');
   });
 
+  it('contactLink: builds mailto/tel only for well-formed values, plain text otherwise (mp-ubcb)', () => {
+    const linkFor = (value) => {
+      const tree = runtime.mount(TournamentInfo, { tournament: { contacts: [{ label: 'C', value }] } });
+      return findInTree(tree, n => n.type === 'a');
+    };
+    // Well-formed email → mailto anchor.
+    expect(linkFor('info@dojo.com')?.props?.href).toBe('mailto:info@dojo.com');
+    expect(linkFor('foo+tag@example.co.uk')?.props?.href).toBe('mailto:foo+tag@example.co.uk');
+    // Phone → tel anchor (decorators stripped).
+    expect(linkFor('+44 20 7946 0000')?.props?.href).toBe('tel:+442079460000');
+    // Leading-dot domain → NOT a link (renders as plain text).
+    expect(linkFor('a@.evil.com')).toBeNull();
+    // mailto query/fragment injection → NOT a link.
+    expect(linkFor('foo@example.com?bcc=attacker@evil.org')).toBeNull();
+    // Whitespace / scheme-injection / bare strings → NOT a link.
+    expect(linkFor('not an email@x')).toBeNull();
+    expect(linkFor('javascript:alert(1)@x')).toBeNull();
+  });
+
   it('isHttpURL accepts http and https but rejects other schemes', () => {
     expect(isHttpURL('http://example.com')).toBe(true);
     expect(isHttpURL('https://example.com')).toBe(true);

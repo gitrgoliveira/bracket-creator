@@ -160,10 +160,13 @@ export function TournamentInfo({ tournament }) {
     if (!value) return value;
     if (isHttpURL(value)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
     // Only build a mailto: href for a well-formed single-address email. A loose
-    // value.includes("@") would turn arbitrary operator-entered strings (e.g.
-    // "javascript:alert(1)@x" or values with whitespace) into a mailto href;
-    // anything that fails this check renders as plain text instead.
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
+    // check would turn arbitrary operator-entered strings into a mailto href:
+    // a leading-dot domain ("a@.evil.com"), or mailto query/fragment injection
+    // ("foo@x.com?bcc=attacker@evil.org" pre-fills the visitor's mail client).
+    // The label-based pattern excludes whitespace, a second "@", a leading-dot
+    // domain, and the ?#&= chars; anything that fails renders as plain text.
+    // Classes don't overlap the literal ".", so there is no catastrophic backtracking.
+    if (/^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/.test(value)) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
     if (/^\+?[\d\s()-]+$/.test(value)) return <a href={"tel:" + value.replace(/[\s()-]/g, "")} className="tournament-info__link">{value}</a>;
     return value;
   };

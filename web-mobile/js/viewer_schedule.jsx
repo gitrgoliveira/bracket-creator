@@ -4,7 +4,7 @@
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
-import { MatchViewerModal, _localQueueLabelCompact } from './viewer_match.jsx';
+import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 
@@ -244,7 +244,7 @@ export function TWMatch({ m, highlight, _tweaks, onClick }) {
   // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
   // separately because the accent-color styling below keys off qp===1.
   const qp = Number(m.queuePosition);
-  const queuePill = (window.queueLabelCompact || _localQueueLabelCompact)(m);
+  const queuePill = (window.queueLabelCompact || localQueueLabelCompact)(m);
   return (
     <button className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} onClick={onClick} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">

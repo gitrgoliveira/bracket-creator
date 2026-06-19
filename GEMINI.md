@@ -112,6 +112,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 
 ## Development Conventions
 
+- **Worktrees:** All new worktrees MUST be created inside the `.gemini/worktrees/` directory.
 - **Code Style:** Follow standard Go idioms. Use `go fmt` and `golangci-lint` for consistency.
 - **Dependency Management:** Use `go mod tidy` to manage `go.mod` and `go.sum`.
 - **Testing:**

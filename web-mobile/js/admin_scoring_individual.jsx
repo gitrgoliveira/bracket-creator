@@ -643,9 +643,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
                 // updates are async — pass r inline via a local override
                 // so the patch is correct on the very first submit.
                 const patch = { ...buildPatch("completed"), correctionReason: r };
-                // Correction (isComplete) saves the current match only.
-                if (onSubmitAndNext && !isComplete) doSubmit(() => onSubmitAndNext(patch));
-                else doSubmit(() => onSubmit(patch));
+                doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
             />

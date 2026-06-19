@@ -1225,9 +1225,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 setCorrectionReason(r);
                 setShowCorrectionPrompt(false);
                 const patch = { ...buildPatch("completed"), correctionReason: r };
-                // Correction (isComplete) saves the current match only.
-                if (onSubmitAndNext && !isComplete) doSubmit(() => onSubmitAndNext(patch));
-                else doSubmit(() => onSubmit(patch));
+                doSubmit(() => onSubmit(patch));
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
             />

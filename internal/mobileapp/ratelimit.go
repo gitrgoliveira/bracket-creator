@@ -145,5 +145,7 @@ func (rl *APIRateLimiter) Middleware() gin.HandlerFunc {
 			})
 			return
 		}
+
+		c.Next()
 	}
 }

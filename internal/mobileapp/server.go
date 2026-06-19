@@ -114,6 +114,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	r.Use(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			apiRateLimiter(c)
+		} else {
+			c.Next()
 		}
 	})
 

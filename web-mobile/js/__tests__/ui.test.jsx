@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from 'vitest';
-import { StatusBadge, formatDate, StableInput } from '../ui.jsx';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { StatusBadge, formatDate, StableInput, LoadingSpinner } from '../ui.jsx';
+import { makeReactive } from './helpers/reactive_react.js';
 
 describe('UI Components', () => {
   describe('StatusBadge', () => {
@@ -113,6 +114,87 @@ describe('UI Components', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('LoadingSpinner', () => {
+    it('does not render immediately if delay > 0', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 200 });
+      expect(spinner).toBeNull();
+    });
+
+    it('renders immediately if delay is 0', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 0 });
+      expect(spinner).not.toBeNull();
+      expect(spinner.type).toBe('div');
+      expect(spinner.props.className).toBe('loading-page');
+    });
+
+    it('supports custom size parameters', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 0, size: 48 });
+      expect(spinner).not.toBeNull();
+      const spinnerEl = spinner.children.find(c => c && c.props && c.props.className === 'loading-spinner');
+      expect(spinnerEl).toBeDefined();
+      expect(spinnerEl.props.style).toEqual({ width: '48px', height: '48px' });
+    });
+
+    describe('reactive behavior', () => {
+      const realReact = global.React;
+      let runtime;
+      let LoadingSpinnerReactive;
+
+      beforeEach(async () => {
+        runtime = makeReactive();
+        global.React = runtime.React;
+        vi.resetModules();
+        const mod = await import('../ui.jsx');
+        LoadingSpinnerReactive = mod.LoadingSpinner;
+      });
+
+      afterEach(() => {
+        runtime.unmount();
+        global.React = realReact;
+        vi.resetModules();
+      });
+
+      it('renders null initially and shows spinner after delay', () => {
+        vi.useFakeTimers();
+        try {
+          runtime.mount(LoadingSpinnerReactive, { text: 'Delayed...', delay: 200 });
+          // Initially it should be null because of the delay
+          expect(runtime.currentTree()).toBeNull();
+
+          // Advance timers by 199ms - should still be null
+          vi.advanceTimersByTime(199);
+          expect(runtime.currentTree()).toBeNull();
+
+          // Advance timers past the 200ms mark
+          vi.advanceTimersByTime(1);
+          const current = runtime.currentTree();
+          expect(current).not.toBeNull();
+          expect(current.type).toBe('div');
+          expect(current.props.className).toBe('loading-page');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it('updates visibility immediately if delay is updated to 0', () => {
+        vi.useFakeTimers();
+        try {
+          runtime.mount(LoadingSpinnerReactive, { text: 'Delayed...', delay: 200 });
+          expect(runtime.currentTree()).toBeNull();
+
+          // Update delay prop to 0
+          runtime.updateProps({ text: 'Delayed...', delay: 0 });
+          const current = runtime.currentTree();
+          expect(current).not.toBeNull();
+          expect(current.type).toBe('div');
+          expect(current.props.className).toBe('loading-page');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
   });
 });

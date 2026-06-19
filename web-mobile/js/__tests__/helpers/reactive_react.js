@@ -31,11 +31,26 @@ export function makeReactive() {
   let rootFactory = null;
   let effectCleanups = [];
   let renderCount = 0;
+  let isRendering = false;
+  let pendingRerender = false;
 
   function rerender() {
-    hookIndex = 0;
-    renderCount++;
-    scheduledRender = rootFactory(rootProps);
+    if (isRendering) {
+      pendingRerender = true;
+      return scheduledRender;
+    }
+    isRendering = true;
+    try {
+      hookIndex = 0;
+      renderCount++;
+      scheduledRender = rootFactory(rootProps);
+    } finally {
+      isRendering = false;
+      if (pendingRerender) {
+        pendingRerender = false;
+        rerender();
+      }
+    }
     return scheduledRender;
   }
 
@@ -65,10 +80,41 @@ export function makeReactive() {
     useEffect: (effect, deps) => {
       const i = hookIndex++;
       if (hookSlots.length <= i) {
-        hookSlots[i] = deps;
+        hookSlots[i] = { deps, cleanup: null };
         const cleanup = effect();
         if (typeof cleanup === 'function') {
+          hookSlots[i].cleanup = cleanup;
           effectCleanups.push(cleanup);
+        }
+      } else {
+        const slot = hookSlots[i];
+        const prevDeps = slot.deps;
+        let changed = false;
+        if (!prevDeps || !deps) {
+          changed = true;
+        } else if (prevDeps.length !== deps.length) {
+          changed = true;
+        } else {
+          for (let d = 0; d < deps.length; d++) {
+            if (deps[d] !== prevDeps[d]) {
+              changed = true;
+              break;
+            }
+          }
+        }
+        if (changed) {
+          if (typeof slot.cleanup === 'function') {
+            slot.cleanup();
+            effectCleanups = effectCleanups.filter(c => c !== slot.cleanup);
+          }
+          slot.deps = deps;
+          const cleanup = effect();
+          if (typeof cleanup === 'function') {
+            slot.cleanup = cleanup;
+            effectCleanups.push(cleanup);
+          } else {
+            slot.cleanup = null;
+          }
         }
       }
     },
@@ -98,6 +144,10 @@ export function makeReactive() {
       rootProps = props;
       effectCleanups = [];
       renderCount = 0;
+      return rerender();
+    },
+    updateProps: (newProps) => {
+      rootProps = newProps;
       return rerender();
     },
     unmount: () => {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -44,8 +45,9 @@ func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) Elev
 // is the HTTP handler; the returned *Hub is exposed so the caller
 // (cmd/mobile_app.go) can call Hub.Close() from a graceful-shutdown
 // hook — without that, http.Server.Shutdown would block forever on
-// the long-lived SSE goroutines.
-func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub) {
+// the long-lived SSE goroutines. The returned *APIRateLimiter should
+// also be closed on shutdown to stop the per-IP cleanup goroutine.
+func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub, *APIRateLimiter) {
 	return NewRouterWithHub(store, eng, res, verifier, NewHub())
 }
 
@@ -53,7 +55,7 @@ func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources,
 // pre-built Hub (e.g. one with NewHubWithLimits) instead of constructing
 // the default. cmd/mobile_app.go uses this to apply the SSE_MAX_CLIENTS
 // override; tests use it to inject a small-capacity hub.
-func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub) (*gin.Engine, *Hub) {
+func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub) (*gin.Engine, *Hub, *APIRateLimiter) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -81,6 +83,40 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	rateLimitVal := 5000.0
+	if val, exists := os.LookupEnv("API_RATE_LIMIT"); exists {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil && parsed > 0 {
+			rateLimitVal = parsed
+		} else {
+			slog.Warn("mobile-app: invalid API_RATE_LIMIT (must be > 0), falling back to default", "val", val)
+		}
+	}
+
+	burstVal := 10000
+	if val, exists := os.LookupEnv("API_RATE_LIMIT_BURST"); exists {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			burstVal = parsed
+		} else {
+			slog.Warn("mobile-app: invalid API_RATE_LIMIT_BURST (must be > 0), falling back to default", "val", val)
+		}
+	}
+
+	slog.Info("mobile-app: api rate limit configured", "globalRate", rateLimitVal, "globalBurst", burstVal, "perIPRate", DefaultPerIPRate, "perIPBurst", DefaultPerIPBurst)
+
+	// Two-layer rate limiting for API endpoints:
+	//   1. Per-IP: prevents a single client from starving others (100 req/s default)
+	//   2. Global: circuit breaker for total server capacity (5000 req/s default)
+	// Both layers are zero-config with automatic cleanup of idle IP entries.
+	apiLimiter := NewAPIRateLimiter(rateLimitVal, burstVal)
+	apiRateLimiter := apiLimiter.Middleware()
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			apiRateLimiter(c)
+		} else {
+			c.Next()
+		}
 	})
 
 	// SSE Events endpoint
@@ -237,5 +273,5 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		})
 	}
 
-	return r, hub
+	return r, hub, apiLimiter
 }

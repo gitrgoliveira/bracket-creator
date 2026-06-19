@@ -39,7 +39,14 @@
 </head>
 
 <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Static spinner shown while JS modules load. Preact replaces
+           #root children on mount, so this vanishes automatically. -->
+      <div class="loading-page" role="status" aria-live="polite">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div class="loading-text">Loading…</div>
+      </div>
+    </div>
 
     <script type="module" src="/dist/api_serializers.js?v=5"></script>
     <script type="module" src="/dist/api_client.js?v=5"></script>

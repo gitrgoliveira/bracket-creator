@@ -48,10 +48,17 @@
       </div>
     </div>
 
-    <script type="module" src="/dist/api_serializers.js?v=5"></script>
+    <!-- Modules that are BOTH script-tagged here AND ES-imported by other modules
+         (e.g. patch.jsx imports data.jsx/api_serializers.jsx; app.jsx imports
+         patch.jsx) use the ".jsx" specifier — identical to the import URL — so the
+         browser keys them as ONE module and evaluates them once. Using ".js?v=5"
+         here would be a second, distinct URL → double module-eval (mp-zd1v).
+         They keep their early position so the window globals they set are
+         available to eval-time readers in later modules. -->
+    <script type="module" src="/dist/api_serializers.jsx"></script>
     <script type="module" src="/dist/api_client.js?v=5"></script>
-    <script type="module" src="/dist/data.js?v=5"></script>
-    <script type="module" src="/dist/patch.js?v=5"></script>
+    <script type="module" src="/dist/data.jsx"></script>
+    <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js?v=5"></script>
     <script type="module" src="/dist/bracket.js?v=5"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
@@ -87,7 +94,7 @@
          viewer.jsx-owned deps it uses are read from window at render time. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
-    <script type="module" src="/dist/admin_helpers.js?v=5"></script>
+    <script type="module" src="/dist/admin_helpers.jsx"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>
     <script type="module" src="/dist/admin_lineup.js?v=5"></script>
@@ -101,7 +108,7 @@
     <script type="module" src="/dist/admin_sponsors.js?v=5"></script>
     <!-- admin_branding.js exports BrandingManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page) — mp-scf. -->
-    <script type="module" src="/dist/admin_branding.js?v=5"></script>
+    <script type="module" src="/dist/admin_branding.jsx"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
          admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->

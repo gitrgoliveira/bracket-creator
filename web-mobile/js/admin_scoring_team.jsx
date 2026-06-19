@@ -94,6 +94,17 @@ export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
   return !!isKnockoutPhase && teamWinner === null && !isComplete;
 }
 
+// teamEncounterHasResult — has any counting bout produced a landed result?
+// IV/PW totals capture decisive bouts and scored draws, but a drawn (hikiwake)
+// bout scored 0–0 contributes neither while still being a real result. Without
+// counting those, a KO encounter tied solely on 0–0 draws would read pending
+// ("—") instead of "DAIHYOSEN". The daihyosen row is excluded to mirror the
+// IV/PW totals (it is the tiebreaker, not a counting bout).
+export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx }) {
+  if ((ivA + ivB + pwA + pwB) > 0) return true;
+  return (subTotals || []).some((s, i) => i !== daihyosenIdx && s.draw);
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -449,7 +460,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // a null teamWinner is never "DRAW": it's "DAIHYOSEN" once there's a scored
   // tie to break, or simply pending ("—") before any bout lands. Only pool
   // matches read a null winner as a true draw.
-  const teamHasAnyScore = (ivA + ivB + pwA + pwB) > 0;
+  // A drawn (hikiwake) sub-bout produces no IV or PW but is still a landed
+  // result, so a KO encounter tied solely on 0–0 draws must read "DAIHYOSEN",
+  // not pending ("—"). teamEncounterHasResult folds those draws in.
+  const teamHasAnyScore = teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx });
   const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore });
   // Block Finish while a KO encounter has no winner: the operator must add and
   // score a daihyosen first (the affordance below). Pool draws stay finishable.

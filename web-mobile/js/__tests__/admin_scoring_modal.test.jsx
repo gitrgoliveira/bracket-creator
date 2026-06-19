@@ -24,6 +24,10 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
+// teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
+// (not part of the thin-entry consumer barrel), imported directly like the
+// resolveMatchLineup tests do.
+import { teamEncounterHasResult } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1120,6 +1124,39 @@ describe('teamResultLabel (no draw in a knockout)', () => {
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
     // Nothing scored yet in a bracket match → pending, still not a draw.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe('—');
+  });
+});
+
+describe('teamEncounterHasResult (folds 0–0 draws into the scored-tie signal)', () => {
+  it('is true when IV/PW totals are non-zero', () => {
+    expect(teamEncounterHasResult({ ivA: 1, ivB: 0, pwA: 0, pwB: 0, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 2, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is true for a KO encounter tied solely on 0–0 hikiwake draws (the bug fix)', () => {
+    // All counting bouts drawn 0–0: no IV, no PW, but a real tie to break.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is false before any bout lands (no totals, no draws)', () => {
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(false);
+  });
+
+  it('ignores a drawn daihyosen row (it is the tiebreaker, not a counting bout)', () => {
+    // Only the daihyosen (index 1) is marked draw; nothing else has landed.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: 1 })).toBe(false);
   });
 });
 

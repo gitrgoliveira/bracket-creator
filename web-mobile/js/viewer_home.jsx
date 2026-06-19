@@ -1,7 +1,7 @@
 // ViewerHome — top-level home component + routing helpers.
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
-import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo } from './viewer_utils.jsx';
+import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
@@ -26,11 +26,7 @@ const formatViewerHeaderEyebrow = window.formatViewerHeaderEyebrow;
 // runs, admin_helpers.js has executed and set the global, so deferring
 // the lookup to call time is safe.
 const hasBothSides = (m) => window.hasBothSides(m);
-// Lazy callable for the same load-order reason as hasBothSides above.
-// Canonical date format is DD-MM-YYYY, which doesn't lex-sort
-// chronologically — use compareDmy as the sort comparator everywhere
-// dates are ordered.
-const compareDmy = (a, b) => window.compareDmy(a, b);
+// compareDmy (DD-MM-YYYY date comparator) is imported from viewer_utils.jsx.
 
 const pluralize = window.pluralize;
 

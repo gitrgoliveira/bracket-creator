@@ -27,6 +27,11 @@ export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolN
 // can read window.poolLabel at render time.
 window.poolLabel = poolLabel;
 
+// Lazy window proxy for the shared DD-MM-YYYY date comparator (defined in
+// data.js, loaded before viewer_*.js). Kept here so both viewer_schedule.jsx
+// and viewer_home.jsx import a single source rather than re-declaring it.
+export const compareDmy = (a, b) => window.compareDmy(a, b);
+
 // Private helper — also kept in viewer.jsx for the usages there.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 

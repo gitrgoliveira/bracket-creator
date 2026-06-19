@@ -35,32 +35,33 @@ export { resolveDeepLink } from './viewer_home.jsx';
 // (viewer_awards.jsx sets window.{buildAllWinnersPublic,AllWinnersView}; the
 // viewer_schedule.jsx/_utils.jsx/_notifications.jsx modules set their own
 // window globals at module-eval time — those are NOT re-set here.)
+// All assignments share one `typeof window` guard so this module can be
+// imported in a non-browser context (tooling/SSR) without a ReferenceError.
 // resolveCompetitionAwards is read off window by admin_shell.jsx (non-module).
 if (typeof window !== 'undefined') {
     window.resolveCompetitionAwards = resolveCompetitionAwards;
+    window.ViewerHome = ViewerHome;
+    window.ViewerCompetition = ViewerCompetition;
+    window.isPlayerWatched = isPlayerWatched;
+    window.competitionKindLabel = competitionKindLabel;
+    window.compMatches = compMatches;
+    window.tournamentMatches = tournamentMatches;
+    // mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
+    // (those files don't ES-import viewer.jsx; they pick globals off window).
+    window.linkBase = linkBase;
+    window.isNonPublicOrigin = isNonPublicOrigin;
+    // Reused read-only on the shiaijo operator console (pool standings + results).
+    window.PoolsViewer = PoolsViewer;
+
+    // Helpers consumed by viewer_watchlist.jsx (WatchlistPanel/BellIcon) at
+    // render time. poolLabel is already exposed by viewer_utils.jsx.
+    window.matchParticipantIds = matchParticipantIds;
+    window.addPlayerToWatchlist = addPlayerToWatchlist;
+    window.effectivePrimaryKey = effectivePrimaryKey;
+    window.entryKey = entryKey;
+    window.resolveEntryPlayerIds = resolveEntryPlayerIds;
+    window.mymatchQueueLabel = mymatchQueueLabel;
+    window.TermV = TermV;
+    window.VSchedItem = VSchedItem;
+    window.WATCHLIST_MAX = WATCHLIST_MAX;
 }
-
-window.ViewerHome = ViewerHome;
-window.ViewerCompetition = ViewerCompetition;
-window.isPlayerWatched = isPlayerWatched;
-window.competitionKindLabel = competitionKindLabel;
-window.compMatches = compMatches;
-window.tournamentMatches = tournamentMatches;
-// mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
-// (those files don't ES-import viewer.jsx; they pick globals off window).
-window.linkBase = linkBase;
-window.isNonPublicOrigin = isNonPublicOrigin;
-// Reused read-only on the shiaijo operator console (pool standings + results).
-window.PoolsViewer = PoolsViewer;
-
-// Helpers consumed by viewer_watchlist.jsx (WatchPicker/WatchHeroCard/
-// WatchlistPanel) at render time. poolLabel is already exposed by viewer_utils.jsx.
-window.matchParticipantIds = matchParticipantIds;
-window.addPlayerToWatchlist = addPlayerToWatchlist;
-window.effectivePrimaryKey = effectivePrimaryKey;
-window.entryKey = entryKey;
-window.resolveEntryPlayerIds = resolveEntryPlayerIds;
-window.mymatchQueueLabel = mymatchQueueLabel;
-window.TermV = TermV;
-window.VSchedItem = VSchedItem;
-window.WATCHLIST_MAX = WATCHLIST_MAX;

@@ -7,10 +7,9 @@
 //
 // Cycle note: viewer.jsx imports from this file and re-exports every symbol
 // here (plus window.* assignments) so the public surface of viewer.jsx is
-// unchanged. subscribePermissionChanges (private to AnnBellBtn, stays in
-// viewer.jsx) imports dispatchNotif from here — that's a reverse import, not
-// a cycle: viewer_alerts.jsx ← viewer.jsx is normal; viewer.jsx importing
-// dispatchNotif from viewer_alerts.jsx is fine since viewer_alerts loads first.
+// unchanged. subscribePermissionChanges (private to AnnBellBtn) lives in
+// viewer_notifications.jsx and imports dispatchNotif from here — not a cycle:
+// viewer_notifications.jsx loads after viewer_alerts.jsx, so the import resolves.
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 

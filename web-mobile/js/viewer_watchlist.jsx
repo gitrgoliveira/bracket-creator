@@ -6,9 +6,10 @@
 // so cross-file code is shared via `window.*`, NOT ES imports (those would
 // 404 in the browser — the served file is .js, the import path is .jsx).
 //
-// This file and viewer.jsx form a runtime CYCLE: ViewerHome (in viewer.jsx)
-// renders WatchlistPanel (here), while these components consume helpers that
-// stay in viewer.jsx (TermV, VSchedItem, entryKey, …). The cycle is safe
+// This file and viewer_home.jsx form a runtime CYCLE: ViewerHome (in
+// viewer_home.jsx) renders WatchlistPanel (here), while these components
+// consume helpers exposed on `window` by viewer.jsx (TermV, VSchedItem,
+// entryKey, …). The cycle is safe
 // because every cross-boundary helper is read from `window` at RENDER time
 // (inside the component body), by which point both scripts have evaluated and
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,

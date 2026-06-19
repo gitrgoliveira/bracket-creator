@@ -32,7 +32,7 @@ window.poolLabel = poolLabel;
 // and viewer_home.jsx import a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
 
-// Private helper — also kept in viewer.jsx for the usages there.
+// Private helper for compMatches below — detects pool-daihyosen match IDs.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
 export function compMatches(c) {

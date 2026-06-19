@@ -445,6 +445,7 @@ function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
 
   React.useEffect(() => {
+    setVisible(delay === 0);
     if (delay === 0) return;
     const timer = setTimeout(() => setVisible(true), delay);
     return () => clearTimeout(timer);

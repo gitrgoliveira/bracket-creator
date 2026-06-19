@@ -178,6 +178,23 @@ describe('UI Components', () => {
           vi.useRealTimers();
         }
       });
+
+      it('updates visibility immediately if delay is updated to 0', () => {
+        vi.useFakeTimers();
+        try {
+          runtime.mount(LoadingSpinnerReactive, { text: 'Delayed...', delay: 200 });
+          expect(runtime.currentTree()).toBeNull();
+
+          // Update delay prop to 0
+          runtime.updateProps({ text: 'Delayed...', delay: 0 });
+          const current = runtime.currentTree();
+          expect(current).not.toBeNull();
+          expect(current.type).toBe('div');
+          expect(current.props.className).toBe('loading-page');
+        } finally {
+          vi.useRealTimers();
+        }
+      });
     });
   });
 });

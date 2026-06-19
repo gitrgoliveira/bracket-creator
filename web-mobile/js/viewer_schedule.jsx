@@ -474,8 +474,5 @@ if (typeof window !== 'undefined') {
   window.PlayerMultiFilter = PlayerMultiFilter;
   window.applyFilters = applyFilters;
   window.matchHighlightedBy = matchHighlightedBy;
-  window.buildPlayerMatchHighlight = buildPlayerMatchHighlight;
-  window.buildWatchlistUpcoming = buildWatchlistUpcoming;
   window.ViewerSchedule = ViewerSchedule;
-  window.ScheduleViewer = ScheduleViewer;
 }

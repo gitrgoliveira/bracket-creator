@@ -15,9 +15,9 @@ import { matchParticipantIds, isFollowedPlayer, isPlayerWatched, WATCHLIST_MAX, 
 import { computeSecondaryAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx';
 import { mymatchQueueLabel, MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { isSwissFinalStandings, swissStandingsHeading, SwissStandingsViewer, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
+import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
 import { deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, AwardsView, FightingSpiritSection } from './viewer_awards.jsx';
-import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming, ScheduleViewer, ViewerSchedule } from './viewer_schedule.jsx';
+import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming, ViewerSchedule } from './viewer_schedule.jsx';
 import { ViewerCompetition, ViewerOverview } from './viewer_competition.jsx';
 import { ViewerHome, shouldShowRegister } from './viewer_home.jsx';
 
@@ -35,23 +35,18 @@ export { resolveDeepLink } from './viewer_home.jsx';
 // (viewer_awards.jsx sets window.{buildAllWinnersPublic,AllWinnersView}; the
 // viewer_schedule.jsx/_utils.jsx/_notifications.jsx modules set their own
 // window globals at module-eval time — those are NOT re-set here.)
+// resolveCompetitionAwards is read off window by admin_shell.jsx (non-module).
 if (typeof window !== 'undefined') {
-    window.deriveAwards = deriveAwards;
-    window.bracketHasDecidedFinal = bracketHasDecidedFinal;
     window.resolveCompetitionAwards = resolveCompetitionAwards;
 }
 
 window.ViewerHome = ViewerHome;
 window.ViewerCompetition = ViewerCompetition;
-window.isFollowedPlayer = isFollowedPlayer;
 window.isPlayerWatched = isPlayerWatched;
 window.ViewerSchedule = ViewerSchedule;
-window.ScheduleViewer = ScheduleViewer;
-window.SwissStandingsViewer = SwissStandingsViewer;
 window.competitionKindLabel = competitionKindLabel;
 window.compMatches = compMatches;
 window.tournamentMatches = tournamentMatches;
-window.currentMatchOf = currentMatchOf;
 // mp-s1gl: expose link-base helpers for admin_shell.jsx / admin_schedule.jsx
 // (those files don't ES-import viewer.jsx; they pick globals off window).
 window.linkBase = linkBase;

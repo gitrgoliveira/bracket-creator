@@ -408,10 +408,10 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   );
 }
 
-// Runtime sharing: expose on window so viewer.jsx (ViewerHome) can render these
-// at render time regardless of script load order.
-window.WatchPicker = WatchPicker;
-window.WatchHeroCard = WatchHeroCard;
+// Runtime sharing: expose WatchlistPanel on window so viewer_home.jsx (ViewerHome)
+// can render it at render time regardless of script load order. WatchPicker and
+// WatchHeroCard are used only internally by WatchlistPanel (this file), so they
+// are not exposed on window.
 window.WatchlistPanel = WatchlistPanel;
 
 // ES exports for the vitest suite, which imports these directly.

@@ -590,5 +590,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
   );
 }
 
+// AllWinnersView is read off window by app.jsx's public results page;
+// buildAllWinnersPublic is exercised via window by viewer_all_winners.test.jsx.
 window.buildAllWinnersPublic = buildAllWinnersPublic;
 window.AllWinnersView = AllWinnersView;

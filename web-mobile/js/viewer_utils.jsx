@@ -159,7 +159,11 @@ export function TournamentInfo({ tournament }) {
   const contactLink = (value) => {
     if (!value) return value;
     if (isHttpURL(value)) return <a href={value} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{value.replace(/^https?:\/\//i, "")}</a>;
-    if (value.includes("@")) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
+    // Only build a mailto: href for a well-formed single-address email. A loose
+    // value.includes("@") would turn arbitrary operator-entered strings (e.g.
+    // "javascript:alert(1)@x" or values with whitespace) into a mailto href;
+    // anything that fails this check renders as plain text instead.
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return <a href={"mailto:" + value} className="tournament-info__link">{value}</a>;
     if (/^\+?[\d\s()-]+$/.test(value)) return <a href={"tel:" + value.replace(/[\s()-]/g, "")} className="tournament-info__link">{value}</a>;
     return value;
   };

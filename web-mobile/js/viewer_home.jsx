@@ -242,7 +242,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
-          <button className="viewer__admin-pill" onClick={onAdminClick}>
+          <button type="button" className="viewer__admin-pill" onClick={onAdminClick}>
             <svg width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden="true">
               <rect x="1" y="5" width="8" height="7" rx="1.5" fill="currentColor"/>
               <path d="M3 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -317,7 +317,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           )}
 
           <div className="viewer-nav-row">
-            <button className="viewer-nav-card" onClick={onOpenSchedule}>
+            <button type="button" className="viewer-nav-card" onClick={onOpenSchedule}>
               <span className="viewer-nav-card__icon">🗓</span>
               <div className="viewer-nav-card__text">
                 <div className="viewer-nav-card__title">Full schedule</div>
@@ -328,7 +328,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 
             {/* mp-koqh: Results summary — only shown when at least one comp has completed. */}
             {onOpenResults && completedCount > 0 && (
-              <button className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
+              <button type="button" className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
                 <span className="viewer-nav-card__icon">🏅</span>
                 <div className="viewer-nav-card__text">
                   <div className="viewer-nav-card__title">Results</div>
@@ -365,7 +365,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                   const showRegister = shouldShowRegister(t, c, !!onRegister);
                   return (
                     <div key={c.id} className="comp-item">
-                      <button className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
+                      <button type="button" className="vlist-item vlist-item--comp" onClick={() => onSelectCompetition(c.id)}>
                         <div className="comp-item__header">
                           <div className="comp-item__body">
                             <div className="vlist-item__eyebrow">{competitionKindLabel(c)}{c.teamSize > 1 ? ` · ${c.teamSize}-person` : ""}</div>
@@ -387,7 +387,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                       </button>
                       {showRegister && (
                         <div className="vlist-item--row-padded">
-                          <button
+                          <button type="button"
                             className="btn btn--primary btn--sm btn--full"
                             onClick={(e) => {
                               e.stopPropagation();

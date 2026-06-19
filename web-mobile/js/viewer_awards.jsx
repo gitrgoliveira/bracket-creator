@@ -286,7 +286,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
           Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
         </div>
       </div>
-      <button className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
+      <button type="button" className="btn btn--sm" onClick={toggleFs} data-testid="awards-fullscreen">
         {isFs ? "Exit fullscreen" : "Fullscreen"}
       </button>
     </div>
@@ -515,7 +515,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
     <div className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
-          <button className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
           <div className="viewer__title-block">
             <div className="viewer__eyebrow">{tournament && tournament.name}</div>
             <div className="viewer__title">Results</div>

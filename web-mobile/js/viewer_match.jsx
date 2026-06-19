@@ -110,7 +110,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isRunning && <span className="bc-running">● NOW</span>}
           {isDone && <span style={{ fontSize: 11, color: "var(--ink-3)", fontWeight: 600 }}>FINAL</span>}
-          {onClose && <button className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
+          {onClose && <button type="button" className="match-detail-card__close" onClick={onClose} aria-label="Close">×</button>}
         </div>
       </div>
 
@@ -182,7 +182,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : localQueueLabelCompact(m))
     : null;
   return (
-    <button className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
+    <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
@@ -308,7 +308,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
                 <span>Contact the organizer to correct this result.</span>
               </div>
             ) : (
-              <button
+              <button type="button"
                 className="btn btn--primary btn--sm"
                 onClick={() => setScoringMatch({ ...match, id: match.id })}
               >

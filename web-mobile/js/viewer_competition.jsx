@@ -192,7 +192,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     <div className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
-          <button className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
           <div className="viewer__title-block">
             <div className="viewer__eyebrow">
               {c.date && <span style={{ fontWeight: 600 }}>{formatDate(c.date)}</span>}
@@ -209,12 +209,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
           {authed && onEditCompetition && (
-            <button className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
+            <button type="button" className="viewer__admin-pill" onClick={() => onEditCompetition(c.id)}>✎ Edit</button>
           )}
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
-            <button key={tb.id} className={`viewer__tab ${tab === tb.id ? "is-active" : ""}`} onClick={() => setTab(tb.id)}>
+            <button type="button" key={tb.id} className={`viewer__tab ${tab === tb.id ? "is-active" : ""}`} onClick={() => setTab(tb.id)}>
               {tb.label}
             </button>
           ))}
@@ -229,7 +229,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                   <span key={k} className="pmf__chip pmf__chip--dojo">
                     <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
                     {entry.dojo}
-                    <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
+                    <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${entry.dojo}`}>×</button>
                   </span>
                 );
               }
@@ -240,12 +240,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                 <span key={k} className="pmf__chip">
                   {number && <span className="num-prefix">{number}</span>}
                   {name}
-                  <button onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
+                  <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
                 </span>
               );
             })}
             {compWatchlist.length > 1 && (
-              <button className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist(prev => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
+              <button type="button" className="viewer__filter-clear" onClick={() => { const ks = new Set(compWatchlist.map(entryKey)); setWatchlist(prev => prev.filter((e) => !ks.has(entryKey(e)))); if (ks.has(primaryKey)) setPrimaryKey(""); }}>Clear all</button>
             )}
           </div>
         )}
@@ -470,7 +470,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             </div>
           )}
           {onSwitchTab && (
-            <button
+            <button type="button"
               className="btn btn--link pool__view-all-btn"
               onClick={() => onSwitchTab("pools")}
               data-testid="league-overview-view-all"

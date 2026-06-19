@@ -94,7 +94,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
           {/* Dojo options first — a dojo entry is dynamic (auto-includes late
               registrations), so it's the higher-leverage choice for a coach. */}
           {dojoMatches.map((d) => (
-            <button
+            <button type="button"
               key={"dojo:" + d.name}
               className="pmf__option pmf__option--dojo"
               onClick={() => pickDojo(d)}
@@ -107,7 +107,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
             </button>
           ))}
           {playerMatches.map((p) => (
-            <button
+            <button type="button"
               key={p.id}
               className="pmf__option"
               onClick={() => pickPlayer(p)}
@@ -206,7 +206,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
         )}
       </div>
       {opponent && (typeof opponent === "object") ? (
-        <button
+        <button type="button"
           className="my-match__opp"
           onClick={() => onMatchClick && onMatchClick(nextMatch)}
         >
@@ -295,13 +295,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       return (
         <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""}`}>
           {multi && (
-            <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
+            <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
               {isPrimary ? "★" : "☆"}
             </button>
           )}
           <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
           {entry.dojo} ({total})
-          <button onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
+          <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
         </span>
       );
     }
@@ -311,13 +311,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     return (
       <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""}`} title={checkedIn ? "Checked in" : undefined}>
         {multi && (
-          <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
+          <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
             {isPrimary ? "★" : "☆"}
           </button>
         )}
         {name}
         {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
-        <button onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
+        <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
       </span>
     );
   };
@@ -332,7 +332,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
         {onBellToggle != null && (
-          <button
+          <button type="button"
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
             onClick={onBellToggle}
             aria-pressed={!chimeMuted}

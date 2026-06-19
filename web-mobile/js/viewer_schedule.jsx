@@ -145,13 +145,13 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
             {p.name}
-            <button onClick={(e) => { e.stopPropagation(); toggle(p); }} aria-label="Remove">×</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); toggle(p); }} aria-label="Remove">×</button>
           </span>
         ))}
         {dojoText ? (
           <span className="pmf__chip pmf__chip--text">
             "{dojoText}"
-            <button onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove">×</button>
+            <button type="button" onClick={(e) => { e.stopPropagation(); setDojoText(""); }} aria-label="Remove">×</button>
           </span>
         ) : null}
         <input
@@ -175,18 +175,18 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           <div className="pmf__dropdown-head">
             {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")} — type to search`}
             {(picked.length > 0 || dojoText) && (
-              <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}
           </div>
           {q && (
-            <button className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
+            <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
               <span>Match text "<b>{query}</b>" in any name/dojo</span>
             </button>
           )}
           {matches.map((p) => {
             const isPicked = !!picked.find((x) => x.id === p.id);
             return (
-              <button key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} onClick={() => toggle(p)}>
+              <button type="button" key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} onClick={() => toggle(p)}>
                 <span className="pmf__check">{isPicked ? "✓" : ""}</span>
                 <span className="pmf__opt-body">
                   <span className="pmf__opt-name">{p.name}</span>
@@ -372,7 +372,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
         >
           <span style={{ color: "var(--ink-3)" }}>Primary:</span>
           <span style={{ fontWeight: 600 }}>{primaryLabel || "(unknown)"}</span>
-          <button
+          <button type="button"
             className="btn btn--ghost btn--sm btn--clear-follow"
             style={{ marginLeft: "auto" }}
             onClick={() => {
@@ -399,7 +399,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
           {courts.map(c => <option key={c} value={c}>Shiaijo {c}</option>)}
         </select>
         {hasAnyFilter && (
-          <button className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); setCourtFilter("all"); }}>Clear</button>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); setCourtFilter("all"); }}>Clear</button>
         )}
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{pluralize(dayFiltered.length, "match", "matches")} of {allMatches.length}</span>
       </div>
@@ -407,7 +407,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
       {multiDay && (
         <div className="day-tabs">
           {allDates.map((d) => (
-            <button key={d} className={`day-tab ${activeDay === d ? "is-active" : ""}`} onClick={() => setActiveDay(d)}>
+            <button type="button" key={d} className={`day-tab ${activeDay === d ? "is-active" : ""}`} onClick={() => setActiveDay(d)}>
               {d ? formatDate(d) : "All days"}
             </button>
           ))}
@@ -457,7 +457,7 @@ export function ViewerSchedule({ tournament, onBack, tweaks }) {
     <div className="viewer">
       <div className="viewer__shell">
         <div className="viewer__head">
-          <button className="viewer__back" onClick={onBack} aria-label="Back">←</button>
+          <button type="button" className="viewer__back" onClick={onBack} aria-label="Back">←</button>
           <div className="viewer__title-block">
             <div className="viewer__eyebrow">{tournament.name}</div>
             <div className="viewer__title">Schedule</div>

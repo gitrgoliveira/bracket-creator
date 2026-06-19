@@ -381,11 +381,11 @@ export function MyMatchAlertBanner({ match, onView, onDismiss }) {
       </div>
       <div className="match-alert-banner__actions">
         {onView && (
-          <button className="btn btn--sm btn--primary" onClick={() => onView(match)}>
+          <button type="button" className="btn btn--sm btn--primary" onClick={() => onView(match)}>
             View
           </button>
         )}
-        {onDismiss && <button
+        {onDismiss && <button type="button"
           className="match-alert-banner__dismiss"
           onClick={onDismiss}
           aria-label="Dismiss match alert"

@@ -124,7 +124,7 @@ export function AnnBellBtn() {
     // State is driven by the NOTIF_SYNC_EVENT listener (onSync above).
   });
   return (
-    <button
+    <button type="button"
       className={`ann-bell-btn${state === "on" ? " ann-bell-btn--on" : ""}${state === "denied" ? " ann-bell-btn--denied" : ""}`}
       onClick={toggle}
       disabled={state === "denied"}
@@ -175,7 +175,7 @@ export function AnnouncementCard({ ann, onDismiss }) {
       <div className="announcement-banner__meta">
         <span className="announcement-banner__badge">{timeLeft}</span>
         <AnnBellBtn />
-        <button
+        <button type="button"
           className="announcement-banner__dismiss"
           onClick={() => onDismiss(ann.id)}
           aria-label="Dismiss announcement"

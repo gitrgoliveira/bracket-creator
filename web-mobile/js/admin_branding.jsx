@@ -172,7 +172,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
             <div className="branding__logo-preview">
               <img key={logoKey} src={`/api/branding/logo?v=${logoKey}`} alt="Tournament logo" style={{ height: 48, width: "auto", maxWidth: 120, objectFit: "contain" }} />
               <div style={{ flex: 1 }}>Current logo</div>
-              <button className="btn btn--danger" disabled={busy} onClick={handleLogoDelete}>Remove</button>
+              <button type="button" className="btn btn--danger" disabled={busy} onClick={handleLogoDelete}>Remove</button>
             </div>
           )}
           <form onSubmit={handleLogoUpload} style={{ display: "flex", flexDirection: "column", gap: 10 }}>

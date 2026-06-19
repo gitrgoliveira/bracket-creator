@@ -149,19 +149,19 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         </div>
       </div>
       <div className="mode-tabs">
-        <button className={mode === "tap" ? "is-active" : ""} onClick={() => setMode("tap")}>Tap winner</button>
-        <button className={mode === "card" ? "is-active" : ""} onClick={() => setMode("card")}>Match card</button>
-        <button className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
+        <button type="button" className={mode === "tap" ? "is-active" : ""} onClick={() => setMode("tap")}>Tap winner</button>
+        <button type="button" className={mode === "card" ? "is-active" : ""} onClick={() => setMode("card")}>Match card</button>
+        <button type="button" className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
       </div>
       {mode === "tap" && (<>
         {/* Layout convention: SHIRO (White, sideB) on the LEFT, AKA (Red, sideA) on the RIGHT. */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
+          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
             <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>SHIRO (WHITE)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{b.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
           </button>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
+          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
             {/* Label tinted red when unselected (button is on white), inherits white when selected (button background is red) */}
             <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: match.winner?.id === a.id ? "inherit" : "var(--red)" }}>AKA (RED)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
@@ -174,12 +174,12 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         <div className="score-card">
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button></div>
+            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button></div>
           </div>
           <div className="score-vs">VS</div>
           <div className="score-side score-side--red">
             <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button></div>
+            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button></div>
           </div>
         </div>
       )}
@@ -193,8 +193,8 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         <div className="sc-board">
           <div className="sc-board__rail sc-board__shiro">
             <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button type="button" className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
             </div>
           </div>
           <div className="sc-board__who sc-board__who--shiro sc-board__shiro">
@@ -209,8 +209,8 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
           </div>
           <div className="sc-board__rail sc-board__aka">
             <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button type="button" className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
             </div>
           </div>
           <div className="sc-board__vs">vs</div>
@@ -233,7 +233,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         const loserArr = aWins ? bPoints : aPoints;
         return (
           <div className="running-panel__actions">
-            <button
+            <button type="button"
               className="btn btn--primary btn--full"
               disabled={!hasWinner}
               onClick={() => onRecord(aWins ? "a" : "b", "ippon", winnerArr, loserArr)}
@@ -252,7 +252,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         </div>
       )}
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
-        <button className="btn btn--sm btn--full" onClick={async () => {
+        <button type="button" className="btn btn--sm btn--full" onClick={async () => {
           // promptDialog returns null on empty/cancel and a string otherwise.
           // A whitespace-only value would be truthy under `if (name)` and would
           // persist a whitespace key as `m.Winner` on the backend (and then
@@ -307,11 +307,11 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
         </div>
       </div>
       <div className="row">
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection("scores")}>
+        <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection("scores")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Scores →</div>
           <div className="card__sub">Update or correct match results</div>
         </button>
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
+        <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>
@@ -419,7 +419,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
             style={{ flex: "1 1 120px", minWidth: 90 }}
             data-testid={`fs-award-dojo-${idx}`}
           />
-          <button
+          <button type="button"
             className="btn btn--sm btn--ghost"
             onClick={() => removeRow(idx)}
             aria-label="Remove award"
@@ -428,8 +428,8 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
         </div>
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
-        <button className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
+        <button type="button" className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
+        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
           {saving && <span className="spinner" />}
           {saving ? "Saving…" : "Save awards"}
         </button>
@@ -1045,7 +1045,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>
-            <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
+            <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
               if (await window.confirmDialog({ message: `Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`, confirmLabel: "Mark invalid", danger: true })) {
                 const admin = await window.promptAdminPassword();
                 if (admin === null) return;
@@ -1078,7 +1078,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
           </div>
         )}
-        <button className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
+        <button type="button" className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
           const started = local.status && local.status !== "setup" && local.status !== "draw-ready";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
@@ -1377,12 +1377,12 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "var(--accent-soft, #ecfdf5)", border: "1px solid var(--accent, #a7f3d0)", borderRadius: 8 }}>
           <div style={{ fontWeight: 600, color: "var(--accent, #065f46)" }}>Competition complete</div>
           {onViewStandings && (
-            <button className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings →</button>
+            <button type="button" className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings →</button>
           )}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
+          <button type="button"
             className="btn btn--primary"
             disabled={!canGenerate || generating}
             onClick={generate}
@@ -1614,11 +1614,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && c.players.length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                  <button type="button" className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
                     {generating && <span className="spinner" />}
                     {generating ? "Generating…" : "Preview draw"}
                   </button>
-                  <button className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -1638,15 +1638,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
+                  <button type="button" className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
                     {generating && <span className="spinner" />}
                     {generating ? "Regenerating…" : "Regenerate draw"}
                   </button>
-                  <button className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -1666,14 +1666,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <div key={sec.sec}>
                 <div className="side-nav__sec">{sec.sec}</div>
                 {sec.items.map((it) => (
-                  <button key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
+                  <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
                 ))}
               </div>
             ))}
             <div>
               <div className="side-nav__sec">Other competitions</div>
               {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                <button key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
               ))}
             </div>
           </div>

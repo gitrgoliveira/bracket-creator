@@ -534,11 +534,11 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
                   <input className="input" style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
                   <input className="input" style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
-                  <button className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
+                  <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
                 </div>
               ))}
               {contacts.length < 10 && (
-                <button className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "", _key: nextKeyRef.current++ }])}>+ Add contact</button>
+                <button type="button" className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "", _key: nextKeyRef.current++ }])}>+ Add contact</button>
               )}
             </div>
           </div>
@@ -576,7 +576,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               )}
               <div style={{ display: "flex", gap: 8 }}>
                 <input className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
-                <button className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
+                <button type="button" className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
                   {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
                 </button>
               </div>
@@ -625,8 +625,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </div>
           <div className="edit-actions__buttons">
             {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}
-            <button className="btn" onClick={handleCancel} disabled={saving}>Cancel</button>
-            <button className="btn btn--primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+            <button type="button" className="btn" onClick={handleCancel} disabled={saving}>Cancel</button>
+            <button type="button" className="btn btn--primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
           </div>
         </div>
         </div>
@@ -1032,8 +1032,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn btn--primary" onClick={create}>Create & continue →</button>
+            <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn--primary" onClick={create}>Create & continue →</button>
           </div>
         </div>
       </div>
@@ -1154,8 +1154,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
               The manifest must list competitions with their CSV file names.
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-              <button className="btn btn--primary" onClick={() => folderRef.current?.click()}>Select folder</button>
-              <button className="btn" onClick={() => filesRef.current?.click()}>Select files individually</button>
+              <button type="button" className="btn btn--primary" onClick={() => folderRef.current?.click()}>Select folder</button>
+              <button type="button" className="btn" onClick={() => filesRef.current?.click()}>Select files individually</button>
             </div>
             <input ref={folderRef} type="file" style={{ display: "none" }} webkitdirectory="true" multiple onChange={e => collectFiles(e.target.files)} />
             <input ref={filesRef} type="file" style={{ display: "none" }} multiple accept=".yaml,.yml,.json,.csv,.txt" onChange={e => collectFiles(e.target.files)} />
@@ -1219,10 +1219,10 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
         )}
 
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn btn--primary" onClick={doImport} disabled={!manifestFile || loading}>
+          <button type="button" className="btn btn--primary" onClick={doImport} disabled={!manifestFile || loading}>
             {loading ? "Importing…" : "Import"}
           </button>
-          <button className="btn" onClick={onBack}>Cancel</button>
+          <button type="button" className="btn" onClick={onBack}>Cancel</button>
         </div>
       </div>
     </div>

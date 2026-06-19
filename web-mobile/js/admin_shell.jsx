@@ -45,7 +45,7 @@ function Breadcrumbs({ items }) {
             // keyboard / hover dismissal, but a blanket blur is the wrong tool —
             // it breaks keyboard users for a problem the browser already handles
             // when the navigated-away input unmounts.)
-            <button onClick={() => item.onClick()}>
+            <button type="button" onClick={() => item.onClick()}>
               {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
               {item.label}
             </button>
@@ -170,8 +170,8 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
           <span aria-hidden="true" className="topbar__conn__dot"></span>
           {connected ? "Connected" : "Reconnecting…"}
         </span>
-        <button className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
-        <button className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
+        <button type="button" className="viewer-toggle" onClick={onViewerMode}><Icon name="eye" /> Public viewer</button>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={onLogout}>Sign out</button>
       </div>
       {!connected && sustainedDown && (
         <div className="conn-alert" role="alert">
@@ -189,7 +189,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
               const courtLabel = m.court ? `Shiaijo ${m.court}` : "Unassigned";
               const courtPhrase = m.court ? `on Shiaijo ${m.court}` : "with no court assigned";
               return (
-                <button
+                <button type="button"
                   key={`${m.compId}:${m.id}`}
                   className="running-strip__chip"
                   onClick={() => onOpenScore && onOpenScore(m)}
@@ -276,7 +276,7 @@ function AllWinnersModal({ comps, onClose }) {
       <div className="modal" style={{ maxWidth: 640, width: "95%" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="All winners">
         <div className="modal__head">
           <div className="modal__title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="trophy" size={18} />All winners</div>
-          <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {state.loading && (
@@ -324,7 +324,7 @@ function AllWinnersModal({ comps, onClose }) {
           ))}
         </div>
         <div className="modal__foot">
-          <button className="btn" onClick={onClose}>Close</button>
+          <button type="button" className="btn" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -423,16 +423,16 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             </div>
           </div>
           <div className="page-head__actions">
-            <button className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
-            <button className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
+            <button type="button" className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
+            <button type="button" className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
             {comps.some(c => c.status === "completed") && (
-              <button className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
+              <button type="button" className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
-            <button className="btn" onClick={onEditTournament}>Edit details</button>
+            <button type="button" className="btn" onClick={onEditTournament}>Edit details</button>
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
-              <button className="btn btn--danger" onClick={onStartAll}>Start all</button>
+              <button type="button" className="btn btn--danger" onClick={onStartAll}>Start all</button>
             )}
-            <button className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+            <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
           </div>
         </div>
 
@@ -444,11 +444,11 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
-          <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
+          <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
             <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
           </button>
-          <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
+          <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
@@ -458,7 +458,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="section-title">Shiaijo operator views</div>
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
               {(t.courts || []).map(court => (
-                <button key={court} className="btn" style={{ minWidth: 120 }} onClick={() => onOpenShiaijo(court)}>
+                <button type="button" key={court} className="btn" style={{ minWidth: 120 }} onClick={() => onOpenShiaijo(court)}>
                   Shiaijo {court} →
                 </button>
               ))}
@@ -482,12 +482,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <div className="section-title">All competitions</div>
         <div className="tlist">
           {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
-          <button className="tcard tcard--add" onClick={onCreateCompetition}>
+          <button type="button" className="tcard tcard--add" onClick={onCreateCompetition}>
             <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
-          <button className="tcard tcard--add" onClick={onOpenImport}>
+          <button type="button" className="tcard tcard--add" onClick={onOpenImport}>
             <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
             <div style={{ fontWeight: 600, marginTop: 4 }}>Import competitions</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
@@ -552,7 +552,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Share registration link">
         <div className="modal__head">
           <div className="modal__title">Share registration link</div>
-          <button className="modal__close" onClick={onClose} aria-label="Close">✕</button>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
@@ -564,10 +564,10 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
           </p>
         </div>
         <div className="modal__foot">
-          <button className="btn btn--primary" onClick={() => {
+          <button type="button" className="btn btn--primary" onClick={() => {
             copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
           }}>Copy link</button>
-          <button className="btn" onClick={onClose}>Close</button>
+          <button type="button" className="btn" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -629,7 +629,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Export PDFs">
         <div className="modal__head">
           <div className="modal__title">Export PDFs</div>
-          <button className="modal__close" onClick={onClose} aria-label="Close" disabled={!!busyType}>✕</button>
+          <button type="button" className="modal__close" onClick={onClose} aria-label="Close" disabled={!!busyType}>✕</button>
         </div>
         <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--ink-3)" }}>
@@ -653,7 +653,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
           ))}
         </div>
         <div className="modal__foot">
-          <button className="btn" onClick={onClose} disabled={!!busyType}>Close</button>
+          <button type="button" className="btn" onClick={onClose} disabled={!!busyType}>Close</button>
         </div>
       </div>
     </div>
@@ -710,16 +710,16 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         </div>
         <div className="tcard__actions">
           {c.status === "setup" && playerCount >= 2 && (
-            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
+            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
-            <button className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>
+            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>
           )}
           {c.status === "completed" && (
-            <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
+            <button type="button" className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>View Results</button>
           )}
           {canShare && (
-            <button className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}>
+            <button type="button" className="btn btn--sm btn--full" onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}>
               Share registration link
             </button>
           )}
@@ -803,7 +803,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
 
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
-      <button
+      <button type="button"
         ref={triggerRef}
         className={btnClassName}
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
@@ -820,7 +820,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
           style={{ [align === "right" ? "right" : "left"]: 0, top: "100%", marginTop: 4 }}
         >
           {courts.map((cc, idx) => (
-            <button
+            <button type="button"
               key={cc}
               ref={(el) => { optionRefs.current[idx] = el; }}
               role="option"

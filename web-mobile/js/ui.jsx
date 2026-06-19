@@ -107,7 +107,7 @@ function Toast({ message, type, onClose }) {
       <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
       {shownIsError && (
-        <button
+        <button type="button"
           className="toast__dismiss"
           aria-label="Dismiss"
           onClick={() => { setVisible(false); if (onCloseRef.current) onCloseRef.current(); }}
@@ -387,7 +387,7 @@ function DialogHost() {
       <div key={req._id} className="modal" ref={dialogRefCb} tabIndex={-1} role="dialog" aria-modal="true" aria-label={req.title} onKeyDown={onDialogKeyDown} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
           <div className="modal__title">{req.title}</div>
-          <button className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>
+          <button type="button" className="modal__close" onClick={onCancel} aria-label="Cancel">&times;</button>
         </div>
         <div className="modal__body">
           {req.message && <p className="dialog-msg">{req.message}</p>}
@@ -409,8 +409,8 @@ function DialogHost() {
           )}
         </div>
         <div className="modal__foot">
-          <button className="btn btn--ghost" onClick={onCancel}>{req.cancelLabel}</button>
-          <button className={`btn ${req.danger ? "btn--danger" : "btn--primary"}`} onClick={onConfirm}>{req.confirmLabel}</button>
+          <button type="button" className="btn btn--ghost" onClick={onCancel}>{req.cancelLabel}</button>
+          <button type="button" className={`btn ${req.danger ? "btn--danger" : "btn--primary"}`} onClick={onConfirm}>{req.confirmLabel}</button>
         </div>
       </div>
     </div>

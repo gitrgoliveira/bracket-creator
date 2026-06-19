@@ -592,5 +592,9 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
 
 // AllWinnersView is read off window by app.jsx's public results page;
 // buildAllWinnersPublic is exercised via window by viewer_all_winners.test.jsx.
-window.buildAllWinnersPublic = buildAllWinnersPublic;
-window.AllWinnersView = AllWinnersView;
+// Guarded so importing viewer.jsx (which imports this module) in a non-browser
+// context (tooling/SSR) doesn't ReferenceError — matches viewer.jsx's own guard.
+if (typeof window !== 'undefined') {
+  window.buildAllWinnersPublic = buildAllWinnersPublic;
+  window.AllWinnersView = AllWinnersView;
+}

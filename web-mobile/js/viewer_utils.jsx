@@ -29,7 +29,7 @@ export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolN
 // Publish to window so viewer_watchlist.js can read window.poolLabel. Load order
 // is irrelevant: viewer_watchlist.js (its own <script> tag) reads this at RENDER
 // time, by which point viewer.js — which imports/evaluates this module — has run.
-window.poolLabel = poolLabel;
+if (typeof window !== 'undefined') window.poolLabel = poolLabel;
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
 // is attached by admin_helpers.jsx, whose <script> tag loads AFTER viewer.js —

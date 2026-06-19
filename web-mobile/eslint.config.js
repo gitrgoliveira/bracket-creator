@@ -6,6 +6,15 @@ export default [
   {
     ignores: ["node_modules/**", "dist/**", "vendor/**"],
   },
+  {
+    // Node.js utility scripts in the web-mobile root (e.g. check-imports.mjs)
+    files: ["*.mjs"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
   js.configs.recommended,
   {
     files: ["js/**/*.{js,jsx}", "*.{js,jsx}"],

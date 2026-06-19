@@ -27,7 +27,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -93,7 +93,11 @@ js/test: ## Run JavaScript unit tests
 	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
 	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/validate: js/lint js/security js/test ## Run all Javascript checks
+js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split modules)
+	@echo "Checking cross-module imports..."
+	@node web-mobile/check-imports.mjs
+
+js/validate: js/lint js/security js/check-imports js/test ## Run all Javascript checks
 
 go/test: go/lint go/security js/validate ## Run tests
 	@echo "Running tests..."

@@ -26,13 +26,14 @@ export function competitionKindLabel(c) {
 }
 
 export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
-// Publish to window immediately so viewer_watchlist.js (loaded after this file)
-// can read window.poolLabel at render time.
+// Publish to window so viewer_watchlist.js can read window.poolLabel. Load order
+// is irrelevant: viewer_watchlist.js (its own <script> tag) reads this at RENDER
+// time, by which point viewer.js — which imports/evaluates this module — has run.
 window.poolLabel = poolLabel;
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator (defined in
-// data.js, loaded before viewer_*.js). Kept here so both viewer_schedule.jsx
-// and viewer_home.jsx import a single source rather than re-declaring it.
+// data.js, whose <script> tag precedes viewer.js). Kept here so both
+// viewer_schedule.jsx and viewer_home.jsx import a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
 
 // Private helper for compMatches below — detects pool-daihyosen match IDs.

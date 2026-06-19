@@ -159,9 +159,10 @@ locals {
               - TOURNAMENT_DATA_DIR=/tournament-data
             volumes:
               - ${local.data_dir}:/tournament-data
-            # The app never needs the cloud metadata service; map its hostname
-            # to loopback so a compromised container cannot read instance
-            # metadata (which includes the cloud-init user-data).
+            # Defense-in-depth: the app never needs the cloud metadata service,
+            # so map its hostname to loopback. NOTE this is not a hard block —
+            # the metadata server is still reachable via the link-local IP
+            # (169.254.169.254); a full block needs host-level firewalling.
             extra_hosts:
               - "metadata.google.internal:127.0.0.1"
             expose:

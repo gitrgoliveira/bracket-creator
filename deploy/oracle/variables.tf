@@ -103,6 +103,14 @@ variable "sse_max_clients" {
   EOT
   type        = number
   default     = 5000
+
+  validation {
+    # The app reads SSE_MAX_CLIENTS with strconv.Atoi (integer-only); a
+    # non-integer would be ignored at runtime and silently fall back to the
+    # default, so reject it at plan time instead.
+    condition     = var.sse_max_clients > 0 && var.sse_max_clients == floor(var.sse_max_clients)
+    error_message = "sse_max_clients must be a positive integer."
+  }
 }
 
 variable "api_rate_limit" {
@@ -115,12 +123,24 @@ variable "api_rate_limit" {
   EOT
   type        = number
   default     = 1000
+
+  validation {
+    # The app parses API_RATE_LIMIT with ParseFloat and ignores values <= 0.
+    condition     = var.api_rate_limit > 0
+    error_message = "api_rate_limit must be greater than 0."
+  }
 }
 
 variable "api_rate_limit_burst" {
   description = "Burst allowance for the global API rate limit. The application default is 10000."
   type        = number
   default     = 2000
+
+  validation {
+    # The server reads API_RATE_LIMIT_BURST with strconv.Atoi (integer-only).
+    condition     = var.api_rate_limit_burst > 0 && var.api_rate_limit_burst == floor(var.api_rate_limit_burst)
+    error_message = "api_rate_limit_burst must be a positive integer."
+  }
 }
 
 variable "ssh_pubkey" {

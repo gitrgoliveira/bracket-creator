@@ -60,8 +60,8 @@ export function subBoutLabel(sub, index) {
 // window.queueLabelCompact is normally available on first render; this
 // serves as defense-in-depth if that ever changes. (The "N before yours"
 // wording lives in mymatchQueueLabel — followed-player context only.)
-// NOTE: a copy of this also lives in viewer.jsx for TWMatch. Keep both in sync.
-function _localQueueLabelCompact(m) {
+// Exported so viewer_schedule.jsx's TWMatch shares this single definition.
+export function _localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;
   const qp = Number(m.queuePosition);
   if (!Number.isFinite(qp) || qp <= 0) return null;

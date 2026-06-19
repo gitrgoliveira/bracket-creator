@@ -4,21 +4,9 @@
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
-import { MatchViewerModal } from './viewer_match.jsx';
+import { MatchViewerModal, _localQueueLabelCompact } from './viewer_match.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
-
-// Local mirror of display.jsx::queueLabelCompact ("Next up" / "#N").
-// display.js loads before viewer.js (see index.html), so
-// window.queueLabelCompact is normally available on first render; this
-// serves as defense-in-depth if that ever changes. (The "N before yours"
-// wording lives in mymatchQueueLabel — followed-player context only.)
-function _localQueueLabelCompact(m) {
-  if (!m || m.status !== "scheduled") return null;
-  const qp = Number(m.queuePosition);
-  if (!Number.isFinite(qp) || qp <= 0) return null;
-  return qp === 1 ? "Next up" : `#${qp}`;
-}
 
 // mp-xhaa: the pinned-primary entry key (string), persisted separately from the
 // list so reordering/dedup of the list never disturbs the pin. Only meaningful

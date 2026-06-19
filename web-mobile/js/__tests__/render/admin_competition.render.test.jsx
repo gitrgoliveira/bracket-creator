@@ -39,8 +39,10 @@ const STUBBED_GLOBALS = {
   AdminExport: Stub('AdminExport'),
   BracketTree: Stub('BracketTree'),
   AdminTeamLineupsList: Stub('AdminTeamLineupsList'),
-  // Pure helpers called synchronously during render.
-  compMatchStats: () => ({ played: 0, total: 0 }),
+  // Pure helpers called synchronously during render. AdminCompOverview
+  // destructures { total, done, running } from compMatchStats — match that
+  // shape so the smoke test renders real values, not undefined.
+  compMatchStats: () => ({ total: 0, done: 0, running: 0 }),
   hasBothSides: () => false,
   hasPoolOriginPlaceholder: () => false,
   dmyToIso: (d) => d,

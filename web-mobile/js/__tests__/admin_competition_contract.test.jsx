@@ -31,11 +31,18 @@ const EXPECTED_ES_EXPORTS = [
   'formatCompMinutes',
 ];
 
-// Components assigned to window at module load (consumed by non-module admin
-// scripts and other component files via window.*). Importing the module for
-// its side effects runs these assignments.
+// Components assigned to window at module load. Importing admin_competition.jsx
+// evaluates every section sub-module — overview via the side-effect import,
+// settings/bracket/swiss via the helper re-exports — so ALL of these
+// assignments run during this test. A split that drops any `window.X = X`
+// would render that section undefined in the browser; this pins all six so it
+// fails loudly in CI instead.
 const EXPECTED_WINDOW_GLOBALS = [
   'AdminCompetition',
+  'AdminCompOverview',
+  'FightingSpiritAwardsEditor',
+  'AdminSettings',
+  'AdminBracket',
   'AdminSwissRounds',
 ];
 

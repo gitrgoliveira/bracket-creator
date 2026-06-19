@@ -63,22 +63,30 @@ function collectExports(src) {
   return names;
 }
 
-// Each relative-.jsx import: { specifiers } and the resolved target path.
-// The IMPORTED name we must find in the target is the left-hand side of `as`
-// (the source binding), or the bare name otherwise.
+// Each relative-.jsx import OR re-export edge: { specifiers } and the resolved
+// target path. Both `import { X } from './y.jsx'` and `export { X } from
+// './y.jsx'` are cross-module edges that must name a real export of the target
+// — re-export drift (the entry re-exporting a helper a section module no longer
+// exports) is exactly the failure the mp-hpe3 split could introduce, and native
+// ESM throws on it just the same. The name we must find in the target is the
+// left-hand side of `as` (the source binding), or the bare name otherwise.
 function collectRelativeImports(src, fromFile) {
   const edges = [];
-  const importRe = /^\s*import\s*\{([^}]*)\}\s*from\s*['"](\.\.?\/[^'"]+\.jsx)['"]/gm;
-  for (const m of src.matchAll(importRe)) {
-    const target = resolve(dirname(fromFile), m[2]);
+  const parseSpecifiers = (raw) => {
     const wanted = [];
-    for (const piece of m[1].split(',')) {
+    for (const piece of raw.split(',')) {
       const part = piece.trim();
       if (!part) continue;
       const asMatch = part.match(/^([A-Za-z_$][\w$]*)\s+as\s+/);
       wanted.push(asMatch ? asMatch[1] : part.replace(/\s+/g, ''));
     }
-    if (wanted.length) edges.push({ target, wanted, spec: m[2] });
+    return wanted;
+  };
+  // `import { … } from` and `export { … } from` share the same edge shape.
+  const edgeRe = /^\s*(?:import|export)\s*\{([^}]*)\}\s*from\s*['"](\.\.?\/[^'"]+\.jsx)['"]/gm;
+  for (const m of src.matchAll(edgeRe)) {
+    const wanted = parseSpecifiers(m[1]);
+    if (wanted.length) edges.push({ target: resolve(dirname(fromFile), m[2]), wanted, spec: m[2] });
   }
   return edges;
 }
@@ -96,7 +104,7 @@ describe('cross-module ES export integrity (mp-hpe3 / mp-pxxc split guardrail)',
     expect(modules.length).toBeGreaterThan(10);
   });
 
-  it('every relative-import names a symbol its target actually exports', () => {
+  it('every relative import/re-export names a symbol its target actually exports', () => {
     const violations = [];
     for (const file of modules) {
       const rel = file.slice(JS_DIR.length + 1);

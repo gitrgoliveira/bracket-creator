@@ -59,7 +59,11 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
   );
 }
 
-// Format a total-minutes integer as "Xh Ym". Exported for unit tests.
+// FightingSpiritAwardsEditor: free-text form for adding/removing/saving
+// optional fighting-spirit (敢闘賞) awards for a competition. Each award has
+// a title, recipient name, and optional dojo. Save calls
+// API.updateCompetitionAwards (elevated-gated PUT /api/competitions/:id/awards).
+// v1 = free-text only; no competitor picker (deferred).
 function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
   // mid-list removals (index keys cause inputs to "jump" / reuse the wrong

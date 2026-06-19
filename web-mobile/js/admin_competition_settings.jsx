@@ -14,6 +14,7 @@ const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
 const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 
+// Format a total-minutes integer as "Xh Ym". Exported for unit tests.
 export function formatCompMinutes(m) {
   if (!Number.isFinite(m) || m <= 0) return null;
   const h = Math.floor(m / 60);
@@ -22,11 +23,6 @@ export function formatCompMinutes(m) {
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
 
-// FightingSpiritAwardsEditor: free-text form for adding/removing/saving
-// optional fighting-spirit (敢闘賞) awards for a competition. Each award has
-// a title, recipient name, and optional dojo. Save calls
-// API.updateCompetitionAwards (elevated-gated PUT /api/competitions/:id/awards).
-// v1 = free-text only; no competitor picker (deferred).
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);

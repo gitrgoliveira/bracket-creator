@@ -84,7 +84,14 @@
     <script type="module" src="/dist/admin_participants.js?v=5"></script>
     <script type="module" src="/dist/admin_pools.js?v=5"></script>
     <script type="module" src="/dist/admin_schedule.js?v=5"></script>
-    <script type="module" src="/dist/admin_competition.js?v=5"></script>
+    <!-- admin_competition section modules (mp-hpe3 split). Mutually independent;
+         each consumes only globals from earlier admin_* files. Must load before
+         admin_competition.js, which aliases their window.* component globals. -->
+    <script type="module" src="/dist/admin_competition_overview.js?v=6"></script>
+    <script type="module" src="/dist/admin_competition_settings.js?v=6"></script>
+    <script type="module" src="/dist/admin_competition_bracket.js?v=6"></script>
+    <script type="module" src="/dist/admin_competition_swiss.js?v=6"></script>
+    <script type="module" src="/dist/admin_competition.js?v=6"></script>
     <script type="module" src="/dist/admin_announcement.js?v=5"></script>
     <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page) — mp-c38. -->

@@ -367,7 +367,7 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
 
   it('useEffect deps include every field rendered via local.*', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
 
@@ -455,7 +455,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 
   it('finalNext contains only allowlisted settings keys', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
 
@@ -495,7 +495,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // usable positive integer.
   it('finalNext numeric fields are wrapped in safeInt fallback', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
     const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
@@ -519,7 +519,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // fractional-clobber dimension.
   it('safeInt helper guards isFinite + isInteger + >= 1', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
     const safeIntMatch = src.match(/const safeInt = \(v, fallback\) =>\s*([^;]+);/);
@@ -549,9 +549,17 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 // stubbed React hooks; structural tests are the durable mechanism.
 describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
   const src = readFileSync(
-    resolve(__dirname, '..', 'admin_competition.jsx'),
+    resolve(__dirname, '..', 'admin_competition_settings.jsx'),
     'utf8'
   );
+
+  // Non-vacuity guard (mp-hpe3): AdminSettings was split into
+  // admin_competition_settings.jsx. If this path ever points at a module that
+  // doesn't contain AdminSettings, the source-introspection regexes below would
+  // match nothing and could pass trivially — fail loudly instead.
+  it('reads the module that actually defines AdminSettings', () => {
+    expect(src).toContain('function AdminSettings');
+  });
 
   it('saveLater takes no snapshot argument', () => {
     // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`

@@ -441,7 +441,17 @@ function Icon({ name, size = 16, className }) {
   );
 }
 
-function LoadingSpinner({ text = "Loading..." }) {
+function LoadingSpinner({ text = "Loading...", delay = 200 }) {
+  const [visible, setVisible] = React.useState(delay === 0);
+
+  React.useEffect(() => {
+    if (delay === 0) return;
+    const timer = setTimeout(() => setVisible(true), delay);
+    return () => clearTimeout(timer);
+  }, [delay]);
+
+  if (!visible) return null;
+
   return (
     <div className="loading-page" role="status" aria-live="polite">
       <div className="loading-spinner" aria-hidden="true"></div>

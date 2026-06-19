@@ -7852,4 +7852,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     animation: none;
     border-color: var(--accent);
   }
+  .loading-page,
+  .loading-text {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+  }
 }

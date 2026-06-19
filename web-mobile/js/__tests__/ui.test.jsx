@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { StatusBadge, formatDate, StableInput } from '../ui.jsx';
+import { StatusBadge, formatDate, StableInput, LoadingSpinner } from '../ui.jsx';
 
 describe('UI Components', () => {
   describe('StatusBadge', () => {
@@ -113,6 +113,20 @@ describe('UI Components', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe('LoadingSpinner', () => {
+    it('does not render immediately if delay > 0', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 200 });
+      expect(spinner).toBeNull();
+    });
+
+    it('renders immediately if delay is 0', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 0 });
+      expect(spinner).not.toBeNull();
+      expect(spinner.type).toBe('div');
+      expect(spinner.props.className).toBe('loading-page');
     });
   });
 });

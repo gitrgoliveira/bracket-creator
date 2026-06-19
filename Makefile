@@ -90,8 +90,8 @@ js/security: js/sec ## Run all Javascript security checks
 
 js/test: ## Run JavaScript unit tests
 	@echo "Running JavaScript tests..."
-	@cd web-mobile && npm test
-	@cd web && npm test
+	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
+	@cd web && NODE_NO_WARNINGS=1 npm test
 
 js/validate: js/lint js/security js/test ## Run all Javascript checks
 

@@ -31,6 +31,7 @@ func TestAPIRateLimiter(t *testing.T) {
 			req.RemoteAddr = "1.1.1.1:1234"
 			r.ServeHTTP(w, req)
 			assert.Equal(t, 200, w.Code)
+			assert.Equal(t, "ok", w.Body.String())
 		}
 
 		// Client A: 3rd request immediately should fail (burst exhausted)
@@ -46,6 +47,7 @@ func TestAPIRateLimiter(t *testing.T) {
 		req2.RemoteAddr = "2.2.2.2:1234"
 		r.ServeHTTP(w2, req2)
 		assert.Equal(t, 200, w2.Code)
+		assert.Equal(t, "ok", w2.Body.String())
 	})
 
 	t.Run("Global Burst Exhaustion", func(t *testing.T) {
@@ -64,6 +66,7 @@ func TestAPIRateLimiter(t *testing.T) {
 			req.RemoteAddr = string(rune('1'+i)) + ".1.1.1:1234"
 			r.ServeHTTP(w, req)
 			assert.Equal(t, 200, w.Code)
+			assert.Equal(t, "ok", w.Body.String())
 		}
 
 		// 4th request from a fresh IP fails because global limit is exhausted

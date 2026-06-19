@@ -78,6 +78,11 @@
          AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps
          (poolLabel etc.) from window at render time, so this order is safe. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
+    <!-- Alert/notification-trigger hooks + banners (notifEnable/Disable, NOTIF_SYNC_EVENT,
+         useChimeMuted, useFollowedMatchAlert, useSecondaryWatchAlert, computeSecondaryAlert,
+         MyMatchAlertBanner, isFollowedMatchOnDeck), extracted from viewer.jsx (mp-pxxc step 3).
+         Must load after viewer_watchlist_core.js and viewer_watchlist.js, and before viewer.js. -->
+    <script type="module" src="/dist/viewer_alerts.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>

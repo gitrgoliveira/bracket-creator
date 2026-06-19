@@ -100,3 +100,14 @@ mp-*/
 .claude/scheduled_tasks.lock
 .claude/*.lock
 .impeccable/
+
+# Terraform local state (provider binaries, lock files from terraform init)
+**/.terraform/
+**/.terraform.lock.hcl
+
+# Terraform state and variable files — may contain secrets (e.g. password
+# hashes) in plaintext; never commit them.
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+!**/*.tfvars.example

@@ -37,6 +37,7 @@ type perIPLimiter struct {
 	rate    float64
 	burst   int
 	stop    chan struct{}
+	once    sync.Once
 }
 
 // newPerIPLimiter creates a per-IP rate limiter and starts the background
@@ -94,7 +95,9 @@ func (p *perIPLimiter) cleanupLoop() {
 
 // close stops the cleanup goroutine.
 func (p *perIPLimiter) close() {
-	close(p.stop)
+	p.once.Do(func() {
+		close(p.stop)
+	})
 }
 
 // APIRateLimiter combines a global circuit breaker with per-IP fairness.

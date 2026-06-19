@@ -805,7 +805,7 @@ function App() {
 
   // Gate ALL rendering on the initial data load. The spinner stays visible
   // until both fetchTournament and fetchAuthConfig have resolved (setting
-  // their respective state variables to either an object or null).
+  // their respective state variables from undefined to their loaded values).
   if (tournament === undefined || authConfig === undefined) {
     return <window.LoadingSpinner text="Loading..." />;
   }

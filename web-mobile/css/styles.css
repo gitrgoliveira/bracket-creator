@@ -7836,11 +7836,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   to { transform: rotate(360deg); }
 }
 
-@keyframes fade-in-delayed {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 .loading-text {
   font-size: 13px;
   font-weight: 500;

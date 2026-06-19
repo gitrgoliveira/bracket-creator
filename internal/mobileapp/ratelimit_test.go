@@ -76,4 +76,14 @@ func TestAPIRateLimiter(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusTooManyRequests, w.Code)
 	})
+
+	t.Run("Idempotent Close", func(t *testing.T) {
+		limiter := NewAPIRateLimiter(100, 100)
+		assert.NotPanics(t, func() {
+			limiter.Close()
+		})
+		assert.NotPanics(t, func() {
+			limiter.Close()
+		})
+	})
 }

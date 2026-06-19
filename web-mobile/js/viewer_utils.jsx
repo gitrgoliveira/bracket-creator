@@ -31,9 +31,11 @@ export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolN
 // time, by which point viewer.js — which imports/evaluates this module — has run.
 window.poolLabel = poolLabel;
 
-// Lazy window proxy for the shared DD-MM-YYYY date comparator (defined in
-// data.js, whose <script> tag precedes viewer.js). Kept here so both
-// viewer_schedule.jsx and viewer_home.jsx import a single source rather than re-declaring it.
+// Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
+// is attached by admin_helpers.jsx, whose <script> tag loads AFTER viewer.js —
+// safe because this proxy is only invoked at render time (after every module tag
+// has executed). Kept here so both viewer_schedule.jsx and viewer_home.jsx import
+// a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
 
 // Private helper for compMatches below — detects pool-daihyosen match IDs.
@@ -49,7 +51,7 @@ export function compMatches(c) {
   if (!c.status || c.status === "setup") return out;
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
-  const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => p.matches.map(m => ({ ...m, phase: "pool", poolName: p.name, phaseName: p.name }))) : []);
+  const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
   // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
   // individual matches even in team competitions — override compKind and teamSize
   // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,

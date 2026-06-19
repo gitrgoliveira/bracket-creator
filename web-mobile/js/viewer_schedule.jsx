@@ -229,7 +229,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   return false;
 }
 
-export function TWMatch({ m, highlight, _tweaks, onClick }) {
+export function TWMatch({ m, highlight, onClick }) {
   const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
@@ -438,7 +438,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
                 {list.length === 0 ? (
                   <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "20px 8px", textAlign: "center" }}>No matches</div>
                 ) : list.map((m) => (
-                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} tweaks={tweaks} onClick={tweaks.onMatchClick ? () => tweaks.onMatchClick(m) : undefined} />
+                  <TWMatch key={`${m.compId}:${m.id}`} m={m} highlight={matchHasFilter(m)} onClick={tweaks.onMatchClick ? () => tweaks.onMatchClick(m) : undefined} />
                 ))}
               </div>
             </div>

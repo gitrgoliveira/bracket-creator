@@ -128,5 +128,13 @@ describe('UI Components', () => {
       expect(spinner.type).toBe('div');
       expect(spinner.props.className).toBe('loading-page');
     });
+
+    it('supports custom size parameters', () => {
+      const spinner = LoadingSpinner({ text: 'Loading...', delay: 0, size: 48 });
+      expect(spinner).not.toBeNull();
+      const spinnerEl = spinner.children.find(c => c && c.props && c.props.className === 'loading-spinner');
+      expect(spinnerEl).toBeDefined();
+      expect(spinnerEl.props.style).toEqual({ width: '48px', height: '48px' });
+    });
   });
 });

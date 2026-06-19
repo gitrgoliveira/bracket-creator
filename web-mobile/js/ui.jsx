@@ -441,7 +441,7 @@ function Icon({ name, size = 16, className }) {
   );
 }
 
-function LoadingSpinner({ text = "Loading...", delay = 200 }) {
+function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
 
   React.useEffect(() => {
@@ -452,9 +452,11 @@ function LoadingSpinner({ text = "Loading...", delay = 200 }) {
 
   if (!visible) return null;
 
+  const spinnerSize = typeof size === "number" ? `${size}px` : size;
+
   return (
     <div className="loading-page" role="status" aria-live="polite">
-      <div className="loading-spinner" aria-hidden="true"></div>
+      <div className="loading-spinner" style={{ width: spinnerSize, height: spinnerSize }} aria-hidden="true"></div>
       <div className="loading-text">{text}</div>
     </div>
   );

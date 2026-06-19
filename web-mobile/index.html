@@ -71,10 +71,20 @@
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
-    <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
-         viewer.jsx. Loaded before viewer.js so window.BellIcon is set before
-         AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps
-         (poolLabel etc.) from window at render time, so this order is safe. -->
+    <!-- Viewer modules (mp-pxxc split). viewer.js statically imports all ten
+         viewer_* helper modules (viewer_utils, viewer_watchlist_core, viewer_alerts,
+         viewer_notifications, viewer_match, viewer_standings, viewer_awards,
+         viewer_schedule, viewer_competition, viewer_home), so it is the SOLE entry
+         that loads them — they must NOT also have their own <script type="module">
+         tags. A separate tag uses a different module URL (".js?v=5") than the import
+         specifier (".jsx"), which the browser keys as a distinct module and would
+         evaluate a SECOND time, doubling the viewer JS download/parse and splitting
+         module-level singleton state across two instances.
+         viewer_watchlist.js is the one exception: viewer.js does NOT import it (it is
+         wired via window.* lazy reads at render time, forming a deliberate runtime
+         cycle with viewer_home.jsx), so it keeps its own tag and loads exactly once.
+         It reads only window.pluralize (from ui.js, above) at module-eval; the
+         viewer.jsx-owned deps it uses are read from window at render time. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
     <script type="module" src="/dist/admin_helpers.js?v=5"></script>

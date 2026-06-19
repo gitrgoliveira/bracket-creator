@@ -111,3 +111,6 @@ mp-*/
 **/*.tfstate.*
 **/*.tfvars
 !**/*.tfvars.example
+
+.antigravitycli
+.gemini/worktrees/

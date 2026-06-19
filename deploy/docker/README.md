@@ -76,11 +76,9 @@ Set `LOCK_PASSWORD=true` and `TOURNAMENT_PASSWORD_HASH=<bcrypt>` in `app.env`
 for public deployments.  Generate the hash:
 
 ```bash
-# Using htpasswd (apache2-utils / httpd-tools)
+# The hash MUST be bcrypt — the server validates it with bcrypt and refuses
+# to start in locked mode otherwise (SHA-512 / MD5 crypt hashes are rejected).
 htpasswd -bnBC 12 "" 'MySecretPassword' | tr -d ':\n'
-
-# Using the openssl fallback
-openssl passwd -6 'MySecretPassword'   # SHA-512, also accepted
 ```
 
 ## Teardown

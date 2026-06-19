@@ -249,6 +249,13 @@ resource "google_compute_instance" "app" {
   # Omitting the block avoids handing the instance a broad API token.
 
   lifecycle {
+    # Fail at plan/apply rather than at container startup: locked mode with an
+    # empty hash makes the app exit immediately (it fails closed).
+    precondition {
+      condition     = lower(trimspace(var.lock_password)) != "true" || trimspace(var.tournament_password_hash) != ""
+      error_message = "tournament_password_hash must be set when lock_password is \"true\" — the app fails closed and exits at startup with an empty hash."
+    }
+
     ignore_changes = [
       # Prevent Terraform from recreating the instance when cloud-init
       # user-data changes after initial deploy.

@@ -1,0 +1,19 @@
+project  = "my-gcp-project-id"
+region   = "us-central1" # MUST be us-west1 / us-central1 / us-east1
+zone     = "us-central1-a"
+hostname = "tournament.example.com"
+
+ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
+
+# Optional — tighten SSH to your IP only
+# operator_cidrs = ["203.0.113.10/32"]
+
+# Optional — reserve a stable IP (free while attached to a running instance)
+# reserve_static_ip = true
+
+# Optional — PDF export (heavier image, ~500 MB, more RAM pressure)
+# image_ref = "ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest"
+
+# Optional — locked password mode (hash must be bcrypt; see README)
+# lock_password            = "true"
+# tournament_password_hash = "$2b$12$..."

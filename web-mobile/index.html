@@ -64,6 +64,10 @@
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
+    <!-- Utility helpers extracted from viewer.jsx (mp-pxxc step 1). Must load
+         before viewer_watchlist.js (which reads window.poolLabel at render time)
+         and before viewer.js. -->
+    <script type="module" src="/dist/viewer_utils.js?v=5"></script>
     <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
          viewer.jsx. Loaded before viewer.js so window.BellIcon is set before
          AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps

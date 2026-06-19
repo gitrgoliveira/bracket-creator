@@ -15,9 +15,9 @@ func TestAPIRateLimiter(t *testing.T) {
 	t.Run("Per-IP Burst Exhaustion", func(t *testing.T) {
 		// generous global, strict per-IP
 		limiter := NewAPIRateLimiter(1000, 1000)
-		// override per-IP for test: 10 req/s, burst 2
+		// override per-IP for test: 0 refill rate, burst 2
 		limiter.perIP.close() // Close the original one to avoid leak
-		limiter.perIP = newPerIPLimiter(10, 2)
+		limiter.perIP = newPerIPLimiter(0, 2)
 		t.Cleanup(limiter.Close)
 
 		r := gin.New()
@@ -52,7 +52,7 @@ func TestAPIRateLimiter(t *testing.T) {
 
 	t.Run("Global Burst Exhaustion", func(t *testing.T) {
 		// strict global (burst 3), generous per-IP (default)
-		limiter := NewAPIRateLimiter(10, 3)
+		limiter := NewAPIRateLimiter(0, 3)
 		t.Cleanup(limiter.Close)
 
 		r := gin.New()

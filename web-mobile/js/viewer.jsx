@@ -1,20 +1,19 @@
 // Viewer side — mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 
-import { withNumber } from './match_scoreboard.jsx';
 // Re-export the shared scoreboard primitives so existing tests that import them
 // from '../viewer.jsx' keep working (the canonical defs now live in match_scoreboard.jsx).
 export { BoutSubRow, boutHansokuMark } from './match_scoreboard.jsx';
-import { TermV, competitionKindLabel, poolLabel, compMatches, tournamentMatches, currentMatchOf, linkBase, isNonPublicOrigin, TournamentInfo } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, WATCHLIST_MAX, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
-import { NOTIF_SYNC_EVENT, runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, computeSecondaryAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
-import { notificationSupported, AnnBellBtn, AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx';
+import { TermV, competitionKindLabel, poolLabel, compMatches, tournamentMatches, currentMatchOf, linkBase, isNonPublicOrigin } from './viewer_utils.jsx';
+import { matchParticipantIds, isFollowedPlayer, isPlayerWatched, WATCHLIST_MAX, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
+import { computeSecondaryAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
+import { AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx';
 import { mymatchQueueLabel, MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { isSwissFinalStandings, swissStandingsHeading, WinnerBadge, SwissStandingsViewer, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
+import { isSwissFinalStandings, swissStandingsHeading, SwissStandingsViewer, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
 import { deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, AwardsView, FightingSpiritSection, buildAllWinnersPublic, AllWinnersView } from './viewer_awards.jsx';
-import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming, ScheduleViewer, ViewerSchedule, TWMatch, usePrimaryWatch, LS_WATCH_PRIMARY, WATCHED_UPCOMING_MAX, WATCHED_UPCOMING_LIST_MAX } from './viewer_schedule.jsx';
+import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming, ScheduleViewer, ViewerSchedule } from './viewer_schedule.jsx';
 import { ViewerCompetition, ViewerOverview } from './viewer_competition.jsx';
-import { ViewerHome, shouldShowRegister, resolveDeepLink } from './viewer_home.jsx';
+import { ViewerHome, shouldShowRegister } from './viewer_home.jsx';
 
 // TermV — moved to viewer_utils.jsx (mp-pxxc step 1). Imported above.
 // competitionKindLabel, poolLabel, compMatches, tournamentMatches, currentMatchOf

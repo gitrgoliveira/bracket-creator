@@ -1,8 +1,8 @@
 // ViewerHome — top-level home component + routing helpers.
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
-import { TermV, competitionKindLabel, compMatches, tournamentMatches, TournamentInfo } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, WATCHLIST_MAX, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
+import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo } from './viewer_utils.jsx';
+import { matchParticipantIds, matchParticipantNames, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';

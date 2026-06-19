@@ -1,8 +1,8 @@
 // viewer_competition.jsx — page-level competition and overview components.
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
-import { TermV, competitionKindLabel, poolLabel, compMatches } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
+import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
+import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';

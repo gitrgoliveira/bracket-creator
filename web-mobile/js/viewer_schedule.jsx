@@ -1,8 +1,8 @@
 // Schedule + filter components extracted from viewer.jsx (mp-pxxc step 7).
 // Pure file split — no behaviour change.
 
-import { TermV, competitionKindLabel, poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster } from './viewer_watchlist_core.jsx';
+import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
+import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
 import { MatchViewerModal } from './viewer_match.jsx';
 

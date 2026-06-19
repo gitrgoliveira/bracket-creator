@@ -7846,3 +7846,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 500;
   color: var(--ink-3);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+}

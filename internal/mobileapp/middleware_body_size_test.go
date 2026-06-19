@@ -152,7 +152,8 @@ func TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth(t *testing.T) {
 		"web-mobile/index.html": {Data: []byte("<html></html>")},
 	}
 	res := resources.NewResources(nil, mockFS)
-	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
 
 	// Body just over AnnouncementMaxBodyBytes — no auth header intentionally:
 	// if the body cap fires first (correct), we get 413; if auth fires first

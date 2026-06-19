@@ -38,7 +38,8 @@ func TestAnnouncementHandlers(t *testing.T) {
 	err = store.SaveTournament(&tourney)
 	require.NoError(t, err)
 
-	router, _, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	router, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
 
 	// 1. GET /api/tournament/announcement - initially empty (204 No Content)
 	w := httptest.NewRecorder()

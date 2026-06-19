@@ -9,8 +9,11 @@
 // it twice (double-load; same class as mp-zd1v).
 //
 // Exports: notificationSupported, AnnBellBtn, AnnouncementCard, AnnouncementBanner.
-// window.AnnouncementCard and window.AnnouncementBanner are set here (moved from
-// viewer.jsx) so they are available before viewer.js executes.
+// window.AnnouncementBanner is set here (assigned at module-eval, when viewer.js
+// imports this module) because app.jsx renders it via window without ES-importing
+// this module. window.AnnouncementCard is also assigned to preserve the original
+// viewer.jsx window surface verbatim (no current window consumer; ES importers use
+// the export above).
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { NOTIF_SYNC_EVENT, dispatchNotif, runOnce, notifEnable, notifDisable } from './viewer_alerts.jsx';

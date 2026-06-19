@@ -68,6 +68,11 @@
          before viewer_watchlist.js (which reads window.poolLabel at render time)
          and before viewer.js. -->
     <script type="module" src="/dist/viewer_utils.js?v=5"></script>
+    <!-- Watchlist hooks + normalization (useWatchlist, entryKey, buildRoster, …),
+         extracted from viewer.jsx (mp-pxxc step 2). Must load after viewer_utils.js
+         and before viewer_watchlist.js and viewer.js (both depend on these helpers
+         via window.* lazy reads set in viewer.js). -->
+    <script type="module" src="/dist/viewer_watchlist_core.js?v=5"></script>
     <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
          viewer.jsx. Loaded before viewer.js so window.BellIcon is set before
          AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps

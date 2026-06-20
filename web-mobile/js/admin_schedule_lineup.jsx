@@ -187,17 +187,30 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       setValues(next);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
-      if (showToast) showToast("Lineup saved");
+      if (typeof showToast === "function") showToast("Lineup saved");
     } catch (e) {
-      setError(e?.message || "Failed to save lineup");
+      // A 409 ErrLineupLocked means the match already started and the backend
+      // froze the lineup. Surface the operator-friendly explanation rather than
+      // the raw error string. Covers both save() and copyFromPrevious, which
+      // both persist through doSave.
+      const msg = e?.message || "Failed to save lineup";
+      if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
+        setError("This match is in progress — lineup is locked and cannot be changed.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setSaving(false);
     }
   };
 
   const save = () => {
+    // Strip empty positions before PUT. The handler replaces the whole
+    // positions map (TeamLineup{Positions: req.Positions}), and the domain
+    // validator treats an absent key the same as an explicit "" — both
+    // "missing". Sending explicit empties only bloats the persisted YAML.
     const positionsOut = {};
-    positions.forEach(p => { positionsOut[p.key] = values[p.key] || ""; });
+    positions.forEach(p => { if (values[p.key]) positionsOut[p.key] = values[p.key]; });
     if (allowDuringMatch && matchStarted) {
       setPendingPositions(positionsOut);
       setShowLineupReasonPrompt(true);
@@ -237,8 +250,9 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
         setError("Previous lineup is empty or unavailable.");
         return;
       }
+      // Strip empty positions (see save()): copy only the slots that are set.
       const next = {};
-      positions.forEach(p => { next[p.key] = (sourceLineup.positions || {})[p.key] || ""; });
+      positions.forEach(p => { const v = (sourceLineup.positions || {})[p.key]; if (v) next[p.key] = v; });
 
       if (allowDuringMatch && matchStarted) {
         // Defer setValues until the save is confirmed so a cancelled

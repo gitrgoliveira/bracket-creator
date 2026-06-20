@@ -345,12 +345,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               <div className="section-title">Competitions</div>
               <div className="vlist">
                 <div className="empty">
-                  <div className="icon">⏳</div>
+                  <div className="icon">⚙️</div>
                   <h3>No competitions yet</h3>
                   <div className="hint--md">Head to Admin to set up the first competition.</div>
                   <button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>
                     Open admin
                   </button>
+                  <div className="hint--sm empty__cta-note">Requires the admin password.</div>
                 </div>
               </div>
             </>

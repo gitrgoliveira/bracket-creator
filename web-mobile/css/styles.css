@@ -3552,6 +3552,12 @@ button.pool-match-row {
   margin: 0 0 4px;
 }
 
+/* Primary CTA inside an empty state (e.g. "Open admin" when no competitions
+   exist) — deliberate rhythm between the hint and the action, then a tighter
+   gap to its sub-note. */
+.empty__cta { margin-top: 16px; }
+.empty__cta-note { margin-top: 8px; }
+
 /* Inline seed list */
 .seed-list {
   display: flex;

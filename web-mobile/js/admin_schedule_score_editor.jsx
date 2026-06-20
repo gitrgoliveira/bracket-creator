@@ -176,9 +176,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}</div>
+                    <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+                    {/* Foul ▲ rides the badge line, NOT the name line — keeping it off
+                        the name means a mid-bout foul never shifts the competitor's name. */}
+                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}
                   </div>
                   <div className="score-edit-row__score">
                     {showScore && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
@@ -188,8 +190,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                         redundant "● NOW" label (the highlight already says "now"). */}
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
-                    <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA} </span>}{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
+                    <span className="se-color-badge se-color-badge--aka">AKA</span>{foulA && <span className="msb-hansoku" data-testid="foul-mark-a"> {foulA}</span>}
+                    <div className="name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>

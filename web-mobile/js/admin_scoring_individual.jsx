@@ -402,7 +402,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
         <div className="editor-modal__head">
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
-              {m.compName} · {m.phase === "pool" ? (m.compFormat === "league" ? "League table" : m.poolName) : m.round}
+              {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div className="editor-modal__title">

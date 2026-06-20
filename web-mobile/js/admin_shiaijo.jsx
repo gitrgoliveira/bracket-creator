@@ -613,7 +613,7 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
     const isPool = match.phase === "pool";
     const isLeagueComp = match.compFormat === "league";
     const phaseLabel = isPool
-        ? (isLeagueComp ? "League table" : (match.poolName || "Pool"))
+        ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
         : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
 

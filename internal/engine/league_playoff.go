@@ -117,9 +117,8 @@ func (e *Engine) LeaguePlayoffCandidates(compID string) ([]TiedGroup, error) {
 	var candidates []TiedGroup
 	for _, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
-			if len(positions) == 0 {
-				continue
-			}
+			// detectPoolTies only returns groups of 2+ positions, so positions
+			// is guaranteed non-empty here.
 			// positions is 0-based into poolStandings (sorted descending by Points).
 			// Convert to 1-based ranks.
 			minPos := positions[0] + 1
@@ -139,25 +138,15 @@ func (e *Engine) LeaguePlayoffCandidates(compID string) ([]TiedGroup, error) {
 }
 
 // GenerateLeaguePlayoffMatches generates the round-robin daihyosen (play-off)
-// matches for a specific set of tied teams in a team-league competition. This is
-// the operator-triggered path (Phase 3b will call this via an HTTP endpoint).
+// matches for a specific set of tied teams in a team-league competition. It is
+// the operator-triggered path, called by the POST /league-playoff handler after
+// it has validated the selection against LeaguePlayoffCandidates (this function
+// does NOT re-validate consequentiality — the handler is the gate).
 //
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.
-// Idempotent: pairs that already exist in the store are skipped.
-//
-// This function is exported here so Phase 3b can call it directly after the
-// operator selects which teams to include. For league competitions it operates
-// on the single league pool.
-//
-// TODO(Phase-3b): add an HTTP handler (e.g. POST /api/competitions/:id/league-playoff)
-// that accepts the operator's selected team names, validates them against
-// LeaguePlayoffCandidates, calls GenerateLeaguePlayoffMatches, and broadcasts
-// EventMatchUpdated + EventScheduleUpdated. Also add a "finalize shared ranks"
-// action (POST /api/competitions/:id/league-playoff/finalize) that accepts the
-// current standings as final, skips the play-off, and transitions the competition
-// to CompStatusComplete. The finalize path should call MaybeAutoCompletePools after
-// accepting shared ranks to trigger the normal completion flow.
+// Idempotent: pairs that already exist in the store are skipped. For league
+// competitions it operates on the single league pool.
 func (e *Engine) GenerateLeaguePlayoffMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {

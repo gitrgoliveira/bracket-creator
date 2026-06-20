@@ -155,25 +155,38 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// All regular matches (and any existing TB/DH matches) are complete.
 	//
 	// Team-league path: the operator decides whether to run supplementary
-	// play-off matches — we do NOT auto-inject DH matches. Instead, check
-	// whether there are any consequential ties; if so, block completion and
-	// return AwaitingLeaguePlayoff so Phase 3b can surface the decision to
-	// the operator. If there are operator-injected DH matches (via Phase 3b),
-	// we fall through to the same dhCycleExists guard as the mixed path.
+	// play-off matches — we do NOT auto-inject DH matches. Instead, block
+	// completion while any CONSEQUENTIAL tied group still lacks an operator
+	// play-off, returning AwaitingLeaguePlayoff so the UI can surface the
+	// decision.
+	//
+	// We check per-group, NOT via the coarse hasCompleteDH flag: a league
+	// table can hold several separate consequential ties (e.g. 1st–2nd and
+	// 3rd–4th). Resolving one group's DH would flip hasCompleteDH true and,
+	// under a blanket `!hasCompleteDH` gate, let the competition complete with
+	// the other group still unresolved. DH results are excluded from the Points
+	// totals (scoring.go), so LeaguePlayoffCandidates keeps reporting a group
+	// even after its DH is scored; we therefore treat a group as "actioned"
+	// when a DH match exists for it (any DH is guaranteed complete here —
+	// hasIncompleteDH bailed above) and hand the resolved/cyclic verdict to the
+	// dhCycleExists guard below. LeaguePlayoffCandidates returns [] when the
+	// operator has finalized shared ranks, so that path completes normally.
 	//
 	// Non-consequential ties (below the playoff band, or covered by the
-	// LeagueTwoThirdPlaces exemption) are accepted as shared ranks and the
-	// competition proceeds to completion normally.
-	if isTeamLeague && !hasCompleteDH {
+	// LeagueTwoThirdPlaces exemption) are accepted as shared ranks.
+	if isTeamLeague {
 		candidates, candErr := e.LeaguePlayoffCandidates(compID)
 		if candErr != nil {
 			return AutoCompleteNoChange, candErr
 		}
-		if len(candidates) > 0 {
-			// Consequential ties present — operator must act before completion.
-			return AutoCompleteAwaitingLeaguePlayoff, nil
+		for _, g := range candidates {
+			if !leagueGroupHasDH(g.Teams, matches) {
+				// A consequential tie with no play-off yet — operator must act.
+				return AutoCompleteAwaitingLeaguePlayoff, nil
+			}
 		}
-		// No consequential ties: fall through to the completion transition.
+		// Every consequential group either has a DH (verified below) or none
+		// remain; fall through to the dhCycleExists guard / completion.
 	}
 
 	// Non-team-league team competitions (mixed): auto-inject DH matches for
@@ -337,6 +350,26 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // name → team name → rank). A tied group whose every member has a
 // manual rank override is considered resolved — the operator has
 // explicitly ranked them, so the cycle no longer blocks completion.
+// leagueGroupHasDH reports whether a daihyosen play-off match already exists
+// between two members of the given tied group — i.e. the operator has run a
+// play-off for it. Used by MaybeAutoCompletePools to decide, per consequential
+// group, whether the operator still needs to act. At that call site every DH
+// match is guaranteed complete (an incomplete DH bails earlier), so "a DH match
+// exists" means "the operator has actioned this group"; whether that play-off
+// actually resolved the order is then verified by dhCycleExists.
+func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
+	names := make(map[string]bool, len(group))
+	for _, s := range group {
+		names[s.Player.Name] = true
+	}
+	for _, m := range allMatches {
+		if IsPoolDaihyosenMatchID(m.ID) && names[m.SideA] && names[m.SideB] {
+			return true
+		}
+	}
+	return false
+}
+
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {

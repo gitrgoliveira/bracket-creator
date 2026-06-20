@@ -21,7 +21,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"sort"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -66,6 +65,18 @@ type leaguePlayoffRequest struct {
 	TeamNames []string `json:"teamNames"`
 }
 
+// dedupedNameSet builds a presence set from names and reports whether the input
+// contained any duplicate. Handlers reject duplicates up front so downstream
+// group-size and pair-count comparisons (which use the deduped set) can't be
+// fooled by a repeated team name.
+func dedupedNameSet(names []string) (set map[string]bool, hadDuplicate bool) {
+	set = make(map[string]bool, len(names))
+	for _, n := range names {
+		set[n] = true
+	}
+	return set, len(set) != len(names)
+}
+
 // RegisterPublicLeaguePlayoffHandlers wires the unauthenticated league-playoff
 // read endpoint on the public api group.
 //
@@ -87,11 +98,20 @@ func RegisterPublicLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEn
 
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			// Public endpoint: don't leak internal store error strings.
+			log.Printf("league-playoff candidates LoadCompetition(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 		if comp == nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+
+		// Short-circuit the finalized case: LeaguePlayoffCandidates returns []
+		// once shared ranks are accepted, so skip the second standings load.
+		if comp.LeaguePlayoffFinalized {
+			c.JSON(http.StatusOK, gin.H{"candidates": []leaguePlayoffCandidateGroup{}, "finalized": true})
 			return
 		}
 
@@ -102,7 +122,9 @@ func RegisterPublicLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEn
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			// Public endpoint: opaque 500, log the real cause server-side.
+			log.Printf("league-playoff candidates LeaguePlayoffCandidates(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 
@@ -169,14 +191,15 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 			return
 		}
 
-		reqSet := make(map[string]bool, len(req.TeamNames))
-		for _, n := range req.TeamNames {
-			reqSet[n] = true
+		reqSet, hadDup := dedupedNameSet(req.TeamNames)
+		if hadDup {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries"})
+			return
 		}
 
 		matched := false
 		for _, g := range candidates {
-			if len(g.Teams) != len(req.TeamNames) {
+			if len(g.Teams) != len(reqSet) {
 				continue
 			}
 			groupSet := make(map[string]bool, len(g.Teams))
@@ -207,11 +230,8 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		pairsNeeded := len(req.TeamNames) * (len(req.TeamNames) - 1) / 2
+		pairsNeeded := len(reqSet) * (len(reqSet) - 1) / 2
 		pairsExist := 0
-		sortedReq := make([]string, len(req.TeamNames))
-		copy(sortedReq, req.TeamNames)
-		sort.Strings(sortedReq)
 		for _, m := range existing {
 			if !engine.IsPoolDaihyosenMatchID(m.ID) {
 				continue
@@ -251,7 +271,8 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 	// DELETE /competitions/:id/league-playoff
 	// Body: { "teamNames": ["TeamA", "TeamB", ...] }
 	// Removes UNSCORED play-off DH matches for the given group.
-	// 409 if any match for the group has already been scored (has a winner).
+	// 400 if teamNames has duplicates or names only part of a play-off group.
+	// 409 if any match for the group is in progress or has already been scored.
 	// 404 if no play-off matches exist for the group.
 	r.DELETE("/competitions/:id/league-playoff", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -269,9 +290,10 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 			return
 		}
 
-		reqSet := make(map[string]bool, len(req.TeamNames))
-		for _, n := range req.TeamNames {
-			reqSet[n] = true
+		reqSet, hadDup := dedupedNameSet(req.TeamNames)
+		if hadDup {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries"})
+			return
 		}
 
 		allMatches, err := store.LoadPoolMatches(id)
@@ -280,13 +302,21 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 			return
 		}
 
-		// Identify DH matches belonging to the requested group.
+		// Identify DH matches belonging to the requested group, and reject a
+		// selection that splits a play-off group: a DH match with exactly one
+		// side in reqSet means the operator named a partial group, which would
+		// orphan the remaining round-robin bouts.
 		var groupDH []state.MatchResult
 		for _, m := range allMatches {
 			if !engine.IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			if reqSet[m.SideA] && reqSet[m.SideB] {
+			inA, inB := reqSet[m.SideA], reqSet[m.SideB]
+			if inA != inB {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not cover a complete play-off group"})
+				return
+			}
+			if inA && inB {
 				groupDH = append(groupDH, m)
 			}
 		}
@@ -295,10 +325,12 @@ func RegisterLeaguePlayoffHandlers(r *gin.RouterGroup, eng LeaguePlayoffEngine, 
 			return
 		}
 
-		// Guard: refuse removal if any match in the group has been scored.
+		// Guard: refuse removal if any match in the group is in progress or has
+		// been scored — deleting a running DH match would orphan the operator's
+		// open scoring session.
 		for _, m := range groupDH {
-			if m.Winner != "" || m.Status == state.MatchStatusCompleted {
-				c.JSON(http.StatusConflict, gin.H{"error": "playoff_match_scored", "detail": "one or more play-off matches for this group have been scored; clear scores first"})
+			if m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning {
+				c.JSON(http.StatusConflict, gin.H{"error": "playoff_match_scored", "detail": "one or more play-off matches for this group are in progress or have been scored; clear scores first"})
 				return
 			}
 		}

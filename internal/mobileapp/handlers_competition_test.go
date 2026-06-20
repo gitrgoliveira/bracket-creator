@@ -2243,6 +2243,63 @@ func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
 	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on PUT")
 }
 
+// TestPUTCompetition_LeaguePlayoffConfigImmutableAfterStart verifies that the
+// league play-off knobs (leaguePlayoffTopN / leagueTwoThirdPlaces) can be
+// changed before the competition starts but are rejected (400) once it has
+// progressed past setup — changing them mid-league would alter the
+// consequential-tie set and which ties already-played play-offs resolve.
+func TestPUTCompetition_LeaguePlayoffConfigImmutableAfterStart(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Pre-start (setup): a change is accepted.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                "lp-setup",
+		Name:              "LP Setup",
+		Format:            state.CompFormatLeague,
+		Kind:              "team",
+		TeamSize:          5,
+		Status:            state.CompStatusSetup,
+		LeaguePlayoffTopN: 3,
+	}))
+	body, _ := json.Marshal(state.Competition{
+		ID: "lp-setup", Name: "LP Setup", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeaguePlayoffTopN: 4, LeagueTwoThirdPlaces: true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/lp-setup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := store.LoadCompetition("lp-setup")
+	require.NoError(t, err)
+	assert.Equal(t, 4, stored.LeaguePlayoffTopN, "pre-start change must persist")
+	assert.True(t, stored.LeagueTwoThirdPlaces)
+
+	// Started (pools): a change is rejected with 400, on-disk value unchanged.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                "lp-started",
+		Name:              "LP Started",
+		Format:            state.CompFormatLeague,
+		Kind:              "team",
+		TeamSize:          5,
+		Status:            state.CompStatusPools,
+		LeaguePlayoffTopN: 3,
+	}))
+	body, _ = json.Marshal(state.Competition{
+		ID: "lp-started", Name: "LP Started", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeaguePlayoffTopN: 4,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/lp-started", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	stored, err = store.LoadCompetition("lp-started")
+	require.NoError(t, err)
+	assert.Equal(t, 3, stored.LeaguePlayoffTopN, "started league config must be unchanged")
+}
+
 // TestPUTCompetition_MixedPoolConfigPreserved verifies that a mixed
 // competition retains its poolSize / poolWinners after a settings PUT.
 func TestPUTCompetition_MixedPoolConfigPreserved(t *testing.T) {

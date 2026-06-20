@@ -902,10 +902,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.SwissRounds = comp.SwissRounds
 				current.Naginata = comp.Naginata
 				current.CheckInEnabled = comp.CheckInEnabled
-				// League-playoff config (Phase 3b): only settable pre-start
-				// (Status == setup) via settings PUT; the finalize endpoint
-				// manages LeaguePlayoffFinalized independently. The PUT
-				// validator above already enforces LeaguePlayoffTopN ∈ {0,3,4}.
+				// League-playoff config (Phase 3b) is only settable pre-start.
+				// Once the competition has started (status past setup) the
+				// consequential-tie set is in play, so changing leaguePlayoffTopN
+				// or leagueTwoThirdPlaces could re-block or unblock completion and
+				// change which ties already-played play-offs were meant to resolve.
+				// Reject a change rather than silently ignoring it. The draw-ready
+				// state already returned early above; the PUT validator enforces
+				// LeaguePlayoffTopN ∈ {0,3,4}. LeaguePlayoffFinalized is managed by
+				// the finalize endpoint, never here.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				if started && (comp.LeaguePlayoffTopN != current.LeaguePlayoffTopN ||
+					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
+					validationErr = fmt.Errorf("leaguePlayoffTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
+					return nil, nil
+				}
 				current.LeaguePlayoffTopN = comp.LeaguePlayoffTopN
 				current.LeagueTwoThirdPlaces = comp.LeagueTwoThirdPlaces
 				return current, nil

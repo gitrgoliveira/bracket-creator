@@ -219,7 +219,7 @@ function RankInput({ initial, className, onCommit, style }) {
 // League competitions use a single pool that spans the full roster; calling
 // it "Pool A" would be confusing, so we show "League table" instead.
 function poolDisplayLabel(pool, format) {
-  return format === "league" ? "League table" : (pool.poolName || "");
+  return window.leagueAwareLabel(format, pool.poolName);
 }
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {

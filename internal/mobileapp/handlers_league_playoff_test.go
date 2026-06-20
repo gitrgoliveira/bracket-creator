@@ -895,3 +895,96 @@ type recordingBroadcaster struct {
 func (b *recordingBroadcaster) Broadcast(t EventType, _ any) {
 	b.events = append(b.events, t)
 }
+
+// ---------------------------------------------------------------------------
+// Tri-review fixes: duplicate names, partial-group, running-match guards
+// ---------------------------------------------------------------------------
+
+// TestLeaguePlayoffPost_DuplicateNames covers the candidacy-gate bypass: a
+// duplicated team name must be rejected up front, not silently deduped into a
+// smaller group that matches a larger candidate group.
+func TestLeaguePlayoffPost_DuplicateNames(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		makeTiedGroup("Team A", "Team B", 1, 2),
+	}
+	// Add a third team so {A,A,B} (len 3) would have matched a 3-team group
+	// under the old raw-len comparison.
+	candidates[0].Teams = append(candidates[0].Teams, state.PlayerStanding{Player: domain.Player{Name: "Team C"}})
+	candidates[0].MaxPosition = 3
+	eng := &stubLeaguePlayoffEngine{candidates: candidates}
+	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "duplicate")
+}
+
+// TestLeaguePlayoffDelete_DuplicateNames — DELETE must reject duplicates too.
+func TestLeaguePlayoffDelete_DuplicateNames(t *testing.T) {
+	eng := &stubLeaguePlayoffEngine{}
+	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team A"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "duplicate")
+}
+
+// TestLeaguePlayoffDelete_PartialGroup — naming only part of a play-off group
+// (a DH match with exactly one side in the request) must be rejected so the
+// remaining round-robin bouts aren't orphaned.
+func TestLeaguePlayoffDelete_PartialGroup(t *testing.T) {
+	eng := &stubLeaguePlayoffEngine{}
+	// A 3-team round-robin play-off: A-B, A-C, B-C all unscored.
+	store := &stubLeaguePlayoffStore{
+		comp: makeTeamLeagueComp(state.CompStatusPools),
+		matches: []state.MatchResult{
+			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
+			{ID: "Pool A-DH-1", SideA: "Team A", SideB: "Team C"},
+			{ID: "Pool A-DH-2", SideA: "Team B", SideB: "Team C"},
+		},
+	}
+	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+
+	// Request only {A,B}: the A-C and B-C matches each have one side in the set.
+	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "complete play-off group")
+}
+
+// TestLeaguePlayoffDelete_RunningMatch — an in-progress DH match must block
+// deletion (409), not be silently removed out from under the scoring session.
+func TestLeaguePlayoffDelete_RunningMatch(t *testing.T) {
+	eng := &stubLeaguePlayoffEngine{}
+	store := &stubLeaguePlayoffStore{
+		comp: makeTeamLeagueComp(state.CompStatusPools),
+		matches: []state.MatchResult{
+			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusRunning},
+		},
+	}
+	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code)
+}

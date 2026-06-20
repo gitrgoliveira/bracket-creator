@@ -546,7 +546,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             </div>
             {/* C2: sync status indicator — only visible while the match is running */}
             <SyncStatusPill isRunning={m.status === "running"} />
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button type="button" className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
 
@@ -637,14 +637,14 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
+                          <button type="button" key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
                             {s.pts[i] || "·"}
                           </button>
                         ))}
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
+                          <button type="button" key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
                         ))}
                       </div>
                     </div>
@@ -655,7 +655,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                             {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
                           </div>
                         )}
-                        <button
+                        <button type="button"
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
                           data-testid="scoring-modal-mark-draw"
                           onClick={() => {
@@ -783,18 +783,18 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
           )}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
             ) : <span />}
 
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
+                <button type="button" className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>
                   ▶ Start match
                 </button>
               )}
-              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
+              {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button type="button" className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
@@ -802,7 +802,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
                   {submitting ? "Saving…" : isComplete ? "Save correction" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button type="button" className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
@@ -813,7 +813,7 @@ function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch
             </div>
 
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
           {/* Quiet, always-present keyboard-shortcut reminder. */}
@@ -1426,7 +1426,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
             </div>
             {/* C2: sync status indicator — only visible while the match is running */}
             <SyncStatusPill isRunning={m.status === "running"} />
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button type="button" className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
 
@@ -1679,7 +1679,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                               individual bout. H (hansoku point) renders as △ there. */}
                           <div className="team-sub-match__btns">
                             {getIpponButtons(isNaginataTeam).map(cc => (
-                              <button key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
+                              <button type="button" key={cc} className={`ipt-btn ipt-btn--sm ${cc === "H" ? "ipt-btn--h" : ""}`}
                                 onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
                                 disabled={subBoutDecided}>{cc}</button>
                             ))}
@@ -1699,9 +1699,9 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                           <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                             <span className="tsm-fouls__label">{rs.label} Fouls</span>
                             <div className="tsm-fouls__controls">
-                              <button className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                              <button type="button" className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
                               <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                              <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
+                              <button type="button" className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
                             </div>
                           </div>
                           <div className="tsm-fusensho">
@@ -1731,7 +1731,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                                 this. (running_a_kendo_tournament.md: ▲ next to name.) */}
                             {rowSides[0].fouls >= 1 && <span className="tsm-foul-tri" title="Hansoku — 1 foul">▲</span>}
                             {[0, 1].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
+                              <button type="button" key={i} className={`editor-side__pt ${rowSides[0].pts[i] ? "editor-side__pt--filled" : ""}`}
                                 onClick={() => rowSides[0].setPts(rowSides[0].pts.filter((_, j) => j !== i))} title="Click to remove">
                                 {rowSides[0].pts[i] || "·"}
                               </button>
@@ -1745,7 +1745,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                                 outer (right) edge nearest the Aka name, so render
                                 the slots in reverse (pts[1] then pts[0]). */}
                             {[1, 0].map(i => (
-                              <button key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
+                              <button type="button" key={i} className={`editor-side__pt ${rowSides[1].pts[i] ? "editor-side__pt--filled" : ""}`}
                                 onClick={() => rowSides[1].setPts(rowSides[1].pts.filter((_, j) => j !== i))} title="Click to remove">
                                 {rowSides[1].pts[i] || "·"}
                               </button>
@@ -2041,15 +2041,15 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
           )}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && (
-                <button className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start match</button>
+                <button type="button" className="btn btn--sm" onClick={() => doSubmit(() => onSubmit(buildPatch("running")))} disabled={submitting}>▶ Start match</button>
               )}
-              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
+              {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
               {onSubmitAndNext ? (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button type="button" className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
@@ -2058,7 +2058,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
                   {submitting ? "Saving…" : isComplete ? "Save correction" : koTieBlocked ? "Needs a winner" : finishArmed ? `Confirm · ${finishSummary} →` : "Finish + Start Next →"}
                 </button>
               ) : (
-                <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
+                <button type="button" className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={() => {
                   if (isComplete && !correctionReason) { setShowCorrectionPrompt(true); return; }
                   if (!isComplete && !finishArmed) { setFinishArmed(true); return; }
                   doSubmit(() => onSubmit(buildPatch("completed")));
@@ -2069,7 +2069,7 @@ function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndN
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
+              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
           {/* Quiet, always-present keyboard-shortcut reminder. */}

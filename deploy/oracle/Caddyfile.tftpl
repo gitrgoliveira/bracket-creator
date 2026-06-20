@@ -1,0 +1,12 @@
+# Rendered by Terraform (templatefile) — see main.tf in this folder.
+#
+# Caddy automatically obtains and renews a Let's Encrypt TLS certificate for
+# this hostname. The host must be reachable on ports 80 and 443 with a DNS A
+# record pointing at its public IP before the stack starts.
+#
+# Caddy streams responses by default, so SSE works without extra configuration.
+# Do NOT add flush_interval or response-buffering directives — they would break
+# the live-score event stream.
+${hostname} {
+    reverse_proxy app:8080
+}

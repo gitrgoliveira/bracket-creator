@@ -308,11 +308,11 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "ek25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
+      buildCompetition({ id: "ako25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
     ];
-    return buildTournament({ id: "european-2025", name: "European Kendo Championships 2025", date: "2025-11-08", venue: "Paris Bercy", courts, status: "completed", competitions: comps });
+    return buildTournament({ id: "autumn-open-2025", name: "Autumn Kendo Open 2025", date: "2025-11-08", venue: "City Arena", courts, status: "completed", competitions: comps });
   })(),
 ];
 

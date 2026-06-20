@@ -4,7 +4,9 @@
 // This file evaluates every section module (via the imports/re-exports below,
 // which set their window.* component globals) and re-exports the full pure-helper
 // surface so existing `import { … } from './admin_competition.jsx'` test sites
-// keep resolving. Section modules load before this file in index.html.
+// keep resolving. This entry is the SOLE loader of the section modules — they
+// have no <script> tag of their own (avoids a duplicate module-eval; see
+// index.html) and are pulled in only by the imports here.
 
 // Evaluate section modules so their window.* globals are set before the alias
 // block below reads them. Settings/bracket/swiss are pulled in via their
@@ -253,11 +255,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && c.players.length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                  <button type="button" className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
                     {generating && <span className="spinner" />}
                     {generating ? "Generating…" : "Preview draw"}
                   </button>
-                  <button className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -277,15 +279,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
+                  <button type="button" className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
                     {generating && <span className="spinner" />}
                     {generating ? "Regenerating…" : "Regenerate draw"}
                   </button>
-                  <button className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -305,14 +307,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <div key={sec.sec}>
                 <div className="side-nav__sec">{sec.sec}</div>
                 {sec.items.map((it) => (
-                  <button key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
+                  <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
                 ))}
               </div>
             ))}
             <div>
               <div className="side-nav__sec">Other competitions</div>
               {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                <button key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
               ))}
             </div>
           </div>

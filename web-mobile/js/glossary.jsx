@@ -198,7 +198,7 @@ function GlossaryPage({ onBack }) {
       <div className="viewer__shell">
         <div className="viewer__head">
           {onBack && (
-            <button className="btn btn--ghost btn--sm" onClick={onBack} style={{ marginRight: 12 }}>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={onBack} style={{ marginRight: 12 }}>
               ← Back
             </button>
           )}

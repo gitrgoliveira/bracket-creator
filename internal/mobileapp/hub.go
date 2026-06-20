@@ -79,7 +79,7 @@ const DefaultHistorySize = 100
 //
 // At 5000 active (draining) clients the base cost is ~20–50 MB — comfortably
 // within the RAM budget of a single-core VPS or RPi-class hardware used for
-// EKC-scale deployments (~45 teams, 1000+ live spectators).
+// large-scale deployments (tens of teams, 1000+ live spectators).
 //
 // Broadcast fan-out is O(N) in the subscriber count and serialises under
 // h.mu.Lock(). At 5000 clients the lock window is bounded by the
@@ -91,9 +91,9 @@ const DefaultHistorySize = 100
 // value disables the cap entirely — used by tests that need to exceed
 // the default and not enforced anywhere in production. The cap is mp-663
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
-// Raised from 1000 → 5000 by mp-9afd to support EKC-scale (1000+ viewers).
-// A real hardware load test (goroutine/fd/memory budget at 5000 clients) is
-// still required before a live EKC deployment.
+// Raised from 1000 → 5000 by mp-9afd to support large-scale events (1000+
+// viewers). A real hardware load test (goroutine/fd/memory budget at 5000
+// clients) is still required before a large live deployment.
 const DefaultMaxSSEClients = 5000
 
 // SSEEvent represents the payload sent to clients.

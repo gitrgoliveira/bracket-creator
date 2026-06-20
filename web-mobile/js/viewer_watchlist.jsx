@@ -1,14 +1,17 @@
 // viewer_watchlist.jsx — the watchlist personalisation UI, extracted from
 // viewer.jsx to keep that file's component count manageable (mp-42rg follow-up).
 //
-// Sharing model (matches the rest of web-mobile/js): files are compiled
-// individually by esbuild and loaded as ordered <script type="module"> tags,
-// so cross-file code is shared via `window.*`, NOT ES imports (those would
-// 404 in the browser — the served file is .js, the import path is .jsx).
+// Sharing model: this module keeps its OWN <script type="module"> tag in
+// index.html because viewer.js does NOT import it (unlike the other viewer_*
+// modules, which viewer.js is the sole entry for). It shares code with viewer.jsx
+// via `window.*` reads at RENDER time to break the runtime cycle with
+// viewer_home.jsx — NOT because ES imports would fail: the server rewrites
+// `/dist/X.jsx` → the compiled `X.js`, so `import "./X.jsx"` resolves fine.
 //
-// This file and viewer.jsx form a runtime CYCLE: ViewerHome (in viewer.jsx)
-// renders WatchlistPanel (here), while these components consume helpers that
-// stay in viewer.jsx (TermV, VSchedItem, entryKey, …). The cycle is safe
+// This file and viewer_home.jsx form a runtime CYCLE: ViewerHome (in
+// viewer_home.jsx) renders WatchlistPanel (here), while these components
+// consume helpers exposed on `window` by viewer.jsx (TermV, VSchedItem,
+// entryKey, …). The cycle is safe
 // because every cross-boundary helper is read from `window` at RENDER time
 // (inside the component body), by which point both scripts have evaluated and
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
@@ -91,7 +94,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
           {/* Dojo options first — a dojo entry is dynamic (auto-includes late
               registrations), so it's the higher-leverage choice for a coach. */}
           {dojoMatches.map((d) => (
-            <button
+            <button type="button"
               key={"dojo:" + d.name}
               className="pmf__option pmf__option--dojo"
               onClick={() => pickDojo(d)}
@@ -104,7 +107,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
             </button>
           ))}
           {playerMatches.map((p) => (
-            <button
+            <button type="button"
               key={p.id}
               className="pmf__option"
               onClick={() => pickPlayer(p)}
@@ -203,7 +206,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
         )}
       </div>
       {opponent && (typeof opponent === "object") ? (
-        <button
+        <button type="button"
           className="my-match__opp"
           onClick={() => onMatchClick && onMatchClick(nextMatch)}
         >
@@ -292,13 +295,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
       return (
         <span key={k} className={`pmf__chip pmf__chip--dojo ${isPrimary ? "is-primary" : ""}`}>
           {multi && (
-            <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
+            <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${entry.dojo}` : `Pin ${entry.dojo} as primary`} aria-pressed={isPrimary}>
               {isPrimary ? "★" : "☆"}
             </button>
           )}
           <span className="pmf__chip-icon" aria-hidden="true">⌂</span>
           {entry.dojo} ({total})
-          <button onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
+          <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${entry.dojo}`}>×</button>
         </span>
       );
     }
@@ -308,13 +311,13 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     return (
       <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""}`} title={checkedIn ? "Checked in" : undefined}>
         {multi && (
-          <button className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
+          <button type="button" className="pmf__chip-pin" onClick={() => togglePin(entry)} aria-label={isPrimary ? `Unpin ${name}` : `Pin ${name} as primary`} aria-pressed={isPrimary}>
             {isPrimary ? "★" : "☆"}
           </button>
         )}
         {name}
         {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
-        <button onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
+        <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
       </span>
     );
   };
@@ -329,7 +332,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
         <span className="watchlist-card-title">Watchlist</span>
         {count > 0 && <span className="watchlist-count" aria-label={`${count} watched`}>{count}</span>}
         {onBellToggle != null && (
-          <button
+          <button type="button"
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
             onClick={onBellToggle}
             aria-pressed={!chimeMuted}
@@ -408,10 +411,10 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   );
 }
 
-// Runtime sharing: expose on window so viewer.jsx (ViewerHome) can render these
-// at render time regardless of script load order.
-window.WatchPicker = WatchPicker;
-window.WatchHeroCard = WatchHeroCard;
+// Runtime sharing: expose WatchlistPanel on window so viewer_home.jsx (ViewerHome)
+// can render it at render time regardless of script load order. WatchPicker and
+// WatchHeroCard are used only internally by WatchlistPanel (this file), so they
+// are not exposed on window.
 window.WatchlistPanel = WatchlistPanel;
 
 // ES exports for the vitest suite, which imports these directly.

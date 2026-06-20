@@ -48,10 +48,17 @@
       </div>
     </div>
 
-    <script type="module" src="/dist/api_serializers.js?v=5"></script>
+    <!-- Modules that are BOTH script-tagged here AND ES-imported by other modules
+         (e.g. patch.jsx imports data.jsx/api_serializers.jsx; app.jsx imports
+         patch.jsx) use the ".jsx" specifier — identical to the import URL — so the
+         browser keys them as ONE module and evaluates them once. Using ".js?v=5"
+         here would be a second, distinct URL → double module-eval (mp-zd1v).
+         They keep their early position so the window globals they set are
+         available to eval-time readers in later modules. -->
+    <script type="module" src="/dist/api_serializers.jsx"></script>
     <script type="module" src="/dist/api_client.js?v=5"></script>
-    <script type="module" src="/dist/data.js?v=5"></script>
-    <script type="module" src="/dist/patch.js?v=5"></script>
+    <script type="module" src="/dist/data.jsx"></script>
+    <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js?v=5"></script>
     <script type="module" src="/dist/bracket.js?v=5"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
@@ -71,26 +78,39 @@
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
     <script type="module" src="/dist/display.js?v=5"></script>
-    <!-- Watchlist UI (WatchPicker/WatchHeroCard/WatchlistPanel), extracted from
-         viewer.jsx. Loaded before viewer.js so window.BellIcon is set before
-         AnnBellBtn's first render. viewer_watchlist.jsx reads viewer.jsx deps
-         (poolLabel etc.) from window at render time, so this order is safe. -->
+    <!-- Viewer modules (mp-pxxc split). viewer.js statically imports all ten
+         viewer_* helper modules (viewer_utils, viewer_watchlist_core, viewer_alerts,
+         viewer_notifications, viewer_match, viewer_standings, viewer_awards,
+         viewer_schedule, viewer_competition, viewer_home), so it is the SOLE entry
+         that loads them — they must NOT also have their own <script type="module">
+         tags. A separate tag uses a different module URL (".js?v=5") than the import
+         specifier (".jsx"), which the browser keys as a distinct module and would
+         evaluate a SECOND time, doubling the viewer JS download/parse and splitting
+         module-level singleton state across two instances.
+         viewer_watchlist.js is the one exception: viewer.js does NOT import it (it is
+         wired via window.* lazy reads at render time, forming a deliberate runtime
+         cycle with viewer_home.jsx), so it keeps its own tag and loads exactly once.
+         It reads only window.pluralize (from ui.js, above) at module-eval; the
+         viewer.jsx-owned deps it uses are read from window at render time. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
     <script type="module" src="/dist/viewer.js?v=5"></script>
-    <script type="module" src="/dist/admin_helpers.js?v=5"></script>
+    <script type="module" src="/dist/admin_helpers.jsx"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
     <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>
     <script type="module" src="/dist/admin_lineup.js?v=5"></script>
     <script type="module" src="/dist/admin_participants.js?v=5"></script>
     <script type="module" src="/dist/admin_pools.js?v=5"></script>
     <script type="module" src="/dist/admin_schedule.js?v=5"></script>
-    <!-- admin_competition section modules (mp-hpe3 split). Mutually independent;
-         each consumes only globals from earlier admin_* files. Must load before
-         admin_competition.js, which aliases their window.* component globals. -->
-    <script type="module" src="/dist/admin_competition_overview.js?v=6"></script>
-    <script type="module" src="/dist/admin_competition_settings.js?v=6"></script>
-    <script type="module" src="/dist/admin_competition_bracket.js?v=6"></script>
-    <script type="module" src="/dist/admin_competition_swiss.js?v=6"></script>
+    <!-- admin_competition.js (mp-hpe3 split) is the SOLE entry that imports the
+         four section modules (overview/settings/bracket/swiss). Like the viewer_*
+         split (mp-pxxc / mp-zd1v), those modules must NOT also have their own
+         <script> tags: a tag would use a different module URL (".js?v=6") than the
+         import specifier (".jsx"), so the browser would key it as a distinct module
+         and evaluate it a SECOND time. The entry loads/evaluates them via its
+         imports; their window.* component globals are set before the entry's alias
+         block runs (ES evaluates imports before the importing module body). The
+         globals they read (CourtPicker, compMatchStats, …) come from admin_* files
+         tagged earlier, which run before this entry in document order. -->
     <script type="module" src="/dist/admin_competition.js?v=6"></script>
     <script type="module" src="/dist/admin_announcement.js?v=5"></script>
     <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
@@ -98,7 +118,7 @@
     <script type="module" src="/dist/admin_sponsors.js?v=5"></script>
     <!-- admin_branding.js exports BrandingManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page) — mp-scf. -->
-    <script type="module" src="/dist/admin_branding.js?v=5"></script>
+    <script type="module" src="/dist/admin_branding.jsx"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
          admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->

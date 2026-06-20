@@ -145,7 +145,7 @@ function RegistrationForm({ compId, onBack }) {
           <h2 style={{ marginBottom: 8 }}>Registration unavailable</h2>
           <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>{metaErr}</p>
           {onBack && (
-            <button className="btn btn--ghost" onClick={onBack}>← Back</button>
+            <button type="button" className="btn btn--ghost" onClick={onBack}>← Back</button>
           )}
         </div>
       </div>
@@ -173,9 +173,9 @@ function RegistrationForm({ compId, onBack }) {
           </p>
           <div style={{ display: "flex", gap: 12 }}>
             {onBack && (
-              <button className="btn btn--ghost" onClick={onBack}>← Back to home</button>
+              <button type="button" className="btn btn--ghost" onClick={onBack}>← Back to home</button>
             )}
-            <button className="btn btn--primary" onClick={registerAnother} style={{ flex: 1 }}>
+            <button type="button" className="btn btn--primary" onClick={registerAnother} style={{ flex: 1 }}>
               Register another participant
             </button>
           </div>

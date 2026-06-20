@@ -1,0 +1,44 @@
+---
+# Provider-agnostic baseline for deploying the bracket-creator mobile-app
+# with Caddy as TLS terminator.
+#
+# Usage:
+#   cp app.env.example app.env     # fill in secrets
+#   docker compose up -d
+#
+# The app container runs as uid 65534.  The host volume MUST be owned by
+# that uid or the app cannot write to the data directory and will exit:
+#   sudo chown -R 65534:65534 ./tournament-data
+#
+# See README.md for full setup instructions.
+
+services:
+  app:
+    image: ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest
+    restart: unless-stopped
+    env_file:
+      - app.env
+    environment:
+      - TOURNAMENT_DATA_DIR=/tournament-data
+    volumes:
+      - ./tournament-data:/tournament-data
+    expose:
+      - "8080"
+    # Never publish 8080 directly to the host; Caddy proxies it.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

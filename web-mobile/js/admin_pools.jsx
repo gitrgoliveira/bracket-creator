@@ -303,7 +303,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       <>
       <div className="pool-detail">
         <div style={{ marginBottom: 16 }}>
-          <button className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
+          <button type="button" className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
         </div>
         <div className="card">
           <div className="card__head">
@@ -311,7 +311,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               <h2 className="page-head__title">{selectedPool.poolName}</h2>
               <div className="card__sub">Shiaijo {court} · {pluralize(selectedPool.players.length, "participant")}</div>
             </div>
-            <button className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
+            <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
           </div>
 
           <div className="field__hint" style={{ marginBottom: 12 }}>
@@ -424,7 +424,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
                       {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● NOW" : "—"}
                     </div>
-                    <button className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
+                    <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
                       {m.status === "completed" ? "Correct" : "Score"}
                     </button>
                   </div>
@@ -445,7 +445,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{pluralize(pools.length, "pool")}</div>
         </div>
-        <button className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
+        <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
       </div>
       <div className="pools-grid">
         {pools.map((pool) => {
@@ -549,7 +549,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                         <div style={{ fontSize: 11, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap" }}>
                           {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● NOW" : "—"}
                         </div>
-                        <button className={getScoreBtnClass(m.status)} style={{ minWidth: 0 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
+                        <button type="button" className={getScoreBtnClass(m.status)} style={{ minWidth: 0 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                       </div>
                     ))}
                   </div>

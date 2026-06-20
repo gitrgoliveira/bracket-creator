@@ -130,19 +130,19 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         </div>
       </div>
       <div className="mode-tabs">
-        <button className={mode === "tap" ? "is-active" : ""} onClick={() => setMode("tap")}>Tap winner</button>
-        <button className={mode === "card" ? "is-active" : ""} onClick={() => setMode("card")}>Match card</button>
-        <button className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
+        <button type="button" className={mode === "tap" ? "is-active" : ""} onClick={() => setMode("tap")}>Tap winner</button>
+        <button type="button" className={mode === "card" ? "is-active" : ""} onClick={() => setMode("card")}>Match card</button>
+        <button type="button" className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
       </div>
       {mode === "tap" && (<>
         {/* Layout convention: SHIRO (White, sideB) on the LEFT, AKA (Red, sideA) on the RIGHT. */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
+          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
             <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>SHIRO (WHITE)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{b.name}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
           </button>
-          <button className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
+          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
             {/* Label tinted red when unselected (button is on white), inherits white when selected (button background is red) */}
             <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: match.winner?.id === a.id ? "inherit" : "var(--red)" }}>AKA (RED)</div>
             <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
@@ -155,12 +155,12 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         <div className="score-card">
           <div className="score-side score-side--white">
             <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button></div>
+            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button></div>
           </div>
           <div className="score-vs">VS</div>
           <div className="score-side score-side--red">
             <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button></div>
+            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button></div>
           </div>
         </div>
       )}
@@ -174,8 +174,8 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         <div className="sc-board">
           <div className="sc-board__rail sc-board__shiro">
             <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button type="button" className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
             </div>
           </div>
           <div className="sc-board__who sc-board__who--shiro sc-board__shiro">
@@ -190,8 +190,8 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
           </div>
           <div className="sc-board__rail sc-board__aka">
             <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
+              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
+              <button type="button" className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
             </div>
           </div>
           <div className="sc-board__vs">vs</div>
@@ -214,7 +214,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         const loserArr = aWins ? bPoints : aPoints;
         return (
           <div className="running-panel__actions">
-            <button
+            <button type="button"
               className="btn btn--primary btn--full"
               disabled={!hasWinner}
               onClick={() => onRecord(aWins ? "a" : "b", "ippon", winnerArr, loserArr)}
@@ -233,7 +233,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
         </div>
       )}
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
-        <button className="btn btn--sm btn--full" onClick={async () => {
+        <button type="button" className="btn btn--sm btn--full" onClick={async () => {
           // promptDialog returns null on empty/cancel and a string otherwise.
           // A whitespace-only value would be truthy under `if (name)` and would
           // persist a whitespace key as `m.Winner` on the backend (and then
@@ -363,16 +363,6 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
     </div>
   );
 }
-
-// T191 (US13 — FR-050d): pure helpers for the Swiss-round admin
-// section. Extracted so the conditional logic ("which round, are
-// matches complete, can we generate next?") is unit-testable without
-// mounting AdminSwissRounds. Mirrors the admin_scoring_modal.jsx
-// pattern (buildDecisionBody / shouldShowEnchoMaxBanner pure helpers
-// exported for tests).
-
-// Returns the canonical match-ID prefix for a Swiss round. Matches
-// engine/swiss.go's `swissPoolName`/`swissMatchID` — keep in sync.
 
 window.AdminBracket = AdminBracket;
 

@@ -4,6 +4,15 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// T191 (US13 — FR-050d): pure helpers for the Swiss-round admin
+// section. Extracted so the conditional logic ("which round, are
+// matches complete, can we generate next?") is unit-testable without
+// mounting AdminSwissRounds. Mirrors the admin_scoring_modal.jsx
+// pattern (buildDecisionBody / shouldShowEnchoMaxBanner pure helpers
+// exported for tests).
+
+// Returns the canonical match-ID prefix for a Swiss round. Matches
+// engine/swiss.go's `swissPoolName`/`swissMatchID` — keep in sync.
 function swissRoundIDPrefix(round) {
   return `Swiss-R${round}-`;
 }
@@ -145,12 +154,12 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12, background: "var(--accent-soft, #ecfdf5)", border: "1px solid var(--accent, #a7f3d0)", borderRadius: 8 }}>
           <div style={{ fontWeight: 600, color: "var(--accent, #065f46)" }}>Competition complete</div>
           {onViewStandings && (
-            <button className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings →</button>
+            <button type="button" className="btn btn--primary btn--sm" onClick={onViewStandings}>View final standings →</button>
           )}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
+          <button type="button"
             className="btn btn--primary"
             disabled={!canGenerate || generating}
             onClick={generate}

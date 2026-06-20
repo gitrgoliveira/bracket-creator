@@ -194,7 +194,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             </span>
           )}
           {onClose && (
-            <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
           )}
         </div>
       </div>
@@ -238,7 +238,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
           {isLocked ? (
-            <button
+            <button type="button"
               className="btn btn--primary"
               onClick={onRevise}
               disabled={!reviseEligible}
@@ -249,7 +249,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
               Revise
             </button>
           ) : (
-            <button
+            <button type="button"
               className="btn btn--primary"
               onClick={save}
               disabled={saving || roster.length === 0}

@@ -613,7 +613,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
-<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
@@ -629,7 +629,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>
-            <button className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
+            <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
               if (await window.confirmDialog({ message: `Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`, confirmLabel: "Mark invalid", danger: true })) {
                 const admin = await window.promptAdminPassword();
                 if (admin === null) return;
@@ -662,7 +662,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
           </div>
         )}
-        <button className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
+        <button type="button" className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
           const started = local.status && local.status !== "setup" && local.status !== "draw-ready";
           const msg = started
             ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`

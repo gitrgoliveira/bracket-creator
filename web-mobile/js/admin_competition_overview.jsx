@@ -1,7 +1,8 @@
 // admin_competition_overview.jsx — Overview + Fighting-Spirit awards sections
 // of the competition admin. Split out of admin_competition.jsx (mp-hpe3) as
-// cohesive section modules; loaded before admin_competition.js in index.html
-// and consumed by the AdminCompetition shell via window.*.
+// cohesive section modules; loaded only via the admin_competition.js entry's
+// imports (no standalone <script> tag) and consumed by the AdminCompetition
+// shell via window.*.
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -46,11 +47,11 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection }) {
         </div>
       </div>
       <div className="row">
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection("scores")}>
+        <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection("scores")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Scores →</div>
           <div className="card__sub">Update or correct match results</div>
         </button>
-        <button className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
+        <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}>
           <div className="card__title" style={{ marginBottom: 6 }}>Results →</div>
           <div className="card__sub">Visual bracket / pool standings</div>
         </button>
@@ -98,7 +99,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
 
   const save = async () => {
-    const admin = window.promptAdminPassword ? await window.promptAdminPassword() : null;
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setSaving(true);
     try {
@@ -149,7 +150,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
             style={{ flex: "1 1 120px", minWidth: 90 }}
             data-testid={`fs-award-dojo-${idx}`}
           />
-          <button
+          <button type="button"
             className="btn btn--sm btn--ghost"
             onClick={() => removeRow(idx)}
             aria-label="Remove award"
@@ -158,8 +159,8 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
         </div>
       ))}
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-        <button className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
-        <button className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
+        <button type="button" className="btn btn--sm btn--ghost" onClick={addRow} data-testid="fs-award-add">+ Add award</button>
+        <button type="button" className="btn btn--sm btn--primary" onClick={save} disabled={saving} data-testid="fs-award-save">
           {saving && <span className="spinner" />}
           {saving ? "Saving…" : "Save awards"}
         </button>

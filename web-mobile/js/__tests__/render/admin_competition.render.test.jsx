@@ -48,8 +48,11 @@ const STUBBED_GLOBALS = {
   dmyToIso: (d) => d,
   isoToDmy: (d) => d,
   isValidDate: () => true,
-  validateAndNormalizeDate: (d) => ({ ok: true, value: d }),
-  decideNumericUpdate: (_field, value) => ({ value }),
+  // Real shapes (admin_helpers.jsx): validateAndNormalizeDate → { norm, error };
+  // decideNumericUpdate → { value, shouldSave }. Match them so the smoke test
+  // exercises the same destructuring the production code does.
+  validateAndNormalizeDate: (d) => ({ norm: d, error: null }),
+  decideNumericUpdate: (_field, value) => ({ value, shouldSave: true }),
   deriveTournamentDays: () => [],
   competitionKindLabel: () => 'Individual',
   formatDate: (d) => String(d ?? ''),

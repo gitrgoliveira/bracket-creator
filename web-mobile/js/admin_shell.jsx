@@ -426,8 +426,8 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             </div>
           </div>
           <div className="page-head__actions">
-            <button type="button" className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
-            <button type="button" className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
+            <button type="button" className="btn" onClick={onAnnounce} disabled={noComps} title={noComps ? "Add a competition first" : undefined}><Icon name="megaphone" />Announce</button>
+            <button type="button" className="btn" onClick={() => setExportPdfOpen(true)} disabled={noComps} title={noComps ? "Add a competition first" : undefined}><Icon name="printer" />Export PDFs</button>
             {comps.some(c => c.status === "completed") && (
               <button type="button" className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
@@ -451,7 +451,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
             <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
           </button>
-          <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
+          <button type="button" className="card" style={{ textAlign: "left", cursor: noComps ? "not-allowed" : "pointer", opacity: noComps ? 0.6 : 1, border: "1px solid var(--line)" }} onClick={onOpenScoreEditor} disabled={noComps} title={noComps ? "Add a competition first" : undefined}>
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>

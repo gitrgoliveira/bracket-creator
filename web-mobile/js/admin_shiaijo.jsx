@@ -451,6 +451,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={setLineupMatch}
                                     onPick={pickMatch}
+                                    onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={scheduled}
                                 />
                             )}
@@ -626,7 +627,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 // `scheduled` is the full court scheduled list (used to derive first/last
 // position for disabling the ↑/↓ buttons). `onMove(m, direction)` swaps
 // scheduledAt with the adjacent row via two updateMatchTime calls.
-function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick }) {
+function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
@@ -636,6 +637,7 @@ function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onM
                         key={matchKey(m)} m={m}
                         scheduled={scheduled}
                         courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick}
+                        onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                     />
                 ))}
             </div>
@@ -643,7 +645,7 @@ function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onM
     );
 }
 
-function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick }) {
+function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
@@ -698,8 +700,17 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
                             <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue">↓</button>
                         </>
                     )}
-                    {/* Score is the primary per-row action — pushed to the end (the "go" slot). */}
-                    {onPick && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" onClick={() => onPick(m)} title="Run this match now and score it">Score</button>}
+                    {/* Optional announce — mirrors the Up Next card so any queued match is a
+                        complete view: call it to the floor, or start it directly. */}
+                    {onCall && window.API && typeof window.API.sendAnnouncement === "function" && (
+                        <button type="button" className="btn btn--ghost btn--sm" disabled={callingKey === matchKey(m)} onClick={() => onCall(m)} title="Announce this match to spectators and competitors">
+                            {callingKey === matchKey(m) ? "Calling…" : (calledKey === matchKey(m) ? "Call again" : "Call to court")}
+                        </button>
+                    )}
+                    {/* Start match is the primary per-row action — pushed to the end (the "go" slot).
+                        Same pickMatch path as the Up Next card: defers an unscored running bout,
+                        blocks while one is being scored, then starts this match for scoring. */}
+                    {onPick && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
                 </div>
             )}
         </div>

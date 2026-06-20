@@ -159,7 +159,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
           const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return (
-            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
+            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -173,8 +173,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
                   <div className="score-edit-row__score">
                     {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {m.status === "running" && <span className="bc-running">●</span>}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                    {/* Running rows rely on the score-edit-row--running row highlight (accent
+                        border + background tint) — no centre dot needed here. The right-column
+                        "● NOW" label (below) is the operator's status cue for running bouts. */}
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
@@ -291,6 +293,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   } catch (_startErr) { /* gate rejected the start; stay on the next match in pre-match */ }
                 }
               } catch (_err) { /* keep modal open on error */ }
+            } : null}
+            onAfterDecision={nextActiveMatch ? async () => {
+              // A kiken/fusenpai decision already persisted the bout via the
+              // /decision POST — no score PUT here. Mirror onSubmitAndNext's
+              // start-next so a fusenpai advances the operator to (and starts)
+              // the next same-court match.
+              if (nextActiveMatch.status === "scheduled") {
+                try {
+                  await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
+                  if (mountedRef.current) setOpenMatch(nextActiveMatch);
+                } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
+              }
             } : null}
             password={password}
           />

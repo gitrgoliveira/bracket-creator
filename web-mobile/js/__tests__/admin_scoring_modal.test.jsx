@@ -24,6 +24,7 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
+import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
@@ -1199,6 +1200,126 @@ describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
   it('is false for null/undefined', () => {
     expect(subBoutHasBeenPlayed(null)).toBe(false);
     expect(subBoutHasBeenPlayed(undefined)).toBe(false);
+  });
+});
+
+// Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
+// so the next match on the same court is started without an extra operator tap.
+describe('item 7 — non-points decisions advance to next match', () => {
+  // submitHantei is component-internal, but the routing logic
+  //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit`
+  // is a pure predicate we can test directly.
+  it('routes hantei to onSubmitAndNext when provided and match is not a correction', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = vi.fn();
+    const isComplete = false; // live match, not a correction
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmitAndNext).toHaveBeenCalledWith(patch);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('routes hantei to onSubmit (not onSubmitAndNext) when correcting a completed match', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = vi.fn();
+    const isComplete = true; // correction — do not auto-advance
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmit).toHaveBeenCalledWith(patch);
+    expect(onSubmitAndNext).not.toHaveBeenCalled();
+  });
+
+  it('routes hantei to onSubmit when onSubmitAndNext is not provided', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = undefined;
+    const isComplete = false;
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p2', name: 'Mori' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmit).toHaveBeenCalledWith(patch);
+  });
+
+  // makeSubmitDecision: onAfterDecision is called for fusenpai when provided
+  // and the match is not complete.
+  describe('makeSubmitDecision with onAfterDecision', () => {
+    let savedAPI;
+    beforeEach(() => {
+      savedAPI = window.API;
+      window.API = {
+        recordDecision: vi.fn().mockResolvedValue({
+          winner: 'Shiro Fighter', sideA: 'Aka Fighter', sideB: 'Shiro Fighter',
+        }),
+      };
+    });
+    afterEach(() => { window.API = savedAPI; });
+
+    const makeMatch = (id) => ({
+      compId: 'c1', id,
+      sideA: { id: 'pa', name: 'Aka Fighter' },
+      sideB: { id: 'pb', name: 'Shiro Fighter' },
+    });
+    const makeSetters = () => ({
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr: vi.fn(),
+      setWithdrawnPlayer: vi.fn(),
+      setDecisionPromptKind: vi.fn(),
+    });
+
+    it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: false,
+        entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onAfterDecision).toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('falls back to onClose for fusenpai when onAfterDecision is not set', async () => {
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m2'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, isComplete: false, entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('does NOT call onAfterDecision for a correction (isComplete=true)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m3'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: true,
+        entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      // Correction: must close rather than advance
+      expect(onClose).toHaveBeenCalled();
+      expect(onAfterDecision).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call onAfterDecision for a kiken decision (modal stays open for RemainingMatchesPanel)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const setWithdrawnPlayer = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), setWithdrawnPlayer, onClose, onAfterDecision, isComplete: false,
+        entityLabel: 'competitors',
+      });
+      await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
+      // Kiken neither advances nor closes — it parks on RemainingMatchesPanel.
+      expect(onAfterDecision).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(setWithdrawnPlayer).toHaveBeenCalled();
+    });
   });
 });
 

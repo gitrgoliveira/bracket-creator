@@ -109,7 +109,9 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
         })()}
-        {m.status === "running" && <span className="bc-running">●</span>}
+        {/* No centre "●" dot: a running match is signalled by the row's
+            .tw-match--running highlight (accent border + ring). The labelled
+            "● NOW" / "● {count} now" badges elsewhere are a separate affordance. */}
         <CourtPicker
           value={m.court}
           courts={courts}

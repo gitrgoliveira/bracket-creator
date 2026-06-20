@@ -58,25 +58,9 @@ const matchKey = (m) => `${m.compId}:${m.id}`;
 // the "Enter lineup" affordance).
 export const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize || 0) > 0);
 
-// addMinuteHHMM — bump an "HH:MM" clock string by one minute, wrapping past
-// midnight. Used to slot a deferred match one tick after its successor.
-export function addMinuteHHMM(t) {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(t || "");
-    if (!m) return null;
-    const total = (Number(m[1]) * 60 + Number(m[2]) + 1) % (24 * 60);
-    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-}
-
-// deferTimeFor — "Defer" means run the next match, then come right back: move
-// this match down exactly one slot in the court's scheduled queue. We place it
-// one minute after its immediate successor (only this match's time changes; the
-// next match keeps its advertised slot). Returns the new "HH:MM", or null when
-// there's no successor (already last) or the successor has no usable time.
-export function deferTimeFor(m, scheduled) {
-    const i = (scheduled || []).findIndex((x) => matchKey(x) === matchKey(m));
-    if (i < 0 || i >= scheduled.length - 1) return null;
-    return addMinuteHHMM(scheduled[i + 1].scheduledAt);
-}
+// (addMinuteHHMM and deferTimeFor removed — queue reordering now works by
+// swapping scheduledAt between adjacent rows via moveMatch, which calls
+// updateMatchTime for both the moved match and its neighbour.)
 
 // shiaijoScoreCell — decide what the queue row's middle score column shows.
 // Exported so the team-vs-individual routing is unit-testable. A team
@@ -119,8 +103,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [callingKey, setCallingKey] = useStateSh(null);
     const [startingKey, setStartingKey] = useStateSh(null);
     const [startError, setStartError] = useStateSh("");
-    const [completedOpen, setCompletedOpen] = useStateSh(false);
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // The match the operator has explicitly picked to score from the queue.
+    // null = follow the running bout (running[0]). A picked match drives the
+    // scoring panel instead; the find() in pickedMatch guards staleness, so a
+    // pick that completes or vanishes falls back to running[0] automatically.
+    const [pickedKey, setPickedKey] = useStateSh(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
@@ -148,11 +136,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const courts = tournament.courts || [];
     const courtKnown = courts.includes(court);
 
-    // The scoring panel always shows the running (NOW) match being officiated
-    // on this court — nothing else. You start the next match from the Up Next
-    // card, and fixing a finished score is done in the competition's own admin
-    // view, so the console never opens an upcoming or completed match here.
-    const selectedMatch = useMemoSh(() => running[0] || null, [running]);
+    // The scoring panel shows the match the operator is officiating. By default
+    // that's the running (NOW) bout, but the operator may pick any upcoming
+    // match to run out of order via its "Score" button (pickMatch). Picking is
+    // governed by two rules in pickMatch: it is BLOCKED while the current bout
+    // has scoring in progress (you must finish or correct it first), and an
+    // unscored current bout is DEFERRED one slot before the new pick starts.
+    // A completed pick (or one that disappears) falls back to running[0]: the
+    // find() filters out completed matches and the `pickedMatch || running[0]`
+    // expression covers the null case. Fixing a finished score is still done
+    // in the competition's own admin view, so completed matches aren't picked.
+    const pickedMatch = useMemoSh(
+        () => pickedKey ? sorted.find((x) => matchKey(x) === pickedKey && x.status !== "completed") || null : null,
+        [pickedKey, sorted]
+    );
+    const selectedMatch = useMemoSh(() => pickedMatch || running[0] || null, [pickedMatch, running]);
 
     // The standings/context panel follows the court's current focus — not
     // strictly the running match — so it stays visible (and updates) after a
@@ -197,20 +195,74 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return window.startPatch();
     };
 
+    // Returns true when the start write succeeded, false otherwise — pickMatch
+    // relies on this so it only pins pickedKey for a match that actually started
+    // (a blocked-by-eligibility start must not steal the panel).
     const startMatch = async (m) => {
-        if (startingKey) return;
+        if (startingKey) return false;
         setStartError("");
         setStartingKey(matchKey(m));
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
             await onEditScore(m.compId, m.id, startPatch(), m);
+            return true;
         } catch (e) {
             if (mountedRef.current) setStartError((e && e.message) || "Could not start the match — check eligibility and try again.");
             if (showToast) showToast((e && e.message) || "Could not start the match", "error");
+            return false;
         } finally {
             if (mountedRef.current) setStartingKey(null);
         }
+    };
+
+    // scoringStarted — has the current running bout had any score entered? Used
+    // by pickMatch to decide whether switching away is safe. A bout with ippons
+    // or points already recorded must be finished or corrected before the
+    // operator can move to another match (you can't abandon a half-scored bout).
+    const scoringStarted = (mm) => !!mm && mm.status === "running" && (
+        (mm.ipponsA?.length || 0) > 0 ||
+        (mm.ipponsB?.length || 0) > 0 ||
+        (mm.score?.winnerPts || 0) > 0 ||
+        (mm.score?.loserPts || 0) > 0
+    );
+
+    // pickMatch — run an upcoming match out of order. Rules:
+    //   • Completed matches are never picked (correct them in the comp admin).
+    //   • If a DIFFERENT bout is running with scoring already started, block —
+    //     finish or correct it first (can't abandon a half-scored bout).
+    //   • If a DIFFERENT bout is running but unscored, defer it: un-start it
+    //     (back to scheduled) so the court is never left with two running bouts.
+    //     The deferred bout returns to the queue and runs after the picked one.
+    //   • A scheduled pick is started (through the eligibility gate); a pick
+    //     that's already running just takes the panel.
+    const pickMatch = async (m) => {
+        if (!m || m.status === "completed") return;
+        const cur = running[0] || null;
+        const isSame = cur && matchKey(cur) === matchKey(m);
+        if (cur && !isSame) {
+            if (scoringStarted(cur)) {
+                if (showToast) showToast("Finish or correct the bout in progress first", "error");
+                return;
+            }
+            // Unscored current bout: un-start it back to scheduled. moveMatch
+            // only reorders scheduled rows (it no-ops on a running bout), so a
+            // real defer here means clearing the running status — otherwise the
+            // pick below would leave the court with two running bouts. The shape
+            // mirrors buildPatch("scheduled") in the scoring modal. If the
+            // defer write fails (surfaced via toast) we must NOT start the pick.
+            try {
+                await onEditScore(cur.compId, cur.id, { status: "scheduled", winner: null, score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0 }, cur);
+            } catch (_e) {
+                return;
+            }
+            if (!mountedRef.current) return;
+        }
+        if (m.status === "scheduled") {
+            const ok = await startMatch(m);
+            if (!ok || !mountedRef.current) return;
+        }
+        setPickedKey(matchKey(m));
     };
 
     // Call to court — optional. Broadcasts a tournament announcement so the
@@ -235,25 +287,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // Defer — run the next match, then come right back: move this match down one
-    // slot (its time is set one minute after its successor; backend
-    // updateMatchTime, persisted + broadcast). No-op on running/completed, or
-    // when it's already last in the queue. The match stays in Upcoming and
-    // returns to Up Next as soon as the one match ahead of it finishes.
-    const skipMatch = async (m) => {
+    // moveMatch — reorder by swapping scheduledAt with the adjacent row.
+    // direction: "up" (earlier) or "down" (later). Only scheduled matches
+    // can be reordered; running/completed are stable. Two updateMatchTime
+    // calls keep both rows' times consistent (persisted + broadcast).
+    const moveMatch = async (m, direction) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
+        const idx = scheduled.findIndex((x) => matchKey(x) === matchKey(m));
+        if (idx < 0) return;
+        const neighbour = direction === "up" ? scheduled[idx - 1] : scheduled[idx + 1];
+        if (!neighbour) return; // already first/last
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
-        const newTime = deferTimeFor(m, scheduled);
-        if (!newTime) {
-            if (showToast) showToast(`${label} is already last in the queue`);
-            return;
-        }
+        const myTime = m.scheduledAt || null;
+        const neighbourTime = neighbour.scheduledAt || null;
         try {
-            await window.API.updateMatchTime(m.compId, m.id, newTime, password);
-            if (showToast) showToast(`Deferred ${label} — it returns after the next match`);
+            // Swap the two times atomically (sequential; second call only runs
+            // if first succeeds so state is never corrupted on partial failure).
+            await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password);
+            await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password);
+            if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
         } catch (e) {
-            if (showToast) showToast((e && e.message) || "Could not defer the match", "error");
+            if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
         }
     };
 
@@ -335,7 +390,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <div className="shiaijo-upnext__time">{upNext.scheduledAt || "—"} · {upNext.compName}</div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
-                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => startMatch(upNext)}>
+                                            {/* Route through pickMatch (not startMatch) so starting the
+                                                Up Next bout honours the same lock/defer rules as the
+                                                Upcoming "Score" buttons: blocked while a different bout is
+                                                being scored, and an unscored running bout is deferred first.
+                                                With no running bout it simply starts this one. */}
+                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => pickMatch(upNext)}>
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
                                             {isTeamMatch(upNext) && (
@@ -357,8 +417,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                     {callingKey === matchKey(upNext) ? "Calling…" : (calledKey === matchKey(upNext) ? "Call again" : "Call to court")}
                                                 </button>
                                             )}
-                                            {window.API && typeof window.API.updateMatchTime === "function" && (
-                                                <button type="button" className="btn btn--sm btn--ghost" onClick={() => skipMatch(upNext)} title="Run the next match first, then return here">Defer</button>
+                                            {window.API && typeof window.API.updateMatchTime === "function" && scheduled.length > 1 && (
+                                                <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={() => moveMatch(upNext, "down")} title="Move this match later in the queue">↓</button>
                                             )}
                                         </div>
                                         {startError && <div className="shiaijo-upnext__error" role="alert">{startError}</div>}
@@ -379,21 +439,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onSkip={skipMatch} onEnterLineup={setLineupMatch}
+                                    onMove={moveMatch} onEnterLineup={setLineupMatch}
+                                    onPick={pickMatch}
+                                    scheduled={scheduled}
                                 />
                             )}
 
                             {completed.length > 0 && (
                                 <div className="shiaijo-completed">
-                                    <button type="button" className="section-title shiaijo-completed__toggle" aria-expanded={completedOpen} onClick={() => setCompletedOpen((v) => !v)}>
-                                        {completedOpen ? "−" : "+"} Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
-                                    </button>
-                                    {completedOpen && (
-                                        <ShiaijoQueueGroup
-                                            matches={completed}
-                                            courts={courts} onMoveCourt={requestMoveCourt}
-                                        />
-                                    )}
+                                    {/* Completed matches stay expanded — this is the operator's
+                                        running record of what's been played on this court/pool today,
+                                        so it must not be hidden behind a collapse toggle. */}
+                                    <div className="section-title">
+                                        Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
+                                    </div>
+                                    <ShiaijoQueueGroup
+                                        matches={completed}
+                                        courts={courts} onMoveCourt={requestMoveCourt}
+                                    />
                                 </div>
                             )}
                         </div>
@@ -446,6 +509,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
                                             }
                                         } catch (_e) { /* keep panel */ }
+                                    }}
+                                    onAfterDecision={async () => {
+                                        // A kiken/fusenpai decision already persisted the bout via
+                                        // the /decision POST — no score PUT here. Just start the next
+                                        // scheduled match so the panel advances (mirrors onSubmitAndNext).
+                                        const next = nextActiveAfter(selectedMatch);
+                                        if (next && next.status === "scheduled") {
+                                            try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
+                                        }
                                     }}
                                     password={password}
                                 />
@@ -518,12 +590,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     );
 }
 
-// A queued match row: plain info (the court reassign and Skip controls still
+// A queued match row: plain info (the court reassign and reorder controls
 // work) but the row itself can't be opened in the scoring panel — you start a
 // match from the Up Next card, not by clicking it. The console never shows a
 // running match in these groups (the running bout is officiated in the scoring
 // panel on the right), so only scheduled/completed states render here.
-function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip, onEnterLineup }) {
+//
+// `scheduled` is the full court scheduled list (used to derive first/last
+// position for disabling the ↑/↓ buttons). `onMove(m, direction)` swaps
+// scheduledAt with the adjacent row via two updateMatchTime calls.
+function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick }) {
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
@@ -531,7 +607,8 @@ function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip, onEnte
                 {matches.map((m) => (
                     <ShiaijoQueueRow
                         key={matchKey(m)} m={m}
-                        courts={courts} onMoveCourt={onMoveCourt} onSkip={onSkip} onEnterLineup={onEnterLineup}
+                        scheduled={scheduled}
+                        courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick}
                     />
                 ))}
             </div>
@@ -539,9 +616,15 @@ function ShiaijoQueueGroup({ label, matches, courts, onMoveCourt, onSkip, onEnte
     );
 }
 
-function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
+function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
+    // Derive position in the full scheduled list to know when to disable ↑/↓.
+    // `scheduled` is the court's complete scheduled array (including Up Next);
+    // the row may be in the Upcoming slice but we disable based on absolute pos.
+    const scheduledIdx = onMove ? (scheduled || []).findIndex((x) => matchKey(x) === matchKey(m)) : -1;
+    const isFirst = scheduledIdx === 0;
+    const isLast = scheduledIdx >= 0 && scheduledIdx === (scheduled || []).length - 1;
     return (
         <div className={`score-edit-row shiaijo-row shiaijo-row--static ${isComplete ? "score-edit-row--complete" : ""}`}>
             <div>
@@ -550,7 +633,10 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
             </div>
             <div className="score-edit-row__sides">
                 <div className="score-edit-row__side" style={{ textAlign: "right" }} aria-label={`Shiro: ${m.sideB?.name || ""}`}>
-                    <div className="name">{m.sideB?.name}</div>
+                    <div className="name">
+                        {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
+                        {m.sideB?.name}
+                    </div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 </div>
                 <div className="score-edit-row__score">
@@ -560,7 +646,10 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
                 </div>
                 <div className="score-edit-row__side" aria-label={`Aka: ${m.sideA?.name || ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{m.sideA?.name}</div>
+                    <div className="name">
+                        {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
+                        {m.sideA?.name}
+                    </div>
                 </div>
             </div>
             <div className="shiaijo-row__status">
@@ -577,8 +666,14 @@ function ShiaijoQueueRow({ m, courts, onMoveCourt, onSkip, onEnterLineup }) {
                 {onEnterLineup && isTeamMatch(m) && m.status === "scheduled" && (
                     <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
                 )}
-                {onSkip && m.status === "scheduled" && (
-                    <button type="button" className="btn btn--ghost btn--sm shiaijo-row__skip" onClick={() => onSkip(m)} title="Run the next match first, then return here">Defer</button>
+                {onPick && m.status === "scheduled" && (
+                    <button type="button" className="btn btn--sm shiaijo-row__pick" onClick={() => onPick(m)} title="Run this match now and score it">Score</button>
+                )}
+                {onMove && m.status === "scheduled" && (
+                    <>
+                        <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move up" disabled={isFirst} onClick={() => onMove(m, "up")} title="Move earlier in the queue">↑</button>
+                        <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue">↓</button>
+                    </>
                 )}
             </div>
         </div>
@@ -590,13 +685,19 @@ function MatchSides({ m, large }) {
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
             <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                <div className="name">{m.sideB?.name}</div>
+                <div className="name">
+                    {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
+                    {m.sideB?.name}
+                </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
             <div className="shiaijo-sides__vs">vs</div>
             <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
-                <div className="name">{m.sideA?.name}</div>
+                <div className="name">
+                    {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
+                    {m.sideA?.name}
+                </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
             </div>
         </div>

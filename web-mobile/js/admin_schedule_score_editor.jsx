@@ -167,6 +167,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // Show the live ippon score for a running bout too (not just completed)
           // so the list reflects scoring in progress; "vs" only before it starts.
           const showScore = m.status === "completed" || m.status === "running";
+          // A just-started running bout is 0–0, where formatIpponsScore returns "".
+          // Fall back so the cell is never blank: running 0–0 → "vs", a completed
+          // match with no recorded score → "—". Live techniques show once present.
+          const seScore = showScore ? window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : "";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
@@ -186,8 +190,9 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <div className="score-edit-row__score">
                     <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
                     <span className="score-edit-row__scoreval">
-                      {showScore && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                      {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                      {m.status === "scheduled"
+                        ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
+                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : "—"}</span>)}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>

@@ -536,3 +536,45 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     expect(text).toContain('Aaron Thompson');
   });
 });
+
+// ------------------------------------------------------------------
+// mp-8rc9 Phase 1: poolLabel format-aware label helper
+// ------------------------------------------------------------------
+describe('poolLabel — format-aware phase label (mp-8rc9)', () => {
+  let poolLabel;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ poolLabel } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('returns "League table" for a league-format match', () => {
+    const m = { compFormat: 'league', poolName: 'Pool A', compName: 'City League' };
+    expect(poolLabel(m)).toBe('League table');
+  });
+
+  it('returns poolName for a mixed-format match', () => {
+    const m = { compFormat: 'mixed', poolName: 'Pool B', compName: 'Open Cup' };
+    expect(poolLabel(m)).toBe('Pool B');
+  });
+
+  it('returns poolName for a playoffs-format match', () => {
+    const m = { compFormat: 'playoffs', poolName: 'Pool A', compName: 'Open Cup' };
+    expect(poolLabel(m)).toBe('Pool A');
+  });
+
+  it('returns poolName when compFormat is absent (legacy match)', () => {
+    const m = { poolName: 'Pool C', compName: 'Old Cup' };
+    expect(poolLabel(m)).toBe('Pool C');
+  });
+
+  it('never returns the competition name for league (would be redundant in eyebrow)', () => {
+    const m = { compFormat: 'league', poolName: 'Pool A', compName: 'City League' };
+    expect(poolLabel(m)).not.toBe('City League');
+  });
+});

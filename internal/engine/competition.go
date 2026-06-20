@@ -51,13 +51,31 @@ const (
 	// gated — court/time can be set on a placeholder match at any time). Callers
 	// should broadcast EventMatchUpdated and EventScheduleUpdated.
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
+	// AutoCompleteAwaitingLeaguePlayoff means all regular team-league matches are
+	// done and there is at least one consequential tie (a group of tied teams whose
+	// position range intersects [1..LeaguePlayoffTopN], adjusted for the two-joint-
+	// 3rd-places convention). The competition stays in CompStatusPools; the engine
+	// did NOT auto-inject any DH matches. The operator must decide which teams play
+	// a supplementary play-off (Phase 3b will add the operator endpoint). Until the
+	// operator acts (or accepts shared ranks), the competition cannot transition to
+	// CompStatusComplete. Callers should broadcast EventScheduleUpdated so the UI
+	// can show the "awaiting play-off decision" banner.
+	AutoCompleteAwaitingLeaguePlayoff AutoCompleteOutcome = 5
 )
 
 // MaybeAutoCompletePools advances a competition past its pool phase after a pool
 // score:
 //
-//   - League format → transitions to CompStatusComplete once every pool match
-//     is recorded as completed.
+//   - League format (individual) → transitions to CompStatusComplete once every
+//     pool match is recorded as completed, with supplementary ippon-shobu
+//     tiebreaker matches auto-injected for tied competitors.
+//   - League format (team) → transitions to CompStatusComplete once every pool
+//     match is done AND there are no consequential ties requiring a play-off. If
+//     there are consequential ties, AutoCompleteAwaitingLeaguePlayoff is returned
+//     and the competition stays in CompStatusPools; NO DH matches are auto-injected.
+//     The operator decides whether to run a play-off (Phase 3b). If all ties are
+//     non-consequential (below the playoff band or covered by the two-thirds rule),
+//     the league completes with shared ranks.
 //   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
 //     pool's finishers into the in-place knockout bracket incrementally (no
 //     separate playoffs competition, no manual "start knockout" step), and flips
@@ -66,11 +84,6 @@ const (
 //     there is no wait for the whole pool phase.
 //
 // The function is a no-op for any other format or status.
-//
-// For league, when all regular pool matches are done but tied competitors
-// remain, supplementary ippon-shobu tiebreaker matches are injected and
-// AutoCompleteTiebreakInjected is returned. (Mixed handles tie-break injection
-// per-pool inside advanceMixedPools.)
 //
 // Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
 // The mixed path delegates to advanceMixedPools, which takes its own per-comp
@@ -99,6 +112,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 
 	isTeamComp := comp != nil && comp.TeamSize > 0
+	isTeamLeague := isTeamComp && comp.Format == state.CompFormatLeague
 
 	// Partition matches into regular vs tiebreaker vs pool-daihyosen.
 	allComplete := true
@@ -139,35 +153,59 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 
 	// All regular matches (and any existing TB/DH matches) are complete.
-	// If no supplementary matches exist yet, check for ties and inject.
 	//
-	// Concurrent callers are safe: the injection functions load fresh state
-	// and use existingPairs guards, so parallel goroutines produce identical
-	// content. SavePoolMatches is a full overwrite — last write wins but the
-	// data is the same, making concurrent injection idempotent.
-	if (isTeamComp && !hasCompleteDH) || (!isTeamComp && !hasCompleteTB) {
-		if isTeamComp {
-			injected, injErr := e.InjectPoolDaihyosenMatches(compID)
-			if injErr != nil {
-				return AutoCompleteNoChange, injErr
-			}
-			if len(injected) > 0 {
-				return AutoCompleteTiebreakInjected, nil
-			}
-		} else {
-			injected, injErr := e.InjectTiebreakerMatches(compID)
-			if injErr != nil {
-				return AutoCompleteNoChange, injErr
-			}
-			if len(injected) > 0 {
-				return AutoCompleteTiebreakInjected, nil
+	// Team-league path: the operator decides whether to run supplementary
+	// play-off matches — we do NOT auto-inject DH matches. Instead, check
+	// whether there are any consequential ties; if so, block completion and
+	// return AwaitingLeaguePlayoff so Phase 3b can surface the decision to
+	// the operator. If there are operator-injected DH matches (via Phase 3b),
+	// we fall through to the same dhCycleExists guard as the mixed path.
+	//
+	// Non-consequential ties (below the playoff band, or covered by the
+	// LeagueTwoThirdPlaces exemption) are accepted as shared ranks and the
+	// competition proceeds to completion normally.
+	if isTeamLeague && !hasCompleteDH {
+		candidates, candErr := e.LeaguePlayoffCandidates(compID)
+		if candErr != nil {
+			return AutoCompleteNoChange, candErr
+		}
+		if len(candidates) > 0 {
+			// Consequential ties present — operator must act before completion.
+			return AutoCompleteAwaitingLeaguePlayoff, nil
+		}
+		// No consequential ties: fall through to the completion transition.
+	}
+
+	// Non-team-league team competitions (mixed): auto-inject DH matches for
+	// any ties. Individual competitions: auto-inject TB matches.
+	// Skip for team-league (handled above) and when supplementary matches
+	// already exist (hasCompleteDH / hasCompleteTB flags prevent double-inject).
+	if !isTeamLeague {
+		if (isTeamComp && !hasCompleteDH) || (!isTeamComp && !hasCompleteTB) {
+			if isTeamComp {
+				injected, injErr := e.InjectPoolDaihyosenMatches(compID)
+				if injErr != nil {
+					return AutoCompleteNoChange, injErr
+				}
+				if len(injected) > 0 {
+					return AutoCompleteTiebreakInjected, nil
+				}
+			} else {
+				injected, injErr := e.InjectTiebreakerMatches(compID)
+				if injErr != nil {
+					return AutoCompleteNoChange, injErr
+				}
+				if len(injected) > 0 {
+					return AutoCompleteTiebreakInjected, nil
+				}
 			}
 		}
 	}
 
-	// For team competitions where DH matches have been played: verify that
-	// the DH results actually broke all ties before transitioning.  In the
-	// rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
+	// For team competitions where DH matches have been played (either via
+	// operator-triggered league play-offs or auto-injected mixed/pools DH):
+	// verify that the DH results actually broke all ties before transitioning.
+	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
 	// possible in a 3+ team pool with a full round-robin DH), every team in
 	// that group still has equal DH win counts and standings remain
 	// unresolved.  Per tournament practice the pool would normally be

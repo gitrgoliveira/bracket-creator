@@ -167,6 +167,24 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
+// normalizePoolConfig silently zeroes PoolSize and PoolWinners for formats
+// that have no pool phase. League has a single implicit pool containing all
+// participants (engine overrides PoolSize at start time); playoffs is a direct
+// elimination bracket with no pools at all. Keeping these fields set for those
+// formats is misleading and inconsistent, so we discard them on ingest rather
+// than rejecting the request (the engine already ignores them at runtime, and
+// the mixed format is the only one where they carry meaning).
+//
+// Called in both the POST (create) and PUT (update/merge) paths so the API is
+// consistent regardless of how the client sends the competition.
+func normalizePoolConfig(comp *state.Competition) {
+	switch comp.Format {
+	case state.CompFormatLeague, state.CompFormatPlayoffs:
+		comp.PoolSize = 0
+		comp.PoolWinners = 0
+	}
+}
+
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
 // must be at least 1. Returns nil for non-swiss competitions. The caller
 // surfaces the error as HTTP 400.
@@ -176,6 +194,24 @@ func validateSwissConfig(comp *state.Competition) error {
 	}
 	if comp.SwissRounds < 1 {
 		return fmt.Errorf("swiss format requires swissRounds >= 1")
+	}
+	return nil
+}
+
+// validateLeaguePlayoffConfig validates the league-playoff configuration knobs
+// (LeaguePlayoffTopN, LeagueTwoThirdPlaces). These fields are only meaningful
+// for team-league competitions; they are silently ignored for other formats/kinds
+// and must not cause errors there. Returns nil for non-league or non-team comps.
+func validateLeaguePlayoffConfig(comp *state.Competition) error {
+	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+		return nil
+	}
+	switch comp.LeaguePlayoffTopN {
+	case 0, 3, 4:
+		// 0 = unset (will default to 3 at draw time); 3 and 4 are the only
+		// legal explicit values (per owner decision Q1).
+	default:
+		return fmt.Errorf("leaguePlayoffTopN must be 3 or 4 (got %d)", comp.LeaguePlayoffTopN)
 	}
 	return nil
 }
@@ -372,8 +408,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Zero out pool-config fields that have no meaning for the chosen
+		// format (league / playoffs). The engine already ignores them at
+		// start time; this keeps the persisted config consistent with what
+		// the engine actually uses. See normalizePoolConfig for full rationale.
+		normalizePoolConfig(&comp)
+
 		// FR-050a: swiss-specific config validation.
 		if err := validateSwissConfig(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// League-playoff config validation (leaguePlayoffTopN must be 0/3/4).
+		if err := validateLeaguePlayoffConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -658,8 +706,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
+			// Zero out pool-config fields that have no meaning for the
+			// chosen format. Mirrors the same call in the POST handler.
+			normalizePoolConfig(&comp)
+
 			// FR-050a: swiss-specific config validation.
 			if err := validateSwissConfig(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// League-playoff config validation (leaguePlayoffTopN must be 0/3/4).
+			if err := validateLeaguePlayoffConfig(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -844,6 +902,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.SwissRounds = comp.SwissRounds
 				current.Naginata = comp.Naginata
 				current.CheckInEnabled = comp.CheckInEnabled
+				// League-playoff config (Phase 3b): only settable pre-start
+				// (Status == setup) via settings PUT; the finalize endpoint
+				// manages LeaguePlayoffFinalized independently. The PUT
+				// validator above already enforces LeaguePlayoffTopN ∈ {0,3,4}.
+				current.LeaguePlayoffTopN = comp.LeaguePlayoffTopN
+				current.LeagueTwoThirdPlaces = comp.LeagueTwoThirdPlaces
 				return current, nil
 			})
 			return updateErr

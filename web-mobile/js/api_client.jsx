@@ -1251,7 +1251,77 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to delete logo (Status ${res.status})`);
         }
-    }
+    },
+
+    // Phase 3b (mp-8rc9): league play-off operator API.
+    //
+    // leaguePlayoffCandidates — GET /competitions/:id/league-playoff/candidates
+    // Returns { candidates: [{teamNames, minPosition, maxPosition}], finalized: bool }.
+    async leaguePlayoffCandidates(compID) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-playoff/candidates`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to load league play-off candidates (${res.status})`);
+        }
+        return res.json();
+    },
+
+    // leaguePlayoffGenerate — POST /competitions/:id/league-playoff
+    // Body: { teamNames: string[] } — the tied group to play off.
+    // Returns { matches: MatchResult[] } on 201.
+    // Throws on 400 (invalid group), 409 (matches already exist).
+    async leaguePlayoffGenerate(compID, teamNames, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-playoff`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ teamNames }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to generate league play-off (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
+
+    // leaguePlayoffRemove — DELETE /competitions/:id/league-playoff
+    // Body: { teamNames: string[] } — the tied group whose unscored matches to remove.
+    // Returns { deleted: number } on 200.
+    // Throws on 404 (no matches found), 409 (any match already scored).
+    async leaguePlayoffRemove(compID, teamNames, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-playoff`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ teamNames }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to remove league play-off matches (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
+
+    // leaguePlayoffFinalize — POST /competitions/:id/league-playoff/finalize
+    // Accepts the current standings as final without a play-off. Sets the
+    // LeaguePlayoffFinalized flag so MaybeAutoCompletePools can transition.
+    // Returns { finalized: true } on 200.
+    // Throws on 404 (comp not found), 409 (already complete).
+    async leaguePlayoffFinalize(compID, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-playoff/finalize`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password },
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to finalise league standings (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
 };
 
 export { API, subscribeSyncStatus, enqueueRunningWrite };

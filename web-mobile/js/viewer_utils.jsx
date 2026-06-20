@@ -25,7 +25,7 @@ export function competitionKindLabel(c) {
   return base;
 }
 
-export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
+export const poolLabel = (m) => m.compFormat === "league" ? "League table" : m.poolName;
 // Publish to window so viewer_watchlist.js can read window.poolLabel. Load order
 // is irrelevant: viewer_watchlist.js (its own <script> tag) reads this at RENDER
 // time, by which point viewer.js — which imports/evaluates this module — has run.

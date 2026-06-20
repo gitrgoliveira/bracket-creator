@@ -226,6 +226,13 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 		// matches may now be live — refresh without a full status change.
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
+	case engine.AutoCompleteAwaitingLeaguePlayoff:
+		// All regular team-league pool matches are complete but consequential ties
+		// remain — the operator must either generate play-off matches or finalize
+		// shared ranks via the league-playoff endpoints (Phase 3b). Signal a
+		// match_updated event so connected clients reload standings and display
+		// the awaiting-playoff banner.
+		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 	}
 }
 

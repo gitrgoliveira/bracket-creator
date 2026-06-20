@@ -125,6 +125,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     sideB: toPlayer(m.sideB),
     compId: m.compId || (comp && comp.id) || "",
     compName: m.compName || (comp && comp.name) || "",
+    compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     phase: m.phase || "pool",
@@ -214,7 +215,15 @@ function RankInput({ initial, className, onCommit, style }) {
   );
 }
 
+// poolDisplayLabel — returns the user-facing label for a pool heading.
+// League competitions use a single pool that spans the full roster; calling
+// it "Pool A" would be confusing, so we show "League table" instead.
+function poolDisplayLabel(pool, format) {
+  return format === "league" ? "League table" : (pool.poolName || "");
+}
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
+  const isLeague = c && c.format === "league";
   const resetOverrides = async () => {
     if (!(await window.confirmDialog({ message: "Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?", confirmLabel: "Reset overrides", danger: true }))) return;
     const admin = await window.promptAdminPassword();
@@ -240,6 +249,168 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Phase 3b (mp-8rc9): league play-off candidate state.
+  // Only fetched for team leagues in the "pools" phase.
+  const isTeamLeague = isLeague && (c.teamSize > 0 || c.kind === "team");
+  const [playoffCandidates, setPlayoffCandidates] = useStateA(null);
+  const [playoffFinalized, setPlayoffFinalized] = useStateA(false);
+  const [playoffActionBusy, setPlayoffActionBusy] = useStateA(false);
+  // Per-button busy key: "<teamNamesKey>:<action>" or "finalize". Keeps the
+  // spinner scoped to exactly the clicked button while all others stay
+  // disabled (playoffActionBusy is still set on all). null = no action in
+  // flight.
+  const [playoffBusyAction, setPlayoffBusyAction] = useStateA(null);
+  const [playoffErr, setPlayoffErr] = useStateA(null);
+
+  // Fetch candidates whenever poolMatches changes (triggered by match_updated
+  // SSE events, which the Go handler now broadcasts for AwaitingLeaguePlayoff).
+  useEffectA(() => {
+    if (!isTeamLeague || c.status !== "pools") return;
+    let cancelled = false;
+    window.API.leaguePlayoffCandidates(c.id)
+      .then(data => {
+        if (cancelled || !mountedRef.current) return;
+        setPlayoffCandidates(data.candidates || []);
+        setPlayoffFinalized(!!data.finalized);
+        setPlayoffErr(null);
+      })
+      .catch(e => {
+        if (cancelled || !mountedRef.current) return;
+        // Non-fatal: banner stays hidden on fetch error (operator can still
+        // use the schedule page to score matches; the banner is advisory).
+        setPlayoffErr(e.message);
+      });
+    return () => { cancelled = true; };
+  }, [c.id, c.status, isTeamLeague, poolMatches]);
+
+  const handlePlayoffGenerate = async (groupTeamNames) => {
+    const actionKey = groupTeamNames.join(",") + ":generate";
+    setPlayoffActionBusy(true);
+    setPlayoffBusyAction(actionKey);
+    setPlayoffErr(null);
+    try {
+      await window.API.leaguePlayoffGenerate(c.id, groupTeamNames, password);
+      // SSE match_updated will reload poolMatches and re-fetch candidates.
+    } catch (e) {
+      if (mountedRef.current) setPlayoffErr(e.message || "Failed to generate play-off matches");
+    } finally {
+      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+    }
+  };
+
+  const handlePlayoffRemove = async (groupTeamNames) => {
+    if (!(await window.confirmDialog({ message: `Remove unscored play-off matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
+    const actionKey = groupTeamNames.join(",") + ":remove";
+    setPlayoffActionBusy(true);
+    setPlayoffBusyAction(actionKey);
+    setPlayoffErr(null);
+    try {
+      await window.API.leaguePlayoffRemove(c.id, groupTeamNames, password);
+    } catch (e) {
+      if (mountedRef.current) setPlayoffErr(e.message || "Failed to remove play-off matches");
+    } finally {
+      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+    }
+  };
+
+  const handlePlayoffFinalize = async () => {
+    if (!(await window.confirmDialog({ message: "Accept the current standings as final without a play-off? This cannot be undone.", confirmLabel: "Accept shared ranks", danger: false }))) return;
+    setPlayoffActionBusy(true);
+    setPlayoffBusyAction("finalize");
+    setPlayoffErr(null);
+    try {
+      await window.API.leaguePlayoffFinalize(c.id, password);
+      if (mountedRef.current) setPlayoffFinalized(true);
+    } catch (e) {
+      if (mountedRef.current) setPlayoffErr(e.message || "Failed to finalise standings");
+    } finally {
+      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+    }
+  };
+
+  // Does a DH match already exist for the given group (both sides present in
+  // poolMatches)? Used to decide whether to show "Run play-off" vs "Remove".
+  const dhMatchExistsForGroup = (groupTeamNames) => {
+    const nameSet = new Set(groupTeamNames);
+    return (poolMatches || []).some(m => {
+      const sideA = m.sideA?.name || m.sideA;
+      const sideB = m.sideB?.name || m.sideB;
+      return m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB);
+    });
+  };
+
+  // Banner element: shown when there are consequential tied groups with no
+  // play-off matches yet, OR when play-off matches have been generated.
+  const leaguePlayoffBanner = isTeamLeague && c.status === "pools" && playoffCandidates && playoffCandidates.length > 0 ? (
+    <div
+      className="alert alert--warn league-playoff"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="league-playoff__title">League play-off required</div>
+      <div className="league-playoff__desc">
+        All regular matches are complete. The groups below are tied at a qualifying position — run a play-off or accept the shared ranks to finalise standings.
+      </div>
+      {playoffCandidates.map((group, gi) => {
+        const names = group.teamNames || [];
+        const hasDH = dhMatchExistsForGroup(names);
+        const posLabel = group.minPosition === group.maxPosition
+          ? `Position ${group.minPosition}`
+          : `Positions ${group.minPosition}–${group.maxPosition}`;
+        const generateKey = names.join(",") + ":generate";
+        const removeKey = names.join(",") + ":remove";
+        return (
+          <div key={gi} className="league-playoff__group">
+            <div className="league-playoff__group-header">
+              <span className="league-playoff__pos">{posLabel}</span>
+              <span className="league-playoff__teams">{names.join(" · ")}</span>
+            </div>
+            <div className="league-playoff__actions">
+              {!hasDH ? (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--primary"
+                  disabled={playoffActionBusy}
+                  onClick={() => handlePlayoffGenerate(names)}
+                >
+                  {playoffBusyAction === generateKey && <span className="spinner" />}
+                  Run play-off
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--danger btn--ghost"
+                  disabled={playoffActionBusy}
+                  onClick={() => handlePlayoffRemove(names)}
+                >
+                  {playoffBusyAction === removeKey && <span className="spinner" />}
+                  Remove unscored play-offs
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {!playoffFinalized && (
+        <div className="league-playoff__finalize">
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            disabled={playoffActionBusy}
+            onClick={handlePlayoffFinalize}
+          >
+            {playoffBusyAction === "finalize" && <span className="spinner" />}
+            Accept shared ranks / no play-off
+          </button>
+          <div className="field__hint" style={{ marginTop: 4 }}>Marks all tied groups as final without additional matches.</div>
+        </div>
+      )}
+      {playoffErr && (
+        <div className="league-playoff__err">{playoffErr}</div>
+      )}
+    </div>
+  ) : null;
 
   // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
   // teamSize, compName, phase, poolName). Pool-match objects from
@@ -291,7 +462,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   ) : null;
 
   if (!pools || pools.length === 0) {
-    return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
+    return <div className="empty"><div className="icon">⏳</div><h3>{isLeague ? "League not drawn yet" : "Pools not drawn yet"}</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to {isLeague ? "draw the league table" : "draw pools"}.</div></div>;
   }
 
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
@@ -308,7 +479,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         <div className="card">
           <div className="card__head">
             <div>
-              <h2 className="page-head__title">{selectedPool.poolName}</h2>
+              <h2 className="page-head__title">{poolDisplayLabel(selectedPool, c.format)}</h2>
               <div className="card__sub">Shiaijo {court} · {pluralize(selectedPool.players.length, "participant")}</div>
             </div>
             <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
@@ -441,9 +612,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
+      {leaguePlayoffBanner}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{pluralize(pools.length, "pool")}</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{isLeague ? "League" : pluralize(pools.length, "pool")}</div>
         </div>
         <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
       </div>
@@ -470,7 +642,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             >
               <div className="pool__head">
                 <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
-                  <div className="pool__name">{pool.poolName}</div>
+                  <div className="pool__name">{poolDisplayLabel(pool, c.format)}</div>
                   <div className="tag-badge" style={{ margin: 0 }}>SHIAIJO {court}</div>
                 </div>
               </div>

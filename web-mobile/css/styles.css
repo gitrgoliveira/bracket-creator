@@ -3098,6 +3098,24 @@ button.pool-match-row {
   color: white;
 }
 
+/* Prominent admin pill — only while the tournament has zero competitions, so
+   the operator setting up a fresh tournament isn't left hunting for the entry
+   point. Solid white fill + navy text reads as the primary action on the navy
+   hero; reverts to the quiet pill above once any competition exists. */
+.viewer__head--hero .viewer__admin-pill--prominent {
+  background: var(--accent-fg);
+  border-color: var(--accent-fg);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 5px 12px;
+}
+
+.viewer__head--hero .viewer__admin-pill--prominent:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .viewer__logo {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }

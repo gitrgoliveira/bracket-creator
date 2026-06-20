@@ -3106,14 +3106,41 @@ button.pool-match-row {
   background: var(--accent-fg);
   border-color: var(--accent-fg);
   color: var(--accent);
-  font-weight: 600;
-  font-size: 11px;
-  padding: 5px 12px;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 7px 14px;
+  letter-spacing: 0.02em;
+  /* Lift the white pill off the navy hero so it reads as a raised, pressable
+     control, then a slow white ring pulse draws the eye — the loud "set this
+     up" signal while the tournament has zero competitions. White ring (not the
+     navy running-pulse of §3) so the two motion languages never collide. */
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35);
+  animation: admin-pill-pulse 2s var(--ease-out) infinite;
 }
 
 .viewer__head--hero .viewer__admin-pill--prominent:hover {
   background: var(--accent-soft);
   color: var(--accent);
+  /* Intent shown — settle the pulse so it doesn't nag during interaction. */
+  animation: none;
+}
+
+@keyframes admin-pill-pulse {
+  0% {
+    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
+                0 0 0 0 color-mix(in srgb, var(--accent-fg) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
+                0 0 0 7px color-mix(in srgb, var(--accent-fg) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer__head--hero .viewer__admin-pill--prominent {
+    animation: none;
+  }
 }
 
 .viewer__logo {

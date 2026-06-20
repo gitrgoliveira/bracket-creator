@@ -1048,3 +1048,43 @@ func TestLeagueTiebreakDelete_RejectsNonTeamLeague(t *testing.T) {
 	// The mixed comp's DH match must NOT have been removed.
 	assert.Len(t, store.matches, 1, "non-league DELETE must not touch matches")
 }
+
+// TestLeagueTiebreakPost_RejectsNonTeamLeague pins the POST guard added in the
+// same Copilot fix round: POST /league-tiebreak must refuse competitions that are
+// not team-leagues, returning 400 without injecting any matches.
+func TestLeagueTiebreakPost_RejectsNonTeamLeague(t *testing.T) {
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+
+	t.Run("non-league format (mixed)", func(t *testing.T) {
+		eng := &stubLeagueTiebreakEngine{}
+		mixed := makeTeamLeagueComp(state.CompStatusPools)
+		mixed.Format = state.CompFormatMixed // valid team comp, but not a league
+		store := &stubLeagueTiebreakStore{comp: mixed}
+		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Empty(t, store.matches, "non-league POST must not inject any matches")
+	})
+
+	t.Run("non-team kind (individual league)", func(t *testing.T) {
+		eng := &stubLeagueTiebreakEngine{}
+		indv := makeTeamLeagueComp(state.CompStatusPools)
+		indv.Kind = "individual" // league format but not a team comp
+		indv.TeamSize = 0
+		store := &stubLeagueTiebreakStore{comp: indv}
+		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Empty(t, store.matches, "individual-league POST must not inject any matches")
+	})
+}

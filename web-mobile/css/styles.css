@@ -5659,7 +5659,7 @@ button.pool-match-row {
   color: #15803d;
 }
 
-/* ---------- League play-off banner (.league-tiebreak) ----------
+/* ---------- League tie-breaker banner (.league-tiebreak) ----------
    Amber "attention" treatment (--warn-*) — never navy --accent (running state)
    and never red (Aka/danger). Composes .alert .alert--warn for the base
    background/border/color, then adds layout specifics.

@@ -181,6 +181,25 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
+		// Guard: this endpoint applies only to team-league competitions.
+		// Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
+		// on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so the Kind
+		// check alone is sufficient.
+		postComp, err := store.LoadCompetition(id)
+		if err != nil {
+			log.Printf("league-tiebreak POST LoadCompetition(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		if postComp == nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if postComp.Format != state.CompFormatLeague || postComp.Kind != "team" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
+			return
+		}
+
 		// Validate the selection against LeagueTiebreakCandidates BEFORE calling
 		// GenerateLeagueTiebreakMatches. The engine does not validate this
 		// constraint itself — the handler is the gate.
@@ -191,7 +210,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			log.Printf("league-tiebreak POST LeagueTiebreakCandidates(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 
@@ -231,7 +251,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		// (all pairs present = idempotent call that already completed).
 		existing, err := store.LoadPoolMatches(id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			log.Printf("league-tiebreak POST LoadPoolMatches(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 		pairsNeeded := len(reqSet) * (len(reqSet) - 1) / 2
@@ -262,7 +283,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			log.Printf("league-tiebreak POST GenerateLeagueTiebreakMatches(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 
@@ -383,7 +405,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return nil
 		})
 		if txErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			log.Printf("league-tiebreak DELETE WithTransaction(%s): %v", id, txErr)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 		switch {
@@ -436,7 +459,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return comp, nil
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			log.Printf("league-tiebreak finalize UpdateCompetitionChanged(%s): %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
 		if notFoundFlag {

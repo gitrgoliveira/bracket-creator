@@ -55,11 +55,11 @@ const (
 	// done and there is at least one consequential tie (a group of tied teams whose
 	// position range intersects [1..LeagueTiebreakTopN], adjusted for the two-joint-
 	// 3rd-places convention). The competition stays in CompStatusPools; the engine
-	// did NOT auto-inject any DH matches. The operator must decide which teams play
-	// a supplementary tie-breaker (Phase 3b will add the operator endpoint). Until the
-	// operator acts (or accepts shared ranks), the competition cannot transition to
-	// CompStatusComplete. Callers should broadcast EventScheduleUpdated so the UI
-	// can show the "awaiting tie-breaker decision" banner.
+	// did NOT auto-inject any DH matches. The operator must use the league-tiebreak
+	// endpoints to either generate tie-breaker matches or accept shared ranks. Until
+	// the operator acts, the competition cannot transition to CompStatusComplete.
+	// Callers should broadcast both EventMatchUpdated (reload standings) and
+	// EventScheduleUpdated (so the UI shows the "awaiting tie-breaker" banner).
 	AutoCompleteAwaitingLeagueTiebreak AutoCompleteOutcome = 5
 )
 

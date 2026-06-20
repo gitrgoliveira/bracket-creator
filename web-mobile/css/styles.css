@@ -5637,53 +5637,53 @@ button.pool-match-row {
   color: #15803d;
 }
 
-/* ---------- League play-off banner (.league-playoff) ----------
+/* ---------- League play-off banner (.league-tiebreak) ----------
    Amber "attention" treatment (--warn-*) — never navy --accent (running state)
    and never red (Aka/danger). Composes .alert .alert--warn for the base
    background/border/color, then adds layout specifics.
    P1: fully tokenized — zero hex fallbacks.
    P3: coarse-pointer rule at bottom ensures ≥44px touch targets on tablets. */
-.league-playoff {
+.league-tiebreak {
   margin-bottom: 16px;
   padding: 16px;
   border-radius: var(--r);
 }
 
-.league-playoff__title {
+.league-tiebreak__title {
   font-weight: 700;
   margin-bottom: 8px;
   /* color inherited from .alert--warn → var(--warn-ink) */
 }
 
-.league-playoff__desc {
+.league-tiebreak__desc {
   color: var(--ink-2);
   font-size: 13px;
   margin-bottom: 12px;
 }
 
-.league-playoff__group {
+.league-tiebreak__group {
   padding-bottom: 10px;
   margin-bottom: 10px;
   border-bottom: 1px solid var(--warn-border);
 }
-.league-playoff__group:last-of-type {
+.league-tiebreak__group:last-of-type {
   padding-bottom: 0;
   margin-bottom: 0;
   border-bottom: none;
 }
 
-.league-playoff__pos {
+.league-tiebreak__pos {
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-3);
 }
 
-.league-playoff__teams {
+.league-tiebreak__teams {
   font-size: 13px;
   color: var(--ink-1);
 }
 
-.league-playoff__group-header {
+.league-tiebreak__group-header {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5691,42 +5691,42 @@ button.pool-match-row {
   margin-bottom: 6px;
 }
 
-.league-playoff__actions {
+.league-tiebreak__actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 6px;
 }
 
-.league-playoff__finalize {
+.league-tiebreak__finalize {
   border-top: 1px solid var(--warn-border);
   margin-top: 14px;
   padding-top: 12px;
 }
 
-.league-playoff__err {
+.league-tiebreak__err {
   color: var(--danger);
   font-size: 12px;
   margin-top: 10px;
 }
 
 /* Entrance: 150ms fade + subtle lift (DESIGN.md: ~140–160ms range, --ease-out). */
-@keyframes league-playoff-in {
+@keyframes league-tiebreak-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.league-playoff {
-  animation: league-playoff-in 150ms var(--ease-out) both;
+.league-tiebreak {
+  animation: league-tiebreak-in 150ms var(--ease-out) both;
 }
 
 /* Tablet touch targets: ≥44px height on banner buttons (DESIGN.md §6 a11y floor). */
 @media (pointer: coarse) {
-  .league-playoff .btn { min-height: 44px; }
+  .league-tiebreak .btn { min-height: 44px; }
 }
 
 /* Gate entrance animation for users who prefer reduced motion. */
 @media (prefers-reduced-motion: reduce) {
-  .league-playoff { animation: none; }
+  .league-tiebreak { animation: none; }
 }
 
 .seed-row__handle {

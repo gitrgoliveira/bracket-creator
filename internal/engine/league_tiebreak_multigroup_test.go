@@ -64,12 +64,12 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 	return eng, store
 }
 
-// scoreGroupDH generates a play-off for the named group and marks every
+// scoreGroupDH generates a tie-breaker for the named group and marks every
 // resulting DH match completed with the given winner, mirroring the operator
-// running + scoring a play-off.
+// running + scoring a tie-breaker.
 func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, teams []string, winner string) {
 	t.Helper()
-	injected, err := eng.GenerateLeaguePlayoffMatches(compID, teams)
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams)
 	require.NoError(t, err)
 	require.NotEmpty(t, injected, "expected DH matches to be generated for %v", teams)
 
@@ -89,7 +89,7 @@ func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, 
 
 // TestMaybeAutoCompletePools_MultipleConsequentialGroups is the regression test
 // for the tri-review critical finding: with two separate consequential tied
-// groups, resolving ONE group's play-off must NOT let the competition complete
+// groups, resolving ONE group's tie-breaker must NOT let the competition complete
 // while the OTHER group is still unresolved. Before the per-group gate fix, the
 // coarse `!hasCompleteDH` guard let the first completed DH flip the competition
 // to complete with the second tie unresolved.
@@ -98,14 +98,14 @@ func TestMaybeAutoCompletePools_MultipleConsequentialGroups(t *testing.T) {
 	eng, store := setupTwoTiedGroupLeague(t, compID)
 
 	// Both groups consequential (top-3 default band: 1–2 and 3–4).
-	cands, err := eng.LeaguePlayoffCandidates(compID)
+	cands, err := eng.LeagueTiebreakCandidates(compID)
 	require.NoError(t, err)
 	require.Len(t, cands, 2, "expected two consequential tied groups")
 
 	// Nothing actioned yet → block.
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteAwaitingLeaguePlayoff, outcome)
+	assert.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
 	// Resolve ONLY the top group.
 	scoreGroupDH(t, eng, store, compID, []string{"Alpha", "Beta"}, "Alpha")
@@ -114,7 +114,7 @@ func TestMaybeAutoCompletePools_MultipleConsequentialGroups(t *testing.T) {
 	// AutoCompleteTransitioned, completing with an unresolved consequential tie.)
 	outcome, err = eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteAwaitingLeaguePlayoff, outcome,
+	assert.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome,
 		"competition must not complete while a second consequential tie is unresolved")
 
 	comp, err := store.LoadCompetition(compID)
@@ -135,21 +135,21 @@ func TestMaybeAutoCompletePools_MultipleConsequentialGroups(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_SingleGroupNoWedge guards the failure mode of the
-// naive fix (always calling LeaguePlayoffCandidates without the per-group DH
-// check): a single tied group, once its play-off is scored, must complete and
-// not wedge in AwaitingLeaguePlayoff (DH results don't break the Points tie, so
-// the group keeps appearing in LeaguePlayoffCandidates).
+// naive fix (always calling LeagueTiebreakCandidates without the per-group DH
+// check): a single tied group, once its tie-breaker is scored, must complete and
+// not wedge in AwaitingLeagueTiebreak (DH results don't break the Points tie, so
+// the group keeps appearing in LeagueTiebreakCandidates).
 func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 	compID := "single-tie-league"
 	eng, store := setupTeamPoolComp(t, compID, true) // 3-way all-draw tie
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
-	require.Equal(t, AutoCompleteAwaitingLeaguePlayoff, outcome)
+	require.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
-	// Operator runs the full 3-way round-robin play-off with a clear order
+	// Operator runs the full 3-way round-robin tie-breaker with a clear order
 	// (Alpha > Beta > Gamma, Alpha > Gamma): no cycle.
-	injected, err := eng.GenerateLeaguePlayoffMatches(compID, []string{"Alpha", "Beta", "Gamma"})
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"})
 	require.NoError(t, err)
 	require.Len(t, injected, 3)
 	all, err := store.LoadPoolMatches(compID)

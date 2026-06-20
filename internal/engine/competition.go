@@ -51,16 +51,16 @@ const (
 	// gated — court/time can be set on a placeholder match at any time). Callers
 	// should broadcast EventMatchUpdated and EventScheduleUpdated.
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
-	// AutoCompleteAwaitingLeaguePlayoff means all regular team-league matches are
+	// AutoCompleteAwaitingLeagueTiebreak means all regular team-league matches are
 	// done and there is at least one consequential tie (a group of tied teams whose
-	// position range intersects [1..LeaguePlayoffTopN], adjusted for the two-joint-
+	// position range intersects [1..LeagueTiebreakTopN], adjusted for the two-joint-
 	// 3rd-places convention). The competition stays in CompStatusPools; the engine
 	// did NOT auto-inject any DH matches. The operator must decide which teams play
-	// a supplementary play-off (Phase 3b will add the operator endpoint). Until the
+	// a supplementary tie-breaker (Phase 3b will add the operator endpoint). Until the
 	// operator acts (or accepts shared ranks), the competition cannot transition to
 	// CompStatusComplete. Callers should broadcast EventScheduleUpdated so the UI
-	// can show the "awaiting play-off decision" banner.
-	AutoCompleteAwaitingLeaguePlayoff AutoCompleteOutcome = 5
+	// can show the "awaiting tie-breaker decision" banner.
+	AutoCompleteAwaitingLeagueTiebreak AutoCompleteOutcome = 5
 )
 
 // MaybeAutoCompletePools advances a competition past its pool phase after a pool
@@ -70,11 +70,11 @@ const (
 //     pool match is recorded as completed, with supplementary ippon-shobu
 //     tiebreaker matches auto-injected for tied competitors.
 //   - League format (team) → transitions to CompStatusComplete once every pool
-//     match is done AND there are no consequential ties requiring a play-off. If
-//     there are consequential ties, AutoCompleteAwaitingLeaguePlayoff is returned
+//     match is done AND there are no consequential ties requiring a tie-breaker. If
+//     there are consequential ties, AutoCompleteAwaitingLeagueTiebreak is returned
 //     and the competition stays in CompStatusPools; NO DH matches are auto-injected.
-//     The operator decides whether to run a play-off (Phase 3b). If all ties are
-//     non-consequential (below the playoff band or covered by the two-thirds rule),
+//     The operator decides whether to run a tie-breaker (Phase 3b). If all ties are
+//     non-consequential (below the tie-break band or covered by the two-thirds rule),
 //     the league completes with shared ranks.
 //   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
 //     pool's finishers into the in-place knockout bracket incrementally (no
@@ -155,9 +155,9 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// All regular matches (and any existing TB/DH matches) are complete.
 	//
 	// Team-league path: the operator decides whether to run supplementary
-	// play-off matches — we do NOT auto-inject DH matches. Instead, block
+	// tie-breaker matches — we do NOT auto-inject DH matches. Instead, block
 	// completion while any CONSEQUENTIAL tied group still lacks an operator
-	// play-off, returning AwaitingLeaguePlayoff so the UI can surface the
+	// tie-breaker, returning AwaitingLeagueTiebreak so the UI can surface the
 	// decision.
 	//
 	// We check per-group, NOT via the coarse hasCompleteDH flag: a league
@@ -165,24 +165,24 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// 3rd–4th). Resolving one group's DH would flip hasCompleteDH true and,
 	// under a blanket `!hasCompleteDH` gate, let the competition complete with
 	// the other group still unresolved. DH results are excluded from the Points
-	// totals (scoring.go), so LeaguePlayoffCandidates keeps reporting a group
+	// totals (scoring.go), so LeagueTiebreakCandidates keeps reporting a group
 	// even after its DH is scored; we therefore treat a group as "actioned"
 	// when a DH match exists for it (any DH is guaranteed complete here —
 	// hasIncompleteDH bailed above) and hand the resolved/cyclic verdict to the
-	// dhCycleExists guard below. LeaguePlayoffCandidates returns [] when the
+	// dhCycleExists guard below. LeagueTiebreakCandidates returns [] when the
 	// operator has finalized shared ranks, so that path completes normally.
 	//
-	// Non-consequential ties (below the playoff band, or covered by the
+	// Non-consequential ties (below the tie-break band, or covered by the
 	// LeagueTwoThirdPlaces exemption) are accepted as shared ranks.
 	if isTeamLeague {
-		candidates, candErr := e.LeaguePlayoffCandidates(compID)
+		candidates, candErr := e.LeagueTiebreakCandidates(compID)
 		if candErr != nil {
 			return AutoCompleteNoChange, candErr
 		}
 		for _, g := range candidates {
 			if !leagueGroupHasDH(g.Teams, matches) {
-				// A consequential tie with no play-off yet — operator must act.
-				return AutoCompleteAwaitingLeaguePlayoff, nil
+				// A consequential tie with no tie-breaker yet — operator must act.
+				return AutoCompleteAwaitingLeagueTiebreak, nil
 			}
 		}
 		// Every consequential group either has a DH (verified below) or none
@@ -216,7 +216,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	}
 
 	// For team competitions where DH matches have been played (either via
-	// operator-triggered league play-offs or auto-injected mixed/pools DH):
+	// operator-triggered league tie-breakers or auto-injected mixed/pools DH):
 	// verify that the DH results actually broke all ties before transitioning.
 	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
 	// possible in a 3+ team pool with a full round-robin DH), every team in
@@ -350,12 +350,12 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // name → team name → rank). A tied group whose every member has a
 // manual rank override is considered resolved — the operator has
 // explicitly ranked them, so the cycle no longer blocks completion.
-// leagueGroupHasDH reports whether a daihyosen play-off match already exists
+// leagueGroupHasDH reports whether a daihyosen tie-breaker match already exists
 // between two members of the given tied group — i.e. the operator has run a
-// play-off for it. Used by MaybeAutoCompletePools to decide, per consequential
+// tie-breaker for it. Used by MaybeAutoCompletePools to decide, per consequential
 // group, whether the operator still needs to act. At that call site every DH
 // match is guaranteed complete (an incomplete DH bails earlier), so "a DH match
-// exists" means "the operator has actioned this group"; whether that play-off
+// exists" means "the operator has actioned this group"; whether that tie-breaker
 // actually resolved the order is then verified by dhCycleExists.
 func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	names := make(map[string]bool, len(group))

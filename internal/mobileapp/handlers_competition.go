@@ -198,20 +198,20 @@ func validateSwissConfig(comp *state.Competition) error {
 	return nil
 }
 
-// validateLeaguePlayoffConfig validates the league-playoff configuration knobs
-// (LeaguePlayoffTopN, LeagueTwoThirdPlaces). These fields are only meaningful
+// validateLeagueTiebreakConfig validates the league-tiebreak configuration knobs
+// (LeagueTiebreakTopN, LeagueTwoThirdPlaces). These fields are only meaningful
 // for team-league competitions; they are silently ignored for other formats/kinds
 // and must not cause errors there. Returns nil for non-league or non-team comps.
-func validateLeaguePlayoffConfig(comp *state.Competition) error {
+func validateLeagueTiebreakConfig(comp *state.Competition) error {
 	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
 		return nil
 	}
-	switch comp.LeaguePlayoffTopN {
+	switch comp.LeagueTiebreakTopN {
 	case 0, 3, 4:
 		// 0 = unset (will default to 3 at draw time); 3 and 4 are the only
 		// legal explicit values (per owner decision Q1).
 	default:
-		return fmt.Errorf("leaguePlayoffTopN must be 3 or 4 (got %d)", comp.LeaguePlayoffTopN)
+		return fmt.Errorf("leagueTiebreakTopN must be 3 or 4 (got %d)", comp.LeagueTiebreakTopN)
 	}
 	return nil
 }
@@ -420,8 +420,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// League-playoff config validation (leaguePlayoffTopN must be 0/3/4).
-		if err := validateLeaguePlayoffConfig(&comp); err != nil {
+		// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+		if err := validateLeagueTiebreakConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -716,8 +716,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
-			// League-playoff config validation (leaguePlayoffTopN must be 0/3/4).
-			if err := validateLeaguePlayoffConfig(&comp); err != nil {
+			// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+			if err := validateLeagueTiebreakConfig(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -902,22 +902,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.SwissRounds = comp.SwissRounds
 				current.Naginata = comp.Naginata
 				current.CheckInEnabled = comp.CheckInEnabled
-				// League-playoff config (Phase 3b) is only settable pre-start.
+				// League tie-breaker config (Phase 3b) is only settable pre-start.
 				// Once the competition has started (status past setup) the
-				// consequential-tie set is in play, so changing leaguePlayoffTopN
+				// consequential-tie set is in play, so changing leagueTiebreakTopN
 				// or leagueTwoThirdPlaces could re-block or unblock completion and
-				// change which ties already-played play-offs were meant to resolve.
+				// change which ties already-played tie-breakers were meant to resolve.
 				// Reject a change rather than silently ignoring it. The draw-ready
 				// state already returned early above; the PUT validator enforces
-				// LeaguePlayoffTopN ∈ {0,3,4}. LeaguePlayoffFinalized is managed by
+				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
 				// the finalize endpoint, never here.
 				started := current.Status != state.CompStatusSetup && current.Status != ""
-				if started && (comp.LeaguePlayoffTopN != current.LeaguePlayoffTopN ||
+				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
 					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
-					validationErr = fmt.Errorf("leaguePlayoffTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
+					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
 					return nil, nil
 				}
-				current.LeaguePlayoffTopN = comp.LeaguePlayoffTopN
+				current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
 				current.LeagueTwoThirdPlaces = comp.LeagueTwoThirdPlaces
 				return current, nil
 			})

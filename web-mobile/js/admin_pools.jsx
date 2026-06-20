@@ -250,87 +250,87 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
-  // Phase 3b (mp-8rc9): league play-off candidate state.
+  // Phase 3b (mp-8rc9): league tie-breaker candidate state.
   // Only fetched for team leagues in the "pools" phase.
   const isTeamLeague = isLeague && (c.teamSize > 0 || c.kind === "team");
-  const [playoffCandidates, setPlayoffCandidates] = useStateA(null);
-  const [playoffFinalized, setPlayoffFinalized] = useStateA(false);
-  const [playoffActionBusy, setPlayoffActionBusy] = useStateA(false);
+  const [tiebreakCandidates, setTiebreakCandidates] = useStateA(null);
+  const [tiebreakFinalized, setTiebreakFinalized] = useStateA(false);
+  const [tiebreakActionBusy, setTiebreakActionBusy] = useStateA(false);
   // Per-button busy key: "<teamNamesKey>:<action>" or "finalize". Keeps the
   // spinner scoped to exactly the clicked button while all others stay
-  // disabled (playoffActionBusy is still set on all). null = no action in
+  // disabled (tiebreakActionBusy is still set on all). null = no action in
   // flight.
-  const [playoffBusyAction, setPlayoffBusyAction] = useStateA(null);
-  const [playoffErr, setPlayoffErr] = useStateA(null);
+  const [tiebreakBusyAction, setTiebreakBusyAction] = useStateA(null);
+  const [tiebreakErr, setTiebreakErr] = useStateA(null);
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
-  // SSE events, which the Go handler now broadcasts for AwaitingLeaguePlayoff).
+  // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
   useEffectA(() => {
     if (!isTeamLeague || c.status !== "pools") return;
     let cancelled = false;
-    window.API.leaguePlayoffCandidates(c.id)
+    window.API.leagueTiebreakCandidates(c.id)
       .then(data => {
         if (cancelled || !mountedRef.current) return;
-        setPlayoffCandidates(data.candidates || []);
-        setPlayoffFinalized(!!data.finalized);
-        setPlayoffErr(null);
+        setTiebreakCandidates(data.candidates || []);
+        setTiebreakFinalized(!!data.finalized);
+        setTiebreakErr(null);
       })
       .catch(e => {
         if (cancelled || !mountedRef.current) return;
         // Non-fatal: banner stays hidden on fetch error (operator can still
         // use the schedule page to score matches; the banner is advisory).
-        setPlayoffErr(e.message);
+        setTiebreakErr(e.message);
       });
     return () => { cancelled = true; };
   }, [c.id, c.status, isTeamLeague, poolMatches]);
 
-  const handlePlayoffGenerate = async (groupTeamNames) => {
+  const handleTiebreakGenerate = async (groupTeamNames) => {
     const actionKey = groupTeamNames.join(",") + ":generate";
-    setPlayoffActionBusy(true);
-    setPlayoffBusyAction(actionKey);
-    setPlayoffErr(null);
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction(actionKey);
+    setTiebreakErr(null);
     try {
-      await window.API.leaguePlayoffGenerate(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password);
       // SSE match_updated will reload poolMatches and re-fetch candidates.
     } catch (e) {
-      if (mountedRef.current) setPlayoffErr(e.message || "Failed to generate play-off matches");
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to generate tie-breaker matches");
     } finally {
-      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
     }
   };
 
-  const handlePlayoffRemove = async (groupTeamNames) => {
-    if (!(await window.confirmDialog({ message: `Remove unscored play-off matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
+  const handleTiebreakRemove = async (groupTeamNames) => {
+    if (!(await window.confirmDialog({ message: `Remove unscored tie-breaker matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
     const actionKey = groupTeamNames.join(",") + ":remove";
-    setPlayoffActionBusy(true);
-    setPlayoffBusyAction(actionKey);
-    setPlayoffErr(null);
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction(actionKey);
+    setTiebreakErr(null);
     try {
-      await window.API.leaguePlayoffRemove(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password);
     } catch (e) {
-      if (mountedRef.current) setPlayoffErr(e.message || "Failed to remove play-off matches");
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to remove tie-breaker matches");
     } finally {
-      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
     }
   };
 
-  const handlePlayoffFinalize = async () => {
-    if (!(await window.confirmDialog({ message: "Accept the current standings as final without a play-off? This cannot be undone.", confirmLabel: "Accept shared ranks", danger: false }))) return;
-    setPlayoffActionBusy(true);
-    setPlayoffBusyAction("finalize");
-    setPlayoffErr(null);
+  const handleTiebreakFinalize = async () => {
+    if (!(await window.confirmDialog({ message: "Accept the current standings as final without a tie-breaker? This cannot be undone.", confirmLabel: "Accept shared ranks", danger: false }))) return;
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction("finalize");
+    setTiebreakErr(null);
     try {
-      await window.API.leaguePlayoffFinalize(c.id, password);
-      if (mountedRef.current) setPlayoffFinalized(true);
+      await window.API.leagueTiebreakFinalize(c.id, password);
+      if (mountedRef.current) setTiebreakFinalized(true);
     } catch (e) {
-      if (mountedRef.current) setPlayoffErr(e.message || "Failed to finalise standings");
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to finalise standings");
     } finally {
-      if (mountedRef.current) { setPlayoffActionBusy(false); setPlayoffBusyAction(null); }
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
     }
   };
 
   // Does a DH match already exist for the given group (both sides present in
-  // poolMatches)? Used to decide whether to show "Run play-off" vs "Remove".
+  // poolMatches)? Used to decide whether to show "Run tie-breaker" vs "Remove".
   const dhMatchExistsForGroup = (groupTeamNames) => {
     const nameSet = new Set(groupTeamNames);
     return (poolMatches || []).some(m => {
@@ -341,18 +341,18 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   };
 
   // Banner element: shown when there are consequential tied groups with no
-  // play-off matches yet, OR when play-off matches have been generated.
-  const leaguePlayoffBanner = isTeamLeague && c.status === "pools" && playoffCandidates && playoffCandidates.length > 0 ? (
+  // tie-breaker matches yet, OR when tie-breaker matches have been generated.
+  const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
     <div
-      className="alert alert--warn league-playoff"
+      className="alert alert--warn league-tiebreak"
       role="status"
       aria-live="polite"
     >
-      <div className="league-playoff__title">League play-off required</div>
-      <div className="league-playoff__desc">
-        All regular matches are complete. The groups below are tied at a qualifying position — run a play-off or accept the shared ranks to finalise standings.
+      <div className="league-tiebreak__title">Tie-breaker required</div>
+      <div className="league-tiebreak__desc">
+        All regular matches are complete. The groups below are tied at a qualifying position — run a tie-breaker or accept the shared ranks to finalise standings.
       </div>
-      {playoffCandidates.map((group, gi) => {
+      {tiebreakCandidates.map((group, gi) => {
         const names = group.teamNames || [];
         const hasDH = dhMatchExistsForGroup(names);
         const posLabel = group.minPosition === group.maxPosition
@@ -361,53 +361,53 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const generateKey = names.join(",") + ":generate";
         const removeKey = names.join(",") + ":remove";
         return (
-          <div key={gi} className="league-playoff__group">
-            <div className="league-playoff__group-header">
-              <span className="league-playoff__pos">{posLabel}</span>
-              <span className="league-playoff__teams">{names.join(" · ")}</span>
+          <div key={gi} className="league-tiebreak__group">
+            <div className="league-tiebreak__group-header">
+              <span className="league-tiebreak__pos">{posLabel}</span>
+              <span className="league-tiebreak__teams">{names.join(" · ")}</span>
             </div>
-            <div className="league-playoff__actions">
+            <div className="league-tiebreak__actions">
               {!hasDH ? (
                 <button
                   type="button"
                   className="btn btn--sm btn--primary"
-                  disabled={playoffActionBusy}
-                  onClick={() => handlePlayoffGenerate(names)}
+                  disabled={tiebreakActionBusy}
+                  onClick={() => handleTiebreakGenerate(names)}
                 >
-                  {playoffBusyAction === generateKey && <span className="spinner" />}
-                  Run play-off
+                  {tiebreakBusyAction === generateKey && <span className="spinner" />}
+                  Run tie-breaker
                 </button>
               ) : (
                 <button
                   type="button"
                   className="btn btn--sm btn--danger btn--ghost"
-                  disabled={playoffActionBusy}
-                  onClick={() => handlePlayoffRemove(names)}
+                  disabled={tiebreakActionBusy}
+                  onClick={() => handleTiebreakRemove(names)}
                 >
-                  {playoffBusyAction === removeKey && <span className="spinner" />}
-                  Remove unscored play-offs
+                  {tiebreakBusyAction === removeKey && <span className="spinner" />}
+                  Remove unscored tie-breaker
                 </button>
               )}
             </div>
           </div>
         );
       })}
-      {!playoffFinalized && (
-        <div className="league-playoff__finalize">
+      {!tiebreakFinalized && (
+        <div className="league-tiebreak__finalize">
           <button
             type="button"
             className="btn btn--sm btn--ghost"
-            disabled={playoffActionBusy}
-            onClick={handlePlayoffFinalize}
+            disabled={tiebreakActionBusy}
+            onClick={handleTiebreakFinalize}
           >
-            {playoffBusyAction === "finalize" && <span className="spinner" />}
-            Accept shared ranks / no play-off
+            {tiebreakBusyAction === "finalize" && <span className="spinner" />}
+            Accept shared ranks / no tie-breaker
           </button>
           <div className="field__hint" style={{ marginTop: 4 }}>Marks all tied groups as final without additional matches.</div>
         </div>
       )}
-      {playoffErr && (
-        <div className="league-playoff__err">{playoffErr}</div>
+      {tiebreakErr && (
+        <div className="league-tiebreak__err">{tiebreakErr}</div>
       )}
     </div>
   ) : null;
@@ -612,7 +612,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
-      {leaguePlayoffBanner}
+      {leagueTiebreakBanner}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>{isLeague ? "League" : pluralize(pools.length, "pool")}</div>

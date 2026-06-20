@@ -23,20 +23,20 @@ type TiedGroup struct {
 	MaxPosition int
 }
 
-// effectiveTopN returns the resolved LeaguePlayoffTopN for the competition.
+// effectiveTopN returns the resolved LeagueTiebreakTopN for the competition.
 // When the field is zero (unset), it defaults to 3 (the standard kendo top-N).
 func effectiveTopN(comp *state.Competition) int {
-	if comp.LeaguePlayoffTopN > 0 {
-		return comp.LeaguePlayoffTopN
+	if comp.LeagueTiebreakTopN > 0 {
+		return comp.LeagueTiebreakTopN
 	}
 	return 3
 }
 
 // isConsequentialTie reports whether a TiedGroup requires an operator-initiated
-// play-off given the competition's playoff band and two-third-places convention.
+// tie-breaker given the competition's tie-break band and two-third-places convention.
 //
 // A group is consequential when ALL of the following hold:
-//  1. The group's MinPosition is within the playoff band [1..topN], meaning at
+//  1. The group's MinPosition is within the tie-break band [1..topN], meaning at
 //     least one of the tied positions determines a top-N place.
 //  2. The group is NOT fully covered by the two-joint-3rd-places exemption:
 //     when LeagueTwoThirdPlaces is true and ALL positions in the group are at
@@ -46,15 +46,15 @@ func effectiveTopN(comp *state.Competition) int {
 // Rule precision for the two-thirds exemption:
 //   - The exemption fires only when EVERY position in the group is >= 3
 //     (i.e. MinPosition >= 3). If MinPosition < 3 the group straddles 2nd/3rd
-//     or higher, and a play-off IS needed to decide who finishes 2nd.
+//     or higher, and a tie-breaker IS needed to decide who finishes 2nd.
 //   - The exemption is applied regardless of topN — even if topN==4, a
 //     group sitting entirely at positions [3,4] is just "two joint 3rds" and
-//     no play-off is required when LeagueTwoThirdPlaces is true.
+//     no tie-breaker is required when LeagueTwoThirdPlaces is true.
 func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 	topN := effectiveTopN(comp)
 
 	// Group must intersect [1..topN]: the best position in the group must be
-	// within the playoff band.
+	// within the tie-break band.
 	if g.MinPosition > topN {
 		return false
 	}
@@ -70,9 +70,9 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 	return true
 }
 
-// LeaguePlayoffCandidates returns the consequential tied groups in a team-league
+// LeagueTiebreakCandidates returns the consequential tied groups in a team-league
 // competition after all regular pool matches are complete. A group is
-// "consequential" when it intersects the playoff band [1..LeaguePlayoffTopN] and
+// "consequential" when it intersects the tie-break band [1..LeagueTiebreakTopN] and
 // is not covered by the LeagueTwoThirdPlaces exemption (see isConsequentialTie).
 //
 // Returns an empty slice (not an error) when:
@@ -83,12 +83,12 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 // This function is the single source of truth for "are there ties that need an
 // operator decision?" and is used by both MaybeAutoCompletePools (to block
 // premature completion) and Phase 3b's operator endpoints (to list which teams
-// need a play-off).
+// need a tie-breaker).
 //
 // The league standings come from a single implicit pool ("Pool A" by convention
 // for single-pool leagues). All tied groups across all pools are evaluated;
 // in practice a league has exactly one pool.
-func (e *Engine) LeaguePlayoffCandidates(compID string) ([]TiedGroup, error) {
+func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -102,10 +102,10 @@ func (e *Engine) LeaguePlayoffCandidates(compID string) ([]TiedGroup, error) {
 		return nil, nil
 	}
 
-	// When the operator has accepted shared ranks without a play-off
+	// When the operator has accepted shared ranks without a tie-breaker
 	// (Phase 3b finalize endpoint), treat the competition as having no
 	// consequential ties so MaybeAutoCompletePools can transition normally.
-	if comp.LeaguePlayoffFinalized {
+	if comp.LeagueTiebreakFinalized {
 		return nil, nil
 	}
 
@@ -137,17 +137,17 @@ func (e *Engine) LeaguePlayoffCandidates(compID string) ([]TiedGroup, error) {
 	return candidates, nil
 }
 
-// GenerateLeaguePlayoffMatches generates the round-robin daihyosen (play-off)
+// GenerateLeagueTiebreakMatches generates the round-robin daihyosen (tie-breaker)
 // matches for a specific set of tied teams in a team-league competition. It is
-// the operator-triggered path, called by the POST /league-playoff handler after
-// it has validated the selection against LeaguePlayoffCandidates (this function
+// the operator-triggered path, called by the POST /league-tiebreak handler after
+// it has validated the selection against LeagueTiebreakCandidates (this function
 // does NOT re-validate consequentiality — the handler is the gate).
 //
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.
 // Idempotent: pairs that already exist in the store are skipped. For league
 // competitions it operates on the single league pool.
-func (e *Engine) GenerateLeaguePlayoffMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func (e *Engine) GenerateLeaguePlayoffMatches(compID string, tiedTeamNames []str
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 	if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
-		return nil, validationErrorf("GenerateLeaguePlayoffMatches is only valid for team-league competitions")
+		return nil, validationErrorf("GenerateLeagueTiebreakMatches is only valid for team-league competitions")
 	}
 
 	standings, err := e.CalculatePoolStandings(compID)

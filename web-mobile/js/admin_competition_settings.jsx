@@ -121,7 +121,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leaguePlayoffTopN, c.leagueTwoThirdPlaces]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -277,10 +277,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       swissRounds: safeInt(effective.swissRounds, latestC.swissRounds || 0),
       naginata: !!effective.naginata,
       checkInEnabled: !!effective.checkInEnabled,
-      // Phase 3b (mp-8rc9): league play-off config. Only meaningful for
+      // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
       // team-league competitions; safe to include for all formats because
       // the backend's PUT allowlist ignores unknown fields.
-      leaguePlayoffTopN: safeInt(effective.leaguePlayoffTopN, latestC.leaguePlayoffTopN || 0),
+      leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
     };
     // Capture the snapshot of edited fields we're about to persist. On
@@ -631,31 +631,31 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
-      {/* Phase 3b (mp-8rc9): league play-off settings — only for team leagues. */}
+      {/* Phase 3b (mp-8rc9): league tie-breaker settings — only for team leagues. */}
       {local.format === "league" && (local.teamSize > 0 || local.kind === "team") && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
           <div className="field">
-            <label className="field__label">Play off ties for top</label>
+            <label className="field__label">Break ties for top</label>
             <div className="radio-group">
               <button
-                className={`radio-pill ${(local.leaguePlayoffTopN || 0) === 0 || local.leaguePlayoffTopN === 3 ? "is-active" : ""}`}
+                className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leaguePlayoffTopN", 3)}
+                onClick={() => updateNow("leagueTiebreakTopN", 3)}
               >Top 3</button>
               <button
-                className={`radio-pill ${local.leaguePlayoffTopN === 4 ? "is-active" : ""}`}
+                className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leaguePlayoffTopN", 4)}
+                onClick={() => updateNow("leagueTiebreakTopN", 4)}
               >Top 4</button>
             </div>
-            <div className="field__hint">Tied teams within this finishing band require an operator-initiated play-off before standings are finalised.</div>
+            <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
               <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => updateNow("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze — no 3rd-vs-4th play-off is needed. Standard kendo convention.</div>
+            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze — no 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>
           </div>
         </div>
       )}

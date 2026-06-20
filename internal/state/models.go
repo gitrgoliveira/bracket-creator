@@ -345,17 +345,17 @@ type Competition struct {
 
 	FightingSpiritAwards []FightingSpiritAward `yaml:"fighting_spirit_awards,omitempty" json:"fightingSpiritAwards,omitempty"`
 
-	// LeaguePlayoffTopN is the highest finishing position (rank) that warrants
-	// an operator-initiated play-off when teams are tied at the end of league
+	// LeagueTiebreakTopN is the highest finishing position (rank) that warrants
+	// an operator-initiated tie-breaker when teams are tied at the end of league
 	// play. Meaningful only for team-league competitions (Format == "league" &&
 	// TeamSize > 0). Allowed values are 3 (default) and 4.
 	//
 	// A "consequential" tied group is one whose position range intersects the
-	// band [1..LeaguePlayoffTopN]. For example, with TopN=3 a tie involving
+	// band [1..LeagueTiebreakTopN]. For example, with TopN=3 a tie involving
 	// teams at positions 1–2 is consequential (it affects who wins or is
 	// runner-up), but a tie at positions 4–5 is not. When all teams in a tied
 	// group occupy positions strictly BELOW TopN (i.e. every position ≥ TopN)
-	// the group is non-consequential and no play-off is needed.
+	// the group is non-consequential and no tie-breaker is needed.
 	//
 	// The kendo convention of two joint 3rd places interacts here: when
 	// LeagueTwoThirdPlaces is true and TopN is 3 or 4, a tied group that sits
@@ -363,7 +363,7 @@ type Competition struct {
 	// both teams are awarded 3rd place and the group is non-consequential.
 	// Zero is treated as the default (3) when format == "league" and kind ==
 	// "team" at draw time.
-	LeaguePlayoffTopN int `yaml:"league_playoff_top_n,omitempty" json:"leaguePlayoffTopN,omitempty"`
+	LeagueTiebreakTopN int `yaml:"league_tiebreak_top_n,omitempty" json:"leagueTiebreakTopN,omitempty"`
 
 	// LeagueTwoThirdPlaces controls whether two joint 3rd places are awarded
 	// when multiple teams tie at the 3rd-position boundary. Meaningful only for
@@ -371,21 +371,21 @@ type Competition struct {
 	//
 	// When true, a tied group whose ENTIRE position range falls at position ≥ 3
 	// (i.e. all tied teams are at 3rd place or below) is treated as
-	// non-consequential — both receive 3rd place and no play-off is required.
+	// non-consequential — both receive 3rd place and no tie-breaker is required.
 	// This implements the standard kendo convention where there is no bronze
 	// match; two teams can share 3rd.
 	//
-	// When false (default), all ties within [1..LeaguePlayoffTopN] are
-	// consequential and may require a play-off.
+	// When false (default), all ties within [1..LeagueTiebreakTopN] are
+	// consequential and may require a tie-breaker.
 	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
 
-	// LeaguePlayoffFinalized is set to true by the operator via
-	// POST /api/competitions/:id/league-playoff/finalize to accept the
-	// current standings as final without running a play-off. When true,
-	// LeaguePlayoffCandidates returns an empty slice (even if consequential
+	// LeagueTiebreakFinalized is set to true by the operator via
+	// POST /api/competitions/:id/league-tiebreak/finalize to accept the
+	// current standings as final without running a tie-breaker. When true,
+	// LeagueTiebreakCandidates returns an empty slice (even if consequential
 	// ties remain), which allows MaybeAutoCompletePools to transition the
 	// competition to CompStatusComplete. Phase 3b.
-	LeaguePlayoffFinalized bool `yaml:"league_playoff_finalized,omitempty" json:"leaguePlayoffFinalized,omitempty"`
+	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
 }

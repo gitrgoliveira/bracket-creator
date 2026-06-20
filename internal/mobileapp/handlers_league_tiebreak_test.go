@@ -21,8 +21,8 @@ import (
 // Test stubs
 // ---------------------------------------------------------------------------
 
-// stubLeaguePlayoffStore implements LeaguePlayoffStore for handler tests.
-type stubLeaguePlayoffStore struct {
+// stubLeagueTiebreakStore implements LeagueTiebreakStore for handler tests.
+type stubLeagueTiebreakStore struct {
 	comp       *state.Competition
 	loadErr    error
 	matches    []state.MatchResult
@@ -34,19 +34,19 @@ type stubLeaguePlayoffStore struct {
 	updateFn func(*state.Competition) (*state.Competition, error)
 }
 
-func (s *stubLeaguePlayoffStore) LoadCompetition(id string) (*state.Competition, error) {
+func (s *stubLeagueTiebreakStore) LoadCompetition(id string) (*state.Competition, error) {
 	return s.comp, s.loadErr
 }
 
-func (s *stubLeaguePlayoffStore) LoadPoolMatches(id string) ([]state.MatchResult, error) {
+func (s *stubLeagueTiebreakStore) LoadPoolMatches(id string) ([]state.MatchResult, error) {
 	return s.matches, s.matchesErr
 }
 
-func (s *stubLeaguePlayoffStore) SavePoolMatches(id string, matches []state.MatchResult) error {
+func (s *stubLeagueTiebreakStore) SavePoolMatches(id string, matches []state.MatchResult) error {
 	return s.saveErr
 }
 
-func (s *stubLeaguePlayoffStore) UpdateCompetitionChanged(id string, transform func(*state.Competition) (*state.Competition, error)) (bool, error) {
+func (s *stubLeagueTiebreakStore) UpdateCompetitionChanged(id string, transform func(*state.Competition) (*state.Competition, error)) (bool, error) {
 	if s.updateErr != nil {
 		return false, s.updateErr
 	}
@@ -73,8 +73,8 @@ func (s *stubLeaguePlayoffStore) UpdateCompetitionChanged(id string, transform f
 	return true, nil
 }
 
-// stubLeaguePlayoffEngine implements LeaguePlayoffEngine for handler tests.
-type stubLeaguePlayoffEngine struct {
+// stubLeagueTiebreakEngine implements LeagueTiebreakEngine for handler tests.
+type stubLeagueTiebreakEngine struct {
 	candidates    []engine.TiedGroup
 	candidatesErr error
 	generated     []state.MatchResult
@@ -83,30 +83,30 @@ type stubLeaguePlayoffEngine struct {
 	autoErr       error
 }
 
-func (e *stubLeaguePlayoffEngine) LeaguePlayoffCandidates(string) ([]engine.TiedGroup, error) {
+func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.TiedGroup, error) {
 	return e.candidates, e.candidatesErr
 }
 
-func (e *stubLeaguePlayoffEngine) GenerateLeaguePlayoffMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
 	return e.generated, e.generateErr
 }
 
-func (e *stubLeaguePlayoffEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+func (e *stubLeagueTiebreakEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
 	return e.autoOutcome, e.autoErr
 }
 
-// leaguePlayoffRouter sets up a gin engine with all league-playoff handlers
+// leagueTiebreakRouter sets up a gin engine with all league-tiebreak handlers
 // wired on the same unauthenticated group, matching the old test layout.
 // This is used by the business-logic tests (happy/error paths) where we
 // test handler behaviour, not auth enforcement.
-func leaguePlayoffRouter(eng LeaguePlayoffEngine, store LeaguePlayoffStore, hub Broadcaster) *gin.Engine {
+func leagueTiebreakRouter(eng LeagueTiebreakEngine, store LeagueTiebreakStore, hub Broadcaster) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	g := r.Group("/api")
 	// Public (unauthenticated) read endpoint.
-	RegisterPublicLeaguePlayoffHandlers(g, eng, store)
+	RegisterPublicLeagueTiebreakHandlers(g, eng, store)
 	// Mutation endpoints — no auth middleware here; business logic only.
-	RegisterLeaguePlayoffHandlers(g, eng, store, hub)
+	RegisterLeagueTiebreakHandlers(g, eng, store, hub)
 	return r
 }
 
@@ -135,18 +135,18 @@ func makeTiedGroup(teamA, teamB string, minPos, maxPos int) engine.TiedGroup {
 }
 
 // ---------------------------------------------------------------------------
-// GET /competitions/:id/league-playoff/candidates
+// GET /competitions/:id/league-tiebreak/candidates
 // ---------------------------------------------------------------------------
 
-func TestLeaguePlayoffCandidates_Happy(t *testing.T) {
+func TestLeagueTiebreakCandidates_Happy(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{candidates: candidates}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -159,12 +159,12 @@ func TestLeaguePlayoffCandidates_Happy(t *testing.T) {
 	assert.Equal(t, false, body["finalized"])
 }
 
-func TestLeaguePlayoffCandidates_Empty(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{candidates: nil}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakCandidates_Empty(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{candidates: nil}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -175,38 +175,38 @@ func TestLeaguePlayoffCandidates_Empty(t *testing.T) {
 	assert.Len(t, cands, 0)
 }
 
-func TestLeaguePlayoffCandidates_CompNotFound(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: nil}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakCandidates_CompNotFound(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: nil}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestLeaguePlayoffCandidates_EngineError(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{candidatesErr: fmt.Errorf("engine error")}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakCandidates_EngineError(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{candidatesErr: fmt.Errorf("engine error")}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestLeaguePlayoffCandidates_Finalized(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{candidates: nil}
+func TestLeagueTiebreakCandidates_Finalized(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{candidates: nil}
 	comp := makeTeamLeagueComp(state.CompStatusPools)
-	comp.LeaguePlayoffFinalized = true
-	store := &stubLeaguePlayoffStore{comp: comp}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	comp.LeagueTiebreakFinalized = true
+	store := &stubLeagueTiebreakStore{comp: comp}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -217,29 +217,29 @@ func TestLeaguePlayoffCandidates_Finalized(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /competitions/:id/league-playoff
+// POST /competitions/:id/league-tiebreak
 // ---------------------------------------------------------------------------
 
-func TestLeaguePlayoffPost_Happy(t *testing.T) {
+func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
 	generated := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
 	}
-	eng := &stubLeaguePlayoffEngine{
+	eng := &stubLeagueTiebreakEngine{
 		candidates: candidates,
 		generated:  generated,
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: nil, // no existing DH matches
 	}
 	hub := &recordingBroadcaster{}
-	r := leaguePlayoffRouter(eng, store, hub)
+	r := leagueTiebreakRouter(eng, store, hub)
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -253,17 +253,17 @@ func TestLeaguePlayoffPost_Happy(t *testing.T) {
 	assert.GreaterOrEqual(t, len(hub.events), 2)
 }
 
-func TestLeaguePlayoffPost_InvalidSelection(t *testing.T) {
+func TestLeagueTiebreakPost_InvalidSelection(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{candidates: candidates}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// Request for teams not in any candidate group.
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team X", "Team Y"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team X", "Team Y"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -271,13 +271,13 @@ func TestLeaguePlayoffPost_InvalidSelection(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestLeaguePlayoffPost_TooFewTeams(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakPost_TooFewTeams(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -285,22 +285,22 @@ func TestLeaguePlayoffPost_TooFewTeams(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestLeaguePlayoffPost_AlreadyExists(t *testing.T) {
+func TestLeagueTiebreakPost_AlreadyExists(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
 	existing := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
 	}
-	eng := &stubLeaguePlayoffEngine{candidates: candidates}
-	store := &stubLeaguePlayoffStore{
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: existing,
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -308,20 +308,20 @@ func TestLeaguePlayoffPost_AlreadyExists(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
-func TestLeaguePlayoffPost_LoadMatchesError(t *testing.T) {
+func TestLeagueTiebreakPost_LoadMatchesError(t *testing.T) {
 	// When LoadPoolMatches fails, the handler must return 500.
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{candidates: candidates}
-	store := &stubLeaguePlayoffStore{
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{
 		comp:       makeTeamLeagueComp(state.CompStatusPools),
 		matchesErr: fmt.Errorf("disk error"),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -329,24 +329,24 @@ func TestLeaguePlayoffPost_LoadMatchesError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestLeaguePlayoffPost_EngineValidationError(t *testing.T) {
-	// GenerateLeaguePlayoffMatches can return a ValidationError when the
+func TestLeagueTiebreakPost_EngineValidationError(t *testing.T) {
+	// GenerateLeagueTiebreakMatches can return a ValidationError when the
 	// competition is not a team-league type. The handler must map that to 400.
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{
+	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
 		generateErr: &engine.ValidationError{Msg: "not a team-league competition"},
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: nil,
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -354,12 +354,12 @@ func TestLeaguePlayoffPost_EngineValidationError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestLeaguePlayoffPost_BadBody(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakPost_BadBody(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", bytes.NewBufferString("not json"))
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", bytes.NewBufferString("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -368,23 +368,23 @@ func TestLeaguePlayoffPost_BadBody(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DELETE /competitions/:id/league-playoff
+// DELETE /competitions/:id/league-tiebreak
 // ---------------------------------------------------------------------------
 
-func TestLeaguePlayoffDelete_Happy(t *testing.T) {
+func TestLeagueTiebreakDelete_Happy(t *testing.T) {
 	existing := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusScheduled},
 	}
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: existing,
 	}
 	hub := &recordingBroadcaster{}
-	r := leaguePlayoffRouter(eng, store, hub)
+	r := leagueTiebreakRouter(eng, store, hub)
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -396,16 +396,16 @@ func TestLeaguePlayoffDelete_Happy(t *testing.T) {
 	assert.GreaterOrEqual(t, len(hub.events), 2)
 }
 
-func TestLeaguePlayoffDelete_NotFound(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakDelete_NotFound(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: nil, // no matches
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -413,7 +413,7 @@ func TestLeaguePlayoffDelete_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestLeaguePlayoffDelete_ScoredMatch(t *testing.T) {
+func TestLeagueTiebreakDelete_ScoredMatch(t *testing.T) {
 	existing := []state.MatchResult{
 		{
 			ID:     "Pool A-DH-0",
@@ -423,15 +423,15 @@ func TestLeaguePlayoffDelete_ScoredMatch(t *testing.T) {
 			Status: state.MatchStatusCompleted,
 		},
 	}
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: existing,
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -439,13 +439,13 @@ func TestLeaguePlayoffDelete_ScoredMatch(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
-func TestLeaguePlayoffDelete_TooFewTeams(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakDelete_TooFewTeams(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -454,20 +454,20 @@ func TestLeaguePlayoffDelete_TooFewTeams(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /competitions/:id/league-playoff/finalize
+// POST /competitions/:id/league-tiebreak/finalize
 // ---------------------------------------------------------------------------
 
-func TestLeaguePlayoffFinalize_Happy(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{
+func TestLeagueTiebreakFinalize_Happy(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
 		autoOutcome: engine.AutoCompleteTransitioned,
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 	}
 	hub := &recordingBroadcaster{}
-	r := leaguePlayoffRouter(eng, store, hub)
+	r := leagueTiebreakRouter(eng, store, hub)
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -475,48 +475,48 @@ func TestLeaguePlayoffFinalize_Happy(t *testing.T) {
 	var resp map[string]any
 	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
 	assert.Equal(t, true, resp["finalized"])
-	// Competition should have LeaguePlayoffFinalized=true set in the store.
-	assert.True(t, store.comp.LeaguePlayoffFinalized)
+	// Competition should have LeagueTiebreakFinalized=true set in the store.
+	assert.True(t, store.comp.LeagueTiebreakFinalized)
 	// CompetitionCompleted event should have been broadcast.
 	assert.GreaterOrEqual(t, len(hub.events), 1)
 }
 
-func TestLeaguePlayoffFinalize_CompNotFound(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: nil}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakFinalize_CompNotFound(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: nil}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestLeaguePlayoffFinalize_AlreadyComplete(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakFinalize_AlreadyComplete(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusComplete),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusConflict, w.Code)
 }
 
-func TestLeaguePlayoffFinalize_MaybeAutoCompleteError(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{
+func TestLeagueTiebreakFinalize_MaybeAutoCompleteError(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
 		autoErr: fmt.Errorf("engine error"),
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -527,23 +527,23 @@ func TestLeaguePlayoffFinalize_MaybeAutoCompleteError(t *testing.T) {
 	assert.Equal(t, AutoCompleteErrorValue, w.Header().Get(AutoCompleteErrorHeader))
 }
 
-func TestLeaguePlayoffFinalize_NoChange(t *testing.T) {
+func TestLeagueTiebreakFinalize_NoChange(t *testing.T) {
 	// AutoCompleteNoChange = not all matches done yet, but finalized flag is set.
-	eng := &stubLeaguePlayoffEngine{
+	eng := &stubLeagueTiebreakEngine{
 		autoOutcome: engine.AutoCompleteNoChange,
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 	}
 	hub := &recordingBroadcaster{}
-	r := leaguePlayoffRouter(eng, store, hub)
+	r := leagueTiebreakRouter(eng, store, hub)
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.True(t, store.comp.LeaguePlayoffFinalized)
+	assert.True(t, store.comp.LeagueTiebreakFinalized)
 	// EventScheduleUpdated should have been broadcast even with NoChange.
 	assert.GreaterOrEqual(t, len(hub.events), 1)
 }
@@ -553,27 +553,27 @@ func TestLeaguePlayoffFinalize_NoChange(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // GET — LoadCompetition returns an error (500).
-func TestLeaguePlayoffCandidates_LoadError(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{loadErr: fmt.Errorf("disk I/O failure")}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakCandidates_LoadError(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{loadErr: fmt.Errorf("disk I/O failure")}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// GET — LeaguePlayoffCandidates returns *engine.NotFoundError (404).
-func TestLeaguePlayoffCandidates_EngineNotFound(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{
+// GET — LeagueTiebreakCandidates returns *engine.NotFoundError (404).
+func TestLeagueTiebreakCandidates_EngineNotFound(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
 		candidatesErr: &engine.NotFoundError{Msg: "competition not in engine"},
 	}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -581,14 +581,14 @@ func TestLeaguePlayoffCandidates_EngineNotFound(t *testing.T) {
 }
 
 // GET — requireValidCompID returns false (empty :id → 400).
-func TestLeaguePlayoffCandidates_InvalidID(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakCandidates_InvalidID(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// A route param that fails ValidateCompetitionID (e.g. empty string via
 	// a sub-path that doesn't carry :id — use a contrived bad value).
-	req := httptest.NewRequest("GET", "/api/competitions/%00/league-playoff/candidates", nil)
+	req := httptest.NewRequest("GET", "/api/competitions/%00/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -598,16 +598,16 @@ func TestLeaguePlayoffCandidates_InvalidID(t *testing.T) {
 	assert.NotEqual(t, http.StatusInternalServerError, w.Code)
 }
 
-// POST — LeaguePlayoffCandidates returns *engine.NotFoundError (404).
-func TestLeaguePlayoffPost_CandidatesNotFound(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{
+// POST — LeagueTiebreakCandidates returns *engine.NotFoundError (404).
+func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
 		candidatesErr: &engine.NotFoundError{Msg: "competition not in engine"},
 	}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -615,23 +615,23 @@ func TestLeaguePlayoffPost_CandidatesNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// POST — GenerateLeaguePlayoffMatches returns *engine.NotFoundError (404).
-func TestLeaguePlayoffPost_GenerateNotFound(t *testing.T) {
+// POST — GenerateLeagueTiebreakMatches returns *engine.NotFoundError (404).
+func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{
+	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
 		generateErr: &engine.NotFoundError{Msg: "competition vanished"},
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: nil,
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -639,23 +639,23 @@ func TestLeaguePlayoffPost_GenerateNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// POST — GenerateLeaguePlayoffMatches returns a generic error (500).
-func TestLeaguePlayoffPost_GenerateInternalError(t *testing.T) {
+// POST — GenerateLeagueTiebreakMatches returns a generic error (500).
+func TestLeagueTiebreakPost_GenerateInternalError(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
-	eng := &stubLeaguePlayoffEngine{
+	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
 		generateErr: fmt.Errorf("unexpected engine failure"),
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: nil,
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -664,16 +664,16 @@ func TestLeaguePlayoffPost_GenerateInternalError(t *testing.T) {
 }
 
 // DELETE — LoadPoolMatches returns an error (500).
-func TestLeaguePlayoffDelete_LoadMatchesError(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakDelete_LoadMatchesError(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:       makeTeamLeagueComp(state.CompStatusPools),
 		matchesErr: fmt.Errorf("store unavailable"),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -682,20 +682,20 @@ func TestLeaguePlayoffDelete_LoadMatchesError(t *testing.T) {
 }
 
 // DELETE — SavePoolMatches returns an error after removal (500).
-func TestLeaguePlayoffDelete_SaveError(t *testing.T) {
+func TestLeagueTiebreakDelete_SaveError(t *testing.T) {
 	existing := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusScheduled},
 	}
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:    makeTeamLeagueComp(state.CompStatusPools),
 		matches: existing,
 		saveErr: fmt.Errorf("write failure"),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -704,12 +704,12 @@ func TestLeaguePlayoffDelete_SaveError(t *testing.T) {
 }
 
 // DELETE — bad request body (400).
-func TestLeaguePlayoffDelete_BadBody(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+func TestLeagueTiebreakDelete_BadBody(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", bytes.NewBufferString("not json"))
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", bytes.NewBufferString("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -718,15 +718,15 @@ func TestLeaguePlayoffDelete_BadBody(t *testing.T) {
 }
 
 // Finalize — UpdateCompetitionChanged returns an error (500).
-func TestLeaguePlayoffFinalize_UpdateError(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakFinalize_UpdateError(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp:      makeTeamLeagueComp(state.CompStatusPools),
 		updateErr: fmt.Errorf("transaction failure"),
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -734,17 +734,17 @@ func TestLeaguePlayoffFinalize_UpdateError(t *testing.T) {
 }
 
 // Finalize — AutoCompleteTransitioned broadcasts EventCompetitionCompleted.
-func TestLeaguePlayoffFinalize_BroadcastsCompleted(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{
+func TestLeagueTiebreakFinalize_BroadcastsCompleted(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
 		autoOutcome: engine.AutoCompleteTransitioned,
 	}
-	store := &stubLeaguePlayoffStore{
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 	}
 	hub := &recordingBroadcaster{}
-	r := leaguePlayoffRouter(eng, store, hub)
+	r := leagueTiebreakRouter(eng, store, hub)
 
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -767,12 +767,12 @@ func TestLeaguePlayoffFinalize_BroadcastsCompleted(t *testing.T) {
 // AuthMiddleware, mirroring the pattern in handlers_eligibility_test.go.
 // They are the primary evidence that the production server.go wiring is
 // correct: GET /candidates serves 200 without X-Tournament-Password;
-// POST /league-playoff returns 401 without it.
+// POST /league-tiebreak returns 401 without it.
 // ---------------------------------------------------------------------------
 
-// setupLeaguePlayoffAuthRouter builds a router that mirrors the production
+// setupLeagueTiebreakAuthRouter builds a router that mirrors the production
 // split: GET /candidates on the public api group, mutations on the admin group.
-func setupLeaguePlayoffAuthRouter(t *testing.T) (*gin.Engine, *state.Store) {
+func setupLeagueTiebreakAuthRouter(t *testing.T) (*gin.Engine, *state.Store) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -785,27 +785,27 @@ func setupLeaguePlayoffAuthRouter(t *testing.T) (*gin.Engine, *state.Store) {
 
 	r := gin.New()
 	// Stub engine: returns no candidates (enough for a 200 on GET).
-	eng := &stubLeaguePlayoffEngine{candidates: nil}
+	eng := &stubLeagueTiebreakEngine{candidates: nil}
 	hub := stubBroadcaster{}
 
 	// Public group — GET /candidates is unauthenticated.
 	api := r.Group("/api")
-	RegisterPublicLeaguePlayoffHandlers(api, eng, store)
+	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
 
 	// Admin-gated group — mutations require X-Tournament-Password.
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterLeaguePlayoffHandlers(admin, eng, store, hub)
+	RegisterLeagueTiebreakHandlers(admin, eng, store, hub)
 
 	return r, store
 }
 
-// TestLeaguePlayoffCandidates_IsPublic is the primary regression test for
+// TestLeagueTiebreakCandidates_IsPublic is the primary regression test for
 // the bug reported in mp-8rc9 Phase 3b: GET /candidates returned 401 because
 // the endpoint was registered on the admin group. It must be 200 without any
 // X-Tournament-Password header, even for a password-protected tournament.
-func TestLeaguePlayoffCandidates_IsPublic(t *testing.T) {
-	r, store := setupLeaguePlayoffAuthRouter(t)
+func TestLeagueTiebreakCandidates_IsPublic(t *testing.T) {
+	r, store := setupLeagueTiebreakAuthRouter(t)
 
 	// Set up a password-protected tournament and a competition.
 	require.NoError(t, store.SaveTournament(&state.Tournament{
@@ -818,7 +818,7 @@ func TestLeaguePlayoffCandidates_IsPublic(t *testing.T) {
 		Kind:   "team",
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/competitions/comp-1/league-playoff/candidates", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/comp-1/league-tiebreak/candidates", nil)
 	// Deliberately no X-Tournament-Password header.
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -826,11 +826,11 @@ func TestLeaguePlayoffCandidates_IsPublic(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "GET /candidates must be public (no auth header)")
 }
 
-// TestLeaguePlayoffPost_RequiresAuth verifies that the POST mutation returns
+// TestLeagueTiebreakPost_RequiresAuth verifies that the POST mutation returns
 // 401 when called without X-Tournament-Password — i.e. the route is still on
 // the admin-gated group after the public/admin split.
-func TestLeaguePlayoffPost_RequiresAuth(t *testing.T) {
-	r, store := setupLeaguePlayoffAuthRouter(t)
+func TestLeagueTiebreakPost_RequiresAuth(t *testing.T) {
+	r, store := setupLeagueTiebreakAuthRouter(t)
 
 	// Set up a password-protected tournament so auth middleware activates.
 	require.NoError(t, store.SaveTournament(&state.Tournament{
@@ -838,50 +838,50 @@ func TestLeaguePlayoffPost_RequiresAuth(t *testing.T) {
 		Password: "secret",
 	}))
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest(http.MethodPost, "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	// No X-Tournament-Password header.
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "POST /league-playoff must be admin-gated")
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "POST /league-tiebreak must be admin-gated")
 }
 
-// TestLeaguePlayoffDelete_RequiresAuth verifies that the DELETE mutation
+// TestLeagueTiebreakDelete_RequiresAuth verifies that the DELETE mutation
 // returns 401 without auth.
-func TestLeaguePlayoffDelete_RequiresAuth(t *testing.T) {
-	r, store := setupLeaguePlayoffAuthRouter(t)
+func TestLeagueTiebreakDelete_RequiresAuth(t *testing.T) {
+	r, store := setupLeagueTiebreakAuthRouter(t)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name:     "Test",
 		Password: "secret",
 	}))
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest(http.MethodDelete, "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest(http.MethodDelete, "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "DELETE /league-playoff must be admin-gated")
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "DELETE /league-tiebreak must be admin-gated")
 }
 
-// TestLeaguePlayoffFinalize_RequiresAuth verifies that the POST /finalize
+// TestLeagueTiebreakFinalize_RequiresAuth verifies that the POST /finalize
 // mutation returns 401 without auth.
-func TestLeaguePlayoffFinalize_RequiresAuth(t *testing.T) {
-	r, store := setupLeaguePlayoffAuthRouter(t)
+func TestLeagueTiebreakFinalize_RequiresAuth(t *testing.T) {
+	r, store := setupLeagueTiebreakAuthRouter(t)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name:     "Test",
 		Password: "secret",
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/competitions/comp-1/league-playoff/finalize", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/comp-1/league-tiebreak/finalize", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "POST /league-playoff/finalize must be admin-gated")
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "POST /league-tiebreak/finalize must be admin-gated")
 }
 
 // ---------------------------------------------------------------------------
@@ -900,10 +900,10 @@ func (b *recordingBroadcaster) Broadcast(t EventType, _ any) {
 // Tri-review fixes: duplicate names, partial-group, running-match guards
 // ---------------------------------------------------------------------------
 
-// TestLeaguePlayoffPost_DuplicateNames covers the candidacy-gate bypass: a
+// TestLeagueTiebreakPost_DuplicateNames covers the candidacy-gate bypass: a
 // duplicated team name must be rejected up front, not silently deduped into a
 // smaller group that matches a larger candidate group.
-func TestLeaguePlayoffPost_DuplicateNames(t *testing.T) {
+func TestLeagueTiebreakPost_DuplicateNames(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
 	}
@@ -911,12 +911,12 @@ func TestLeaguePlayoffPost_DuplicateNames(t *testing.T) {
 	// under the old raw-len comparison.
 	candidates[0].Teams = append(candidates[0].Teams, state.PlayerStanding{Player: domain.Player{Name: "Team C"}})
 	candidates[0].MaxPosition = 3
-	eng := &stubLeaguePlayoffEngine{candidates: candidates}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team A", "Team B"}})
-	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -925,14 +925,14 @@ func TestLeaguePlayoffPost_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeaguePlayoffDelete_DuplicateNames — DELETE must reject duplicates too.
-func TestLeaguePlayoffDelete_DuplicateNames(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+// TestLeagueTiebreakDelete_DuplicateNames — DELETE must reject duplicates too.
+func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team A"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team A"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -941,13 +941,13 @@ func TestLeaguePlayoffDelete_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeaguePlayoffDelete_PartialGroup — naming only part of a play-off group
+// TestLeagueTiebreakDelete_PartialGroup — naming only part of a tie-breaker group
 // (a DH match with exactly one side in the request) must be rejected so the
 // remaining round-robin bouts aren't orphaned.
-func TestLeaguePlayoffDelete_PartialGroup(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	// A 3-team round-robin play-off: A-B, A-C, B-C all unscored.
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakDelete_PartialGroup(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	// A 3-team round-robin tie-breaker: A-B, A-C, B-C all unscored.
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 		matches: []state.MatchResult{
 			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
@@ -955,33 +955,33 @@ func TestLeaguePlayoffDelete_PartialGroup(t *testing.T) {
 			{ID: "Pool A-DH-2", SideA: "Team B", SideB: "Team C"},
 		},
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// Request only {A,B}: the A-C and B-C matches each have one side in the set.
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
-	assert.Contains(t, w.Body.String(), "complete play-off group")
+	assert.Contains(t, w.Body.String(), "complete tie-breaker group")
 }
 
-// TestLeaguePlayoffDelete_RunningMatch — an in-progress DH match must block
+// TestLeagueTiebreakDelete_RunningMatch — an in-progress DH match must block
 // deletion (409), not be silently removed out from under the scoring session.
-func TestLeaguePlayoffDelete_RunningMatch(t *testing.T) {
-	eng := &stubLeaguePlayoffEngine{}
-	store := &stubLeaguePlayoffStore{
+func TestLeagueTiebreakDelete_RunningMatch(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 		matches: []state.MatchResult{
 			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusRunning},
 		},
 	}
-	r := leaguePlayoffRouter(eng, store, stubBroadcaster{})
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leaguePlayoffRequest{TeamNames: []string{"Team A", "Team B"}})
-	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-playoff", body)
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

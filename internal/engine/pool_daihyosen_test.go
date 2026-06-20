@@ -337,8 +337,8 @@ func TestInjectPoolDaihyosenMatches_Idempotent(t *testing.T) {
 // TestMaybeAutoCompletePools_TeamMixedTieInjectsDH verifies that InjectPoolDaihyosenMatches
 // auto-injects DH matches for a TEAM MIXED competition with tied pools. This confirms
 // that mixed-format team competitions still auto-inject DH (unlike team-league
-// competitions, which return AutoCompleteAwaitingLeaguePlayoff instead and require
-// operator opt-in — see league_playoff_test.go for those tests).
+// competitions, which return AutoCompleteAwaitingLeagueTiebreak instead and require
+// operator opt-in — see league_tiebreak_test.go for those tests).
 //
 // NOTE: MaybeAutoCompletePools is not called here because the mixed path routes through
 // advanceMixedPools → ResolveQualifiedPools, which enforces a ≥2 pools constraint
@@ -382,7 +382,7 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "autocomplete-team-dhcomplete", true)
 
 	// Operator manually injects DH for the tied group (bypasses the league
-	// AwaitingLeaguePlayoff gate — this mirrors what Phase 3b will do).
+	// AwaitingLeagueTiebreak gate — this mirrors what Phase 3b will do).
 	injected, injErr := eng.InjectPoolDaihyosenMatches("autocomplete-team-dhcomplete")
 	require.NoError(t, injErr)
 	require.NotEmpty(t, injected, "DH matches should be injected for the tied group")

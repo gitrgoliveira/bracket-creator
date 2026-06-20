@@ -39,7 +39,15 @@
                     // initial mount so Preact owns #root outright; subsequent
                     // renders diff Preact's own tree and must NOT be wiped.
                     if (!mounted) {
-                        container.replaceChildren();
+                        // replaceChildren() is the clean modern API, but fall
+                        // back to innerHTML on the off chance it's missing — this
+                        // is the critical mount path; it must never throw before
+                        // the app renders.
+                        if (typeof container.replaceChildren === "function") {
+                            container.replaceChildren();
+                        } else {
+                            container.innerHTML = "";
+                        }
                         mounted = true;
                     }
                     window.preact.render(children, container);

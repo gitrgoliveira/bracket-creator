@@ -257,7 +257,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
   // load, or one match finishing and the next starting). Empty deps would
   // miss the case where `bracket` is still null on first mount and only
   // populates via the detail fetch / SSE.
-  const runningMatchId = (bracket?.rounds || []).flatMap(r => r).find(m => m.status === "running")?.id || null;
+  const runningMatchId = (bracket?.rounds || []).flatMap(r => r || []).find(m => m && m.status === "running")?.id || null;
   useEffectA(() => {
     if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
   }, [runningMatchId]);

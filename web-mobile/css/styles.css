@@ -3344,6 +3344,21 @@ button.pool-match-row {
   background: var(--accent-soft);
 }
 
+/* No competitions yet — promote the "Add competition" tile from a quiet dashed
+   placeholder to the page's primary action: solid accent frame, soft-navy fill,
+   and elevation so the operator's first step is unmistakable. Reverts to the
+   plain dashed tile once any competition exists (class is conditional). */
+.tcard--add.tcard--add-cta {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow);
+}
+
+.tcard--add.tcard--add-cta:hover {
+  box-shadow: var(--shadow-lg);
+}
+
 /* Inline tabs/sections */
 .section-title {
   font-size: 12px;

@@ -234,7 +234,11 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   // out of the visible grid without any patch.jsx-side awareness.
   const courtFiltered = filterMatchesByCourt(filtered, effectiveCourt);
 
-  const courts = tournament.courts;
+  // Guard against a nil courts slice: the JSON tag has no omitempty, so the
+  // API can serialize `courts: null`. The rest of the codebase guards
+  // `t.courts || []` (e.g. the score editor) — match that to avoid a render
+  // crash on courts.forEach/map/includes below.
+  const courts = tournament.courts || [];
   const byCourt = {};
   courts.forEach((cc) => byCourt[cc] = []);
   // Matches whose court isn't in the configured list (missing, removed from

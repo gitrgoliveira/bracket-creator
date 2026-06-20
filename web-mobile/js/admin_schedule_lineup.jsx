@@ -173,7 +173,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
   // The save then sends force=true so the backend bypasses the same freeze.
   const isLocked = !allowDuringMatch && (!!lockedAt || matchStarted);
 
-  const doSave = async (positionsOut, reason) => {
+  const doSave = async (positionsOut, reason, successMsg = "Match lineup saved") => {
     setError("");
     setSaving(true);
     try {
@@ -187,7 +187,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       setValues(next);
       setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
-      if (typeof showToast === "function") showToast("Lineup saved");
+      if (typeof showToast === "function") showToast(successMsg);
     } catch (e) {
       // A 409 ErrLineupLocked means the match already started and the backend
       // froze the lineup. Surface the operator-friendly explanation rather than
@@ -262,8 +262,9 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
       } else {
         // doSave applies the copied values from the persisted server response on
         // success, so we deliberately do NOT setValues eagerly here — a failed
-        // save must not leave unpersisted copied values on screen.
-        await doSave(next, "");
+        // save must not leave unpersisted copied values on screen. Pass the
+        // distinct copy toast to preserve the pre-split confirmation.
+        await doSave(next, "", "Lineup copied from previous match");
       }
     } catch (e) {
       setError(e?.message || "Failed to copy lineup");

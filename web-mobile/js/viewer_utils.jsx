@@ -25,11 +25,21 @@ export function competitionKindLabel(c) {
   return base;
 }
 
-export const poolLabel = (m) => m.compFormat === "league" ? m.compName : m.poolName;
-// Publish to window so viewer_watchlist.js can read window.poolLabel. Load order
-// is irrelevant: viewer_watchlist.js (its own <script> tag) reads this at RENDER
-// time, by which point viewer.js — which imports/evaluates this module — has run.
-if (typeof window !== 'undefined') window.poolLabel = poolLabel;
+// leagueAwareLabel — the single source of truth for the pool-vs-league heading.
+// A league is one round-robin table spanning the whole roster, so calling it
+// "Pool A" is wrong; show "League table" instead. Non-league formats fall back
+// to the pool name (or the given fallback when that's empty).
+export const leagueAwareLabel = (compFormat, poolName, fallback = "") =>
+  compFormat === "league" ? "League table" : (poolName || fallback);
+export const poolLabel = (m) => leagueAwareLabel(m.compFormat, m.poolName);
+// Publish to window so viewer_watchlist.js (and the admin scoring/shiaijo/pools
+// surfaces) can read these at RENDER time without an explicit import. Load order
+// is irrelevant: each consumer reads the global when it renders, by which point
+// viewer.js — which evaluates this module — has run.
+if (typeof window !== 'undefined') {
+  window.poolLabel = poolLabel;
+  window.leagueAwareLabel = leagueAwareLabel;
+}
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
 // is attached by admin_helpers.jsx, whose <script> tag loads AFTER viewer.js —

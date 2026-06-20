@@ -772,7 +772,10 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
     const comp = (tournament.competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
-    const phaseLabel = isPool ? (match.poolName || "Pool") : (match.round || "Elimination");
+    const isLeagueComp = match.compFormat === "league";
+    const phaseLabel = isPool
+        ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
+        : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
 
     // Pools/standings aren't on the console's competition list payload — fetch
@@ -811,11 +814,13 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
                 <div className="shiaijo-context__body">
                     {isPool ? (
                         <>
-                            <div className="shiaijo-context__next">
-                                {nextPoolName
-                                    ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
-                                    : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
-                            </div>
+                            {!isLeagueComp && (
+                                <div className="shiaijo-context__next">
+                                    {nextPoolName
+                                        ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
+                                        : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
+                                </div>
+                            )}
                             {PoolsViewer && currentPool ? (
                                 <div className="shiaijo-context__pools">
                                     <PoolsViewer
@@ -831,8 +836,8 @@ function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, 
                             ) : (
                                 <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
                                     {detailErr
-                                        ? "Couldn't load pool standings — they'll appear once the connection recovers."
-                                        : "Loading pool standings…"}
+                                        ? "Couldn't load standings — they'll appear once the connection recovers."
+                                        : "Loading standings…"}
                                 </p>
                             )}
                         </>

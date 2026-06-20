@@ -154,6 +154,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicRegistrationHandlers(api, store, hub)
 	RegisterPublicSponsorHandlers(api, store)
 	RegisterPublicBrandingHandlers(api, store)
+	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -189,6 +190,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 
 	// PDF export — POST body is effectively empty (type in URL param only);

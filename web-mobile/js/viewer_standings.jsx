@@ -411,15 +411,15 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
-  if (!pools || pools.length === 0) {
-    return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3></div>;
-  }
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format
   // field render as before (no header relabel, no winner badge).
   const isLeague = competition && competition.format === "league";
+  if (!pools || pools.length === 0) {
+    return <div className="empty"><div className="icon">⏳</div><h3>{isLeague ? "League not drawn yet" : "Pools not drawn yet"}</h3></div>;
+  }
   const allMatchesComplete = isLeague && (() => {
     const all = poolMatches || [];
     return all.length > 0 && all.every(m => m.status === "completed");

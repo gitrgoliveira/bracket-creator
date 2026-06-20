@@ -551,3 +551,105 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     expect(text).toContain('Aaron Thompson');
   });
 });
+
+// ------------------------------------------------------------------
+// mp-8rc9 Phase 1: poolLabel format-aware label helper
+// ------------------------------------------------------------------
+describe('poolLabel — format-aware phase label (mp-8rc9)', () => {
+  let poolLabel;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ poolLabel } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('returns "League table" for a league-format match', () => {
+    const m = { compFormat: 'league', poolName: 'Pool A', compName: 'City League' };
+    expect(poolLabel(m)).toBe('League table');
+  });
+
+  it('returns poolName for a mixed-format match', () => {
+    const m = { compFormat: 'mixed', poolName: 'Pool B', compName: 'Open Cup' };
+    expect(poolLabel(m)).toBe('Pool B');
+  });
+
+  it('returns poolName for a playoffs-format match', () => {
+    const m = { compFormat: 'playoffs', poolName: 'Pool A', compName: 'Open Cup' };
+    expect(poolLabel(m)).toBe('Pool A');
+  });
+
+  it('returns poolName when compFormat is absent (legacy match)', () => {
+    const m = { poolName: 'Pool C', compName: 'Old Cup' };
+    expect(poolLabel(m)).toBe('Pool C');
+  });
+
+  it('never returns the competition name for league (would be redundant in eyebrow)', () => {
+    const m = { compFormat: 'league', poolName: 'Pool A', compName: 'City League' };
+    expect(poolLabel(m)).not.toBe('City League');
+  });
+
+  // The core terminology rule: a LEAGUE surface must never render the word
+  // "Pool" — leagues are a single table shown as "League table". Pool/mixed
+  // surfaces DO render the pool name. poolLabel is the eyebrow path; this
+  // guards it against the "Pool" word leaking back in for leagues.
+  it('league poolLabel never contains the word "Pool" even when poolName is "Pool A"', () => {
+    const m = { compFormat: 'league', poolName: 'Pool A', compName: 'City League' };
+    expect(poolLabel(m)).toBe('League table');
+    expect(poolLabel(m)).not.toMatch(/pool/i);
+  });
+
+  it('pool/mixed poolLabel DOES surface the pool name (the word "Pool" is correct here)', () => {
+    expect(poolLabel({ compFormat: 'mixed', poolName: 'Pool B' })).toMatch(/pool/i);
+    expect(poolLabel({ compFormat: 'playoffs', poolName: 'Pool A' })).toMatch(/pool/i);
+  });
+});
+
+// ------------------------------------------------------------------
+// mp-8rc9: leagueAwareLabel — single source of truth for the
+// league-vs-pool heading. Every admin/viewer surface routes its
+// pool-heading through this helper (poolLabel, poolDisplayLabel, the
+// shiaijo phase label, the scoring eyebrow). Pinning the boundary here
+// guards ALL of them: a league must read "League table" and must NEVER
+// contain "Pool"; a pool/mixed surface must surface the pool name.
+// ------------------------------------------------------------------
+describe('leagueAwareLabel — league/pool terminology boundary (mp-8rc9)', () => {
+  let leagueAwareLabel;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ leagueAwareLabel } = await import('../viewer_utils.jsx'));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('league → "League table", never "Pool" (even with a pool-shaped poolName)', () => {
+    expect(leagueAwareLabel('league', 'Pool A')).toBe('League table');
+    expect(leagueAwareLabel('league', 'Pool A')).not.toMatch(/pool/i);
+  });
+
+  it('league ignores the non-league fallback and still never says "Pool"', () => {
+    // admin_shiaijo passes "Pool" as the non-league fallback; a league must
+    // not fall through to it.
+    expect(leagueAwareLabel('league', '', 'Pool')).toBe('League table');
+    expect(leagueAwareLabel('league', '', 'Pool')).not.toMatch(/pool/i);
+  });
+
+  it('mixed/pools → the pool name (the word "Pool" belongs here)', () => {
+    expect(leagueAwareLabel('mixed', 'Pool A')).toBe('Pool A');
+    expect(leagueAwareLabel('playoffs', 'Pool B')).toBe('Pool B');
+    expect(leagueAwareLabel('swiss', 'Pool C')).toBe('Pool C');
+  });
+
+  it('non-league with empty poolName uses the supplied fallback', () => {
+    expect(leagueAwareLabel('mixed', '', 'Pool')).toBe('Pool');
+    expect(leagueAwareLabel('mixed', '')).toBe('');
+  });
+});

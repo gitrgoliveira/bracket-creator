@@ -3763,8 +3763,9 @@ button.pool-match-row {
     min-height: 44px;
   }
   /* Shiaijo console court controls: the per-row reassign picker (A▾) and the
-     header court switcher. The Defer button already forces the queue row to
-     44px tall under coarse pointer, so flooring the picker costs no row height. */
+     header court switcher. The Score / ↑ / ↓ controls already force the queue
+     row to 44px tall under coarse pointer, so flooring the picker costs no
+     extra row height. */
   .score-edit-row__court--btn {
     min-height: 44px;
   }
@@ -6020,7 +6021,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .league-matrix__win { color: #16a34a; }
 .league-matrix__loss { color: #dc2626; }
-.league-matrix__draw { color: var(--ink-2); }
+/* Draw must be distinguishable from win/loss WITHOUT colour (Principle 2):
+   the near-invisible 0.04-alpha cell tint can't carry the signal for a
+   colour-blind operator, so the draw letter (or "X") gets an underline —
+   a treatment, not a hue. Win/loss carry no underline, so the three states
+   are separable in greyscale. --ink-2 holds >4.5:1 on the faint draw bg. */
+.league-matrix__draw {
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
 
 .league-matrix__legend {
   display: flex;
@@ -6039,7 +6050,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .league-matrix__legend-item--win { color: #16a34a; background: rgba(22, 163, 74, 0.1); }
 .league-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
-.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
+/* Mirror the cell's non-colour draw treatment (underline) so the legend key
+   matches what's rendered in the matrix. */
+.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
 
 /* ---------- FoulCounter (Individual Scoring) ---------- */
 .sb-fouls {
@@ -7731,6 +7744,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ↑/↓ reorder arrows: square, monospace-centred glyph so the arrow sits true. */
 .shiaijo-row__move { padding: 2px 7px; font-size: 12px; line-height: 1; min-width: 26px; text-align: center; }
 
+/* Touch devices: the Score / ↑ / ↓ controls must each meet the 44px target
+   (DESIGN.md §6 / Principle 4). The base .btn coarse rule already floors
+   height; we floor width too and widen the gap so three controls don't crowd
+   into a mis-tappable cluster. The actions grid column also widens to fit
+   them (see .shiaijo-row coarse override below). Desktop stays compact. */
+@media (pointer: coarse) {
+  .shiaijo-row__actions { gap: 10px; }
+  .shiaijo-row__pick,
+  .shiaijo-row__move {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
 /* Big sides block for the Up Next card */
 .shiaijo-sides { display: flex; align-items: center; gap: 12px; }
 .shiaijo-sides__side { flex: 1; min-width: 0; }
@@ -7744,6 +7771,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    court-picker / Skip controls line up vertically across every queue row
    regardless of each row's content width. */
 .shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; }
+/* Touch: widen the actions column so three 44px controls (Score ↑ ↓) plus
+   their gaps fit without crowding (DESIGN.md §6). Desktop keeps 84px. */
+@media (pointer: coarse) {
+  .shiaijo-row { grid-template-columns: 52px 1fr 44px 160px; }
+}
 /* Upcoming rows are informational (start via Up Next, manage via the row's
    own controls) — not openable in the scoring panel, so no button affordance. */
 .shiaijo-row--static { cursor: default; }
@@ -7764,10 +7796,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border: 0;
 }
 
-.shiaijo-completed__toggle,
 .shiaijo-context__toggle {
   background: none; border: 0; cursor: pointer; width: 100%; text-align: left;
   display: flex; align-items: center; gap: 6px;
+}
+/* Inline "Show all N" / "Show fewer" toggle under the Completed list. */
+.shiaijo-completed__more {
+  margin-top: 8px;
+  font-size: 12px;
 }
 .shiaijo-count {
   display: inline-flex; align-items: center; justify-content: center;

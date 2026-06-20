@@ -53,6 +53,11 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
+// How many of the most-recent completed bouts the Completed section shows
+// before the "Show all N" toggle. Keeps the live queue + standings above the
+// fold on a full-day court without hiding the recent record.
+const COMPLETED_PREVIEW = 8;
+
 // A team encounter (vs an individual bout) — team matches carry a lineup the
 // operator can set before the bout starts. Exported for unit tests (it gates
 // the "Enter lineup" affordance).
@@ -104,6 +109,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [startingKey, setStartingKey] = useStateSh(null);
     const [startError, setStartError] = useStateSh("");
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // Completed list stays expanded (it's the operator's running record), but a
+    // full-day court accumulates many bouts that would bury the live queue on
+    // mobile. Show the most recent COMPLETED_PREVIEW by default; the rest fold
+    // behind an inline "Show all N" toggle. The recent ones are never hidden.
+    const [showAllCompleted, setShowAllCompleted] = useStateSh(false);
     // The match the operator has explicitly picked to score from the queue.
     // null = follow the running bout (running[0]). A picked match drives the
     // scoring panel instead; the find() in pickedMatch guards staleness, so a
@@ -449,14 +459,31 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <div className="shiaijo-completed">
                                     {/* Completed matches stay expanded — this is the operator's
                                         running record of what's been played on this court/pool today,
-                                        so it must not be hidden behind a collapse toggle. */}
+                                        so it must not be hidden behind a collapse toggle. To keep the
+                                        live queue above the fold on a full day, only the most recent
+                                        COMPLETED_PREVIEW show by default; "Show all N" reveals the rest.
+                                        completed is sorted ascending, so the most recent are the tail. */}
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
                                     </div>
                                     <ShiaijoQueueGroup
-                                        matches={completed}
+                                        matches={(showAllCompleted || completed.length <= COMPLETED_PREVIEW)
+                                            ? completed
+                                            : completed.slice(-COMPLETED_PREVIEW)}
                                         courts={courts} onMoveCourt={requestMoveCourt}
                                     />
+                                    {completed.length > COMPLETED_PREVIEW && (
+                                        <button
+                                            type="button"
+                                            className="linklike shiaijo-completed__more"
+                                            aria-expanded={showAllCompleted}
+                                            onClick={() => setShowAllCompleted((v) => !v)}
+                                        >
+                                            {showAllCompleted
+                                                ? "Show fewer"
+                                                : `Show all ${completed.length}`}
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>

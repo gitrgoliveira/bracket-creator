@@ -3,6 +3,7 @@
 
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
+import { boutHansokuMark } from './match_scoreboard.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -158,6 +159,14 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // Go's formatScore doesn't get split into bogus ippon letters.
           const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
           const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+          // Outstanding single hansoku → red ▲ next to the offending side (same
+          // mark as the scoresheet). hansoku may live on the match or under
+          // score.fouls depending on the source; fall back across both.
+          const foulB = boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0);
+          const foulA = boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0);
+          // Show the live ippon score for a running bout too (not just completed)
+          // so the list reflects scoring in progress; "vs" only before it starts.
+          const showScore = m.status === "completed" || m.status === "running";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
@@ -167,25 +176,26 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name">{m.sideB?.name}</div>
+                    <div className="name">{m.sideB?.name}{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
+                    {showScore && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
                     {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
-                    {/* Running rows rely on the score-edit-row--running row highlight (accent
-                        border + background tint) — no centre dot needed here. The right-column
-                        "● NOW" label (below) is the operator's status cue for running bouts. */}
+                    {/* Running rows show the live ippon score above and are signalled by the
+                        score-edit-row--running / is-running row highlight — no centre dot, no
+                        redundant "● NOW" label (the highlight already says "now"). */}
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{m.sideA?.name}</div>
+                    <div className="name">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA} </span>}{m.sideA?.name}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>
               <div>
-                {m.status === "running" && <span className="bc-running">● NOW</span>}
+                {/* Running: no "● NOW" label — the row highlight is the signal (removed as
+                    redundant). Completed keeps its Final / Corrected status. */}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

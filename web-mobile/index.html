@@ -25,11 +25,23 @@
         window.React = window.preactCompat;
         window.ReactDOM = window.preactCompat;
 
-        // React 18 createRoot polyfill for Preact
+        // React 18 createRoot polyfill for Preact.
         window.ReactDOM.createRoot = (container) => {
+            let mounted = false;
             return {
                 render: (children) => {
                     console.log("Mounting application...");
+                    // React's createRoot().render() REPLACES the container's
+                    // existing DOM. Preact's render() instead diffs/appends, so
+                    // the server-rendered static "Loading…" placeholder (the
+                    // .loading-page child of #root) survives the first mount and
+                    // re-appears when the user scrolls to the top. Clear it on the
+                    // initial mount so Preact owns #root outright; subsequent
+                    // renders diff Preact's own tree and must NOT be wiped.
+                    if (!mounted) {
+                        container.replaceChildren();
+                        mounted = true;
+                    }
                     window.preact.render(children, container);
                 }
             };

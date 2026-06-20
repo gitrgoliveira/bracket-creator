@@ -176,7 +176,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name">{m.sideB?.name}{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}</div>
+                    <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
@@ -189,7 +189,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA} </span>}{m.sideA?.name}</div>
+                    <div className="name">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA} </span>}{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>

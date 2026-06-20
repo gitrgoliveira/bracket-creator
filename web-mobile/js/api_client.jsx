@@ -1251,7 +1251,77 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to delete logo (Status ${res.status})`);
         }
-    }
+    },
+
+    // Phase 3b (mp-8rc9): league tie-breaker operator API.
+    //
+    // leagueTiebreakCandidates — GET /competitions/:id/league-tiebreak/candidates
+    // Returns { candidates: [{teamNames, minPosition, maxPosition}], finalized: bool }.
+    async leagueTiebreakCandidates(compID) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/candidates`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to load league tie-breaker candidates (${res.status})`);
+        }
+        return res.json();
+    },
+
+    // leagueTiebreakGenerate — POST /competitions/:id/league-tiebreak
+    // Body: { teamNames: string[] } — the tied group to break the tie.
+    // Returns { matches: MatchResult[] } on 201.
+    // Throws on 400 (invalid group), 409 (matches already exist).
+    async leagueTiebreakGenerate(compID, teamNames, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ teamNames }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to generate league tie-breaker (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
+
+    // leagueTiebreakRemove — DELETE /competitions/:id/league-tiebreak
+    // Body: { teamNames: string[] } — the tied group whose unscored matches to remove.
+    // Returns { deleted: number } on 200.
+    // Throws on 404 (no matches found), 409 (any match already scored).
+    async leagueTiebreakRemove(compID, teamNames, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ teamNames }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to remove league tie-breaker matches (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
+
+    // leagueTiebreakFinalize — POST /competitions/:id/league-tiebreak/finalize
+    // Accepts the current standings as final without a tie-breaker. Sets the
+    // LeagueTiebreakFinalized flag so MaybeAutoCompletePools can transition.
+    // Returns { finalized: true } on 200.
+    // Throws on 404 (comp not found), 409 (already complete).
+    async leagueTiebreakFinalize(compID, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/finalize`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password },
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            const e = new Error(err.error || `Failed to finalise league standings (${res.status})`);
+            if (err.error) e.code = err.error;
+            throw e;
+        }
+        return res.json();
+    },
 };
 
 export { API, subscribeSyncStatus, enqueueRunningWrite };

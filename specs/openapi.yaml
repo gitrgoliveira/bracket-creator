@@ -1994,6 +1994,139 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/competitions/{id}/league-tiebreak/candidates:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: List consequential league tie-breaker tied groups
+      description: >
+        Returns the consequential tied groups for a team-league competition —
+        groups of teams tied on all official criteria whose finishing positions
+        fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
+        `leagueTwoThirdPlaces`). Public read (no auth): derived from the
+        already-public standings. Returns an empty list for non-team-league
+        competitions and once shared ranks have been finalised.
+      security: []
+      responses:
+        '200':
+          description: Tied groups plus the finalized flag.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
+                  finalized:
+                    type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/competitions/{id}/league-tiebreak:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [competitions]
+      summary: Generate a league tie-breaker for a tied group
+      description: >
+        Generates the round-robin daihyosen (representative-bout) matches for one
+        consequential tied group. Admin-gated. `teamNames` must match exactly one
+        group from `GET .../league-tiebreak/candidates` (order-independent, no
+        duplicates).
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeagueTiebreakRequest'
+      responses:
+        '201':
+          description: The generated tie-breaker matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Tie-breaker matches for this group already exist.
+    delete:
+      tags: [competitions]
+      summary: Remove unscored league tie-breaker matches for a group
+      description: >
+        Removes the unscored daihyosen matches for one tied group. Admin-gated.
+        `teamNames` must cover a complete tie-breaker group (no duplicates, no
+        partial selection).
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeagueTiebreakRequest'
+      responses:
+        '200':
+          description: Number of matches deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          description: No tie-breaker matches found for the group.
+        '409':
+          description: One or more matches are in progress or already scored.
+
+  /api/competitions/{id}/league-tiebreak/finalize:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [competitions]
+      summary: Accept shared league ranks without a tie-breaker
+      description: >
+        Marks the league's consequential ties as final without a tie-breaker
+        (`leagueTiebreakFinalized = true`) and attempts to complete the
+        competition. Admin-gated.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Finalized.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  finalized:
+                    type: boolean
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Competition is already complete.
+
   /api/schedule/estimate:
     get:
       tags: [viewer]
@@ -3060,3 +3193,34 @@ components:
             type: integer
         ceremonyMinutes:
           type: integer
+
+    LeagueTiebreakCandidateGroup:
+      type: object
+      description: >
+        One consequential tied group in a team league: teams tied on all official
+        criteria whose finishing positions fall within the tie-breaker band.
+      properties:
+        teamNames:
+          type: array
+          description: Names of the tied teams, in standings order.
+          items:
+            type: string
+        minPosition:
+          type: integer
+          description: 1-based best finishing rank among the tied teams.
+        maxPosition:
+          type: integer
+          description: 1-based worst finishing rank among the tied teams.
+
+    LeagueTiebreakRequest:
+      type: object
+      description: >
+        Selects exactly one tied group (by team name set) for the league
+        tie-breaker POST/DELETE endpoints. Order-independent; duplicates rejected.
+      required: [teamNames]
+      properties:
+        teamNames:
+          type: array
+          minItems: 2
+          items:
+            type: string

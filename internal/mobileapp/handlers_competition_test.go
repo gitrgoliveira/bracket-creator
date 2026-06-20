@@ -2111,3 +2111,227 @@ func TestNumberPrefixUniquenessHandlers(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "number prefix")
 	})
 }
+
+// TestNormalizePoolConfig_LeagueAndPlayoffs verifies the normalizePoolConfig
+// pure function directly (no HTTP round-trip needed for the unit assertion).
+func TestNormalizePoolConfig_LeagueAndPlayoffs(t *testing.T) {
+	cases := []struct {
+		name          string
+		format        string
+		inPoolSize    int
+		inPoolWinners int
+		wantPoolSize  int
+		wantWinners   int
+	}{
+		{
+			name:          "league zeroes poolSize and poolWinners",
+			format:        state.CompFormatLeague,
+			inPoolSize:    5,
+			inPoolWinners: 2,
+			wantPoolSize:  0,
+			wantWinners:   0,
+		},
+		{
+			name:          "playoffs zeroes poolSize and poolWinners",
+			format:        state.CompFormatPlayoffs,
+			inPoolSize:    8,
+			inPoolWinners: 3,
+			wantPoolSize:  0,
+			wantWinners:   0,
+		},
+		{
+			name:          "mixed preserves poolSize and poolWinners",
+			format:        state.CompFormatMixed,
+			inPoolSize:    4,
+			inPoolWinners: 2,
+			wantPoolSize:  4,
+			wantWinners:   2,
+		},
+		{
+			name:          "swiss preserves poolSize and poolWinners",
+			format:        state.CompFormatSwiss,
+			inPoolSize:    6,
+			inPoolWinners: 1,
+			wantPoolSize:  6,
+			wantWinners:   1,
+		},
+		{
+			name:          "empty format preserves poolSize and poolWinners",
+			format:        "",
+			inPoolSize:    4,
+			inPoolWinners: 2,
+			wantPoolSize:  4,
+			wantWinners:   2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := &state.Competition{
+				Format:      tc.format,
+				PoolSize:    tc.inPoolSize,
+				PoolWinners: tc.inPoolWinners,
+			}
+			normalizePoolConfig(comp)
+			assert.Equal(t, tc.wantPoolSize, comp.PoolSize, "PoolSize")
+			assert.Equal(t, tc.wantWinners, comp.PoolWinners, "PoolWinners")
+		})
+	}
+}
+
+// TestPOSTCompetition_LeaguePoolConfigNormalized verifies that creating a
+// league competition with poolSize / poolWinners set results in them being
+// silently zeroed on disk (API normalises, does not reject).
+func TestPOSTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	body, _ := json.Marshal(state.Competition{
+		Name:        "League Cup",
+		Format:      state.CompFormatLeague,
+		Kind:        "individual",
+		PoolSize:    6,
+		PoolWinners: 3,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	// Verify the stored competition has zeroed pool config.
+	stored, err := store.LoadCompetition("league-cup")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 0, stored.PoolSize, "league PoolSize must be zeroed on create")
+	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on create")
+}
+
+// TestPUTCompetition_LeaguePoolConfigNormalized verifies that updating a
+// league competition with poolSize / poolWinners set results in them being
+// silently zeroed on disk (settings PUT normalises, does not reject).
+func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed a league competition (with zeroed pool config on disk).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "league-edit",
+		Name:   "League Edit",
+		Format: state.CompFormatLeague,
+		Kind:   "individual",
+	}))
+
+	// PUT with poolSize / poolWinners set — they must be zeroed on save.
+	body, _ := json.Marshal(state.Competition{
+		ID:          "league-edit",
+		Name:        "League Edit",
+		Format:      state.CompFormatLeague,
+		Kind:        "individual",
+		PoolSize:    7,
+		PoolWinners: 2,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/league-edit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	stored, err := store.LoadCompetition("league-edit")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 0, stored.PoolSize, "league PoolSize must be zeroed on PUT")
+	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on PUT")
+}
+
+// TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart verifies that the
+// league tie-breaker knobs (leagueTiebreakTopN / leagueTwoThirdPlaces) can be
+// changed before the competition starts but are rejected (400) once it has
+// progressed past setup — changing them mid-league would alter the
+// consequential-tie set and which ties already-played tie-breakers resolve.
+func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Pre-start (setup): a change is accepted.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                 "lp-setup",
+		Name:               "LP Setup",
+		Format:             state.CompFormatLeague,
+		Kind:               "team",
+		TeamSize:           5,
+		Status:             state.CompStatusSetup,
+		LeagueTiebreakTopN: 3,
+	}))
+	body, _ := json.Marshal(state.Competition{
+		ID: "lp-setup", Name: "LP Setup", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/lp-setup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := store.LoadCompetition("lp-setup")
+	require.NoError(t, err)
+	assert.Equal(t, 4, stored.LeagueTiebreakTopN, "pre-start change must persist")
+	assert.True(t, stored.LeagueTwoThirdPlaces)
+
+	// Started (pools): a change is rejected with 400, on-disk value unchanged.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                 "lp-started",
+		Name:               "LP Started",
+		Format:             state.CompFormatLeague,
+		Kind:               "team",
+		TeamSize:           5,
+		Status:             state.CompStatusPools,
+		LeagueTiebreakTopN: 3,
+	}))
+	body, _ = json.Marshal(state.Competition{
+		ID: "lp-started", Name: "LP Started", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/lp-started", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	stored, err = store.LoadCompetition("lp-started")
+	require.NoError(t, err)
+	assert.Equal(t, 3, stored.LeagueTiebreakTopN, "started league config must be unchanged")
+}
+
+// TestPUTCompetition_MixedPoolConfigPreserved verifies that a mixed
+// competition retains its poolSize / poolWinners after a settings PUT.
+func TestPUTCompetition_MixedPoolConfigPreserved(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "mixed-edit",
+		Name:        "Mixed Edit",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		PoolSize:    5,
+		PoolWinners: 2,
+	}))
+
+	body, _ := json.Marshal(state.Competition{
+		ID:          "mixed-edit",
+		Name:        "Mixed Edit",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		PoolSize:    4,
+		PoolWinners: 1,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/mixed-edit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	stored, err := store.LoadCompetition("mixed-edit")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 4, stored.PoolSize, "mixed PoolSize must be preserved")
+	assert.Equal(t, 1, stored.PoolWinners, "mixed PoolWinners must be preserved")
+}

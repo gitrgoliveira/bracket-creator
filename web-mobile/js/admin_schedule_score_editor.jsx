@@ -3,6 +3,7 @@
 
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
+import { boutHansokuMark } from './match_scoreboard.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -158,8 +159,20 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // Go's formatScore doesn't get split into bogus ippon letters.
           const seIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
           const seIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
+          // Outstanding single hansoku → red ▲ next to the offending side (same
+          // mark as the scoresheet). hansoku may live on the match or under
+          // score.fouls depending on the source; fall back across both.
+          const foulB = boutHansokuMark(m.hansokuB ?? m.score?.fouls?.b ?? 0);
+          const foulA = boutHansokuMark(m.hansokuA ?? m.score?.fouls?.a ?? 0);
+          // Show the live ippon score for a running bout too (not just completed)
+          // so the list reflects scoring in progress; "vs" only before it starts.
+          const showScore = m.status === "completed" || m.status === "running";
+          // A just-started running bout is 0–0, where formatIpponsScore returns "".
+          // Fall back so the cell is never blank: running 0–0 → "vs", a completed
+          // match with no recorded score → "—". Live techniques show once present.
+          const seScore = showScore ? window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : "";
           return (
-            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
+            <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
@@ -167,23 +180,31 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name">{m.sideB?.name}</div>
+                    <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
+                  {/* Foul ▲ flanks the SCORE (Shiro left, Aka right) — a hansoku is part of
+                      the scoreline, so it reads at the score's level. The slots are reserved
+                      symmetrically so the centred score never shifts when a foul appears. */}
                   <div className="score-edit-row__score">
-                    {m.status === "completed" && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {m.status === "running" && <span className="bc-running">●</span>}
-                    {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                    <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
+                    <span className="score-edit-row__scoreval">
+                      {m.status === "scheduled"
+                        ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
+                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : "—"}</span>)}
+                    </span>
+                    <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{m.sideA?.name}</div>
+                    <div className="name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>
               <div>
-                {m.status === "running" && <span className="bc-running">● NOW</span>}
+                {/* Running: no "● NOW" label — the row highlight is the signal (removed as
+                    redundant). Completed keeps its Final / Corrected status. */}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -291,6 +312,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   } catch (_startErr) { /* gate rejected the start; stay on the next match in pre-match */ }
                 }
               } catch (_err) { /* keep modal open on error */ }
+            } : null}
+            onAfterDecision={nextActiveMatch ? async () => {
+              // A kiken/fusenpai decision already persisted the bout via the
+              // /decision POST — no score PUT here. Mirror onSubmitAndNext's
+              // start-next so a fusenpai advances the operator to (and starts)
+              // the next same-court match.
+              if (nextActiveMatch.status === "scheduled") {
+                try {
+                  await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
+                  if (mountedRef.current) setOpenMatch(nextActiveMatch);
+                } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
+              }
             } : null}
             password={password}
           />

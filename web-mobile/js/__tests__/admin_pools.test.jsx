@@ -262,6 +262,26 @@ describe('enrichPoolMatchWithComp', () => {
     expect(enriched.status).toBe('scheduled');
   });
 
+  it('sets compFormat from competition.format so score editors can render format-aware labels', () => {
+    const leagueComp = { id: 'c2', name: 'League Cup', kind: 'individual', teamSize: 0, format: 'league' };
+    const m = { id: 'Pool A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, leagueComp);
+    expect(enriched.compFormat).toBe('league');
+  });
+
+  it('prefers compFormat already on the match over the competition format', () => {
+    const leagueComp = { id: 'c2', name: 'League Cup', kind: 'individual', teamSize: 0, format: 'league' };
+    const m = { id: 'Pool A-0', status: 'scheduled', compFormat: 'mixed' };
+    const enriched = enrichPoolMatchWithComp(m, leagueComp);
+    expect(enriched.compFormat).toBe('mixed');
+  });
+
+  it('falls back to empty string for compFormat when competition has no format', () => {
+    const m = { id: 'A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, comp); // comp has no .format
+    expect(enriched.compFormat).toBe('');
+  });
+
   it('prefers the explicit poolNameOverride over the id-derived prefix', () => {
     const m = { id: 'A-0', status: 'scheduled' };
     const enriched = enrichPoolMatchWithComp(m, comp, 'Pool Alpha');

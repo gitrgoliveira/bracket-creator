@@ -125,6 +125,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     sideB: toPlayer(m.sideB),
     compId: m.compId || (comp && comp.id) || "",
     compName: m.compName || (comp && comp.name) || "",
+    compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     phase: m.phase || "pool",
@@ -214,7 +215,15 @@ function RankInput({ initial, className, onCommit, style }) {
   );
 }
 
+// poolDisplayLabel — returns the user-facing label for a pool heading.
+// League competitions use a single pool that spans the full roster; calling
+// it "Pool A" would be confusing, so we show "League table" instead.
+function poolDisplayLabel(pool, format) {
+  return window.leagueAwareLabel(format, pool.poolName);
+}
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
+  const isLeague = c && c.format === "league";
   const resetOverrides = async () => {
     if (!(await window.confirmDialog({ message: "Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?", confirmLabel: "Reset overrides", danger: true }))) return;
     const admin = await window.promptAdminPassword();
@@ -240,6 +249,186 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // Phase 3b (mp-8rc9): league tie-breaker candidate state.
+  // Only fetched for team leagues in the "pools" phase.
+  const isTeamLeague = isLeague && (c.teamSize > 0 || c.kind === "team");
+  const [tiebreakCandidates, setTiebreakCandidates] = useStateA(null);
+  const [tiebreakFinalized, setTiebreakFinalized] = useStateA(false);
+  const [tiebreakActionBusy, setTiebreakActionBusy] = useStateA(false);
+  // Per-button busy key: "<teamNamesKey>:<action>" or "finalize". Keeps the
+  // spinner scoped to exactly the clicked button while all others stay
+  // disabled (tiebreakActionBusy is still set on all). null = no action in
+  // flight.
+  const [tiebreakBusyAction, setTiebreakBusyAction] = useStateA(null);
+  const [tiebreakErr, setTiebreakErr] = useStateA(null);
+
+  // Fetch candidates whenever poolMatches changes (triggered by match_updated
+  // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
+  useEffectA(() => {
+    if (!isTeamLeague || c.status !== "pools") return;
+    let cancelled = false;
+    window.API.leagueTiebreakCandidates(c.id)
+      .then(data => {
+        if (cancelled || !mountedRef.current) return;
+        setTiebreakCandidates(data.candidates || []);
+        setTiebreakFinalized(!!data.finalized);
+        setTiebreakErr(null);
+      })
+      .catch(e => {
+        if (cancelled || !mountedRef.current) return;
+        // Non-fatal: banner stays hidden on fetch error (operator can still
+        // use the schedule page to score matches; the banner is advisory).
+        setTiebreakErr(e.message);
+      });
+    return () => { cancelled = true; };
+  }, [c.id, c.status, isTeamLeague, poolMatches]);
+
+  const handleTiebreakGenerate = async (groupTeamNames) => {
+    const actionKey = groupTeamNames.join(",") + ":generate";
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction(actionKey);
+    setTiebreakErr(null);
+    try {
+      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password);
+      // SSE match_updated will reload poolMatches and re-fetch candidates.
+    } catch (e) {
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to generate tie-breaker matches");
+    } finally {
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
+    }
+  };
+
+  const handleTiebreakRemove = async (groupTeamNames) => {
+    if (!(await window.confirmDialog({ message: `Remove unscored tie-breaker matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
+    const actionKey = groupTeamNames.join(",") + ":remove";
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction(actionKey);
+    setTiebreakErr(null);
+    try {
+      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password);
+    } catch (e) {
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to remove tie-breaker matches");
+    } finally {
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
+    }
+  };
+
+  const handleTiebreakFinalize = async () => {
+    if (!(await window.confirmDialog({ message: "Accept the current standings as final without a tie-breaker? This cannot be undone.", confirmLabel: "Accept shared ranks", danger: false }))) return;
+    setTiebreakActionBusy(true);
+    setTiebreakBusyAction("finalize");
+    setTiebreakErr(null);
+    try {
+      await window.API.leagueTiebreakFinalize(c.id, password);
+      if (mountedRef.current) setTiebreakFinalized(true);
+    } catch (e) {
+      if (mountedRef.current) setTiebreakErr(e.message || "Failed to finalise standings");
+    } finally {
+      if (mountedRef.current) { setTiebreakActionBusy(false); setTiebreakBusyAction(null); }
+    }
+  };
+
+  // Does a DH match already exist for the given group (both sides present in
+  // poolMatches)? Used to decide whether to show "Run tie-breaker" vs "Remove".
+  const dhMatchExistsForGroup = (groupTeamNames) => {
+    const nameSet = new Set(groupTeamNames);
+    return (poolMatches || []).some(m => {
+      const sideA = m.sideA?.name || m.sideA;
+      const sideB = m.sideB?.name || m.sideB;
+      return m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB);
+    });
+  };
+
+  // Returns true if any DH match for the given group is running or already scored.
+  // The DELETE endpoint returns 409 in that state, so the Remove button must be disabled.
+  const dhMatchScoredForGroup = (groupTeamNames) => {
+    const nameSet = new Set(groupTeamNames);
+    return (poolMatches || []).some(m => {
+      const sideA = m.sideA?.name || m.sideA;
+      const sideB = m.sideB?.name || m.sideB;
+      if (!(m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB))) return false;
+      return m.status === "running" || m.status === "completed" || !!m.winner;
+    });
+  };
+
+  // Banner element: shown when there are consequential tied groups with no
+  // tie-breaker matches yet, OR when tie-breaker matches have been generated.
+  const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
+    <div
+      className="alert alert--warn league-tiebreak"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="league-tiebreak__title">Tie-breaker required</div>
+      <div className="league-tiebreak__desc">
+        All regular matches are complete. The groups below are tied at a qualifying position — run a tie-breaker or accept the shared ranks to finalise standings.
+      </div>
+      {tiebreakCandidates.map((group, gi) => {
+        const names = group.teamNames || [];
+        const hasDH = dhMatchExistsForGroup(names);
+        const dhScored = hasDH && dhMatchScoredForGroup(names);
+        const posLabel = group.minPosition === group.maxPosition
+          ? `Position ${group.minPosition}`
+          : `Positions ${group.minPosition}–${group.maxPosition}`;
+        const generateKey = names.join(",") + ":generate";
+        const removeKey = names.join(",") + ":remove";
+        return (
+          <div key={gi} className="league-tiebreak__group">
+            <div className="league-tiebreak__group-header">
+              <span className="league-tiebreak__pos">{posLabel}</span>
+              <span className="league-tiebreak__teams">{names.join(" · ")}</span>
+            </div>
+            <div className="league-tiebreak__actions">
+              {!hasDH ? (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--primary"
+                  disabled={tiebreakActionBusy}
+                  onClick={() => handleTiebreakGenerate(names)}
+                >
+                  {tiebreakBusyAction === generateKey && <span className="spinner" />}
+                  Run tie-breaker
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--danger btn--ghost"
+                    disabled={tiebreakActionBusy || dhScored}
+                    onClick={() => handleTiebreakRemove(names)}
+                  >
+                    {tiebreakBusyAction === removeKey && <span className="spinner" />}
+                    Remove unscored tie-breaker
+                  </button>
+                  {dhScored && (
+                    <span className="field__hint">Tie-breaker is running or already scored — score it to continue.</span>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {!tiebreakFinalized && (
+        <div className="league-tiebreak__finalize">
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            disabled={tiebreakActionBusy}
+            onClick={handleTiebreakFinalize}
+          >
+            {tiebreakBusyAction === "finalize" && <span className="spinner" />}
+            Accept shared ranks / no tie-breaker
+          </button>
+          <div className="field__hint" style={{ marginTop: 4 }}>Marks all tied groups as final without additional matches.</div>
+        </div>
+      )}
+      {tiebreakErr && (
+        <div className="league-tiebreak__err">{tiebreakErr}</div>
+      )}
+    </div>
+  ) : null;
 
   // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
   // teamSize, compName, phase, poolName). Pool-match objects from
@@ -291,7 +480,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   ) : null;
 
   if (!pools || pools.length === 0) {
-    return <div className="empty"><div className="icon">⏳</div><h3>Pools not drawn yet</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to draw pools.</div></div>;
+    return <div className="empty"><div className="icon">⏳</div><h3>{isLeague ? "League not drawn yet" : "Pools not drawn yet"}</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to {isLeague ? "draw the league table" : "draw pools"}.</div></div>;
   }
 
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
@@ -308,7 +497,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         <div className="card">
           <div className="card__head">
             <div>
-              <h2 className="page-head__title">{selectedPool.poolName}</h2>
+              <h2 className="page-head__title">{poolDisplayLabel(selectedPool, c.format)}</h2>
               <div className="card__sub">Shiaijo {court} · {pluralize(selectedPool.players.length, "participant")}</div>
             </div>
             <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
@@ -441,9 +630,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
+      {leagueTiebreakBanner}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{pluralize(pools.length, "pool")}</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{isLeague ? "League" : pluralize(pools.length, "pool")}</div>
         </div>
         <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
       </div>
@@ -470,7 +660,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             >
               <div className="pool__head">
                 <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
-                  <div className="pool__name">{pool.poolName}</div>
+                  <div className="pool__name">{poolDisplayLabel(pool, c.format)}</div>
                   <div className="tag-badge" style={{ margin: 0 }}>SHIAIJO {court}</div>
                 </div>
               </div>

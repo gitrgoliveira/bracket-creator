@@ -104,10 +104,15 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   const bStr = (ipponsB || []).filter(x => x && x !== "•").join("");
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
-    // A hikiwake is always X — scored or not — to match the canonical team
-    // scoresheet (X on the centre line). This is the draw glyph, not the
-    // hansoku marker: fouls render separately as the reserved red triangle.
-    return "X" + suffix;
+    if (!aStr && !bStr) {
+      // Scoreless draw (operator pressed X with no ippons entered) — canonical
+      // hikiwake glyph. This is the draw marker, not the hansoku triangle.
+      return "X" + suffix;
+    }
+    // Scored equal draw (e.g. 1–1 M–K hikiwake): show the actual points so
+    // the operator and viewer see what was struck, not a bare X. The hikiwake
+    // type is still recorded on the server — this is a display-only change.
+    return `${aStr || "·"}–${bStr || "·"}` + suffix;
   }
   if (!aStr && !bStr) {
     // Fall back when the per-side ippon arrays are absent but a score object
@@ -765,14 +770,26 @@ function matchScoreStr(m, ipponsB, ipponsA) {
     || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
 }
 
+// matchStateCell — the centre score-cell content for a compact match row, shared
+// so every list renders the SAME lifecycle cue: completed → score string,
+// running → "vs" (the row's .is-running highlight is the "now" signal, NOT a
+// centre dot), scheduled → "–". The labelled "● NOW" badge used in headers/
+// status columns is a separate affordance and is NOT produced here.
+function matchStateCell(m, ipponsB, ipponsA) {
+  if (m.status === "completed") return matchScoreStr(m, ipponsB, ipponsA) || "—";
+  if (m.status === "running") return "vs";
+  return "–";
+}
+
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
 window.matchScoreStr = matchScoreStr;
+window.matchStateCell = matchStateCell;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr, buildDisplayModel, computeMetaTops };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops };

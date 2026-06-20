@@ -120,15 +120,15 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 // SubMatchResult.SideA/SideB are set here to exercise the sub.SideA fallback
 // path in computeStandings. The "" == "" false-positive is now guarded by a
 // sub.SideA != "" check, so empty sub-bout sides (from quick-score) are safe.
+//
+// Uses CompFormatLeague for the DH-injection unit tests (InjectPoolDaihyosenMatches
+// is format-agnostic and can be called directly regardless of format). Tests that
+// exercise MaybeAutoCompletePools DH auto-injection must use setupTeamMixedPoolComp
+// instead — team-league no longer auto-injects DH (operator decides via Phase 3b).
 func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *state.Store) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 
-	// Use league format: league auto-completes after all pool matches (including DH).
-	// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
-	// DH injection logic is format-agnostic (it depends only on isTeamComp), so
-	// changing the format here doesn't affect the tiebreaker-injection behavior
-	// being tested.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:       compID,
 		Name:     "Team Pool Test",
@@ -173,6 +173,80 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 	} else {
 		// Alpha wins both matches (W=2); Beta and Gamma each win one (W=1, L=1) and
 		// then face each other with Beta winning — distinct standings, no tie.
+		matches = []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+				Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "Alpha"},
+					{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "Alpha"},
+				}},
+			{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma",
+				Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+					{Position: 2, SideA: "Alpha", SideB: "Gamma", Winner: "Alpha"},
+				}},
+			{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma",
+				Status: state.MatchStatusCompleted, Winner: "Beta", Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+					{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
+				}},
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	return eng, store
+}
+
+// setupTeamMixedPoolComp creates a team-competition (mixed format, CompStatusPools)
+// with the same three-team structure as setupTeamPoolComp. Used for tests that
+// exercise MaybeAutoCompletePools DH auto-injection — mixed-format team
+// competitions still auto-inject DH matches when ties are detected (unlike
+// team-league, which requires operator opt-in per Phase 3b).
+func setupTeamMixedPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *state.Store) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Team Mixed Pool Test",
+		Format:   state.CompFormatMixed,
+		Status:   state.CompStatusPools,
+		Courts:   []string{"A"},
+		TeamSize: 2,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
+		}},
+	}))
+
+	var matches []state.MatchResult
+	if tieAll {
+		matches = []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Alpha", SideB: "Beta", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+			{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Alpha", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Alpha", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+			{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma",
+				Status: state.MatchStatusCompleted,
+				Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
+				SubResults: []state.SubMatchResult{
+					{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+					{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "", Decision: string(domain.DecisionHikiwake)},
+				}},
+		}
+	} else {
 		matches = []state.MatchResult{
 			{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
 				Status: state.MatchStatusCompleted, Winner: "Alpha", Court: "A",
@@ -260,18 +334,37 @@ func TestInjectPoolDaihyosenMatches_Idempotent(t *testing.T) {
 	assert.Empty(t, second, "second inject must produce no new matches")
 }
 
-// TestMaybeAutoCompletePools_TeamTieInjectsDH verifies that MaybeAutoCompletePools
-// returns AutoCompleteTiebreakInjected and injects DH matches for a team
-// competition with tied pools.
-func TestMaybeAutoCompletePools_TeamTieInjectsDH(t *testing.T) {
-	eng, _ := setupTeamPoolComp(t, "autocomplete-team-tie", true)
+// TestMaybeAutoCompletePools_TeamMixedTieInjectsDH verifies that InjectPoolDaihyosenMatches
+// auto-injects DH matches for a TEAM MIXED competition with tied pools. This confirms
+// that mixed-format team competitions still auto-inject DH (unlike team-league
+// competitions, which return AutoCompleteAwaitingLeagueTiebreak instead and require
+// operator opt-in — see league_tiebreak_test.go for those tests).
+//
+// NOTE: MaybeAutoCompletePools is not called here because the mixed path routes through
+// advanceMixedPools → ResolveQualifiedPools, which enforces a ≥2 pools constraint
+// (mixed competitions always have ≥2 pools in production). The DH injection step
+// (InjectPoolDaihyosenMatches) is the focus of this test and is what advanceMixedPools
+// calls first before attempting to seed the knockout.
+func TestMaybeAutoCompletePools_TeamMixedTieInjectsDH(t *testing.T) {
+	eng, store := setupTeamMixedPoolComp(t, "autocomplete-team-mixed-tie", true)
 
-	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-tie")
+	injected, err := eng.InjectPoolDaihyosenMatches("autocomplete-team-mixed-tie")
 	require.NoError(t, err)
-	assert.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	assert.NotEmpty(t, injected, "tied team mixed comp should auto-inject DH matches")
+
+	// Verify the injected matches are saved in the store.
+	allMatches, err := store.LoadPoolMatches("autocomplete-team-mixed-tie")
+	require.NoError(t, err)
+	dhCount := 0
+	for _, m := range allMatches {
+		if IsPoolDaihyosenMatchID(m.ID) {
+			dhCount++
+		}
+	}
+	assert.Greater(t, dhCount, 0, "DH matches should appear in the store after injection")
 }
 
-// TestMaybeAutoCompletePools_TeamNoTieTransitions verifies that a team pool
+// TestMaybeAutoCompletePools_TeamNoTieTransitions verifies that a team-league pool
 // with no ties transitions to complete.
 func TestMaybeAutoCompletePools_TeamNoTieTransitions(t *testing.T) {
 	eng, _ := setupTeamPoolComp(t, "autocomplete-team-notie", false)
@@ -282,16 +375,19 @@ func TestMaybeAutoCompletePools_TeamNoTieTransitions(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_TeamDHCompleteTransitions verifies that after all
-// DH matches are completed, the competition transitions to complete.
+// operator-injected DH matches are completed in a team-league competition, the
+// competition transitions to complete (the cycle-guard passes when DH results
+// are unambiguous).
 func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "autocomplete-team-dhcomplete", true)
 
-	// First pass: inject DH.
-	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dhcomplete")
-	require.NoError(t, err)
-	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	// Operator manually injects DH for the tied group (bypasses the league
+	// AwaitingLeagueTiebreak gate — this mirrors what Phase 3b will do).
+	injected, injErr := eng.InjectPoolDaihyosenMatches("autocomplete-team-dhcomplete")
+	require.NoError(t, injErr)
+	require.NotEmpty(t, injected, "DH matches should be injected for the tied group")
 
-	// Mark all pool matches (including the injected DH) as completed.
+	// Mark all pool matches (including the injected DH) as completed with winners.
 	allMatches, err := store.LoadPoolMatches("autocomplete-team-dhcomplete")
 	require.NoError(t, err)
 	for i := range allMatches {
@@ -302,7 +398,8 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dhcomplete", allMatches))
 
-	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dhcomplete")
+	// Now MaybeAutoCompletePools should see hasCompleteDH=true and transition.
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dhcomplete")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteTransitioned, outcome)
 }
@@ -313,10 +410,10 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-nowinner", true)
 
-	// Inject DH.
-	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
-	require.NoError(t, err)
-	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	// Operator manually injects DH (Phase 3b path).
+	injected, injErr := eng.InjectPoolDaihyosenMatches("autocomplete-team-dh-nowinner")
+	require.NoError(t, injErr)
+	require.NotEmpty(t, injected)
 
 	// Mark all matches completed but leave DH winner empty (hikiwake).
 	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-nowinner")
@@ -327,7 +424,7 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-nowinner", allMatches))
 
-	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-nowinner")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteNoChange, outcome, "DH with no winner should block auto-completion")
 }
@@ -390,13 +487,15 @@ func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
 
 // TestMaybeAutoCompletePools_TeamDHCycleBlocks verifies that auto-completion
 // is blocked when DH results form a cycle and standings remain tied.
+// Uses team-league with operator-injected DH (Phase 3b path) since team-league
+// no longer auto-injects DH.
 func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-cycle", true)
 
-	// Inject DH matches (3-way tie → 3 DH bouts injected).
-	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle")
-	require.NoError(t, err)
-	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	// Operator manually injects DH matches (3-way tie → 3 DH bouts injected).
+	injected, injErr := eng.InjectPoolDaihyosenMatches("autocomplete-team-dh-cycle")
+	require.NoError(t, injErr)
+	require.NotEmpty(t, injected, "DH matches should be injected for the 3-way tied group")
 
 	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-cycle")
 	require.NoError(t, err)
@@ -449,7 +548,7 @@ func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
 	}
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-cycle", allMatches))
 
-	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle")
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteNoChange, outcome, "cyclic DH results should block auto-completion")
 }
@@ -458,13 +557,14 @@ func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
 // when DH results form a cycle but the operator has applied manual rank
 // overrides covering every tied team, MaybeAutoCompletePools transitions to
 // complete instead of blocking forever.
+// Uses team-league with operator-injected DH (Phase 3b path).
 func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, "autocomplete-team-dh-cycle-override", true)
 
-	// Inject DH and build the same 3-way cycle as TeamDHCycleBlocks.
-	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
-	require.NoError(t, err)
-	require.Equal(t, AutoCompleteTiebreakInjected, outcome)
+	// Operator manually injects DH and builds the same 3-way cycle as TeamDHCycleBlocks.
+	injected, injErr := eng.InjectPoolDaihyosenMatches("autocomplete-team-dh-cycle-override")
+	require.NoError(t, injErr)
+	require.NotEmpty(t, injected)
 
 	allMatches, err := store.LoadPoolMatches("autocomplete-team-dh-cycle-override")
 	require.NoError(t, err)
@@ -500,7 +600,7 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dh-cycle-override", allMatches))
 
 	// Without overrides the cycle blocks.
-	outcome, err = eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
+	outcome, err := eng.MaybeAutoCompletePools("autocomplete-team-dh-cycle-override")
 	require.NoError(t, err)
 	require.Equal(t, AutoCompleteNoChange, outcome, "cycle must block before overrides are set")
 

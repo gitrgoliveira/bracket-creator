@@ -39,11 +39,10 @@ import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosa
 // to work (scoring_modal_match_lineup.test.jsx imports directly from here).
 import { resolveMatchLineup, resolveLineupTeamId } from './lineup_resolver.jsx';
 
-// Built from MAX_TEAM_SIZE (admin_helpers.jsx) so the scoring UI's
-// position count stays in lockstep with the team-size input caps in
-// admin_competition.jsx and admin_setup.jsx. Bumping MAX_TEAM_SIZE
-// flows automatically to all three sites.
-const TEAM_POSITIONS = Array.from({ length: window.MAX_TEAM_SIZE }, (_, i) => String(i + 1));
+// Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
+// from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
+// MAX_TEAM_SIZE (admin_helpers.jsx), kept in lockstep with the team-size input
+// caps in admin_competition.jsx and admin_setup.jsx.
 
 // T131 helper: human-friendly position label for the team-match scoring
 // modal. 5-person teams use the canonical FIK names; non-5 sizes use the
@@ -141,7 +140,15 @@ export function subBoutHasBeenPlayed(s) {
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
-  const numberedPositions = TEAM_POSITIONS.slice(0, teamSize);
+  // Kachinuki appends bouts beyond teamSize (engine assigns Position =
+  // len(SubResults)+1, up to 2*roster-1 bouts), so size the grid to cover every
+  // persisted bout position — otherwise reopening a kachinuki match hides (and
+  // can't score) the later bouts. A fixed-position match never persists a
+  // position past teamSize, so it is unaffected. Capped at the theoretical
+  // kachinuki maximum (2*MAX_TEAM_SIZE-1) as a guard against malformed data.
+  const maxSubPos = (m.subResults || []).reduce((mx, s) => (s.position > 0 && s.position > mx ? s.position : mx), 0);
+  const positionCount = Math.min(Math.max(teamSize, maxSubPos), 2 * window.MAX_TEAM_SIZE - 1);
+  const numberedPositions = Array.from({ length: positionCount }, (_, i) => String(i + 1));
   // mp-4pc: a persisted daihyosen (representative bout) lives in
   // SubResults at wire position -1. It is scored "like any other
   // sub-match" (handlers_daihyosen.go) but is NOT an individual victory —
@@ -760,14 +767,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               team header / summary / decision / footer stay anchored. */}
           <div className="team-bouts-scroll">
           {(() => {
-            // T136: kachinuki "current bout" index — last row that has
-            // any data, or 0 if nothing scored yet.
+            // T136: kachinuki "current bout" index. The server advances by
+            // appending an EMPTY placeholder bout after each score, so the bout
+            // to score is the first UNPLAYED slot AFTER the last played one —
+            // not the last played row itself (which would keep showing the bout
+            // just completed). Falls back to the last played row when there is
+            // no further slot, or row 0 before anything is scored.
             let kachinukiIdx = 0;
+            let lastPlayedIdx = -1;
             for (let i = subs.length - 1; i >= 0; i--) {
-              if (subs[i].aPts.length > 0 || subs[i].bPts.length > 0 || subs[i].aFouls > 0 || subs[i].bFouls > 0) {
-                kachinukiIdx = i;
-                break;
-              }
+              if (subBoutHasBeenPlayed(subs[i])) { lastPlayedIdx = i; break; }
+            }
+            if (lastPlayedIdx >= 0) {
+              kachinukiIdx = (lastPlayedIdx + 1 < subs.length) ? lastPlayedIdx + 1 : lastPlayedIdx;
             }
             // T136: "kachinuki-exhaustion" sentinel — surface the end
             // banner instead of more bout rows when the backend has

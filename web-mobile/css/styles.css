@@ -6028,16 +6028,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .league-matrix__win { color: #16a34a; }
 .league-matrix__loss { color: #dc2626; }
-/* Draw must be distinguishable from win/loss WITHOUT colour (Principle 2):
-   the near-invisible 0.04-alpha cell tint can't carry the signal for a
-   colour-blind operator, so the draw letter (or "X") gets an underline —
-   a treatment, not a hue. Win/loss carry no underline, so the three states
-   are separable in greyscale. --ink-2 holds >4.5:1 on the faint draw bg. */
+/* Draw = neutral ippon letters (no win/loss hue). Plain text — never underlined:
+   an underline reads as a hyperlink on static data. The draw is already the
+   visual odd-one-out (uncoloured letters on the neutral cell), and the Matches
+   list above carries the authoritative "M–K". --ink-2 holds >4.5:1 on the cell. */
 .league-matrix__draw {
   color: var(--ink-2);
-  text-decoration: underline;
-  text-decoration-thickness: 2px;
-  text-underline-offset: 2px;
 }
 
 .league-matrix__legend {
@@ -6057,9 +6053,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .league-matrix__legend-item--win { color: #16a34a; background: rgba(22, 163, 74, 0.1); }
 .league-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
-/* Mirror the cell's non-colour draw treatment (underline) so the legend key
-   matches what's rendered in the matrix. */
-.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
+.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
 
 /* ---------- FoulCounter (Individual Scoring) ---------- */
 .sb-fouls {

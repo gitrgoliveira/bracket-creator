@@ -105,6 +105,26 @@ export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyose
   return (subTotals || []).some((s, i) => i !== daihyosenIdx && s.draw);
 }
 
+// resolveKachinukiBoutSides — competitor identity for a KACHINUKI sub-bout.
+// Unlike a fixed-position encounter (settled on IV/PW at the match level, where
+// computeStandings matches the match-level side first via isWinForSide), a
+// kachinuki bout is consumed per-competitor: engine.AdvanceKachinuki compares
+// the bout winner against sideA/sideB to decide who stays on, and the bout-log
+// export prints those names. So a kachinuki bout must persist the INDIVIDUAL
+// player names and a player-name winner — never the team name. When the lineup
+// is unknown the sides are left empty and the winner falls back to the team
+// name, the same "sides empty when unknown" contract the backend's quick-score
+// path documents (handlers_match.go). Fixed-position and daihyosen bouts keep
+// their existing team-name behaviour and do not call this.
+export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }) {
+  const sideA = aName || "";
+  const sideB = bName || "";
+  let winner = "";
+  if (wKey === "a") winner = aName || teamWinnerName || "";
+  else if (wKey === "b") winner = bName || teamWinnerName || "";
+  return { sideA, sideB, winner };
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -476,6 +496,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // encho to avoid duplicate/ambiguous semantics on the team match.
   const enchoBlock = () => (enchoPeriodCount > 0 && !hasDaihyosen) ? { encho: { periodCount: enchoPeriodCount } } : {};
 
+  // Per-bout competitor names resolved from the team lineup by position
+  // (falling back to any previously-recorded sub-bout side). Shared by the row
+  // renderer and buildPatch so a kachinuki bout can persist competitor identity
+  // (see resolveKachinukiBoutSides). Mirrors pickFromLineup in the renderer.
+  const playerNamesForBout = (idx) => {
+    const pos = idx === daihyosenIdx ? -1 : idx + 1;
+    const existing = existingSub.find(s => s.position === pos);
+    const posKey5 = (teamSize === 5 && idx < 5) ? POS_LABELS_BY_INDEX_5[idx].toLowerCase() : null;
+    const posKeyN = String(positions[idx]);
+    const pick = (lineup) => {
+      if (!lineup?.positions) return "";
+      if (posKey5 && lineup.positions[posKey5]) return lineup.positions[posKey5];
+      if (lineup.positions[posKeyN]) return lineup.positions[posKeyN];
+      return "";
+    };
+    return { aName: pick(lineupA) || existing?.sideA || "", bName: pick(lineupB) || existing?.sideB || "" };
+  };
+
   const buildPatch = (targetStatus) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
     const subResults = subs.map((s, idx) => {
@@ -494,15 +532,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (isDaihyo) decision = "daihyosen";
       else if (s.fusensho) decision = "fusensho";
       else if (t.winner === null) decision = "hikiwake";
+      const teamWinnerName = w ? (typeof w === "object" ? w.name : w) : "";
+      // Competition-type-aware sub-bout identity: a kachinuki bout is consumed
+      // per-competitor (advancement + bout-log export), so persist player-name
+      // sides + winner; a fixed-position or daihyosen bout settles at the match
+      // level, so it keeps the team-name behaviour (standings match the
+      // match-level side first via isWinForSide).
+      let sideA, sideB, winner;
+      if (isKachinuki && !isDaihyo) {
+        const { aName, bName } = playerNamesForBout(idx);
+        ({ sideA, sideB, winner } = resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }));
+      } else {
+        sideA = sideAName;
+        sideB = sideBName;
+        winner = teamWinnerName;
+      }
       const entry = {
         position: isDaihyo ? -1 : idx + 1,
-        sideA: typeof m.sideA === "object" ? m.sideA?.name : m.sideA,
-        sideB: typeof m.sideB === "object" ? m.sideB?.name : m.sideB,
+        sideA,
+        sideB,
         ipponsA: aAll,
         ipponsB: bAll,
         hansokuA: s.aFouls,
         hansokuB: s.bFouls,
-        winner: w ? (typeof w === "object" ? w.name : w) : "",
+        winner,
         decision,
       };
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
@@ -744,14 +797,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // shapes so this stays size-agnostic.
             const posKey5 = (teamSize === 5 && idx < 5) ? POS_LABELS_BY_INDEX_5[idx].toLowerCase() : null;
             const posKeyN = String(positions[idx]);
-            const pickFromLineup = (lineup) => {
-              if (!lineup?.positions) return "";
-              if (posKey5 && lineup.positions[posKey5]) return lineup.positions[posKey5];
-              if (lineup.positions[posKeyN]) return lineup.positions[posKeyN];
-              return "";
-            };
-            const playerAName = pickFromLineup(lineupA) || existingSubAtIdx?.sideA || "";
-            const playerBName = pickFromLineup(lineupB) || existingSubAtIdx?.sideB || "";
+            // Same lineup→competitor resolution buildPatch uses (DRY).
+            const { aName: playerAName, bName: playerBName } = playerNamesForBout(idx);
 
             // Feature 2 / layout: each player's name select lives WITH that
             // side's score controls (grouped, and aligned down the sheet),
@@ -798,7 +845,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   return { ...prev, bFouls: r.fouls, aPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
                 }),
                 color: "shiro", label: "SHIRO",
-                playerName: playerBName, roster: rosterB, onSelectName: pickPlayer(teamIdB, lineupB),
+                // The daihyosen is a representative bout, not a lineup position:
+                // "daihyosen" is not a valid lineup key (domain/team_lineup.go
+                // accepts only senpo/… or "1".."N"), so a name pick there would
+                // 4xx. Suppress the picker by passing an empty roster (the input
+                // only renders when roster.length > 0).
+                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, onSelectName: pickPlayer(teamIdB, lineupB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -809,7 +861,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   return { ...prev, aFouls: r.fouls, bPts: r.opponentPts, fusensho: "", _preFusensho: undefined, draw: false };
                 }),
                 color: "aka", label: "AKA",
-                playerName: playerAName, roster: rosterA, onSelectName: pickPlayer(teamIdA, lineupA),
+                // See SHIRO note above — no lineup picker on the daihyosen row.
+                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, onSelectName: pickPlayer(teamIdA, lineupA),
               },
             ];
 

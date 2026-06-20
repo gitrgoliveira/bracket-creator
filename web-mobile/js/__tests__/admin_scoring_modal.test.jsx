@@ -27,7 +27,7 @@ import {
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1157,6 +1157,29 @@ describe('teamEncounterHasResult (folds 0–0 draws into the scored-tie signal)'
       { aTotal: 0, bTotal: 0, winner: null, draw: true },
     ];
     expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: 1 })).toBe(false);
+  });
+});
+
+describe('resolveKachinukiBoutSides (per-competitor identity for kachinuki bouts)', () => {
+  it('uses player names for sides and the winning player as winner', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Senpo', bName: 'B-Senpo', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: 'A-Senpo', sideB: 'B-Senpo', winner: 'A-Senpo' });
+  });
+
+  it('attributes the winner to side B when wKey is "b"', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Jiho', bName: 'B-Jiho', wKey: 'b', teamWinnerName: 'Team B' });
+    expect(r.winner).toBe('B-Jiho');
+  });
+
+  it('leaves sides empty and falls the winner back to the team name when the lineup is unknown', () => {
+    // Matches the backend quick-score contract: sub-bout sides empty when unknown.
+    const r = resolveKachinukiBoutSides({ aName: '', bName: '', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: '', sideB: '', winner: 'Team A' });
+  });
+
+  it('returns an empty winner for a drawn bout (no wKey)', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Chuken', bName: 'B-Chuken', wKey: null, teamWinnerName: '' });
+    expect(r).toEqual({ sideA: 'A-Chuken', sideB: 'B-Chuken', winner: '' });
   });
 });
 

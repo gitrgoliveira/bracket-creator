@@ -7,9 +7,14 @@ export default [
     ignores: ["node_modules/**", "dist/**", "vendor/**"],
   },
   {
-    // Node.js utility scripts in the web-mobile root (e.g. check-imports.mjs)
+    // Node.js utility scripts in the web-mobile root (e.g. check-imports.mjs).
+    // Set ecmaVersion/sourceType explicitly (mirroring the JS/JSX block) so the
+    // ESM `import` syntax parses regardless of any future change to ESLint's
+    // implicit flat-config defaults.
     files: ["*.mjs"],
     languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
       globals: {
         ...globals.node,
       },

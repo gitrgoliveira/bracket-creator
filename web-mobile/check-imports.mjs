@@ -99,7 +99,11 @@ let totalErrors = 0;
 for (const modName of CHECK_MODULES) {
   const modPath = resolve(JS_DIR, modName);
   if (!existsSync(modPath)) {
-    console.log(`SKIP (not found): ${modName}`);
+    // A listed split module that has vanished almost always means a bad
+    // rename/move — failing the check is correct, not a soft skip, otherwise
+    // js/validate would go green on a broken refactor.
+    console.error(`  ✗ ${modName}: listed in CHECK_MODULES but file not found — bad rename/move?`);
+    totalErrors++;
     continue;
   }
 

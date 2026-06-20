@@ -27,7 +27,7 @@ import {
 // teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
 // (not part of the thin-entry consumer barrel), imported directly like the
 // resolveMatchLineup tests do.
-import { teamEncounterHasResult, resolveKachinukiBoutSides } from '../admin_scoring_team.jsx';
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1180,6 +1180,25 @@ describe('resolveKachinukiBoutSides (per-competitor identity for kachinuki bouts
   it('returns an empty winner for a drawn bout (no wKey)', () => {
     const r = resolveKachinukiBoutSides({ aName: 'A-Chuken', bName: 'B-Chuken', wKey: null, teamWinnerName: '' });
     expect(r).toEqual({ sideA: 'A-Chuken', sideB: 'B-Chuken', winner: '' });
+  });
+});
+
+describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
+  it('is false for an untouched 0–0 bout', () => {
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(false);
+  });
+
+  it('is true once any ippon, foul, fusensho, or explicit draw is present', () => {
+    expect(subBoutHasBeenPlayed({ aPts: ["M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: ["K"], aFouls: 0, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 1, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], fusensho: "a" })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], draw: true })).toBe(true);
+  });
+
+  it('is false for null/undefined', () => {
+    expect(subBoutHasBeenPlayed(null)).toBe(false);
+    expect(subBoutHasBeenPlayed(undefined)).toBe(false);
   });
 });
 

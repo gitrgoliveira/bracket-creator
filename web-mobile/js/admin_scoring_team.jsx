@@ -125,6 +125,19 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
   return { sideA, sideB, winner };
 }
 
+// subBoutHasBeenPlayed — true once a sub-bout carries any operator input
+// (ippons, fouls, a per-bout fusensho, or an explicit hikiwake). Used to drop
+// untouched positions from a KACHINUKI patch: the modal maps over all team
+// positions, but kachinuki appends bouts dynamically, so emitting unplayed
+// positions as 0–0 hikiwake would corrupt advancement (AdvanceKachinuki keys
+// off the LAST SubResult having an outcome) and inflate individual-draw
+// standings. Fixed-position matches keep all positions — a 0–0 there is a
+// legitimate hikiwake.
+export function subBoutHasBeenPlayed(s) {
+  if (!s) return false;
+  return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw;
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
@@ -516,7 +529,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   const buildPatch = (targetStatus) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
-    const subResults = subs.map((s, idx) => {
+    let subResults = subs.map((s, idx) => {
       const t = subTotals[idx];
       const isDaihyo = idx === daihyosenIdx;
       // Hansoku Hs already in pts arrays via applyFoulIncrement — no fold.
@@ -566,6 +579,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       }
       return entry;
     });
+    // Kachinuki appends bouts dynamically, so the all-positions map above leaves
+    // untouched trailing positions. Drop them (keep the daihyosen and any played
+    // bout) — see subBoutHasBeenPlayed. Fixed-position matches keep every
+    // position because a 0–0 there is a legitimate hikiwake.
+    if (isKachinuki) {
+      subResults = subResults.filter((_entry, idx) => idx === daihyosenIdx || subBoutHasBeenPlayed(subs[idx]));
+    }
     const winner = teamWinner === "a" ? m.sideA : teamWinner === "b" ? m.sideB : null;
     const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
     // When transitioning to "running" (▶ Start), teamWinner is typically

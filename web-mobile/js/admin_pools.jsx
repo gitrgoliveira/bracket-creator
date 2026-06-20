@@ -340,6 +340,18 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
+  // Returns true if any DH match for the given group is running or already scored.
+  // The DELETE endpoint returns 409 in that state, so the Remove button must be disabled.
+  const dhMatchScoredForGroup = (groupTeamNames) => {
+    const nameSet = new Set(groupTeamNames);
+    return (poolMatches || []).some(m => {
+      const sideA = m.sideA?.name || m.sideA;
+      const sideB = m.sideB?.name || m.sideB;
+      if (!(m.id && /(-DH-)/.test(m.id) && nameSet.has(sideA) && nameSet.has(sideB))) return false;
+      return m.status === "running" || m.status === "completed" || !!m.winner;
+    });
+  };
+
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
   const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
@@ -355,6 +367,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {tiebreakCandidates.map((group, gi) => {
         const names = group.teamNames || [];
         const hasDH = dhMatchExistsForGroup(names);
+        const dhScored = hasDH && dhMatchScoredForGroup(names);
         const posLabel = group.minPosition === group.maxPosition
           ? `Position ${group.minPosition}`
           : `Positions ${group.minPosition}–${group.maxPosition}`;
@@ -378,15 +391,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   Run tie-breaker
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="btn btn--sm btn--danger btn--ghost"
-                  disabled={tiebreakActionBusy}
-                  onClick={() => handleTiebreakRemove(names)}
-                >
-                  {tiebreakBusyAction === removeKey && <span className="spinner" />}
-                  Remove unscored tie-breaker
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--danger btn--ghost"
+                    disabled={tiebreakActionBusy || dhScored}
+                    onClick={() => handleTiebreakRemove(names)}
+                  >
+                    {tiebreakBusyAction === removeKey && <span className="spinner" />}
+                    Remove unscored tie-breaker
+                  </button>
+                  {dhScored && (
+                    <span className="field__hint">Tie-breaker is running or already scored — score it to continue.</span>
+                  )}
+                </>
               )}
             </div>
           </div>

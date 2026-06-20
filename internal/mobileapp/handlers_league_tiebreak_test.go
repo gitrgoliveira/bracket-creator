@@ -1088,3 +1088,39 @@ func TestLeagueTiebreakPost_RejectsNonTeamLeague(t *testing.T) {
 		assert.Empty(t, store.matches, "individual-league POST must not inject any matches")
 	})
 }
+
+// TestLeagueTiebreakFinalize_RejectsNonTeamLeague pins the finalize handler's
+// team-league guard: POST /league-tiebreak/finalize must return 400 for any
+// competition that is not a team-league, without mutating LeagueTiebreakFinalized.
+func TestLeagueTiebreakFinalize_RejectsNonTeamLeague(t *testing.T) {
+	t.Run("non-league format (mixed)", func(t *testing.T) {
+		eng := &stubLeagueTiebreakEngine{}
+		mixed := makeTeamLeagueComp(state.CompStatusPools)
+		mixed.Format = state.CompFormatMixed
+		store := &stubLeagueTiebreakStore{comp: mixed}
+		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.False(t, store.comp.LeagueTiebreakFinalized, "non-league finalize must not set LeagueTiebreakFinalized")
+	})
+
+	t.Run("non-team kind (individual league)", func(t *testing.T) {
+		eng := &stubLeagueTiebreakEngine{}
+		indv := makeTeamLeagueComp(state.CompStatusPools)
+		indv.Kind = "individual"
+		indv.TeamSize = 0
+		store := &stubLeagueTiebreakStore{comp: indv}
+		r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+		req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.False(t, store.comp.LeagueTiebreakFinalized, "individual-league finalize must not set LeagueTiebreakFinalized")
+	})
+}

@@ -445,10 +445,15 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		}
 
 		var notFoundFlag bool
+		var notTeamLeague bool
 		var alreadyComplete bool
 		_, err := store.UpdateCompetitionChanged(id, func(comp *state.Competition) (*state.Competition, error) {
 			if comp == nil {
 				notFoundFlag = true
+				return nil, nil
+			}
+			if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+				notTeamLeague = true
 				return nil, nil
 			}
 			if comp.Status == state.CompStatusComplete {
@@ -465,6 +470,10 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		}
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if notTeamLeague {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
 			return
 		}
 		if alreadyComplete {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatIpponsScore, ipponsFromScore } from '../bracket.jsx';
+import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.jsx';
 
 // Convention enforced across all match-list views:
 //   SHIRO (sideB) is always displayed on the LEFT.
@@ -47,8 +47,21 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
     });
 
-    it('returns X for a draw even when scores were entered (canonical hikiwake glyph)', () => {
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('X');
+    it('returns X for a scoreless draw (canonical hikiwake glyph, no ippons)', () => {
+      expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
+      expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
+    });
+
+    it('returns the points for a scored equal draw (1–1), not bare X', () => {
+      // Item 6: operator entered M on one side, K on the other, then toggled
+      // hikiwake. The ippons are preserved on the server (the score.type is
+      // hikiwake but ipponsA/B are non-empty). Show the techniques so the
+      // viewer sees what was struck rather than losing that information.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+    });
+
+    it('shows scored draw with one empty side using the placeholder dot', () => {
+      expect(formatIpponsScore(['M'], [], { type: 'hikiwake' }, null)).toBe('M–·');
     });
 
     it('falls back to numeric score when ippons arrays are empty AND score has no ippon letters', () => {
@@ -120,11 +133,12 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
     });
 
-    it('appends (E) to a draw', () => {
-      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('X (E)');
+    it('appends (E) to a scored draw (shows points, not X)', () => {
+      // Item 6: scored equal draw shows techniques + encho suffix, not bare X.
+      expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
     });
 
-    it('appends (E) to a no-score draw', () => {
+    it('appends (E) to a no-score draw (X is the scoreless-draw glyph)', () => {
       expect(formatIpponsScore([], [], null, 'hikiwake', { periodCount: 2 })).toBe('X (E)');
     });
 
@@ -166,6 +180,65 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 })).toBe('M–K (E)');
       expect(formatIpponsScore(['M'], ['K'], { type: 'ippon', hantei: true }, null, { periodCount: 1 }, true)).toBe('M–K (E) Ht');
     });
+  });
+});
+
+// Item 6 regression suite: scored-draw rendering (formatIpponsScore).
+// Pinned so future changes to the hikiwake branch can't silently revert
+// the display from "M–K" back to the bare-X glyph.
+describe('formatIpponsScore — hikiwake draw display (item 6)', () => {
+  it('0–0 hikiwake (score.type) → bare X', () => {
+    expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
+  });
+
+  it('0–0 hikiwake (decision string) → bare X', () => {
+    expect(formatIpponsScore([], [], null, 'hikiwake')).toBe('X');
+  });
+
+  it('1–1 hikiwake (ipponsA=[M], ipponsB=[K]) → "M–K" (points shown, no X)', () => {
+    // Canonical scored-equal-draw case: both sides hit one ippon, operator
+    // toggled hikiwake. Server keeps ippons; display must show techniques.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null)).toBe('M–K');
+  });
+
+  it('1–1 hikiwake with encho (periodCount>0) → "M–K (E)"', () => {
+    // Encho suffix must survive the scored-draw path unchanged.
+    expect(formatIpponsScore(['M'], ['K'], { type: 'hikiwake' }, null, { periodCount: 1 })).toBe('M–K (E)');
+  });
+});
+
+// matchStateCell: the shared centre-cell lifecycle cue. completed → score
+// string (with "—" fallback), running → "vs" (the row highlight is the "now"
+// signal, NOT a centre dot), scheduled/other → "–".
+describe('matchStateCell — shared running-row centre cue', () => {
+  it('completed → the formatted ippon score (first arg = SHIRO/left)', () => {
+    // matchStateCell(m, ipponsB, ipponsA) → matchScoreStr → formatIpponsScore
+    // renders firstArg–secondArg, so ['M'],['K'] → "M–K".
+    expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M–K');
+  });
+
+  it('completed with no derivable score → "—" fallback', () => {
+    // No ippons, no score, no decision → matchScoreStr returns "" → "—".
+    expect(matchStateCell({ status: 'completed' }, [], [])).toBe('—');
+  });
+
+  it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {
+    expect(matchStateCell({ status: 'running' }, [], [])).toBe('vs');
+  });
+
+  it('scheduled → "–"', () => {
+    expect(matchStateCell({ status: 'scheduled' }, [], [])).toBe('–');
+  });
+
+  it('unknown/missing status → "–" (treated as not-yet-run)', () => {
+    expect(matchStateCell({ status: 'bye' }, [], [])).toBe('–');
+    expect(matchStateCell({}, [], [])).toBe('–');
+  });
+
+  it('never emits a bare "●" for any state', () => {
+    for (const status of ['completed', 'running', 'scheduled', 'bye', undefined]) {
+      expect(matchStateCell({ status }, [], [])).not.toContain('●');
+    }
   });
 });
 

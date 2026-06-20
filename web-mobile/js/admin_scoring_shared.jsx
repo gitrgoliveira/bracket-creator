@@ -260,7 +260,12 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 // copies of this (the only difference was the "competitors"/"teams" wording in
 // the decision_locked confirm), so it lives here once. The returned closure:
 //   - POSTs the decision, then on a kiken result resolves the loser side and
-//     opens the withdrawn-player panel; other kinds close the modal;
+//     opens the withdrawn-player panel for default-win chaining (kiken keeps
+//     the modal open — DO NOT route kiken through onAfterDecision, the
+//     operator must work through RemainingMatchesPanel first);
+//   - for fusenpai / other non-kiken decisions: calls onAfterDecision when
+//     provided and the match is not a correction (item 7: starts next match),
+//     else falls back to onClose;
 //   - on 409 decision_locked / max_encho_exceeded, confirms then retries with
 //     force (recursing into itself).
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
@@ -274,6 +279,12 @@ function makeSubmitDecision({
   setWithdrawnPlayer,
   setDecisionPromptKind,
   onClose,
+  // item 7: optional zero-arg callback invoked after a non-kiken decision
+  // succeeds and the match is not a correction. The shiaijo page wires this
+  // to startMatch(next) so the operator advances without an extra tap.
+  // Kiken always keeps the modal open for RemainingMatchesPanel chaining.
+  onAfterDecision,
+  isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
 }) {
   const submit = async (kind, { decisionBy, decisionReason }, opts = {}) => {
@@ -285,9 +296,9 @@ function makeSubmitDecision({
       );
       if (!mountedRef.current) return;
       if (window.isKikenDecision(kind)) {
-        // The loser is the side != Winner. SideA/SideB on MatchResult are names;
-        // resolve back to the normalized {id,name} via the original match for the
-        // remaining-matches lookup.
+        // Kiken keeps the modal open so the operator can walk through
+        // RemainingMatchesPanel and award default wins to each remaining
+        // scheduled match for the withdrawn player. Do NOT advance yet.
         const winnerName = (updated?.winner || '').trim();
         const loserName = winnerName === (updated?.sideA || '') ? (updated?.sideB || '') : (updated?.sideA || '');
         const loser =
@@ -296,6 +307,11 @@ function makeSubmitDecision({
           { id: '', name: loserName };
         setWithdrawnPlayer(loser);
         setDecisionPromptKind('');
+      } else if (!isComplete && onAfterDecision) {
+        // Item 7: fusenpai (and any future non-kiken decision) advances to the
+        // next match on the same court. The decision was already persisted via
+        // /decision POST so we do NOT issue another score PUT — just advance.
+        await onAfterDecision();
       } else {
         onClose();
       }

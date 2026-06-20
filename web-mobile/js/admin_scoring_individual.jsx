@@ -32,7 +32,7 @@ import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosa
 
 import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -42,7 +42,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
   // correctly stay on the individual editor.
   const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -143,10 +143,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
   //   operator to confirm and re-send with force=true.
   // Shared factory (admin_scoring_shared.jsx) — the individual + team modals had
   // byte-identical copies; "competitors" is the only per-modal wording.
+  // Item 7: a non-kiken decision (fusenpai) routes through onAfterDecision when
+  // the host page provides it (and this isn't a correction) so the court
+  // advances to the next match — mirroring the Finish + Start Next flow. Hantei
+  // advance is handled separately in submitHantei below. Kiken keeps the modal
+  // open for RemainingMatchesPanel regardless.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
-    onClose, entityLabel: "competitors",
+    onClose, onAfterDecision, isComplete, entityLabel: "competitors",
   });
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -222,11 +227,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
   // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
   // regular flow assumes an ippon-derived win.
+  //
+  // Item 7: mirror the Finish button's isComplete ? onSubmit : onSubmitAndNext
+  // choice so a hantei finish also advances to the next match on the same
+  // court (when onSubmitAndNext is available and this isn't a correction).
   const submitHantei = (winnerSide) => {
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const aFinal = aPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bPts.filter(x => x !== "•").slice(0, MAX_IPPONS_PER_SIDE);
-    return doSubmit(() => onSubmit({
+    const patch = {
       winner,
       ipponsA: aFinal,
       ipponsB: bFinal,
@@ -235,7 +244,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, pr
       status: "completed",
       ...enchoBlock(),
       decidedByHantei: true,
-    }));
+    };
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    return doSubmit(() => submitFn(patch));
   };
 
   const doSubmit = async (fn) => {

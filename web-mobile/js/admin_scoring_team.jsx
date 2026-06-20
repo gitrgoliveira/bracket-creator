@@ -137,7 +137,7 @@ export function subBoutHasBeenPlayed(s) {
   return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw;
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
@@ -391,10 +391,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // Shared factory (admin_scoring_shared.jsx) — same handler as ScoreEditorModal;
   // "teams" is the only per-modal wording (in the decision_locked confirm).
+  // Item 7: fusenpai routes through onAfterDecision (host-supplied) to advance
+  // the court, same as ScoreEditorModal. Kiken keeps the modal open regardless.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
-    onClose, entityLabel: "teams",
+    onClose, onAfterDecision, isComplete, entityLabel: "teams",
   });
 
   const existingSub = m.subResults || [];

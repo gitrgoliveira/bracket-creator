@@ -4226,7 +4226,9 @@ button.pool-match-row {
 .is-running {
   box-shadow: inset 0 0 0 2px var(--accent);
   background: var(--accent-soft);
-  border-radius: 8px;
+  /* No border-radius here: each host keeps its own (score-edit-row 10px,
+     shiaijo-qrow 8px, …). The inset ring follows the host's radius, so running
+     rows don't change shape vs their non-running siblings. */
 }
 
 /* The score editor's running row keeps its own border-color shift but inherits

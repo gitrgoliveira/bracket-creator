@@ -226,16 +226,24 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // scoringStarted — has the current running bout had any score entered? Used
-    // by pickMatch to decide whether switching away is safe. A bout with ippons
-    // or points already recorded must be finished or corrected before the
-    // operator can move to another match (you can't abandon a half-scored bout).
-    const scoringStarted = (mm) => !!mm && mm.status === "running" && (
-        (mm.ipponsA?.length || 0) > 0 ||
-        (mm.ipponsB?.length || 0) > 0 ||
-        (mm.score?.winnerPts || 0) > 0 ||
-        (mm.score?.loserPts || 0) > 0
-    );
+    // scoringStarted — has the current running bout had ANY score entered? Used
+    // by pickMatch to decide whether switching away is safe: a bout with any
+    // entered state must be finished or corrected first (you can't abandon a
+    // half-scored bout, and the defer/un-start path would discard it).
+    // Counts real ippons (ignoring "•" placeholder slots), points, FOULS
+    // (hansoku — top-level or score.fouls), and team sub-bout results, so a
+    // lone foul or a scored team sub-bout also locks the switch.
+    const scoringStarted = (mm) => {
+        if (!mm || mm.status !== "running") return false;
+        const realIppons = (arr) => (arr || []).filter((x) => x && x !== "•").length;
+        const fouls = (mm.hansokuA || 0) + (mm.hansokuB || 0) + (mm.score?.fouls?.a || 0) + (mm.score?.fouls?.b || 0);
+        return realIppons(mm.ipponsA) > 0 ||
+            realIppons(mm.ipponsB) > 0 ||
+            (mm.score?.winnerPts || 0) > 0 ||
+            (mm.score?.loserPts || 0) > 0 ||
+            fouls > 0 ||
+            (mm.subResults?.length || 0) > 0;
+    };
 
     // pickMatch — run an upcoming match out of order. Rules:
     //   • Completed matches are never picked (correct them in the comp admin).
@@ -261,8 +269,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // pick below would leave the court with two running bouts. The shape
             // mirrors buildPatch("scheduled") in the scoring modal. If the
             // defer write fails (surfaced via toast) we must NOT start the pick.
+            // Reset to scheduled. scoringStarted (above) guarantees this bout has
+            // no entered state, but clear every scoring field — ippons, fouls AND
+            // team subResults — so no partially-entered data can be stranded on the
+            // now-scheduled match.
             try {
-                await onEditScore(cur.compId, cur.id, { status: "scheduled", winner: null, score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0 }, cur);
+                await onEditScore(cur.compId, cur.id, { status: "scheduled", winner: null, score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, subResults: [] }, cur);
             } catch (_e) {
                 return;
             }
@@ -299,8 +311,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // moveMatch — reorder by swapping scheduledAt with the adjacent row.
     // direction: "up" (earlier) or "down" (later). Only scheduled matches
-    // can be reordered; running/completed are stable. Two updateMatchTime
-    // calls keep both rows' times consistent (persisted + broadcast).
+    // can be reordered; running/completed are stable.
+    //
+    // The swap is two separate updateMatchTime PUTs (no server-side swap API),
+    // so it is NOT atomic. If the second PUT fails we best-effort roll the first
+    // one back to its original time, so a partial failure doesn't leave both rows
+    // with the same/incorrect time. Times are sent as strings ("" for an unset
+    // time) — never null, which the Go handler's `scheduledAt string` rejects (400).
     const moveMatch = async (m, direction) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
@@ -309,15 +326,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const neighbour = direction === "up" ? scheduled[idx - 1] : scheduled[idx + 1];
         if (!neighbour) return; // already first/last
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
-        const myTime = m.scheduledAt || null;
-        const neighbourTime = neighbour.scheduledAt || null;
+        const myTime = m.scheduledAt || "";
+        const neighbourTime = neighbour.scheduledAt || "";
+        let firstDone = false;
         try {
-            // Swap the two times atomically (sequential; second call only runs
-            // if first succeeds so state is never corrupted on partial failure).
             await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password);
+            firstDone = true;
             await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password);
             if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
         } catch (e) {
+            // Roll back the first swap so the queue isn't left half-swapped.
+            if (firstDone) {
+                try { await window.API.updateMatchTime(m.compId, m.id, myTime, password); }
+                catch (_rb) { /* rollback also failed; the error toast below still fires */ }
+            }
             if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
         }
     };

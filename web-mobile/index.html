@@ -25,11 +25,31 @@
         window.React = window.preactCompat;
         window.ReactDOM = window.preactCompat;
 
-        // React 18 createRoot polyfill for Preact
+        // React 18 createRoot polyfill for Preact.
         window.ReactDOM.createRoot = (container) => {
+            let mounted = false;
             return {
                 render: (children) => {
                     console.log("Mounting application...");
+                    // React's createRoot().render() REPLACES the container's
+                    // existing DOM. Preact's render() instead diffs/appends, so
+                    // the server-rendered static "Loading…" placeholder (the
+                    // .loading-page child of #root) survives the first mount and
+                    // re-appears when the user scrolls to the top. Clear it on the
+                    // initial mount so Preact owns #root outright; subsequent
+                    // renders diff Preact's own tree and must NOT be wiped.
+                    if (!mounted) {
+                        // replaceChildren() is the clean modern API, but fall
+                        // back to innerHTML on the off chance it's missing — this
+                        // is the critical mount path; it must never throw before
+                        // the app renders.
+                        if (typeof container.replaceChildren === "function") {
+                            container.replaceChildren();
+                        } else {
+                            container.innerHTML = "";
+                        }
+                        mounted = true;
+                    }
                     window.preact.render(children, container);
                 }
             };
@@ -101,7 +121,17 @@
     <script type="module" src="/dist/admin_participants.js?v=5"></script>
     <script type="module" src="/dist/admin_pools.js?v=5"></script>
     <script type="module" src="/dist/admin_schedule.js?v=5"></script>
-    <script type="module" src="/dist/admin_competition.js?v=5"></script>
+    <!-- admin_competition.js (mp-hpe3 split) is the SOLE entry that imports the
+         four section modules (overview/settings/bracket/swiss). Like the viewer_*
+         split (mp-pxxc / mp-zd1v), those modules must NOT also have their own
+         <script> tags: a tag would use a different module URL (".js?v=6") than the
+         import specifier (".jsx"), so the browser would key it as a distinct module
+         and evaluate it a SECOND time. The entry loads/evaluates them via its
+         imports; their window.* component globals are set before the entry's alias
+         block runs (ES evaluates imports before the importing module body). The
+         globals they read (CourtPicker, compMatchStats, …) come from admin_* files
+         tagged earlier, which run before this entry in document order. -->
+    <script type="module" src="/dist/admin_competition.js?v=6"></script>
     <script type="module" src="/dist/admin_announcement.js?v=5"></script>
     <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page) — mp-c38. -->

@@ -24,6 +24,10 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
+// teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
+// (not part of the thin-entry consumer barrel), imported directly like the
+// resolveMatchLineup tests do.
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -1120,6 +1124,81 @@ describe('teamResultLabel (no draw in a knockout)', () => {
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
     // Nothing scored yet in a bracket match → pending, still not a draw.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe('—');
+  });
+});
+
+describe('teamEncounterHasResult (folds 0–0 draws into the scored-tie signal)', () => {
+  it('is true when IV/PW totals are non-zero', () => {
+    expect(teamEncounterHasResult({ ivA: 1, ivB: 0, pwA: 0, pwB: 0, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 2, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is true for a KO encounter tied solely on 0–0 hikiwake draws (the bug fix)', () => {
+    // All counting bouts drawn 0–0: no IV, no PW, but a real tie to break.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is false before any bout lands (no totals, no draws)', () => {
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(false);
+  });
+
+  it('ignores a drawn daihyosen row (it is the tiebreaker, not a counting bout)', () => {
+    // Only the daihyosen (index 1) is marked draw; nothing else has landed.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: 1 })).toBe(false);
+  });
+});
+
+describe('resolveKachinukiBoutSides (per-competitor identity for kachinuki bouts)', () => {
+  it('uses player names for sides and the winning player as winner', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Senpo', bName: 'B-Senpo', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: 'A-Senpo', sideB: 'B-Senpo', winner: 'A-Senpo' });
+  });
+
+  it('attributes the winner to side B when wKey is "b"', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Jiho', bName: 'B-Jiho', wKey: 'b', teamWinnerName: 'Team B' });
+    expect(r.winner).toBe('B-Jiho');
+  });
+
+  it('leaves sides empty and falls the winner back to the team name when the lineup is unknown', () => {
+    // Matches the backend quick-score contract: sub-bout sides empty when unknown.
+    const r = resolveKachinukiBoutSides({ aName: '', bName: '', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: '', sideB: '', winner: 'Team A' });
+  });
+
+  it('returns an empty winner for a drawn bout (no wKey)', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Chuken', bName: 'B-Chuken', wKey: null, teamWinnerName: '' });
+    expect(r).toEqual({ sideA: 'A-Chuken', sideB: 'B-Chuken', winner: '' });
+  });
+});
+
+describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
+  it('is false for an untouched 0–0 bout', () => {
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(false);
+  });
+
+  it('is true once any ippon, foul, fusensho, or explicit draw is present', () => {
+    expect(subBoutHasBeenPlayed({ aPts: ["M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: ["K"], aFouls: 0, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 1, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], fusensho: "a" })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], draw: true })).toBe(true);
+  });
+
+  it('is false for null/undefined', () => {
+    expect(subBoutHasBeenPlayed(null)).toBe(false);
+    expect(subBoutHasBeenPlayed(undefined)).toBe(false);
   });
 });
 

@@ -29,7 +29,7 @@ jobs:
             tag_suffix: "-mobile-pdf"
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Need tags + full history so `git describe` produces a real version
           # for the build args below (the binary embeds these via go generate).

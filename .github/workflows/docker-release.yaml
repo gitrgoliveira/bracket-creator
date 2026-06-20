@@ -49,7 +49,7 @@ jobs:
             tag_suffix: "-mobile-pdf"
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Compute build metadata
         id: meta

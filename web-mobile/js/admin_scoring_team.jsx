@@ -170,13 +170,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // C1: debounced autosave refs (same pattern as ScoreEditorModal).
   // Updated after buildPatch is defined below.
-  const _autosaveIsRunningRefT = useRefA(false);
-  const _autosaveBuildPatchRefT = useRefA(null);
-  const _autosaveOnSubmitRefT = useRefA(null);
-  const { markDirty: markScoringDirtyT, cancelDebounce: cancelScoringDebounceT } = useDebouncedRunningWrite({
-    isRunningRef: _autosaveIsRunningRefT,
-    buildPatchRef: _autosaveBuildPatchRefT,
-    onSubmitRef: _autosaveOnSubmitRefT,
+  const _autosaveIsRunningRef = useRefA(false);
+  const _autosaveBuildPatchRef = useRefA(null);
+  const _autosaveOnSubmitRef = useRefA(null);
+  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+    isRunningRef: _autosaveIsRunningRef,
+    buildPatchRef: _autosaveBuildPatchRef,
+    onSubmitRef: _autosaveOnSubmitRef,
     mountedRef,
   });
 
@@ -400,9 +400,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   }
   const [subs, setSubs] = useStateA(initSubsRef.current);
   // C1: updateSub is the single choke-point for all sub-bout state
-  // mutations. Calling markScoringDirtyT() here captures every edit
+  // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
-  const updateSub = (idx, fn) => { setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s)); markScoringDirtyT(); };
+  const updateSub = (idx, fn) => { setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s)); markScoringDirty(); };
 
   // T096/FR-031: per-bout Fusensho — award a 2-0 default win to the
   // present side. Re-clicking the active side undoes the fusensho and
@@ -544,12 +544,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status for TeamScoreEditorModal.
-  _autosaveIsRunningRefT.current = m.status === "running";
-  _autosaveBuildPatchRefT.current = buildPatch;
-  _autosaveOnSubmitRefT.current = onSubmit;
+  _autosaveIsRunningRef.current = m.status === "running";
+  _autosaveBuildPatchRef.current = buildPatch;
+  _autosaveOnSubmitRef.current = onSubmit;
 
   const doSubmit = async (fn) => {
-    cancelScoringDebounceT(); // C1: cancel pending autosave before explicit submit
+    cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit
     setSubmitting(true);
     try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
   };

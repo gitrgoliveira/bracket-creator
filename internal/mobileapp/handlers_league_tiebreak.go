@@ -43,6 +43,10 @@ type LeagueTiebreakStore interface {
 	LoadPoolMatches(id string) ([]state.MatchResult, error)
 	SavePoolMatches(id string, matches []state.MatchResult) error
 	UpdateCompetitionChanged(id string, transform func(current *state.Competition) (*state.Competition, error)) (bool, error)
+	// WithTransaction holds the per-comp lock across a read-modify-write so the
+	// DELETE handler's load→guard→filter→save can't lose a concurrent score
+	// write that lands mid-sequence.
+	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
 // leagueTiebreakCandidateGroup is the JSON shape for one tied group returned
@@ -296,72 +300,114 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		allMatches, err := store.LoadPoolMatches(id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// The whole read-modify-write runs under the per-comp lock so a
+		// concurrent score write can't land between the load and the save and be
+		// lost when we rewrite the pool-match list.
+		var (
+			compMissing    bool
+			notTeamLeague  bool
+			partialGroup   bool
+			noneFound      bool
+			scoredConflict bool
+			deleted        int
+		)
+		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
+			comp, err := stx.LoadCompetition(id)
+			if err != nil {
+				return err
+			}
+			if comp == nil {
+				compMissing = true
+				return nil
+			}
+			// This endpoint is league-only. Without this guard an operator could
+			// delete a MIXED team competition's auto-injected DH matches through
+			// the league tie-breaker endpoint.
+			if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+				notTeamLeague = true
+				return nil
+			}
+
+			allMatches, err := stx.LoadPoolMatches(id)
+			if err != nil {
+				return err
+			}
+
+			// Identify DH matches belonging to the requested group, and reject a
+			// selection that splits a tie-breaker group: a DH match with exactly
+			// one side in reqSet means the operator named a partial group, which
+			// would orphan the remaining round-robin bouts.
+			var groupDH []state.MatchResult
+			for _, m := range allMatches {
+				if !engine.IsPoolDaihyosenMatchID(m.ID) {
+					continue
+				}
+				inA, inB := reqSet[m.SideA], reqSet[m.SideB]
+				if inA != inB {
+					partialGroup = true
+					return nil
+				}
+				if inA && inB {
+					groupDH = append(groupDH, m)
+				}
+			}
+			if len(groupDH) == 0 {
+				noneFound = true
+				return nil
+			}
+
+			// Refuse removal if any match in the group is in progress or has been
+			// scored — deleting a running DH match would orphan the operator's
+			// open scoring session.
+			for _, m := range groupDH {
+				if m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning {
+					scoredConflict = true
+					return nil
+				}
+			}
+
+			dhIDs := make(map[string]bool, len(groupDH))
+			for _, m := range groupDH {
+				dhIDs[m.ID] = true
+			}
+			filtered := make([]state.MatchResult, 0, len(allMatches)-len(groupDH))
+			for _, m := range allMatches {
+				if !dhIDs[m.ID] {
+					filtered = append(filtered, m)
+				}
+			}
+			if err := stx.SavePoolMatches(id, filtered); err != nil {
+				return err
+			}
+			deleted = len(groupDH)
+			return nil
+		})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
 			return
 		}
-
-		// Identify DH matches belonging to the requested group, and reject a
-		// selection that splits a tie-breaker group: a DH match with exactly one
-		// side in reqSet means the operator named a partial group, which would
-		// orphan the remaining round-robin bouts.
-		var groupDH []state.MatchResult
-		for _, m := range allMatches {
-			if !engine.IsPoolDaihyosenMatchID(m.ID) {
-				continue
-			}
-			inA, inB := reqSet[m.SideA], reqSet[m.SideB]
-			if inA != inB {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not cover a complete tie-breaker group"})
-				return
-			}
-			if inA && inB {
-				groupDH = append(groupDH, m)
-			}
-		}
-		if len(groupDH) == 0 {
+		switch {
+		case compMissing:
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		case notTeamLeague:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
+			return
+		case partialGroup:
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not cover a complete tie-breaker group"})
+			return
+		case noneFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "no_tiebreak_matches", "detail": "no tie-breaker matches found for this group"})
 			return
-		}
-
-		// Guard: refuse removal if any match in the group is in progress or has
-		// been scored — deleting a running DH match would orphan the operator's
-		// open scoring session.
-		for _, m := range groupDH {
-			if m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning {
-				c.JSON(http.StatusConflict, gin.H{"error": "tiebreak_match_scored", "detail": "one or more tie-breaker matches for this group are in progress or have been scored; clear scores first"})
-				return
-			}
-		}
-
-		// Build the filtered matches list (remove the group's DH matches).
-		dhIDs := make(map[string]bool, len(groupDH))
-		for _, m := range groupDH {
-			dhIDs[m.ID] = true
-		}
-		filtered := make([]state.MatchResult, 0, len(allMatches)-len(groupDH))
-		for _, m := range allMatches {
-			if !dhIDs[m.ID] {
-				filtered = append(filtered, m)
-			}
-		}
-
-		// Persist the filtered pool-match list. Race risk: a concurrent score
-		// write could land between our Load and this Save, but the delete is
-		// an operator-explicit action and we already guard against scored
-		// matches above, so a last-write-wins outcome is acceptable here.
-		// A future refactor can wrap this in WithTransaction for stronger
-		// atomicity if needed.
-		if err := store.SavePoolMatches(id, filtered); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		case scoredConflict:
+			c.JSON(http.StatusConflict, gin.H{"error": "tiebreak_match_scored", "detail": "one or more tie-breaker matches for this group are in progress or have been scored; clear scores first"})
 			return
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
 		hub.Broadcast(EventScheduleUpdated, nil)
 
-		c.JSON(http.StatusOK, gin.H{"deleted": len(groupDH)})
+		c.JSON(http.StatusOK, gin.H{"deleted": deleted})
 	})
 
 	// POST /competitions/:id/league-tiebreak/finalize

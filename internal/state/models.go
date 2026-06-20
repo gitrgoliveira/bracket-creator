@@ -351,18 +351,20 @@ type Competition struct {
 	// TeamSize > 0). Allowed values are 3 (default) and 4.
 	//
 	// A "consequential" tied group is one whose position range intersects the
-	// band [1..LeagueTiebreakTopN]. For example, with TopN=3 a tie involving
-	// teams at positions 1–2 is consequential (it affects who wins or is
-	// runner-up), but a tie at positions 4–5 is not. When all teams in a tied
-	// group occupy positions strictly BELOW TopN (i.e. every position ≥ TopN)
-	// the group is non-consequential and no tie-breaker is needed.
+	// band [1..LeagueTiebreakTopN] — i.e. its best (lowest-numbered) position is
+	// ≤ TopN. For example, with TopN=3 a tie involving teams at positions 1–2 is
+	// consequential (it affects who wins or is runner-up), but a tie at positions
+	// 4–5 is not. When the best-placed team in a tied group finishes WORSE than
+	// position TopN (its top position is strictly greater than TopN, so the whole
+	// group sits below the band), the group is non-consequential and no
+	// tie-breaker is needed.
 	//
 	// The kendo convention of two joint 3rd places interacts here: when
 	// LeagueTwoThirdPlaces is true and TopN is 3 or 4, a tied group that sits
 	// ENTIRELY at position 3 or below does not need a 3rd-vs-4th decider —
 	// both teams are awarded 3rd place and the group is non-consequential.
-	// Zero is treated as the default (3) when format == "league" and kind ==
-	// "team" at draw time.
+	// Zero is treated as the default (3) for a team league (Format == "league"
+	// && Kind == "team") at draw time.
 	LeagueTiebreakTopN int `yaml:"league_tiebreak_top_n,omitempty" json:"leagueTiebreakTopN,omitempty"`
 
 	// LeagueTwoThirdPlaces controls whether two joint 3rd places are awarded

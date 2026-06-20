@@ -43,7 +43,41 @@ func (s *stubLeagueTiebreakStore) LoadPoolMatches(id string) ([]state.MatchResul
 }
 
 func (s *stubLeagueTiebreakStore) SavePoolMatches(id string, matches []state.MatchResult) error {
+	if s.saveErr == nil {
+		s.matches = matches
+	}
 	return s.saveErr
+}
+
+// WithTransaction runs fn against a stub StoreTx that delegates the three
+// methods the DELETE handler uses (LoadCompetition / LoadPoolMatches /
+// SavePoolMatches) back to this stub. The DELETE read-modify-write is the only
+// transactional path in this handler family.
+func (s *stubLeagueTiebreakStore) WithTransaction(compID string, fn func(tx state.StoreTx) error) error {
+	return fn(&stubLeagueTiebreakTx{store: s})
+}
+
+// stubLeagueTiebreakTx satisfies state.StoreTx by embedding the interface (so
+// the type checks) and implementing only the methods the DELETE handler calls.
+// Any other method would panic — none are reached by these tests.
+type stubLeagueTiebreakTx struct {
+	state.StoreTx
+	store *stubLeagueTiebreakStore
+}
+
+func (t *stubLeagueTiebreakTx) LoadCompetition(id string) (*state.Competition, error) {
+	return t.store.comp, t.store.loadErr
+}
+
+func (t *stubLeagueTiebreakTx) LoadPoolMatches(id string) ([]state.MatchResult, error) {
+	return t.store.matches, t.store.matchesErr
+}
+
+func (t *stubLeagueTiebreakTx) SavePoolMatches(id string, matches []state.MatchResult) error {
+	if t.store.saveErr == nil {
+		t.store.matches = matches
+	}
+	return t.store.saveErr
 }
 
 func (s *stubLeagueTiebreakStore) UpdateCompetitionChanged(id string, transform func(*state.Competition) (*state.Competition, error)) (bool, error) {
@@ -987,4 +1021,30 @@ func TestLeagueTiebreakDelete_RunningMatch(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+// TestLeagueTiebreakDelete_RejectsNonTeamLeague pins the Copilot fix: the
+// league-only DELETE must refuse a non-league (e.g. mixed) competition so an
+// operator can't delete a mixed team comp's auto-injected DH matches through it.
+func TestLeagueTiebreakDelete_RejectsNonTeamLeague(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	mixed := makeTeamLeagueComp(state.CompStatusPools)
+	mixed.Format = state.CompFormatMixed // not a league
+	store := &stubLeagueTiebreakStore{
+		comp: mixed,
+		matches: []state.MatchResult{
+			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
+		},
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	// The mixed comp's DH match must NOT have been removed.
+	assert.Len(t, store.matches, 1, "non-league DELETE must not touch matches")
 }

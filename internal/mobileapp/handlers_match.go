@@ -231,7 +231,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 		// remain — the operator must either generate tie-breaker matches or finalize
 		// shared ranks via the league-tiebreak endpoints (Phase 3b). Signal a
 		// match_updated event so connected clients reload standings and display
-		// the awaiting-playoff banner.
+		// the "tie-breaker required" banner.
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 	}
 }

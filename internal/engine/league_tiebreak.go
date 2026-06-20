@@ -109,6 +109,26 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 		return nil, nil
 	}
 
+	// Consequential ties are only meaningful once EVERY regular league match is
+	// complete. Mid-league, standings are provisional (often everyone tied at 0
+	// points), which would surface a spurious "everyone tied" group and pop the
+	// "Tie-breaker required" banner prematurely. Supplementary DH/TB matches do
+	// not count as regular. This mirrors the all-regular-complete gate in
+	// MaybeAutoCompletePools, so the public GET candidates endpoint can't get
+	// ahead of it.
+	matches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range matches {
+		if IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID) {
+			continue
+		}
+		if m.Status != state.MatchStatusCompleted {
+			return nil, nil
+		}
+	}
+
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
@@ -164,10 +184,16 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 		return nil, err
 	}
 
-	// Resolve the standings for the requested team names. Validate that all
-	// provided names exist in standings.
+	// Resolve the standings for the requested team names. The HTTP handler is the
+	// consequentiality gate, but this method must still defend itself when called
+	// directly: reject duplicate names and any name that doesn't resolve to a
+	// standing, so it can never build a partial/garbled group (e.g. [A,B,X] with
+	// X missing would otherwise silently generate a 2-team round-robin).
 	nameSet := make(map[string]bool, len(tiedTeamNames))
 	for _, n := range tiedTeamNames {
+		if nameSet[n] {
+			return nil, validationErrorf("duplicate team %q in tie-break request for competition %s", n, compID)
+		}
 		nameSet[n] = true
 	}
 
@@ -182,8 +208,11 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 			}
 		}
 	}
-	if len(tiedGroup) == 0 {
-		return nil, validationErrorf("none of the requested teams found in standings for competition %s", compID)
+	if len(tiedGroup) != len(nameSet) {
+		return nil, validationErrorf("one or more requested teams not found in standings for competition %s", compID)
+	}
+	if len(tiedGroup) < 2 {
+		return nil, validationErrorf("a tie-break group needs at least two teams (competition %s)", compID)
 	}
 
 	// Determine the court from existing matches.

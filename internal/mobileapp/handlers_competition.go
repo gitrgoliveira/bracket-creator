@@ -202,6 +202,11 @@ func validateSwissConfig(comp *state.Competition) error {
 // (LeagueTiebreakTopN, LeagueTwoThirdPlaces). These fields are only meaningful
 // for team-league competitions; they are silently ignored for other formats/kinds
 // and must not cause errors there. Returns nil for non-league or non-team comps.
+//
+// Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
+// on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so a comp with
+// TeamSize > 0 but Kind == "" cannot be persisted — the Kind check alone is
+// sufficient to identify a team league here.
 func validateLeagueTiebreakConfig(comp *state.Competition) error {
 	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
 		return nil

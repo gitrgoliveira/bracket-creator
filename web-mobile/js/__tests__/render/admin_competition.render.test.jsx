@@ -39,21 +39,16 @@ const STUBBED_GLOBALS = {
   AdminExport: Stub('AdminExport'),
   BracketTree: Stub('BracketTree'),
   AdminTeamLineupsList: Stub('AdminTeamLineupsList'),
-  // Pure helpers called synchronously during render. AdminCompOverview
-  // destructures { total, done, running } from compMatchStats — match that
-  // shape so the smoke test renders real values, not undefined.
-  compMatchStats: () => ({ total: 0, done: 0, running: 0 }),
-  hasBothSides: () => false,
-  hasPoolOriginPlaceholder: () => false,
-  dmyToIso: (d) => d,
-  isoToDmy: (d) => d,
-  isValidDate: () => true,
-  // Real shapes (admin_helpers.jsx): validateAndNormalizeDate → { norm, error };
-  // decideNumericUpdate → { value, shouldSave }. Match them so the smoke test
-  // exercises the same destructuring the production code does.
-  validateAndNormalizeDate: (d) => ({ norm: d, error: null }),
-  decideNumericUpdate: (_field, value) => ({ value, shouldSave: true }),
-  deriveTournamentDays: () => [],
+  // NOTE: the pure helpers admin_competition_* consumes (compMatchStats,
+  // hasBothSides, hasPoolOriginPlaceholder, dmyToIso, isoToDmy, isValidDate,
+  // validateAndNormalizeDate, decideNumericUpdate, deriveTournamentDays) are
+  // deliberately NOT stubbed here — the render harness (vitest.setup.render.js)
+  // loads the real admin_helpers.jsx, so the components run against the genuine
+  // implementations and contracts. Hand-rolled stubs drifted from the real
+  // signatures/shapes (e.g. decideNumericUpdate is (raw, min), not (field, value)),
+  // which made the smoke test less representative; using the real helpers removes
+  // that whole class of drift. Only cross-module components, browser APIs, dialogs,
+  // and the backend API are stubbed below.
   competitionKindLabel: () => 'Individual',
   formatDate: (d) => String(d ?? ''),
   matchMedia: () => ({

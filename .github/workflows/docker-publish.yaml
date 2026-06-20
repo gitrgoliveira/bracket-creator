@@ -109,13 +109,13 @@ jobs:
             tag_suffix: "-mobile-pdf"
     steps:
       - name: Download AMD64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: digest-${{ matrix.image.name }}-X64
           path: /tmp/digests
 
       - name: Download ARM64 digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: digest-${{ matrix.image.name }}-ARM64
           path: /tmp/digests

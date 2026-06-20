@@ -4293,8 +4293,15 @@ button.pool-match-row {
   font-size: 14px;
   font-weight: 700;
   min-width: 44px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }
+/* Symmetric foul gutters flanking the score (Shiro left, Aka right). Reserved
+   even when empty so the centred score never shifts as a hansoku ▲ appears. */
+.score-edit-row__foul { min-width: 0.85em; display: inline-flex; justify-content: center; }
+.score-edit-row__scoreval { text-align: center; }
 
 
 .score-edit-row__correction {

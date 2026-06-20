@@ -178,19 +178,21 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
                     <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</div>
                     <div className="dojo">{m.sideB?.dojo}</div>
-                    {/* Foul ▲ rides the badge line, NOT the name line — keeping it off
-                        the name means a mid-bout foul never shifts the competitor's name. */}
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>{foulB && <span className="msb-hansoku" data-testid="foul-mark-b"> {foulB}</span>}
+                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
+                  {/* Foul ▲ flanks the SCORE (Shiro left, Aka right) — a hansoku is part of
+                      the scoreline, so it reads at the score's level. The slots are reserved
+                      symmetrically so the centred score never shifts when a foul appears. */}
                   <div className="score-edit-row__score">
-                    {showScore && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
-                    {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
-                    {/* Running rows show the live ippon score above and are signalled by the
-                        score-edit-row--running / is-running row highlight — no centre dot, no
-                        redundant "● NOW" label (the highlight already says "now"). */}
+                    <span className="score-edit-row__foul">{foulB && <span className="msb-hansoku" data-testid="foul-mark-b">{foulB}</span>}</span>
+                    <span className="score-edit-row__scoreval">
+                      {showScore && window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}
+                      {m.status === "scheduled" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                    </span>
+                    <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
-                    <span className="se-color-badge se-color-badge--aka">AKA</span>{foulA && <span className="msb-hansoku" data-testid="foul-mark-a"> {foulA}</span>}
+                    <span className="se-color-badge se-color-badge--aka">AKA</span>
                     <div className="name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>

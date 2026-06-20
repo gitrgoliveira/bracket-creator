@@ -28,7 +28,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   const baseComp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 2 };
   const tweaks = { showDojo: false };
@@ -73,6 +73,11 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // running → "vs", scheduled → "–".
+    global.window.matchStateCell = (m, ippB, ippA) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -308,7 +313,7 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
   let runtime;
   let PoolsViewer;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   const leagueComp = (status) => ({
     format: 'league',
@@ -344,6 +349,11 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // running → "vs", scheduled → "–".
+    global.window.matchStateCell = (m, ippB, ippA) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;
@@ -410,7 +420,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
   let runtime;
   let PoolNumberedMatchRow;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -428,6 +438,11 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // running → "vs", scheduled → "–".
+    global.window.matchStateCell = (m, ippB, ippA) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
     global.window.queueLabelCompact = () => null;

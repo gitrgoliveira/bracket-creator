@@ -163,23 +163,19 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
   const aWin = winnerName && winnerName === aRawName;
   const bWin = winnerName && winnerName === bRawName;
 
-  const scoreStr = m.status === "completed"
-    ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
-    : null;
-
   // Render a non-interactive <div> when there's no click handler (read-only
   // reuse, e.g. the operator console passes onClick=null) so we don't leave a
   // focusable button that does nothing for keyboard/screen-reader users.
   const Tag = onClick ? "button" : "div";
   const interactiveProps = onClick ? { type: "button", onClick } : {};
   return (
-    <Tag className="pool-match-row" {...interactiveProps}>
+    <Tag className={`pool-match-row${m.status === "running" ? " is-running" : ""}`} {...interactiveProps}>
       <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__name">{bName}</span>
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
-        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-running" style={{ fontSize: 10 }}>●</span> : "–"}
+        {window.matchStateCell(m, m.ipponsB, m.ipponsA)}
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
@@ -296,7 +292,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
 
                 if (m.status !== "completed") {
                   return <td key={`${pkey(colPlayer)}#${ci}`} title={cellTitle(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} className={`league-matrix__cell league-matrix__cell--pending ${m.status === "running" ? "league-matrix__cell--running" : ""}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, m.status === "running" ? "Now" : "Pending")} {...interactiveProps}>
-                    {m.status === "running" ? <span className="bc-running" style={{ fontSize: 9 }}>●</span> : "–"}
+                    {m.status === "running" ? "" : "–"}
                   </td>;
                 }
 
@@ -324,7 +320,13 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 let cellContent;
                 let resultLabel;
                 if (isDraw) {
-                  cellContent = <span className="league-matrix__draw">X</span>;
+                  // A scored draw shows the row player's own ippon letters
+                  // (M/K/D/T/H); the draw colour (league-matrix__cell--draw)
+                  // signals it was a tie, so we don't collapse a 1–1 to a bare
+                  // "X". A scoreless draw has no letters → fall back to the "X"
+                  // hikiwake glyph.
+                  const drawLetters = rowIppons.join("");
+                  cellContent = <span className="league-matrix__draw">{drawLetters || "X"}</span>;
                   resultLabel = "Draw";
                 } else if (rowWon) {
                   // Show the row player's ippon letters (M/K/D/T/H); the green
@@ -352,8 +354,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
       <div className="league-matrix__legend">
         <span className="league-matrix__legend-item league-matrix__legend-item--win">win</span>
         <span className="league-matrix__legend-item league-matrix__legend-item--loss">loss</span>
-        <span className="league-matrix__legend-item league-matrix__legend-item--draw">X = draw</span>
-        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H)</span>
+        <span className="league-matrix__legend-item league-matrix__legend-item--draw">draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H) · X = scoreless draw</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>
@@ -380,15 +382,6 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
   const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
   const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
 
-  // scoreStr: non-null only for completed matches; the render span below
-  // handles the empty-string/null → "—" fallback in one place.
-  // For team matches, teamIVScore derives the IV aggregate from subResults (mp-o4xl);
-  // for individual matches it returns null and formatIpponsScore is used instead.
-  // ipponsB = Shiro (left), ipponsA = Aka (right) — same arg order as all other callers.
-  const scoreStr = m.status === "completed"
-    ? window.matchScoreStr(m, m.ipponsB, m.ipponsA)
-    : null;
-
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
   // Non-interactive <div> when there's no handler (read-only reuse) so the row
@@ -396,14 +389,17 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
   const Tag = handleClick ? "button" : "div";
   const interactiveProps = handleClick ? { type: "button", onClick: handleClick } : {};
   return (
-    <Tag className="pool-match-numbered-row" style={{ cursor: handleClick ? "pointer" : "default" }} {...interactiveProps}>
+    <Tag className={`pool-match-numbered-row${m.status === "running" ? " is-running" : ""}`} style={{ cursor: handleClick ? "pointer" : "default" }} {...interactiveProps}>
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
         <span className="pool-match-numbered-row__name">{bName || "—"}</span>
       </div>
       <span className="pool-match-numbered-row__score">
-        {m.status === "completed" ? (scoreStr || "—") : m.status === "running" ? <span className="bc-running" style={{ fontSize: 10 }}>●</span> : "–"}
+        {/* Running matches are signalled by the row highlight (shared .is-running),
+            not a centre dot — matchStateCell shows "vs" for the live matchup,
+            a score when completed, "–" when scheduled. */}
+        {window.matchStateCell(m, m.ipponsB, m.ipponsA)}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>

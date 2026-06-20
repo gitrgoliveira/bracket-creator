@@ -1,14 +1,14 @@
-// Barrel-completeness test for admin_scoring_modal.jsx.
+// Barrel-completeness / bridge-wiring guard for admin_scoring_modal.jsx.
 //
-// Purpose: catch dropped re-exports and missing window.ScoreEditorModal
-// after any refactor of the module (including the 4-way split in mp-zac3).
-// This test is intentionally WIRING-focused, not logic-focused. It verifies
-// that every name the surrounding codebase depends on is still exported, and
-// that the window bridge is still set. It does NOT test any function behavior.
+// admin_scoring_modal.jsx is the thin entry that re-exports the scoring
+// module's full named surface and sets window.ScoreEditorModal. This test is
+// intentionally WIRING-focused, not logic-focused: it verifies that every name
+// the surrounding codebase depends on is still exported and that the window
+// bridge is still set. It does NOT test any function behavior — that lives in
+// admin_scoring_modal.test.jsx and the per-module suites.
 //
-// Run on the current (pre-split) file first to establish a green baseline.
-// After the split the SAME test — unchanged, importing from the thin entry
-// admin_scoring_modal.jsx — must stay green.
+// Its ongoing role is to fail loudly if a future refactor drops a re-export
+// from the barrel or forgets to wire the window bridge.
 
 import { describe, it, expect } from 'vitest';
 

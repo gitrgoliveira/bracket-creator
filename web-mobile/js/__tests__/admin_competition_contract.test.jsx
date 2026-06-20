@@ -55,13 +55,15 @@ describe('admin_competition.jsx public-surface contract (mp-hpe3 split oracle)',
       });
     }
 
-    it('does not silently drop any expected export (exact set guard)', () => {
-      const actual = Object.keys(adminCompetition).filter(
-        (k) => typeof adminCompetition[k] === 'function',
-      );
-      for (const name of EXPECTED_ES_EXPORTS) {
-        expect(actual, `thin entry no longer exports ${name}`).toContain(name);
-      }
+    it('exposes exactly the expected function exports — no more, no less', () => {
+      // True exact-set guard: the set of function-valued ES exports must EQUAL
+      // the manifest. Fails on a dropped export (split lost a re-export) AND on
+      // an unexpected addition (a new public symbol that should be added to
+      // EXPECTED_ES_EXPORTS deliberately, not leaked silently).
+      const actual = Object.keys(adminCompetition)
+        .filter((k) => typeof adminCompetition[k] === 'function')
+        .sort();
+      expect(actual).toEqual([...EXPECTED_ES_EXPORTS].sort());
     });
   });
 

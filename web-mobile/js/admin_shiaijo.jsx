@@ -652,57 +652,56 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
     const scheduledIdx = onMove ? (scheduled || []).findIndex((x) => matchKey(x) === matchKey(m)) : -1;
     const isFirst = scheduledIdx === 0;
     const isLast = scheduledIdx >= 0 && scheduledIdx === (scheduled || []).length - 1;
+    // Stacked card layout (not the wide score-editor grid): the matchup gets a
+    // full-width line so names stay READABLE in the narrow queue column; the
+    // controls live on their own line below so they never crowd the names.
+    const showActions = m.status === "scheduled" && (
+        (onMoveCourt && courts.length > 1) ||
+        (onEnterLineup && isTeamMatch(m)) || onPick || onMove
+    );
     return (
-        <div className={`score-edit-row shiaijo-row shiaijo-row--static ${isComplete ? "score-edit-row--complete" : ""}`}>
-            <div>
-                <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
-                <div className="shiaijo-row__comp">{m.compName}</div>
-            </div>
-            <div className="score-edit-row__sides">
-                <div className="score-edit-row__side" style={{ textAlign: "right" }} aria-label={`Shiro: ${m.sideB?.name || ""}`}>
-                    <div className="name">
-                        {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
-                        {m.sideB?.name}
-                    </div>
-                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                </div>
-                <div className="score-edit-row__score">
+        <div className={`shiaijo-qrow ${isComplete ? "shiaijo-qrow--complete" : ""}`}>
+            <div className="shiaijo-qrow__top">
+                <span className="shiaijo-qrow__time">{m.scheduledAt || "—"} · {m.compName}</span>
+                <span className="shiaijo-qrow__state">
                     {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
-                    {scoreCell.kind === "vs" && <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>}
+                    {isComplete && <span className="shiaijo-qrow__final">Final</span>}
+                </span>
+            </div>
+            <div className="shiaijo-qrow__match">
+                <div className="shiaijo-qrow__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
+                    <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
+                    <span className="shiaijo-qrow__name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</span>
                 </div>
-                <div className="score-edit-row__side" aria-label={`Aka: ${m.sideA?.name || ""}`}>
+                <span className="shiaijo-qrow__vs">vs</span>
+                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${m.sideA?.name || ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">
-                        {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
-                        {m.sideA?.name}
-                    </div>
+                    <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</span>
                 </div>
             </div>
-            <div className="shiaijo-row__status">
-                {isComplete && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>Final</span>}
-            </div>
-            <div className="shiaijo-row__actions" onClick={(e) => e.stopPropagation()}>
-                {onMoveCourt && courts.length > 1 && !isComplete && (
-                    <CourtPicker
-                        value={m.court} courts={courts}
-                        onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
-                        btnClassName="score-edit-row__court score-edit-row__court--btn"
-                    />
-                )}
-                {onEnterLineup && isTeamMatch(m) && m.status === "scheduled" && (
-                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
-                )}
-                {onPick && m.status === "scheduled" && (
-                    <button type="button" className="btn btn--sm shiaijo-row__pick" onClick={() => onPick(m)} title="Run this match now and score it">Score</button>
-                )}
-                {onMove && m.status === "scheduled" && (
-                    <>
-                        <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move up" disabled={isFirst} onClick={() => onMove(m, "up")} title="Move earlier in the queue">↑</button>
-                        <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue">↓</button>
-                    </>
-                )}
-            </div>
+            {showActions && (
+                <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
+                    {onMoveCourt && courts.length > 1 && (
+                        <CourtPicker
+                            value={m.court} courts={courts}
+                            onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
+                            btnClassName="score-edit-row__court score-edit-row__court--btn"
+                        />
+                    )}
+                    {onEnterLineup && isTeamMatch(m) && (
+                        <button type="button" className="btn btn--ghost btn--sm" onClick={() => onEnterLineup(m)} title="Set the team lineup before starting">Lineup</button>
+                    )}
+                    {onMove && (
+                        <>
+                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move up" disabled={isFirst} onClick={() => onMove(m, "up")} title="Move earlier in the queue">↑</button>
+                            <button type="button" className="btn btn--ghost btn--sm shiaijo-row__move" aria-label="Move down" disabled={isLast} onClick={() => onMove(m, "down")} title="Move later in the queue">↓</button>
+                        </>
+                    )}
+                    {/* Score is the primary per-row action — pushed to the end (the "go" slot). */}
+                    {onPick && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" onClick={() => onPick(m)} title="Run this match now and score it">Score</button>}
+                </div>
+            )}
         </div>
     );
 }

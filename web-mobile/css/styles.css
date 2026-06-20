@@ -7745,19 +7745,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    scoring panel would be. */
 .lineup-panel--inline { padding: 16px 18px; }
 
-/* Queue-row action cell: court picker, Score, and ↑/↓ reorder, kept compact. */
-.shiaijo-row__actions { display: flex; align-items: center; gap: 6px; }
+/* Queue-row controls bar — its own full-width line below the matchup, so the
+   court picker / Score / ↑ / ↓ never crowd the names. Right-aligned; wraps if
+   the row gets very narrow. */
+.shiaijo-qrow__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .shiaijo-row__pick { padding: 2px 10px; font-size: 11px; }
 /* ↑/↓ reorder arrows: square, monospace-centred glyph so the arrow sits true. */
 .shiaijo-row__move { padding: 2px 7px; font-size: 12px; line-height: 1; min-width: 26px; text-align: center; }
 
 /* Touch devices: the Score / ↑ / ↓ controls must each meet the 44px target
    (DESIGN.md §6 / Principle 4). The base .btn coarse rule already floors
-   height; we floor width too and widen the gap so three controls don't crowd
-   into a mis-tappable cluster. The actions grid column also widens to fit
-   them (see .shiaijo-row coarse override below). Desktop stays compact. */
+   height; we floor width too and widen the gap so the controls don't crowd
+   into a mis-tappable cluster. They sit on their own line, so there's room. */
 @media (pointer: coarse) {
-  .shiaijo-row__actions { gap: 10px; }
+  .shiaijo-qrow__actions { gap: 10px; }
   .shiaijo-row__pick,
   .shiaijo-row__move {
     min-width: 44px;
@@ -7773,22 +7774,33 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
 .shiaijo-sides--lg .name { font-size: 18px; }
 
-/* Queue rows: 4-column variant of score-edit-row (no standalone court cell). */
-/* Fixed status + actions columns (not auto) so the "Final" badge and the
-   court-picker / Skip controls line up vertically across every queue row
-   regardless of each row's content width. */
-.shiaijo-row { grid-template-columns: 52px 1fr 44px 84px; }
-/* Touch: widen the actions column so three 44px controls (Score ↑ ↓) plus
-   their gaps fit without crowding (DESIGN.md §6). Desktop keeps 84px. */
-@media (pointer: coarse) {
-  .shiaijo-row { grid-template-columns: 52px 1fr 44px 160px; }
+/* Queue row (Upcoming / Completed): a compact stacked card. The matchup gets a
+   full-width line so player NAMES stay readable in the narrow queue column;
+   meta sits above, controls below. Replaces the old wide score-edit-row grid
+   that squeezed the names to nothing. */
+.shiaijo-qrow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
 }
-/* Upcoming rows are informational (start via Up Next, manage via the row's
-   own controls) — not openable in the scoring panel, so no button affordance. */
-.shiaijo-row--static { cursor: default; }
-.shiaijo-row__comp { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
-.shiaijo-row__status { display: flex; align-items: center; justify-content: flex-end; }
-.shiaijo-row__actions { justify-content: flex-end; }
+.shiaijo-qrow--complete { opacity: 0.72; }
+.shiaijo-qrow__top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 12px;
+}
+.shiaijo-qrow__time { font-weight: 600; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shiaijo-qrow__state { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--ink); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.shiaijo-qrow__final { font-family: var(--font-sans); font-weight: 600; font-size: 10px; color: var(--ink-3); }
+/* Matchup: two equal name columns flanking the centre "vs", names hug centre. */
+.shiaijo-qrow__match { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
+.shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
 
 /* Team encounter score in the queue row: always carries an IV label so a
    bare figure is never shown out of context (a team number could read as

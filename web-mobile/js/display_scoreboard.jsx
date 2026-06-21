@@ -208,10 +208,20 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                             className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "") + (isDone ? " tvd-indiv-row--done" : "")}
                             style={{
                                 padding: "1vh 1.5vw", borderRadius: "0.6vw",
-                                background: isNow ? "#fef3c7" : isDone ? "#f9fafb" : "transparent",
+                                background: isNow ? "var(--accent-soft)" : isDone ? "#f9fafb" : "transparent",
+                                borderLeft: isNow ? "0.8vw solid var(--accent)" : undefined,
                                 opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
+                                display: "flex", alignItems: "center", gap: "1.2vw",
                             }}>
-                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                            {isNow && (
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5vh", flexShrink: 0, minWidth: "3.5vw" }}>
+                                    <span style={{ width: "1.6vh", height: "1.6vh", borderRadius: "50%", background: "var(--accent)", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                                    <span style={{ fontSize: "2vh", fontWeight: 700, letterSpacing: "0.1em", color: "var(--accent)" }}>NOW</span>
+                                </div>
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                            </div>
                         </div>
                     );
                 })}

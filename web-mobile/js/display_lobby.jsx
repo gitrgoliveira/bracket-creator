@@ -2,6 +2,7 @@
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, countCourtMatches, sideLabel, phaseLabel } from './display_helpers.jsx';
+import { boutHansokuMark } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -24,11 +25,12 @@ const LOBBY_COLORS = {
     inkMuted:   'rgba(0,0,0,0.35)',
     line:       'rgba(0,0,0,0.10)',
     lineStrong: 'rgba(0,0,0,0.20)',
-    nowBg:      'rgba(0,0,0,0.04)',
-    nowBorder:  'rgba(0,0,0,0.14)',
-    nextBg:     '#fef3c7',
-    nextBorder: 'rgba(180,83,9,0.30)',
-    nextAccent: '#b45309',
+    // NOW row: navy accent — emphasis is on the live match.
+    nowBg:      'var(--accent-soft, #e7eaf3)',
+    nowBorder:  'var(--accent, #1d3557)',
+    // NEXT row: quiet neutral — visible but clearly subordinate to NOW.
+    nextBg:     'rgba(0,0,0,0.02)',
+    nextBorder: 'rgba(0,0,0,0.10)',
     schedBg:    'rgba(0,0,0,0.02)',
     akaSoft:    '#c0392b',
     akaVivid:   '#b91c1c',
@@ -126,8 +128,13 @@ function LobbyMatchCell({ slot, rowKind }) {
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
 
-    // Score column: running → actual scores; upnext/scheduled → "vs"
+    // Score column: running → actual scores + foul marks; upnext/scheduled → "vs"
     let vsContent;
+    // Foul marks — only meaningful when the match is actively running.
+    // hansokuB = Shiro (left/white) foul count; hansokuA = Aka (right/red) foul count.
+    const foulMarkB = kind === 'running' ? boutHansokuMark(match.hansokuB) : '';
+    const foulMarkA = kind === 'running' ? boutHansokuMark(match.hansokuA) : '';
+
     if (kind === 'running') {
         const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('') || '0';
         const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
@@ -154,23 +161,53 @@ function LobbyMatchCell({ slot, rowKind }) {
                 minHeight: 54,
                 border: `1px solid ${cellBorder}`,
             }}>
+                {/* NOW badge — navy dot + "NOW" label, only for the live slot */}
+                {rowKind === 'now' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+                        <span style={{
+                            width: 10, height: 10, borderRadius: '50%',
+                            background: 'var(--accent, #1d3557)',
+                            display: 'inline-block',
+                            flexShrink: 0,
+                            animation: 'pulse 1.4s ease-in-out infinite',
+                        }} />
+                        <span style={{
+                            fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
+                            color: 'var(--accent, #1d3557)', textTransform: 'uppercase',
+                        }}>NOW</span>
+                    </div>
+                )}
                 {compMeta && (
                     <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em' }}>
                         {compMeta}
                     </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
-                    {/* Shiro — white text, left side */}
-                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {sideLabel(match.sideB, zekken)}
+                    {/* Shiro — white/left side; foul mark at end if outstanding */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {sideLabel(match.sideB, zekken)}
+                        </span>
+                        {foulMarkB && (
+                            <span data-testid="lobby-foul-mark-b" style={{ color: 'var(--danger, #c0392b)', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
+                                {foulMarkB}
+                            </span>
+                        )}
                     </div>
                     {/* Score / vs */}
                     <div style={{ flexShrink: 0, minWidth: 64, textAlign: 'center' }}>
                         {vsContent}
                     </div>
-                    {/* Aka — pink/red text, right side */}
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right', color: LOBBY_COLORS.akaSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {sideLabel(match.sideA, zekken)}
+                    {/* Aka — pink/red text, right side; foul mark before name if outstanding */}
+                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, overflow: 'hidden' }}>
+                        {foulMarkA && (
+                            <span data-testid="lobby-foul-mark-a" style={{ color: 'var(--danger, #c0392b)', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
+                                {foulMarkA}
+                            </span>
+                        )}
+                        <span style={{ color: LOBBY_COLORS.akaSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {sideLabel(match.sideA, zekken)}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -442,4 +479,4 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     );
 }
 
-export { LobbyDisplay, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS };
+export { LobbyDisplay, LobbyMatchCell, LOBBY_COLORS, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS };

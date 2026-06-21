@@ -272,6 +272,47 @@ describe('TvIndividualBoard', () => {
     expect(str).toContain('tvd-indiv-row-now'); // the running match is flagged current
   });
 
+  it('NOW row carries the "NOW" label and tvd-indiv-row-now testid; amber #fef3c7 is absent', () => {
+    // mp-pa6s: running row must show a prominent NOW label (navy, pulsing dot)
+    // and must NOT use the old amber background.
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
+    // The NOW label text must appear in the rendered vnode tree.
+    expect(str).toContain('NOW');
+    // The testid must still be present (regression guard).
+    expect(str).toContain('tvd-indiv-row-now');
+    // The old amber hex must be gone from the running row treatment.
+    expect(str).not.toContain('#fef3c7');
+  });
+
+  it('completed (non-running) rows do NOT get the navy NOW treatment', () => {
+    // mp-pa6s: only the live row gets var(--accent-soft) / var(--accent) border.
+    // Completed rows keep the grey #f9fafb background; no NOW label appears for them.
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    // Walk the vnode tree and collect the wrapper div for each row by testid.
+    const rows = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      const tid = n.props?.['data-testid'];
+      if (tid === 'tvd-indiv-row' || tid === 'tvd-indiv-row-now') rows.push(n);
+      const k = n.children || n.props?.children || [];
+      [].concat(k).forEach(walk);
+    })(TvIndividualBoard({ ...base, promoted }));
+    // We have 2 rows total (poolMatches has 2 entries).
+    expect(rows.length).toBe(2);
+    const nowRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row-now');
+    const doneRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row');
+    // NOW row: navy soft bg, left accent border.
+    expect(nowRow.props.style.background).toBe('var(--accent-soft)');
+    expect(nowRow.props.style.borderLeft).toContain('var(--accent)');
+    // Completed row: grey bg, no accent border.
+    expect(doneRow.props.style.background).toBe('#f9fafb');
+    expect(doneRow.props.style.borderLeft).toBeUndefined();
+    // Completed row must not contain the NOW label.
+    expect(JSON.stringify(doneRow)).not.toContain('"NOW"');
+  });
+
   it('passes match sides with .number through to IndividualScore (numberPrefix support)', () => {
     // mp-13y: when a competition has numberPrefix configured, the assigned
     // number (e.g. "K1") rides on match.sideA.number / match.sideB.number

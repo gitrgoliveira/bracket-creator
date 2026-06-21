@@ -13,7 +13,7 @@
 // call sites (tests, viewer.jsx, app.jsx) continue to work unchanged.
 
 import { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup } from './display_scoreboard.jsx';
-import { LobbyDisplay, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS } from './display_lobby.jsx';
+import { LobbyDisplay, LobbyMatchCell, LOBBY_COLORS, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS } from './display_lobby.jsx';
 import { StreamingOverlay, overlayPositionLabel, findCurrentBoutIndex } from './streaming_overlay.jsx';
 import {
     sideLabel,
@@ -73,6 +73,8 @@ function DisplayRoute({ tournament, competitions, connected = true }) {
 export {
     TvDisplay,
     LobbyDisplay,
+    LobbyMatchCell,
+    LOBBY_COLORS,
     StreamingOverlay,
     DisplayRoute,
     sideLabel,

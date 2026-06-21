@@ -175,7 +175,7 @@ Admin Client ──→ POST /api/competitions/:id/matches/:mid/score
 ```
 tournament-data/
 ├── tournament.md                       YAML front-matter: name, date, venue, courts, password
-├── wal/                                Pending multi-file transactions (replayed on startup)
+├── .wal/                               Pending multi-file transactions (replayed on startup)
 ├── branding/                           Uploaded logo (logo.png|jpg) for display surfaces
 ├── sponsors/                           Uploaded sponsor images
 └── competitions/
@@ -226,7 +226,7 @@ The `Hub` broadcasts the following event types over `GET /api/events`:
 | Event | Triggered by |
 |---|---|
 | `match_updated` | score / decision / status change (coalesced ≤4/s per match) |
-| `competition_started` | `POST /competitions/:id/start` |
+| `competition_started` | `POST /api/competitions/:id/start` |
 | `competition_completed` | final match resolved |
 | `tournament_updated` | tournament-level CRUD |
 | `schedule_updated` | court/time edits, schedule regenerated |
@@ -294,7 +294,7 @@ App (app.jsx)
 
 **Decision types** (`internal/domain/decision.go` is the source of truth): the canonical wire values include `""`, `fought`, `hikiwake`, `kiken` (legacy), `kiken-voluntary` (FIK Art. 31, permanent), `kiken-injury` (FIK Art. 30, reinstateable), `fusenpai`, `fusensho`, `daihyosen`, `kachinuki-exhaustion`, `ippon-shobu`. Use `domain.IsKikenDecision`/`IsKikenDecisionStr` to match any kiken variant. Legacy YAML `decision: true` migrates to `hikiwake`, `false` to `fought`, and `kiken` to `kiken-voluntary` (Decision.UnmarshalYAML).
 
-**Competitor eligibility** (`engine/eligibility.go`, `state/competitor_status.go`): a kiken/fusenpai decision auto-writes `CompetitorStatus{Eligible: false}` for the loser. `engine.StartMatchTx` is the FR-035 pre-flight gate — returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`), mapped to HTTP 409 by the score handler. Re-scoring a match that itself created the ineligibility is permitted (undo path). Kiken-injury (FIK Art. 30) sets `Reinstateable: true`; an admin can restore eligibility via `POST /competitions/:cid/competitors/:pid/reinstate`. Kiken-voluntary (Art. 31) and fusenpai are not reinstateable.
+**Competitor eligibility** (`engine/eligibility.go`, `state/competitor_status.go`): a kiken/fusenpai decision auto-writes `CompetitorStatus{Eligible: false}` for the loser. `engine.StartMatchTx` is the FR-035 pre-flight gate — returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`), mapped to HTTP 409 by the score handler. Re-scoring a match that itself created the ineligibility is permitted (undo path). Kiken-injury (FIK Art. 30) sets `Reinstateable: true`; an admin can restore eligibility via `POST /api/competitions/:id/competitors/:pid/reinstate`. Kiken-voluntary (Art. 31) and fusenpai are not reinstateable.
 
 **Team lineups & kachinuki** (`domain/team_lineup.go`, `engine/kachinuki.go`): TeamLineup pins position → player for a round. FIK 5-person rule: Senpo + Taisho mandatory; 1 vacancy must be Jiho, 2 must be Jiho+Fukusho, 3+ disqualifies. Kachinuki ("winner-stays-on") dynamically appends bouts via `engine.AdvanceKachinuki` until one team is exhausted (`DecisionKachinukiExhaustion`).
 

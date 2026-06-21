@@ -120,8 +120,9 @@ func TestCreateHandler_CommaInPlayerName_NotCorrupted(t *testing.T) {
 // generator honours a competition's PoolFormat=partial (mp-x0u9 follow-up):
 // AdminExport posts poolFormat=partial, which must route to
 // CreatePartialPoolMatches (a path graph of N-1 matches) instead of the default
-// full round-robin (N*(N-1)/2). Each pool match writes a literal "vs" cell on
-// the Pool Matches sheet, so the match count is the number of "vs" cells.
+// full round-robin (N*(N-1)/2). Match rows are mostly formula cells (empty in
+// GetRows) and "vs" is just the block header, so the match count is measured by
+// geometry: the rows between the "vs" header and the "Results" block.
 func TestCreateHandler_PartialPoolFormat_FewerMatches(t *testing.T) {
 	roster := "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF" // 1 pool of 6
 	// Match rows are formula cells (GetRows shows them empty), so count them by

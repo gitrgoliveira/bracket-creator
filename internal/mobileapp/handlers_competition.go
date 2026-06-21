@@ -841,11 +841,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// bracket.json) were generated from the current config.
 				// Mutating output-affecting fields while draw-ready would
 				// leave config.md inconsistent with those artifacts when
-				// StartCompetition runs. Cosmetic fields (Name, Date,
-				// StartTime, NumberPrefix, CheckInEnabled, Naginata,
-				// WithZekkenName) are still editable in draw-ready and are
-				// applied below. This mirrors the participant/seed 409s in
-				// handlers_participants.go.
+				// StartCompetition runs. Fields that do NOT reach the Excel
+				// generator (Name, Date, StartTime, CheckInEnabled, Naginata)
+				// stay editable in draw-ready and are applied below. NOTE:
+				// NumberPrefix and WithZekkenName DO reach the generator
+				// (player numbers / name columns) and are gated below. This
+				// mirrors the participant/seed 409s in handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
 					// Compare the EFFECTIVE (about-to-be-applied) values
 					// directly — no zero/empty sentinels. The settings merge

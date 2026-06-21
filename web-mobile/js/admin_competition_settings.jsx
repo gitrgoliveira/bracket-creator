@@ -378,10 +378,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (nextCourts.length) updateNow("courts", nextCourts);
   };
 
-  // draw-ready lock: output-affecting fields (pools, courts, format, kind, team
-  // size, mirror) are disabled while a draw exists. Cosmetic fields (name,
-  // date, startTime, numberPrefix, checkInEnabled, naginata, withZekkenName)
-  // remain editable. Discard the draw from the competition header to unlock.
+  // draw-ready lock: output-affecting fields — those that reach the Excel
+  // generator (pools, courts, format, kind, team size, mirror, numberPrefix,
+  // withZekkenName) — are disabled while a draw exists. Fields that do NOT
+  // affect the generated workbook (name, date, startTime, checkInEnabled,
+  // naginata) remain editable. Discard the draw from the competition header to
+  // unlock everything.
   const isDrawReady = local.status === "draw-ready";
 
   return (

@@ -377,12 +377,14 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
   // logic in ViewerCompetition), so the pointer text must match.
   if (c.status === "draw-ready") {
-    const isSwiss = c.format === "swiss";
+    let tabHint = "Browse the Pools and Bracket tabs to see the draw.";
+    if (c.format === "swiss") tabHint = "Check the Standings tab to follow the rounds.";
+    else if (isLeague) tabHint = "Browse the League tab to see the draw.";
     return (
       <EmptyState
         icon="📋"
         title="Draw is ready"
-        message={`Starts at ${c.startTime}. ${isSwiss ? "Check the Standings tab to follow the rounds." : isLeague ? "Browse the League tab to see the draw." : "Browse the Pools and Bracket tabs to see the draw."}`}
+        message={`Starts at ${c.startTime}. ${tabHint}`}
         style={{ padding: 32 }}
       />
     );

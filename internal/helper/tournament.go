@@ -212,6 +212,14 @@ func SanitizeName(name string) string {
 }
 
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+	// Guard before the division below: poolSize is the divisor in both the
+	// "max" and fixed-size branches, so a zero/negative value panics with an
+	// integer divide-by-zero. Reject it here — the lowest shared point — so
+	// every caller (engine draw, schedule estimator, CLI) is panic-proof
+	// regardless of how PoolSize reached it. (mp-ebgz)
+	if poolSize <= 0 {
+		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
+	}
 	var totalPools int
 	if isMax {
 		totalPools = (len(players) + poolSize - 1) / poolSize

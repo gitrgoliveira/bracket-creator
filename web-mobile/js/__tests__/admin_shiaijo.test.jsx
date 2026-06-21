@@ -52,6 +52,12 @@ describe('parsePath — /competition/:id/:tab', () => {
       mode: 'viewer', viewerCompId: 'abc', viewerTab: null,
     });
   });
+
+  it('normalizes an explicit /overview segment to null (canonical default)', () => {
+    expect(parsePath('/competition/abc/overview')).toEqual({
+      mode: 'viewer', viewerCompId: 'abc', viewerTab: null,
+    });
+  });
 });
 
 describe('pathFromState — viewer competition tab round-trip', () => {

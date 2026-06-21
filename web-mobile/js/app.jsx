@@ -110,8 +110,13 @@ function parsePath(path) {
       const id = parts[1];
       // mp-tidg: the 3rd segment encodes the active tab so browser
       // back/forward navigates across tabs. Decode defensively (same
-      // safeDecode pattern as the shiaijo court segment above).
-      const tab = parts[2] ? safeDecode(parts[2]) : null;
+      // safeDecode pattern as the shiaijo court segment above). Normalize
+      // the default tab to null — the rest of the app treats "overview" as
+      // the nullish default (selectTab/pathFromState), so /competition/:id
+      // and /competition/:id/overview must both parse to viewerTab=null and
+      // never carry two representations of the same state.
+      let tab = parts[2] ? safeDecode(parts[2]) : null;
+      if (tab === "overview") tab = null;
       return { mode: "viewer", viewerCompId: id, viewerTab: tab };
     }
     if (path === "/schedule") {
@@ -901,8 +906,10 @@ function App() {
       {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps remounts the
-          // component and resets per-comp UI state (active tab, open
-          // match modal, bracket scroll target).
+          // component and resets its internal per-comp UI state (open match
+          // modal, bracket scroll target). The active tab is NOT reset by the
+          // remount — it is controlled App state (viewerTab); the onBack /
+          // onSelectCompetition handlers clear it explicitly.
           key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}

@@ -101,6 +101,7 @@ func createTournamentHandler(c *gin.Context) {
 	}
 
 	roundRobin := c.PostForm("roundRobin") == "on"
+	poolFormat := c.PostForm("poolFormat") // "partial" → path-graph; else legacy roundRobin switch
 	poolSizeMode := c.PostForm("poolSizeMode")
 
 	// Parse courts (number of Shiaijo)
@@ -154,6 +155,7 @@ func createTournamentHandler(c *gin.Context) {
 			determined:      determined,
 			teamMatches:     teamMatches,
 			roundRobin:      roundRobin,
+			poolFormat:      poolFormat,
 			numPlayers:      numPlayers,
 			maxPlayers:      maxPlayers,
 			poolWinners:     winnersPerPool,

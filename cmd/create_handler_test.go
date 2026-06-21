@@ -116,6 +116,48 @@ func TestCreateHandler_CommaInPlayerName_NotCorrupted(t *testing.T) {
 	require.True(t, found, "comma-containing player name was corrupted (split on the comma) in the data sheet")
 }
 
+// TestCreateHandler_PartialPoolFormat_FewerMatches verifies the /create
+// generator honours a competition's PoolFormat=partial (mp-x0u9 follow-up):
+// AdminExport posts poolFormat=partial, which must route to
+// CreatePartialPoolMatches (a path graph of N-1 matches) instead of the default
+// full round-robin (N*(N-1)/2). Each pool match writes a literal "vs" cell on
+// the Pool Matches sheet, so the match count is the number of "vs" cells.
+func TestCreateHandler_PartialPoolFormat_FewerMatches(t *testing.T) {
+	roster := "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF" // 1 pool of 6
+	// Match rows are formula cells (GetRows shows them empty), so count them by
+	// geometry: the block runs from the "White … vs … Red" header to the
+	// "Results" block, separated by one blank row. matches = resultsRow - headerRow - 2.
+	matchCount := func(f *excelize.File) int {
+		rows, err := f.GetRows("Pool Matches")
+		require.NoError(t, err)
+		headerRow, resultsRow := -1, -1
+		for i, row := range rows {
+			for _, cell := range row {
+				if cell == "vs" {
+					headerRow = i
+				}
+			}
+			if len(row) > 0 && row[0] == "Results" {
+				resultsRow = i
+				break
+			}
+		}
+		require.Positive(t, headerRow+1, "match header row not found")
+		require.Positive(t, resultsRow+1, "Results block not found")
+		return resultsRow - headerRow - 2
+	}
+
+	full := matchCount(postCreate(t, leagueForm(roster))) // round-robin → 6*5/2 = 15
+
+	partialForm := leagueForm(roster)
+	partialForm.Set("poolFormat", "partial")          // takes precedence over roundRobin
+	partial := matchCount(postCreate(t, partialForm)) // path graph → 6-1 = 5
+
+	require.Equal(t, 15, full, "round-robin pool of 6 should produce 15 matches")
+	require.Equal(t, 5, partial, "partial (path-graph) pool of 6 should produce 5 matches")
+	require.Less(t, partial, full, "partial pool format must generate fewer matches than round-robin")
+}
+
 // TestCreateHandler_CRLFRoster_Normalized guards the newline-normalization fix:
 // a CRLF roster (as a browser textarea / curl can send) must not leave a
 // trailing "\r" on the last field nor trip the exact-match duplicate check on a

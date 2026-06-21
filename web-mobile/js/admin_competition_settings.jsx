@@ -7,8 +7,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Default on-clock minutes per match when a duration field is left blank.
 // Mirrors defaultPerMatchClockMinutes in internal/engine/scheduler_slots.go
-// (3 min = the FIK individual default). Surfaced in the duration inputs so the
-// operator knows what "blank" resolves to.
+// (a nominal estimate anchor, not a regulation match time). Surfaced in the
+// duration inputs so the operator knows what "blank" resolves to.
 const DEFAULT_MATCH_MINUTES = 3;
 
 const dmyToIso = window.dmyToIso;

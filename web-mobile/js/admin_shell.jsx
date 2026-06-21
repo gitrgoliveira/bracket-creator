@@ -393,6 +393,9 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
   }, [comps]);
 
   const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
+  // No competitions yet: the "Add competition" tile is the operator's primary
+  // next step, so it's promoted from a quiet dashed placeholder to a loud CTA.
+  const noComps = comps.length === 0;
 
   // Derive the tournament-level status from competition activity instead of
   // trusting t.status, which can read "Pending" (setup) even while competitions
@@ -423,8 +426,8 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             </div>
           </div>
           <div className="page-head__actions">
-            <button type="button" className="btn" onClick={onAnnounce}><Icon name="megaphone" />Announce</button>
-            <button type="button" className="btn" onClick={() => setExportPdfOpen(true)}><Icon name="printer" />Export PDFs</button>
+            <button type="button" className="btn" onClick={onAnnounce} disabled={noComps} title={noComps ? "Add a competition first" : undefined}><Icon name="megaphone" />Announce</button>
+            <button type="button" className="btn" onClick={() => setExportPdfOpen(true)} disabled={noComps} title={noComps ? "Add a competition first" : undefined}><Icon name="printer" />Export PDFs</button>
             {comps.some(c => c.status === "completed") && (
               <button type="button" className="btn" onClick={() => setAllWinnersOpen(true)}><Icon name="trophy" />All winners</button>
             )}
@@ -448,7 +451,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
             <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
           </button>
-          <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenScoreEditor}>
+          <button type="button" className="card" style={{ textAlign: "left", cursor: noComps ? "not-allowed" : "pointer", opacity: noComps ? 0.6 : 1, border: "1px solid var(--line)" }} onClick={onOpenScoreEditor} disabled={noComps} title={noComps ? "Add a competition first" : undefined}>
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
           </button>
@@ -482,10 +485,10 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <div className="section-title">All competitions</div>
         <div className="tlist">
           {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
-          <button type="button" className="tcard tcard--add" onClick={onCreateCompetition}>
-            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
-            <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
+          <button type="button" className={`tcard tcard--add${noComps ? " tcard--add-cta" : ""}`} onClick={onCreateCompetition}>
+            <div style={{ fontSize: 28, color: noComps ? "var(--accent)" : "var(--ink-3)" }}>+</div>
+            <div style={{ fontWeight: noComps ? 700 : 600, marginTop: 4, color: noComps ? "var(--accent)" : undefined }}>Add competition</div>
+            <div style={{ fontSize: 12, color: noComps ? "var(--ink-2)" : "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
           <button type="button" className="tcard tcard--add" onClick={onOpenImport}>
             <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>

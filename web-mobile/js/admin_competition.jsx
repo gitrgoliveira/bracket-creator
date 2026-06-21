@@ -112,7 +112,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const discardDraw = async () => {
-    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`, confirmLabel: "Discard draw", danger: true }))) return;
+    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true }))) return;
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setDiscarding(true);
@@ -121,7 +121,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
-      onSection("overview");
+      // After discard the status reverts to "setup", so draw-only/preview nav
+      // items (pools, bracket, swiss) disappear. If the operator is on one of
+      // those sections, fall back to participants — a sensible landing point
+      // after discarding. Otherwise leave them exactly where they are.
+      // (This fallback set mirrors the draw-only items gated on isDrawReady /
+      // draw artifacts in the sections array above.)
+      if (["pools", "bracket", "swiss"].includes(section)) {
+        onSection("participants");
+      }
     } catch (e) {
       console.error("Discard draw failed:", e);
       if (mountedRef.current) showToast(e.message, "error");
@@ -130,34 +138,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
-  const regenerateDraw = async () => {
-    if (!(await confirmCheckInExclusion())) return;
-    // Regenerate discards the existing draw first (DELETE /draw is gated),
-    // so collect the elevated password up front before any work begins.
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
-    setGenerating(true);
-    try {
-      await window.API.discardDraw(c.id, password, admin);
-      if (!mountedRef.current) return;
-      // Refresh after discard so the UI reflects setup status immediately;
-      // if generateDraw then fails the UI is consistent with the server.
-      onRefreshCompetition?.();
-      await window.API.generateDraw(c.id, password);
-      if (!mountedRef.current) return;
-      onRefreshCompetition?.();
-      showToast(`Draw regenerated for ${c.name}`);
-      onSection(c.format === "playoffs" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
-    } catch (e) {
-      console.error("Regenerate draw failed:", e);
-      if (mountedRef.current) {
-        onRefreshCompetition?.();
-        showToast(e.message, "error");
-      }
-    } finally {
-      if (mountedRef.current) setGenerating(false);
-    }
-  };
+  // NOTE: there is intentionally no "regenerate draw" action. The draw is
+  // deterministic on its stored inputs (no RNG in helper seeding/pools/tree;
+  // Swiss round 1 uses a comp-id-seeded shuffle), so regenerating without
+  // changing inputs would reproduce the identical draw. To get a different
+  // draw the operator discards (which unlocks editing), changes inputs
+  // (e.g. Shuffle unseeded / seeds / settings), then generates again.
 
   const start = async () => {
     // draw-ready → running does not regenerate the draw; skip the confirmation
@@ -196,6 +182,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const isDrawReady = c.status === "draw-ready";
+  // Block section/competition navigation while a draw mutation is in-flight —
+  // the in-flight transition changes which sections are valid and discardDraw's
+  // fallback uses the section captured at call time (see the side-nav below).
+  const navBusy = generating || starting || discarding;
+  // Compute the other-competitions list once (used for both the render guard
+  // and the map below).
+  const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
   const sections = [
     {
       sec: "Preparation", items: [
@@ -255,11 +248,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && c.players.length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
                     {generating && <span className="spinner" />}
-                    {generating ? "Generating…" : "Preview draw"}
+                    {generating ? "Generating…" : "Generate draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -279,20 +272,20 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
+                  {/* navBusy (generating||starting||discarding) covers the brief
+                      window where generateDraw has flipped status to draw-ready
+                      but its setGenerating(false) hasn't run yet — without it
+                      these buttons would be momentarily clickable mid-generate. */}
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
-                    {generating && <span className="spinner" />}
-                    {generating ? "Regenerating…" : "Regenerate draw"}
-                  </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start. To change it, discard and edit first.</div>
               </div>
             )}
             {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (
@@ -302,21 +295,35 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         </div>
 
         <div className="workspace">
-          <div className="side-nav">
-            {sections.map((sec) => (
-              <div key={sec.sec}>
-                <div className="side-nav__sec">{sec.sec}</div>
-                {sec.items.map((it) => (
-                  <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
-                ))}
-              </div>
-            ))}
-            <div>
-              <div className="side-nav__sec">Other competitions</div>
-              {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+          {/* Left column stacks the per-competition nav and, as a SEPARATE
+              card below it, the switcher to other competitions (mp-xsc1).
+              The Other-competitions card is position:static so it doesn't
+              fight the sticky nav above it. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="side-nav">
+              {sections.map((sec) => (
+                <div key={sec.sec}>
+                  <div className="side-nav__sec">{sec.sec}</div>
+                  {sec.items.map((it) => (
+                    /* Disable nav while a draw mutation is in-flight: a
+                       discard/generate/start changes status and which sections
+                       are valid, and discardDraw's post-resolve fallback reads
+                       the `section` captured when it started. Navigating
+                       mid-flight could strand the UI on a section that
+                       disappears once status changes. */
+                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} disabled={navBusy} onClick={() => onSection(it.id)}>{it.label}</button>
+                  ))}
+                </div>
               ))}
             </div>
+            {otherComps.length > 0 && (
+              <div className="side-nav" style={{ position: "static" }}>
+                <div className="side-nav__sec">Other competitions</div>
+                {otherComps.map((cc) => (
+                  <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}

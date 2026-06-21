@@ -5,6 +5,12 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Default on-clock minutes per match when a duration field is left blank.
+// Mirrors defaultPerMatchClockMinutes in internal/engine/scheduler_slots.go
+// (a nominal estimate anchor, not a regulation match time). Surfaced in the
+// duration inputs so the operator knows what "blank" resolves to.
+const DEFAULT_MATCH_MINUTES = 3;
+
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
@@ -121,7 +127,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -282,6 +288,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
+      // teamMatchType has no editable control in this form, but the settings
+      // merge is a full replace — omitting it would clobber a kachinuki
+      // competition's value to "" (fixed) on any save. Round-trip it like
+      // `mirror` above to preserve the stored value.
+      teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving
@@ -373,6 +384,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (nextCourts.length) updateNow("courts", nextCourts);
   };
 
+  // draw-ready lock: output-affecting fields — those that reach the Excel
+  // generator (pools, courts, format, kind, team size, mirror, numberPrefix,
+  // withZekkenName) — are disabled while a draw exists. Fields that do NOT
+  // affect the generated workbook (name, date, startTime, checkInEnabled,
+  // naginata) remain editable. Discard the draw from the competition header to
+  // unlock everything.
+  const isDrawReady = local.status === "draw-ready";
+
   return (
     <div className="card">
       <div className="card__head">
@@ -449,6 +468,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* Render NaN as "" so clearing the input stays empty instead of */}
           {/* collapsing to "0"; updateNumber gates the debounced save so a */}
           {/* cleared/invalid value never lands on the backend as 0. */}
+          {/* draw-ready lock: teamSize is output-affecting. */}
           <input
             className="input"
             type="number"
@@ -456,14 +476,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             max={MAX_TEAM_SIZE}
             value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
             onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
+            disabled={isDrawReady}
           />
         </div>
       )}
       <div className="field">
         <label className="field__label">Assigned shiaijo (courts)</label>
+        {/* draw-ready lock: courts is output-affecting — discard the draw to reassign. */}
+        {isDrawReady && (
+          <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
+            Discard the draw to change pools, courts, or format.
+          </div>
+        )}
         <div className="radio-group">
           {tournament.courts.map((cc) => (
-            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
+            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)} disabled={isDrawReady}>Shiaijo (court) {cc}</button>
           ))}
         </div>
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
@@ -485,9 +512,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
+            {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")}>maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")}>minimum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
           <div className="row">
@@ -500,6 +528,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               min="3"
               value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
               onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
+              disabled={isDrawReady}
             /></div>
             <div className="field"><label className="field__label">Winners per pool</label><input
               className="input"
@@ -507,6 +536,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               min="1"
               value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
               onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+              disabled={isDrawReady}
             /></div>
           </div>
         </>
@@ -525,9 +555,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 step="1"
                 value={Number.isFinite(local.poolMatchDuration) && local.poolMatchDuration > 0 ? local.poolMatchDuration : ""}
                 onChange={(e) => updateNumber("poolMatchDuration", e.target.value, 0)}
-                placeholder="default"
+                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">{local.format === "swiss" ? "Estimated minutes per Swiss-round match. Leave blank for default." : "Estimated minutes per pool match. Leave blank for default."}</div>
+              <div className="field__hint">{local.format === "swiss" ? `Estimated minutes per Swiss-round match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).` : `Estimated minutes per pool match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
           {(local.format === "playoffs" || local.format === "mixed") && (
@@ -540,9 +570,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 step="1"
                 value={Number.isFinite(local.playoffMatchDuration) && local.playoffMatchDuration > 0 ? local.playoffMatchDuration : ""}
                 onChange={(e) => updateNumber("playoffMatchDuration", e.target.value, 0)}
-                placeholder="default"
+                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">Estimated minutes per playoff/knockout match. Leave blank for default.</div>
+              <div className="field__hint">{`Estimated minutes per playoff/knockout match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
         </div>
@@ -613,13 +643,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       <div className="field">
         <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
+        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} disabled={isDrawReady} style={{ maxWidth: 80 }} />
         <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
+        {/* draw-ready lock: roundRobin is output-affecting. */}
+        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

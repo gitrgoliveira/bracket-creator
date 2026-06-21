@@ -837,14 +837,52 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
-				// Block settings changes while a draw is pending — the
-				// draw artifacts (pools.csv / bracket.json) were generated
-				// from the current config; mutating PoolSize, Courts, or
-				// Format while draw-ready would leave config.md inconsistent
-				// with those artifacts when StartCompetition runs.
+				// Draw-ready gate: the draw artifacts (pools.csv /
+				// bracket.json) were generated from the current config.
+				// Mutating output-affecting fields while draw-ready would
+				// leave config.md inconsistent with those artifacts when
+				// StartCompetition runs. Fields that do NOT reach the Excel
+				// generator (Name, Date, StartTime, CheckInEnabled, Naginata)
+				// stay editable in draw-ready and are applied below. NOTE:
+				// NumberPrefix and WithZekkenName DO reach the generator
+				// (player numbers / name columns) and are gated below. This
+				// mirrors the participant/seed 409s in handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
-					drawReadyFlag = true
-					return nil, nil
+					// Compare the EFFECTIVE (about-to-be-applied) values
+					// directly — no zero/empty sentinels. The settings merge
+					// below is a full replace, so a caller that sets an
+					// output-affecting field TO its zero/empty value (e.g.
+					// format:"" or poolFormat:"", both accepted by
+					// validateCompetitionFormat) would otherwise slip past a
+					// sentinel guard and corrupt the draw. The real client
+					// (admin_competition_settings.jsx finalNext) always PUTs
+					// the full config with current values for untouched fields,
+					// so a cosmetic-only edit never trips this. comp.Courts was
+					// already defaulted to >=1 court (tournament fallback) in the
+					// settings-validation block above. ApplyCompetitionDefaults
+					// touches only match-duration fields, so comparing here
+					// (pre-defaults) matches the merged result for these fields.
+					outputAffectingChanged :=
+						comp.PoolSize != current.PoolSize ||
+							comp.PoolWinners != current.PoolWinners ||
+							comp.PoolSizeMode != current.PoolSizeMode ||
+							strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+							comp.Format != current.Format ||
+							comp.PoolFormat != current.PoolFormat ||
+							comp.RoundRobin != current.RoundRobin ||
+							comp.Mirror != current.Mirror ||
+							comp.TeamSize != current.TeamSize ||
+							comp.Kind != current.Kind ||
+							// NumberPrefix and WithZekkenName reach the Excel generator
+							// (POST /create: numberPrefix → player numbers, withZekkenName
+							// → name columns), so changing them while draw-ready desyncs
+							// config from the generated output.
+							comp.NumberPrefix != current.NumberPrefix ||
+							comp.WithZekkenName != current.WithZekkenName
+					if outputAffectingChanged {
+						drawReadyFlag = true
+						return nil, nil
+					}
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompFields BEFORE the transform, so a PUT to
@@ -937,7 +975,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, pool format, round-robin, mirror, team size, kind, number prefix, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if validationErr != nil {

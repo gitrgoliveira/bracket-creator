@@ -331,11 +331,12 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || [];
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
   const [allWinnersOpen, setAllWinnersOpen] = useStateA(false);
+  const scheduleEnabled = !!(authConfig?.scheduleEnabled);
 
   useEffectA(() => {
     // Coalesce bursts of events into a single dashboard refresh. On a busy
@@ -447,10 +448,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
-          <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
-            <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
-            <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
-          </button>
+          {scheduleEnabled && (
+            <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
+              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>
+              <div className="card__sub">All matches across courts. Move matches between shiaijo, filter by player.</div>
+            </button>
+          )}
           <button type="button" className="card" style={{ textAlign: "left", cursor: noComps ? "not-allowed" : "pointer", opacity: noComps ? 0.6 : 1, border: "1px solid var(--line)" }} onClick={onOpenScoreEditor} disabled={noComps} title={noComps ? "Add a competition first" : undefined}>
             <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="pencil" size={18} />Score editor →</div>
             <div className="card__sub">Update results or correct past matches across the tournament.</div>
@@ -712,7 +715,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
           {runningCount > 0 && <div className="tcard__stat"><div className="v" style={{ color: "var(--red)" }}>{runningCount}</div><div className="l">Now</div></div>}
         </div>
         <div className="tcard__actions">
-          {c.status === "setup" && playerCount >= 2 && (
+          {(c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2)) && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (

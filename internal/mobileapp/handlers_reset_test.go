@@ -37,7 +37,7 @@ func setupResetTest(t *testing.T, verifier PasswordVerifier) (*state.Store, *gin
 	r := gin.New()
 	api := r.Group("/api")
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier, defaultElevatedVerifier(verifier, store))
+	RegisterAuthConfigHandlers(api, verifier, defaultElevatedVerifier(verifier, store), false)
 
 	return store, r, hub
 }

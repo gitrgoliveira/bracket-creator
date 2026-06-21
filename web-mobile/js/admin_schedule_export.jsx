@@ -66,6 +66,10 @@ export function AdminExport({ c, t }) {
         determined: "on", // preserve the registered participant order (no shuffle)
       });
       if (singlePool || cfg.roundRobin) body.set("roundRobin", "on");
+      // Honour the competition's pool format: "partial" → path-graph match set
+      // (the generator otherwise defaults to full round-robin). Mirrors the
+      // engine's PoolFormat switch (internal/engine/pools.go).
+      if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
       if (cfg.withZekkenName) body.set("withZekkenName", "on");
       if (seeded.length) body.set("seeds", JSON.stringify(seeded));
 

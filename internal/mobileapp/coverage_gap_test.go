@@ -684,7 +684,7 @@ func TestNewRouterWithHub_NilVerifier(t *testing.T) {
 		"web-mobile/index.html": {Data: []byte("<html></html>")},
 	})
 	// nil verifier is allowed — falls back to NewFileVerifier(store)
-	r, _, limiter := NewRouterWithHub(store, eng, res, nil, hub)
+	r, _, limiter := NewRouterWithHub(store, eng, res, nil, hub, false)
 	t.Cleanup(limiter.Close)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/health", nil)

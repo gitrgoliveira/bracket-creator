@@ -31,8 +31,9 @@ const defaultLunchStartClock = "12:00"
 // match when a competition carries neither PoolMatchDuration nor
 // PlayoffMatchDuration nor a legacy MatchDuration (e.g. an
 // unconfigured comp loaded under ApplyCompetitionDefaults). 3 minutes
-// matches the FIK individual default and keeps the slot loop
-// progressing rather than collapsing to zero-duration steps.
+// is a reasonable nominal value that keeps the slot loop progressing
+// rather than collapsing to zero-duration steps; it is only an estimate
+// anchor, not a regulation match time.
 const defaultPerMatchClockMinutes = 3
 
 // perMatchElapsedMinutes returns the elapsed minutes a single match

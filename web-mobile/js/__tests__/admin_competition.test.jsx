@@ -453,6 +453,9 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // the backend PUT allowlist ignores unknown fields.
     'leagueTiebreakTopN',
     'leagueTwoThirdPlaces',
+    // Round-tripped (no UI control) to avoid clobbering a kachinuki
+    // competition's value to "" on a settings save.
+    'teamMatchType',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.

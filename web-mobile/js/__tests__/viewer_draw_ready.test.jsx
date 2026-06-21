@@ -9,7 +9,11 @@ function collectText(node) {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
   if (typeof node.type === 'function') {
-    try { return collectText(node.type(node.props || {})); } catch { /* fall through */ }
+    try {
+      const p = { ...(node.props || {}) };
+      if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+      return collectText(node.type(p));
+    } catch { /* fall through */ }
   }
   if (node.children) return collectText(node.children);
   if (node.props?.children) return collectText(node.props.children);

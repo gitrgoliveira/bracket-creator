@@ -1316,7 +1316,12 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
     }
     if (pred(node)) return node;
     if (typeof node.type === 'function') {
-      try { const f = findNode(node.type(node.props || {}), pred); if (f) return f; } catch { /* fall through */ }
+      try {
+        const p = { ...(node.props || {}) };
+        if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+        const f = findNode(node.type(p), pred);
+        if (f) return f;
+      } catch { /* fall through */ }
     }
     const kids = node.children || node.props?.children || [];
     for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }

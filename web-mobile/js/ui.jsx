@@ -453,6 +453,31 @@ function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...a
   );
 }
 
+function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
+  useEscapeToClose(dismissable ? onClose : undefined);
+  return (
+    <div className="modal-backdrop" onClick={dismissable ? onClose : undefined}>
+      <div
+        className={`modal${size ? ` modal--${size}` : ""}${className ? ` ${className}` : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel || (typeof title === "string" ? title : undefined)}
+        style={style}
+      >
+        <div className="modal__head">
+          <div className="modal__title">{title}</div>
+          {dismissable && (
+            <button type="button" className="modal__close" onClick={onClose} aria-label="Close">&times;</button>
+          )}
+        </div>
+        <div className="modal__body">{children}</div>
+        {footer && <div className="modal__foot">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
 function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
 
@@ -509,7 +534,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -530,5 +555,6 @@ if (typeof window !== "undefined") {
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
   window.EmptyState = EmptyState;
+  window.Modal = Modal;
 }
 

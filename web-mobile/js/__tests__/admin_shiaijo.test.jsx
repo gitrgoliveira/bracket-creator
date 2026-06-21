@@ -38,6 +38,56 @@ describe('shiaijoScoreCell — team numbers are never context-free', () => {
   });
 });
 
+// mp-tidg: viewer competition tab routing — /competition/:id/:tab gives
+// browser back/forward support across tabs (Overview / Pools / Bracket / etc).
+describe('parsePath — /competition/:id/:tab', () => {
+  it('parses a tab segment into viewerTab', () => {
+    expect(parsePath('/competition/abc/bracket')).toEqual({
+      mode: 'viewer', viewerCompId: 'abc', viewerTab: 'bracket',
+    });
+  });
+
+  it('returns viewerTab null when no tab segment is present', () => {
+    expect(parsePath('/competition/abc')).toEqual({
+      mode: 'viewer', viewerCompId: 'abc', viewerTab: null,
+    });
+  });
+});
+
+describe('pathFromState — viewer competition tab round-trip', () => {
+  it('emits bare /competition/:id for overview (default tab)', () => {
+    expect(pathFromState('viewer', undefined, 'abc', {}, 'overview')).toBe('/competition/abc');
+    expect(pathFromState('viewer', undefined, 'abc', {}, null)).toBe('/competition/abc');
+  });
+
+  it('appends the tab segment for non-overview tabs', () => {
+    expect(pathFromState('viewer', undefined, 'abc', {}, 'bracket')).toBe('/competition/abc/bracket');
+  });
+
+  it('round-trips bracket tab through parsePath', () => {
+    const url = pathFromState('viewer', undefined, 'abc', {}, 'bracket');
+    expect(parsePath(url)).toEqual({
+      mode: 'viewer', viewerCompId: 'abc', viewerTab: 'bracket',
+    });
+  });
+
+  it('register takes precedence over vcid — no tab suffix', () => {
+    expect(pathFromState('viewer', 'register', 'abc', {}, 'bracket')).toBe('/register/abc');
+  });
+
+  // mp-tidg: encode/decode symmetry — pathFromState encodeURIComponent's the
+  // tab and parsePath safeDecode's it, so a URL-special tab id round-trips.
+  // (Real tab ids are plain ASCII, so this is a defensive contract, not a
+  // behaviour change for current tabs.)
+  it('encodes a URL-special tab segment and round-trips it', () => {
+    const url = pathFromState('viewer', undefined, 'abc', {}, 'a b');
+    expect(url).toBe('/competition/abc/a%20b');
+    expect(parsePath(url)).toEqual({
+      mode: 'viewer', viewerCompId: 'abc', viewerTab: 'a b',
+    });
+  });
+});
+
 // Routing for the dedicated shiaijo operator view (mp-c2yr).
 describe('parsePath — /admin/shiaijo/:court', () => {
   it('maps a court segment to the shiaijo admin kind', () => {

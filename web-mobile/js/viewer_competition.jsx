@@ -163,18 +163,23 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // comp (e.g. "bracket") may not exist yet on draw-ready or setup.
   const effectiveTab = tabs.some(t => t.id === activeTab) ? activeTab : "overview";
 
+  // Controlled-tab writer. Maps the default tab to null so App keeps the
+  // canonical bare /competition/:id URL (the rest of the app stores null,
+  // not "overview", for the default), and tolerates a missing handler via
+  // optional chaining — some unit tests mount ViewerCompetition without an
+  // onTabChange just to assert tab presence. (mp-tidg / PR #307 review)
+  const selectTab = (id) => onTabChange?.(id === "overview" ? null : id);
+
   // mp-tidg: when the requested tab isn't available (deep-link to /bracket
   // before a draw, or a draw_discarded SSE while sitting on it) effectiveTab
   // falls back to overview for display. Propagate that back to app state so
   // the URL stops claiming a tab the user isn't actually on — otherwise a
   // shared permalink would render Overview while still reading /…/bracket.
-  // null (not "overview") keeps the canonical bare /competition/:id path.
   // Guard on a truthy activeTab: when no specific tab was requested (the
   // default/nullish state) there is nothing to correct — the URL is already
-  // canonical — and skipping keeps the component renderable without an
-  // onTabChange handler (used by unit tests that only assert tab presence).
+  // canonical.
   React.useEffect(() => {
-    if (activeTab && effectiveTab !== activeTab) onTabChange(effectiveTab === "overview" ? null : effectiveTab);
+    if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab);
   }, [effectiveTab, activeTab, onTabChange]);
 
   const currentMatch = useMemo(() => {
@@ -235,7 +240,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
-            <button type="button" key={tb.id} className={`viewer__tab ${effectiveTab === tb.id ? "is-active" : ""}`} onClick={() => onTabChange(tb.id)}>
+            <button type="button" key={tb.id} className={`viewer__tab ${effectiveTab === tb.id ? "is-active" : ""}`} onClick={() => selectTab(tb.id)}>
               {tb.label}
             </button>
           ))}
@@ -286,7 +291,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               standings={standings}
               pools={pools}
               poolMatches={poolMatches}
-              onSwitchTab={onTabChange}
+              onSwitchTab={selectTab}
               hasActiveFilter={hasActiveFilter}
               filterLabel={filterLabel}
               highlightPlayers={highlightPlayers}

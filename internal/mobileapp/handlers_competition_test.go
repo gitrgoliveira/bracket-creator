@@ -2410,6 +2410,42 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 
+	// NumberPrefix and WithZekkenName reach the Excel generator (POST /create),
+	// so they are output-affecting and must be gated while draw-ready.
+	for _, tc := range []struct {
+		name  string
+		field string
+		value any
+	}{
+		{"REJECT numberPrefix change while draw-ready", "numberPrefix", "X"},
+		{"REJECT withZekkenName change while draw-ready", "withZekkenName", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"id":          cid,
+				"name":        "Draw Ready Gate",
+				"format":      state.CompFormatMixed,
+				"kind":        "individual",
+				"courts":      []string{"A"},
+				"poolSize":    4,
+				"poolWinners": 2,
+				"roundRobin":  false,
+				"mirror":      false,
+				tc.field:      tc.value, // the only output-affecting change
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			assert.Equalf(t, http.StatusConflict, w.Code,
+				"changing %s while draw-ready must return 409: %s", tc.field, w.Body.String())
+			stored, err := store.LoadCompetition(cid)
+			require.NoError(t, err)
+			assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+		})
+	}
+
 	t.Run("ALLOW cosmetic Name rename while draw-ready", func(t *testing.T) {
 		// All output-affecting fields match the stored comp; only Name differs.
 		// The gate compares effective values directly (no sentinels): the real

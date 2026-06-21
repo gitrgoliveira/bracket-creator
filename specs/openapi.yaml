@@ -973,6 +973,17 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            Conflict. Either a duplicate competition name/number-prefix was
+            detected, or output-affecting settings (format, courts, pool
+            size/winners/mode, pool format, round-robin, mirror, team size,
+            kind, number prefix, zekken display) were changed while the
+            competition is in `draw-ready` state — discard the draw first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:

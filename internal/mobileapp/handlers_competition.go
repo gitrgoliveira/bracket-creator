@@ -871,7 +871,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							comp.RoundRobin != current.RoundRobin ||
 							comp.Mirror != current.Mirror ||
 							comp.TeamSize != current.TeamSize ||
-							comp.Kind != current.Kind
+							comp.Kind != current.Kind ||
+							// NumberPrefix and WithZekkenName reach the Excel generator
+							// (POST /create: numberPrefix → player numbers, withZekkenName
+							// → name columns), so changing them while draw-ready desyncs
+							// config from the generated output.
+							comp.NumberPrefix != current.NumberPrefix ||
+							comp.WithZekkenName != current.WithZekkenName
 					if outputAffectingChanged {
 						drawReadyFlag = true
 						return nil, nil
@@ -968,7 +974,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, pool format, round-robin, mirror, team size, kind) while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, pool format, round-robin, mirror, team size, kind, number prefix, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if validationErr != nil {

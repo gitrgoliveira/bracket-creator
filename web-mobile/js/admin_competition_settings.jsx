@@ -121,7 +121,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDuration, c.playoffMatchDuration, c.swissRounds, c.swissCurrentRound, c.naginata, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -282,6 +282,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
+      // teamMatchType has no editable control in this form, but the settings
+      // merge is a full replace — omitting it would clobber a kachinuki
+      // competition's value to "" (fixed) on any save. Round-trip it like
+      // `mirror` above to preserve the stored value.
+      teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
     };
     // Capture the snapshot of edited fields we're about to persist. On
     // success we clear ONLY those fields from the edited set — preserving
@@ -630,14 +635,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       <div className="field">
         <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} style={{ maxWidth: 80 }} />
+        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} disabled={isDrawReady} style={{ maxWidth: 80 }} />
         <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {/* draw-ready lock: roundRobin is output-affecting. */}
         <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

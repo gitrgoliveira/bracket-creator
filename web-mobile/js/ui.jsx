@@ -516,11 +516,12 @@ function useEscapeToClose(onClose) {
   }, []);
 }
 
-function useClickOutside(ref, callback) {
+function useClickOutside(ref, callback, enabled = true) {
   const { useRef, useEffect } = React;
   const cbRef = useRef(callback);
   useEffect(() => { cbRef.current = callback; }, [callback]);
   useEffect(() => {
+    if (!enabled) return;
     const onDoc = (e) => {
       if (ref.current && !ref.current.contains(e.target) && typeof cbRef.current === "function") {
         cbRef.current(e);
@@ -528,7 +529,7 @@ function useClickOutside(ref, callback) {
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [ref]);
+  }, [ref, enabled]);
 }
 
 // Returns true when el is a text-entry element (blocks navigation shortcuts

@@ -713,7 +713,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  window.useClickOutside(ref, () => { setOpen(false); setQuery(""); });
+  window.useClickOutside(ref, () => { setOpen(false); setQuery(""); }, open);
 
   const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
   const onKeyDown = (e) => {

@@ -65,7 +65,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
 
   const total = dojoMatches.length + playerMatches.length;
 
-  window.useClickOutside(ref, () => setOpen(false));
+  window.useClickOutside(ref, () => setOpen(false), open);
 
   const pickPlayer = (p) => { onPickPlayer(p); setQuery(""); setOpen(false); };
   const pickDojo = (d) => { onPickDojo(d); setQuery(""); setOpen(false); };

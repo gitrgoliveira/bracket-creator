@@ -126,7 +126,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
     p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
   ).slice(0, 30) : roster.slice(0, 30);
 
-  window.useClickOutside(ref, () => setOpen(false));
+  window.useClickOutside(ref, () => setOpen(false), open);
 
   const toggle = (p) => {
     if (picked.find((x) => x.id === p.id)) setPicked(picked.filter((x) => x.id !== p.id));

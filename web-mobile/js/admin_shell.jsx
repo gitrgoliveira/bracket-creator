@@ -722,7 +722,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   const triggerRef = useRefA(null);
   const optionRefs = useRefA([]);
 
-  window.useClickOutside(ref, () => setOpen(false));
+  window.useClickOutside(ref, () => setOpen(false), open);
 
   // On open, seed the active option to the current court and move focus into
   // the popover. On close, return focus to the trigger so keyboard users

@@ -1,6 +1,7 @@
 package pdf
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -104,14 +105,14 @@ func TestGenerateGroups_UnknownType(t *testing.T) {
 	// validation path via a direct call on a zero-value Generator. The
 	// function returns before touching the converter.
 	g := &Generator{}
-	_, err := g.GenerateGroups(nil, []string{"nonexistent-type"}, nil, "") //nolint:staticcheck
+	_, err := g.GenerateGroups(context.TODO(), []string{"nonexistent-type"}, nil, "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown PDF type")
 }
 
 func TestGenerate_NoSources(t *testing.T) {
 	g := &Generator{}
-	_, err := g.generate(nil, nil, nil, t.TempDir()) //nolint:staticcheck
+	_, err := g.generate(context.TODO(), nil, nil, t.TempDir())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no source workbooks")
 }

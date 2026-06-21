@@ -204,6 +204,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const isDrawReady = c.status === "draw-ready";
+  // Block section/competition navigation while a draw mutation is in-flight —
+  // the in-flight transition changes which sections are valid and discardDraw's
+  // fallback uses the section captured at call time (see the side-nav below).
+  const navBusy = generating || starting || discarding;
   const sections = [
     {
       sec: "Preparation", items: [
@@ -320,7 +324,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div key={sec.sec}>
                   <div className="side-nav__sec">{sec.sec}</div>
                   {sec.items.map((it) => (
-                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
+                    /* Disable nav while a draw mutation is in-flight: a
+                       discard/generate/start changes status and which sections
+                       are valid, and discardDraw's post-resolve fallback reads
+                       the `section` captured when it started. Navigating
+                       mid-flight could strand the UI on a section that
+                       disappears once status changes. */
+                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} disabled={navBusy} onClick={() => onSection(it.id)}>{it.label}</button>
                   ))}
                 </div>
               ))}
@@ -329,7 +339,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               <div className="side-nav" style={{ position: "static" }}>
                 <div className="side-nav__sec">Other competitions</div>
                 {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                  <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                  <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
                 ))}
               </div>
             )}

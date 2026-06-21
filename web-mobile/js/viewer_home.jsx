@@ -242,7 +242,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             </div>
             <div className="viewer__title viewer__title--lg">{t.name}</div>
           </div>
-          <button type="button" className="viewer__admin-pill" onClick={onAdminClick}>
+          <button type="button" className={`viewer__admin-pill${comps.length === 0 ? " viewer__admin-pill--prominent" : ""}`} onClick={onAdminClick}>
             <svg width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden="true">
               <rect x="1" y="5" width="8" height="7" rx="1.5" fill="currentColor"/>
               <path d="M3 5V3.5a2 2 0 0 1 4 0V5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -345,9 +345,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               <div className="section-title">Competitions</div>
               <div className="vlist">
                 <div className="empty">
-                  <div className="icon">⏳</div>
+                  <div className="icon">⚙️</div>
                   <h3>No competitions yet</h3>
-                  <div className="hint--md">Check back soon for the tournament schedule and updates.</div>
+                  <div className="hint--md">Head to Admin to set up the first competition.</div>
+                  <button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>
+                    Open admin
+                  </button>
+                  <div className="hint--sm empty__cta-note">Requires the admin password.</div>
                 </div>
               </div>
             </>

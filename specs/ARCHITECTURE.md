@@ -58,6 +58,7 @@ web-mobile/    Preact SPA for the live tournament app (embedded, served by mobil
 | `internal/domain/` | Pure domain models with **zero internal dependencies** — Player, Pool, Match, Tournament, Seed, Decision, CompetitorStatus, TeamLineup, plus the UI glossary. | `decision.go`, `team_lineup.go` |
 | `internal/helper/` | Core algorithms + all Excel rendering (the historical catch-all). Bracket trees, seeding, pool creation, CSV parsing, `excel_*.go` renderers. Subpackages `bracket/`, `csv/`, `seeding/` are an in-progress extraction. | `tree.go`, `seed.go`, `tournament.go`, `constants.go` |
 | `internal/excel/` | Excel file lifecycle (`Client`) and full-workbook construction. | `template.go` (`NewFileFromScratch`) |
+| `internal/pdf/` | Renders bracket XLSX workbooks to print-ready PDFs via LibreOffice (used by the `print` command and engine PDF export). | `generate.go`, `soffice.go` |
 | `internal/engine/` | Business logic for live tournaments — scoring, pools/bracket advancement, ranking & tie-breaking, scheduling, eligibility, kachinuki, daihyosen, Swiss, participant replacement, Excel/PDF export. | `engine.go`, `scoring_tx.go`, `eligibility.go` |
 | `internal/state/` | File-backed persistence with mtime caching + WAL. Markdown/YAML and CSV/JSON readers per artifact; multi-file transactions. | `store.go`, `transactions.go`, `models.go`, `wal/wal.go` |
 | `internal/mobileapp/` | Gin HTTP handlers (`handlers_*.go`, grouped by feature), SSE hub, auth, and supporting infra (rate limiting, broadcast coalescing, viewer single-flight, `safeGo`). Handlers depend on `deps.go` interfaces. | `server.go`, `hub.go`, `deps.go`, `middleware.go` |
@@ -330,7 +331,7 @@ Docker images available via `Dockerfile` and `Dockerfile.mobile`.
 
 Relative sizing only — exact line counts go stale immediately and aren't worth hand-maintaining. Re-derive with a `wc -l` / `gocloc` sweep when you need numbers.
 
-**Package mass** (largest → smallest): `mobileapp` ≫ `engine` ≳ `helper` ≈ `state` ≫ `cmd` ≫ `domain` ≫ `excel`. The Go backend and the JSX frontend are roughly comparable in size.
+**Package mass** (largest → smallest): `mobileapp` > `engine` > `helper` ≈ `state` ≫ `cmd` ≫ `domain` ≫ `excel`. The Go backend is somewhat larger than the JSX frontend, but they're the same order of magnitude.
 
 **Test investment** (test LOC ÷ source LOC): most packages sit around 1.5–1.9× — substantial, algorithm-heavy test bodies. Two outliers:
 

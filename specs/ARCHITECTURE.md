@@ -14,7 +14,7 @@ bracket-creator
 └── mobile-app         Web: live tournament management with real-time updates
 ```
 
-Hidden / helper commands: `version`, `man` (man-page generation), `hash-password` (bcrypt hash for locked-mode auth), `print` (render a saved competition to PDF/Excel), and `diag` (runtime diagnostics).
+Additional commands: `version`, `hash-password` (bcrypt hash for locked-mode auth), and `print` (render bracket XLSX workbooks to print-ready PDFs via LibreOffice). `man` (man-page generation) is the only hidden command. Folder-diagnostic helpers live in `cmd/diag_*.go` but are not a subcommand.
 
 **CLI mode** reads a CSV participant list, generates bracket structures in memory, and writes an Excel workbook with formula-linked cells for bracket visualization.
 
@@ -54,7 +54,7 @@ web-mobile/    Preact SPA for the live tournament app (embedded, served by mobil
 
 | Package | Owns | Start here |
 |---|---|---|
-| `cmd/` | Cobra CLI commands — one options struct + `run()` per subcommand; `serve`/`mobile_app` boot the web servers. Shared CLI logic in `shared.go`. | `root.go`, `shared.go`, `serve.go`, `mobile_app.go` |
+| `cmd/` | Cobra CLI commands — the larger ones (e.g. `create-pools`) use an options struct + `run()`; small ones (`version`, `man`) are plain `cobra.Command`. `serve`/`mobile_app` boot the web servers; shared CLI logic in `shared.go`. | `root.go`, `shared.go`, `serve.go`, `mobile_app.go` |
 | `internal/domain/` | Pure domain models with **zero internal dependencies** — Player, Pool, Match, Tournament, Seed, Decision, CompetitorStatus, TeamLineup, plus the UI glossary. | `decision.go`, `team_lineup.go` |
 | `internal/helper/` | Core algorithms + all Excel rendering (the historical catch-all). Bracket trees, seeding, pool creation, CSV parsing, `excel_*.go` renderers. Subpackages `bracket/`, `csv/`, `seeding/` are an in-progress extraction. | `tree.go`, `seed.go`, `tournament.go`, `constants.go` |
 | `internal/excel/` | Excel file lifecycle (`Client`) and full-workbook construction. | `template.go` (`NewFileFromScratch`) |

@@ -208,6 +208,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // the in-flight transition changes which sections are valid and discardDraw's
   // fallback uses the section captured at call time (see the side-nav below).
   const navBusy = generating || starting || discarding;
+  // Compute the other-competitions list once (used for both the render guard
+  // and the map below).
+  const otherComps = t.competitions.filter((cc) => cc.id !== c.id);
   const sections = [
     {
       sec: "Preparation", items: [
@@ -335,10 +338,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 </div>
               ))}
             </div>
-            {t.competitions.filter((cc) => cc.id !== c.id).length > 0 && (
+            {otherComps.length > 0 && (
               <div className="side-nav" style={{ position: "static" }}>
                 <div className="side-nav__sec">Other competitions</div>
-                {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
+                {otherComps.map((cc) => (
                   <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
                 ))}
               </div>

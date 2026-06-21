@@ -923,7 +923,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
-                      if (reorderDisabled) return;
+                      // Clear the drop-target highlight even when disabled — if
+                      // the row went disabled mid-drag (e.g. draw-ready via SSE)
+                      // an early return would leave dragOverIdx stranded.
+                      if (reorderDisabled) { setDragOverIdx(null); return; }
                       moveSeedRow(dragIdxRef.current, i);
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
@@ -1021,7 +1024,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               onClick={() => { if (!isDrawReady) fileRef.current?.click(); }}
               onDragOver={(e) => { if (isDrawReady) return; e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { if (isDrawReady) { e.preventDefault(); return; } onDrop(e); }}
+              onDrop={(e) => { if (isDrawReady) { e.preventDefault(); setDragOver(false); return; } onDrop(e); }}
               style={{ flex: 1, height: 80, minHeight: 80, cursor: isDrawReady ? "not-allowed" : undefined, opacity: isDrawReady ? 0.5 : undefined }}
             >
               <div className="dropzone__icon">📥</div>

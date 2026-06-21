@@ -170,6 +170,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub)
 
+	// Mount the stateless tournament-generation endpoint (same handler the
+	// `serve` web app uses) so the in-app "Download .xlsx" button runs the
+	// proven one-pass generator instead of the engine's stored-pool export,
+	// which loses the pool scoring/ranking formulas (mp-x0u9). It reads the
+	// roster from the request body and writes nothing to the state store.
+	//
+	// It lives outside the /api/ group, so the global rate-limit middleware
+	// (which gates on the /api/ prefix) would skip it. Apply the same limiter
+	// plus a body cap explicitly here so this CPU-heavy public endpoint cannot
+	// starve scoring/SSE on the live tournament server.
+	r.POST("/create", apiLimiter.Middleware(), mobileapp.MaxBodyBytes(mobileapp.DefaultMaxBodyBytes), createTournamentHandler)
+
 	// Explicit http.Server with timeouts (mp-663 Phase 2). r.Run uses a
 	// zero-value http.Server, which has no read/write/idle timeouts and
 	// no graceful-shutdown hook — a single slowloris client can pin a

@@ -81,8 +81,9 @@ func TestMarkTiedStandings_Pools(t *testing.T) {
 	})
 }
 
-// leagueMatchesAllDoneFor builds a round-robin among `names` where every
-// listed competitor's matches are completed. Used to fire the emerging trigger.
+// leagueRoundRobin builds a round-robin among `names` where every
+// listed competitor's matches are either all completed or all scheduled.
+// Used to fire (or not) the emerging-tie trigger.
 func leagueRoundRobin(names []string, completed bool) []state.MatchResult {
 	var out []state.MatchResult
 	idx := 0

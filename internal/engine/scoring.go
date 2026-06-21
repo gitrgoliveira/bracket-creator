@@ -622,6 +622,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
+		// Detect ties before applying manual rank overrides. detectPoolTies walks
+		// adjacent elements, so it must run while the slice is still Points-sorted.
+		// Overrides only change the display order; the underlying scoring tie is real
+		// regardless of how the operator chose to resolve it.
+		markTiedStandings(comp, sorted, poolResults[p.PoolName])
+
 		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)
 		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
@@ -650,7 +656,6 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				}
 			}
 		}
-		markTiedStandings(comp, sorted, poolResults[p.PoolName])
 		allStandings[p.PoolName] = sorted
 	}
 

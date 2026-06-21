@@ -465,7 +465,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             </thead>
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => (
-                <tr key={s.player?.id || s.player?.name || i}>
+                <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index — DRY with the full standings and
                       the backend tiebreak/override logic. */}

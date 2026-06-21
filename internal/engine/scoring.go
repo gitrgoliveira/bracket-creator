@@ -622,6 +622,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
+		// Detect ties before applying manual rank overrides. detectPoolTies walks
+		// adjacent elements, so it must run while the slice is still Points-sorted.
+		// Overrides only change the display order; the underlying scoring tie is real
+		// regardless of how the operator chose to resolve it.
+		markTiedStandings(comp, sorted, poolResults[p.PoolName])
+
 		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)
 		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
@@ -654,6 +660,134 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	}
 
 	return allStandings, nil
+}
+
+// markTiedStandings sets Tied=true on standings rows that are genuinely tied
+// (same Points on every criterion) and where the tie is visible/consequential
+// given the competition format and match-completion state.
+//
+// Gating rules by format:
+//
+//   - Pools (not league): mark tied groups only after ALL regular matches in
+//     that pool are complete. Regular = excludes TB ("-TB-") and DH ("-DH-")
+//     supplementary bouts. Pre-completion the rank is provisional, so no amber.
+//
+//   - League (comp.Format == state.CompFormatLeague), both team and individual:
+//     EMERGING-TIE trigger. Once ANY of the top-N competitors (N =
+//     effectiveTopN(comp), clamped to pool size) has completed ALL their own
+//     regular fights, mark Tied=true on every tied group whose MinPosition <=
+//     effectiveTopN AND that is not covered by the two-joint-3rd-places
+//     exemption (LeagueTwoThirdPlaces + MinPosition >= 3).
+//
+// matches contains only the regular+supplementary matches for this specific
+// pool (already filtered upstream by poolNameFromMatchID).
+func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
+	if len(sorted) == 0 {
+		return
+	}
+
+	// Separate regular matches (exclude supplementary TB/DH bouts).
+	var regularMatches []state.MatchResult
+	for _, m := range matches {
+		if !IsTiebreakerMatchID(m.ID) && !IsPoolDaihyosenMatchID(m.ID) {
+			regularMatches = append(regularMatches, m)
+		}
+	}
+
+	isLeague := comp != nil && comp.Format == state.CompFormatLeague
+
+	if isLeague {
+		markTiedStandingsLeague(comp, sorted, regularMatches)
+	} else {
+		markTiedStandingsPools(sorted, regularMatches)
+	}
+}
+
+// markTiedStandingsPools marks tied rows in a pools (non-league) competition.
+// Rows are only marked once ALL regular matches in the pool are complete.
+func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+	// Gate: there must be at least one regular match, and all must be completed.
+	// With no matches at all the pool hasn't started — everyone is tied at 0
+	// points, which must NOT surface as amber.
+	if len(regularMatches) == 0 {
+		return
+	}
+	for _, m := range regularMatches {
+		if m.Status != state.MatchStatusCompleted {
+			return // pool not yet finished — no amber
+		}
+	}
+
+	// Pool is complete; mark every tied group.
+	for _, positions := range detectPoolTies(sorted) {
+		for _, idx := range positions {
+			sorted[idx].Tied = true
+		}
+	}
+}
+
+// markTiedStandingsLeague marks tied rows in a league competition using the
+// emerging-tie trigger: once ANY top-N competitor has finished all their own
+// regular fights, mark consequential tied groups amber. Works for both team
+// and individual leagues.
+func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+	topN := min(effectiveTopN(comp), len(sorted))
+
+	// Build per-competitor regular match counts and completion status.
+	// A competitor is "done" when every regular match they appear in is Completed.
+	type compStatus struct {
+		total     int
+		completed int
+	}
+	status := make(map[string]*compStatus, len(sorted))
+	for _, s := range sorted {
+		status[s.Player.Name] = &compStatus{}
+	}
+	for _, m := range regularMatches {
+		if _, okA := status[m.SideA]; okA {
+			status[m.SideA].total++
+			if m.Status == state.MatchStatusCompleted {
+				status[m.SideA].completed++
+			}
+		}
+		if _, okB := status[m.SideB]; okB {
+			status[m.SideB].total++
+			if m.Status == state.MatchStatusCompleted {
+				status[m.SideB].completed++
+			}
+		}
+	}
+
+	// Check if ANY top-N competitor has completed all their own fights.
+	triggerFired := false
+	for i := range topN {
+		name := sorted[i].Player.Name
+		cs := status[name]
+		if cs != nil && cs.total > 0 && cs.completed == cs.total {
+			triggerFired = true
+			break
+		}
+	}
+	if !triggerFired {
+		return
+	}
+
+	// Trigger has fired: mark tied groups that intersect the top-N band and
+	// are not covered by the two-joint-3rd-places exemption.
+	for _, positions := range detectPoolTies(sorted) {
+		minPos := positions[0] + 1 // 1-based
+		g := TiedGroup{
+			Teams:       standingsAt(sorted, positions),
+			MinPosition: minPos,
+			MaxPosition: positions[len(positions)-1] + 1,
+		}
+		if !isConsequentialTie(g, comp) {
+			continue
+		}
+		for _, idx := range positions {
+			sorted[idx].Tied = true
+		}
+	}
 }
 
 // recordBracketMatchResult is the main bracket-side scoring path. It

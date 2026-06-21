@@ -725,6 +725,7 @@ type PlayerStanding struct {
 	IndividualDraws  int           `json:"individualDraws,omitempty"`
 	PointsWon        int           `json:"pointsWon,omitempty"`
 	PointsLost       int           `json:"pointsLost,omitempty"`
+	Tied             bool          `json:"tied,omitempty"`
 }
 
 type BracketMatch struct {

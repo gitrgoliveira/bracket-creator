@@ -513,6 +513,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const rowClasses = [
                     isPlayerWatched(p, highlightPlayers) ? "pool__row--me" : "",
                     isAdvancing ? "advancing" : "",
+                    s && s.tied ? "pool__row--tied" : "",
                   ].filter(Boolean).join(" ");
 
                   return (

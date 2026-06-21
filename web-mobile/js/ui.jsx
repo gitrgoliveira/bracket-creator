@@ -518,6 +518,21 @@ function useEscapeToClose(onClose) {
   }, []);
 }
 
+function useClickOutside(ref, callback) {
+  const { useRef, useEffect } = React;
+  const cbRef = useRef(callback);
+  useEffect(() => { cbRef.current = callback; }, [callback]);
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target) && typeof cbRef.current === "function") {
+        cbRef.current(e);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [ref]);
+}
+
 // Returns true when el is a text-entry element (blocks navigation shortcuts
 // to avoid clobbering cursor movement in inputs).
 function isTextEntry(el) {
@@ -534,7 +549,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -545,6 +560,7 @@ if (typeof window !== "undefined") {
   window.formatLabel = formatLabel;
   window.formatLabelShort = formatLabelShort;
   window.useEscapeToClose = useEscapeToClose;
+  window.useClickOutside = useClickOutside;
   window.isTextEntry = isTextEntry;
   window.isInteractiveTarget = isInteractiveTarget;
   window.formatAdminHeaderSub = formatAdminHeaderSub;

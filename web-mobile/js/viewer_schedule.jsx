@@ -126,11 +126,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
     p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
   ).slice(0, 30) : roster.slice(0, 30);
 
-  React.useEffect(() => {
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  window.useClickOutside(ref, () => setOpen(false));
 
   const toggle = (p) => {
     if (picked.find((x) => x.id === p.id)) setPicked(picked.filter((x) => x.id !== p.id));

@@ -923,11 +923,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
-                      // Clear the drop-target highlight even when disabled — if
-                      // the row went disabled mid-drag (e.g. draw-ready via SSE)
-                      // an early return would leave dragOverIdx stranded.
-                      if (reorderDisabled) { setDragOverIdx(null); return; }
-                      moveSeedRow(dragIdxRef.current, i);
+                      // Clear both refs on disabled path — if the row went
+                      // disabled mid-drag (e.g. draw-ready via SSE) a stale
+                      // dragIdxRef would corrupt the next legitimate drop.
+                      if (reorderDisabled) { dragIdxRef.current = null; setDragOverIdx(null); return; }
+                      if (dragIdxRef.current !== null) moveSeedRow(dragIdxRef.current, i);
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}

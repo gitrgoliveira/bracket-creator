@@ -208,21 +208,26 @@ describe('LOBBY_COLORS — amber removed from next row (mp-ulh9)', () => {
     });
 });
 
-// ── LobbyMatchCell — NOW badge ───────────────────────────────────────────────
-describe('LobbyMatchCell — NOW badge present for rowKind=now (mp-ulh9)', () => {
-    it('renders the "NOW" text in the now cell', () => {
+// ── LobbyMatchCell — NOW navy treatment (mp-ulh9) ────────────────────────────
+// The row-label column already prints "Now" / "Next" / "#3"…, so no inline
+// NOW dot/label is rendered in the cell itself; the navy bg+border carries
+// the live signal.
+describe('LobbyMatchCell — NOW row uses navy treatment, NEXT does not (mp-ulh9)', () => {
+    it('NOW cell uses LOBBY_COLORS.nowBg (navy) and LOBBY_COLORS.nowBorder', () => {
         const tree = LobbyMatchCell({ slot: makeRunningSlot(), rowKind: 'now' });
-        expect(treeStr(tree)).toContain('NOW');
+        const str = treeStr(tree);
+        // navy-soft bg via --accent-soft (or its fallback hex)
+        expect(/--accent-soft|#e7eaf3/.test(str)).toBe(true);
+        // navy border via --accent (or its fallback hex)
+        expect(/--accent[^-]|#1d3557/.test(str)).toBe(true);
     });
 
-    it('does not render "NOW" text in the next cell', () => {
+    it('NEXT cell does NOT use the navy bg or border', () => {
         const tree = LobbyMatchCell({ slot: makeScheduledSlot(), rowKind: 'next' });
-        expect(treeStr(tree)).not.toContain('"NOW"');
-    });
-
-    it('does not render "NOW" text in the queue cell', () => {
-        const tree = LobbyMatchCell({ slot: makeScheduledSlot(), rowKind: 'queue' });
-        expect(treeStr(tree)).not.toContain('"NOW"');
+        const str = treeStr(tree);
+        expect(str).not.toContain('--accent-soft');
+        expect(str).not.toContain('#e7eaf3');
+        expect(str).not.toContain('#1d3557');
     });
 });
 

@@ -161,22 +161,9 @@ function LobbyMatchCell({ slot, rowKind }) {
                 minHeight: 54,
                 border: `1px solid ${cellBorder}`,
             }}>
-                {/* NOW badge — navy dot + "NOW" label, only for the live slot */}
-                {rowKind === 'now' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-                        <span style={{
-                            width: 10, height: 10, borderRadius: '50%',
-                            background: 'var(--accent, #1d3557)',
-                            display: 'inline-block',
-                            flexShrink: 0,
-                            animation: 'pulse 1.4s ease-in-out infinite',
-                        }} />
-                        <span style={{
-                            fontSize: 11, fontWeight: 700, letterSpacing: '0.12em',
-                            color: 'var(--accent, #1d3557)', textTransform: 'uppercase',
-                        }}>NOW</span>
-                    </div>
-                )}
+                {/* The row-label column already prints "Now" / "Next" / "#3"…
+                    so the live cell needs no inline NOW badge here — the navy
+                    bg + border carry the live signal. */}
                 {compMeta && (
                     <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em' }}>
                         {compMeta}

@@ -947,7 +947,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         />
                       </div>
                     )}
-                    <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
+                    <span className="seed-row__handle" title={isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>

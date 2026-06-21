@@ -22,6 +22,12 @@ global.prompt = vi.fn(() => null);
 // Load it now so those globals are available when render tests import components.
 await import('./js/admin_helpers.jsx');
 
+// viewer_utils.jsx publishes window.poolLabel / window.leagueAwareLabel, which
+// the admin scoring/shiaijo/pools surfaces call at render time (in production
+// viewer.js evaluates this module before the admin bundles load). Import it so
+// mounted admin components have those globals, mirroring the admin_helpers load.
+await import('./js/viewer_utils.jsx');
+
 // Fail tests that produce unexpected console.warn or console.error — matches
 // the invariant enforced by the unit suite (vitest.setup.js).
 // Tests that intentionally trigger warnings (e.g. the GUARD test) must spy on

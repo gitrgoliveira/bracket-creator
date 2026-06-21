@@ -1,4 +1,4 @@
-// Package engine — daihyosen (representative-bout) play-off for tied
+// Package engine — daihyosen (representative-bout) tie-breaker for tied
 // knockout-stage team matches.
 //
 // Daihyosen is the FIK tie-breaker for knockout team matches that end

@@ -14,13 +14,13 @@ bracket-creator
 └── mobile-app         Web: live tournament management with real-time updates
 ```
 
-Hidden helper commands: `version`, `man` (man-page generation).
+Additional commands: `version`, `hash-password` (bcrypt hash for locked-mode auth), and `print` (render bracket XLSX workbooks to print-ready PDFs via LibreOffice). `man` (man-page generation) is the only hidden command. Folder-diagnostic helpers live in `cmd/diag_*.go` but are not a subcommand.
 
 **CLI mode** reads a CSV participant list, generates bracket structures in memory, and writes an Excel workbook with formula-linked cells for bracket visualization.
 
 **Serve mode** is a full-featured web UI for Excel bracket generation. The SPA (`web/index.html`) provides tournament type selection (pools+playoffs or direct elimination), court configuration, CSV participant input with drag-and-drop and validation, a seeding modal, time estimation, and dark/light theming. Form values auto-save to localStorage. On submit, the backend generates the Excel workbook and returns it as a download. No server-side persistence.
 
-**Mobile-app mode** is a full tournament management platform: CRUD for tournaments/competitions, live match scoring, decision recording (kiken/fusenpai/daihyosen), team lineups, Swiss/Kachinuki formats, real-time push via SSE, and file-backed persistent state. The frontend is a Preact SPA embedded in the binary.
+**Mobile-app mode** is a full tournament management platform: CRUD for tournaments/competitions, live match scoring, decision recording (kiken/fusenpai/daihyosen), team lineups, Swiss/Kachinuki formats, league tie-breakers, mid-tournament participant replacement, self-service registration, public display surfaces (TV/lobby/streaming overlay), operator content (announcements, branding, sponsors), PDF/Excel print, real-time push via SSE, and file-backed persistent state. The frontend is a Preact SPA embedded in the binary.
 
 ## Layered View
 
@@ -43,115 +43,30 @@ Presentation (cmd/, mobileapp/, web/, web-mobile/)
 
 ## Package Map
 
+This is a responsibility map at the package level, with a few representative anchor files per package — it is deliberately **not** a file-by-file inventory (those drift on every commit; let `go doc ./...` and a directory listing be the source of truth). Each entry describes what the package owns and where to start reading.
+
 ```
-main.go                          Entry point; embeds web/ and web-mobile/ via //go:embed
-│
-├── cmd/                         Cobra CLI commands
-│   ├── root.go                  Root command, flag registration
-│   ├── create-pools.go          Pool + playoff bracket generation
-│   ├── create-playoffs.go       Direct elimination bracket generation
-│   ├── shared.go                Shared CLI helpers (processEntries, openOutputFile, etc.)
-│   ├── serve.go                 Stateless web server (form → Excel)
-│   ├── mobile_app.go            Live tournament server startup
-│   ├── version.go               Version display
-│   └── man.go                   Man-page generation (hidden)
-│
-├── internal/
-│   ├── domain/                  Pure domain models (no internal dependencies)
-│   │   ├── player.go            Player, MatchWinner
-│   │   ├── seed.go              SeedAssignment
-│   │   ├── pool.go, match.go, tournament.go
-│   │   ├── decision.go          Decision wire values + UnmarshalYAML migration
-│   │   ├── competitor_status.go Eligibility record
-│   │   ├── team_lineup.go       Team-match lineup (Senpo..Taisho)
-│   │   └── glossary.go          Kendo-term glossary used by the UI
-│   │
-│   ├── helper/                  Core algorithms and Excel rendering (largest package)
-│   │   ├── tree.go              Binary bracket tree (Node, recursive subdivision)
-│   │   ├── seed.go              Seeding algorithms (StandardSeeding, PoolSeeding, ApplySeeds)
-│   │   ├── tournament.go        Pool creation (greedy, dojo-conflict avoidance)
-│   │   ├── csv.go               CSV parsing and validation
-│   │   ├── excel.go, excel_*.go Excel rendering (data, styles, tree, tags, kachinuki)
-│   │   ├── constants.go         Layout constants, sheet names, defaults
-│   │   ├── numbers.go, uuid.go, helper.go
-│   │   └── bracket/, csv/, pool/, seeding/   Small focused subpackages
-│   │
-│   ├── excel/                   Excel file lifecycle
-│   │   ├── client.go            File open/save/close (Client)
-│   │   ├── error.go             Error handling utilities
-│   │   └── template.go          NewFileFromScratch — builds entire workbook
-│   │
-│   ├── engine/                  Business logic for live tournaments (15 files)
-│   │   ├── engine.go            Engine struct (wraps state.Store)
-│   │   ├── scoring.go, scoring_tx.go   Match result recording (tx-aware variants)
-│   │   ├── pools.go, bracket.go        Pool round-robin + bracket advancement
-│   │   ├── ranking.go                  Standings, tie-breaking
-│   │   ├── competition.go              Lifecycle (start, invalidate, complete)
-│   │   ├── schedule.go, scheduler_slots.go   Court scheduling + estimator
-│   │   ├── eligibility.go              StartMatch gate (kiken/fusenpai)
-│   │   ├── kachinuki.go, kachinuki_export.go  Winner-stays-on bouts
-│   │   ├── daihyosen.go                Rep-bout flow
-│   │   ├── swiss.go                    Swiss-round format
-│   │   ├── export.go                   Excel export from live state
-│   │   └── errors.go                   Typed error definitions
-│   │
-│   ├── state/                   File-backed persistence with caching + WAL
-│   │   ├── store.go             Store struct, per-competition locking, mtime cache
-│   │   ├── transactions.go      WithTransaction / StoreTx (multi-file atomic commits)
-│   │   ├── atomic_write.go      Single-file durable write (tmp → fsync → rename)
-│   │   ├── wal/wal.go           Write-ahead log for multi-file transactions
-│   │   ├── models.go            Tournament, Competition, MatchResult, Bracket, etc.
-│   │   ├── tournament.go, competition.go   YAML-frontmatter Markdown read/write
-│   │   ├── participants.go, seeds.go, pools.go, bracket.go, schedule.go
-│   │   ├── competitor_status.go Eligibility persistence
-│   │   ├── team_lineup.go       Team lineup persistence
-│   │   ├── overrides.go         Manual ranking overrides
-│   │   ├── match.go             DeriveQueuePositions (pure helper)
-│   │   └── ids.go               ID generation utilities
-│   │
-│   ├── mobileapp/               HTTP handlers and real-time events
-│   │   ├── server.go            Gin router setup, CORS, SPA fallback
-│   │   ├── middleware.go        Auth middleware (X-Tournament-Password)
-│   │   ├── hub.go               SSE pub/sub hub (channel-based, non-blocking)
-│   │   ├── deps.go              Consumer-boundary interfaces (NFR-002)
-│   │   ├── validation.go        Shared request validation helpers
-│   │   ├── handlers_tournament.go, handlers_competition.go, handlers_participants.go
-│   │   ├── handlers_match.go, handlers_decision.go, handlers_daihyosen.go
-│   │   ├── handlers_eligibility.go, handlers_lineup.go, handlers_swiss.go
-│   │   ├── handlers_schedule.go Stateless schedule estimator (also wired into `serve`)
-│   │   ├── handlers_import.go   Tournament import
-│   │   ├── handlers_display.go  Public TV/lobby/overlay surfaces
-│   │   └── handlers_viewer.go   Public (unauthenticated) endpoints
-│   │
-│   ├── resources/               Embedded filesystem abstraction
-│   ├── service/                 Thin service layer (tournament_service.go)
-│   ├── cmd/version/             Build/version metadata helpers
-│   └── test/                    Shared test helpers and factories
-│
-├── web/                         Web UI for Excel bracket generation
-│   └── index.html               Full SPA: tournament config, CSV input, seeding, estimator
-│
-├── web-mobile/                  Preact SPA (embedded, served by `mobile-app`)
-│   ├── index.html               SPA shell
-│   ├── js/
-│   │   ├── app.jsx              Root component, SSE listener, auth, view state
-│   │   ├── router.jsx           preact-router wrapper, useQuery()
-│   │   ├── api_client.jsx       HTTP client (auth, retry, error mapping)
-│   │   ├── api_serializers.jsx  JSON ↔ camelCase normalization
-│   │   ├── data.jsx             State hooks, data normalization
-│   │   ├── patch.jsx            Patch-merge for SSE updates
-│   │   ├── ui.jsx, bracket.jsx, glossary.jsx, glossary_data.js
-│   │   ├── viewer.jsx, display.jsx          Public surfaces
-│   │   ├── admin.jsx, admin_shell.jsx       Admin container + chrome
-│   │   ├── admin_setup.jsx, admin_competition.jsx, admin_participants.jsx
-│   │   ├── admin_pools.jsx, admin_schedule.jsx, admin_scoring_modal.jsx
-│   │   ├── admin_lineup.jsx, admin_helpers.jsx
-│   │   └── __tests__/           22 Vitest spec files
-│   ├── css/styles.css
-│   └── dist/                    esbuild output (pre-compiled JSX)
-│
-└── specs/                       OpenAPI spec, feature specs, this document
+main.go        Entry point; embeds web/ and web-mobile/ via //go:embed
+specs/         OpenAPI spec, feature specs, this document
+web/           index.html — full SPA for the stateless Excel generator (serve mode)
+web-mobile/    Preact SPA for the live tournament app (embedded, served by mobile-app)
 ```
+
+| Package | Owns | Start here |
+|---|---|---|
+| `cmd/` | Cobra CLI commands — the larger ones (e.g. `create-pools`) use an options struct + `run()`; small ones (`version`, `man`) are plain `cobra.Command`. `serve`/`mobile_app` boot the web servers; shared CLI logic in `shared.go`. | `root.go`, `shared.go`, `serve.go`, `mobile_app.go` |
+| `internal/domain/` | Pure domain models with **zero internal dependencies** — Player, Pool, Match, Tournament, Seed, Decision, CompetitorStatus, TeamLineup, plus the UI glossary. | `decision.go`, `team_lineup.go` |
+| `internal/helper/` | Core algorithms + all Excel rendering (the historical catch-all). Bracket trees, seeding, pool creation, CSV parsing, `excel_*.go` renderers. Subpackages `bracket/`, `csv/`, `seeding/` are an in-progress extraction. | `tree.go`, `seed.go`, `tournament.go`, `constants.go` |
+| `internal/excel/` | Excel file lifecycle (`Client`) and full-workbook construction. | `template.go` (`NewFileFromScratch`) |
+| `internal/pdf/` | Renders bracket XLSX workbooks to print-ready PDFs via LibreOffice (used by the `print` command and engine PDF export). | `generate.go`, `soffice.go` |
+| `internal/engine/` | Business logic for live tournaments — scoring, pools/bracket advancement, ranking & tie-breaking, scheduling, eligibility, kachinuki, daihyosen, Swiss, participant replacement, Excel/PDF export. | `engine.go`, `scoring_tx.go`, `eligibility.go` |
+| `internal/state/` | File-backed persistence with mtime caching + WAL. Markdown/YAML and CSV/JSON readers per artifact; multi-file transactions. | `store.go`, `transactions.go`, `models.go`, `wal/wal.go` |
+| `internal/mobileapp/` | Gin HTTP handlers (`handlers_*.go`, grouped by feature), SSE hub, auth, and supporting infra (rate limiting, broadcast coalescing, viewer single-flight, `safeGo`). Handlers depend on `deps.go` interfaces. | `server.go`, `hub.go`, `deps.go`, `middleware.go` |
+| `internal/resources/` | Embedded-filesystem abstraction (`fs.FS`) over the bundled web assets. | — |
+| `internal/service/` | Thin service layer over helper logic. | `tournament_service.go` |
+| `internal/test/` | Shared test helpers and factories. | `helpers.go` |
+
+The `web-mobile/js/` SPA is organized by feature prefix rather than enumerated here: `app.jsx`/`router.jsx` (shell + routing), `api_*.jsx`/`data.jsx`/`patch.jsx` (transport + state), `viewer_*.jsx` (public viewer), `display_*.jsx`/`streaming_overlay.jsx` (TV/lobby/overlay), `admin_*.jsx` (operator surfaces — setup, competition, pools, schedule, scoring, lineup, shiaijo, content), and `registration.jsx`/`reset.jsx` (public self-service). Tests live in `js/__tests__/` (Vitest, including `render/` DOM tests); compiled output in `dist/`.
 
 ## Dependency Graph
 
@@ -261,7 +176,9 @@ Admin Client ──→ POST /api/competitions/:id/matches/:mid/score
 ```
 tournament-data/
 ├── tournament.md                       YAML front-matter: name, date, venue, courts, password
-├── wal/                                Pending multi-file transactions (replayed on startup)
+├── .wal/                               Pending multi-file transactions (replayed on startup)
+├── branding/                           Uploaded logo (logo.png|jpg) for display surfaces
+├── sponsors/                           Uploaded sponsor images
 └── competitions/
     └── {compID}/
         ├── config.md                   YAML front-matter: format, pool size, courts, etc.
@@ -309,12 +226,17 @@ The `Hub` broadcasts the following event types over `GET /api/events`:
 
 | Event | Triggered by |
 |---|---|
-| `match_updated` | score / decision / status change |
-| `competition_started` | `POST /competitions/:id/start` |
+| `match_updated` | score / decision / status change (coalesced ≤4/s per match) |
+| `competition_started` | `POST /api/competitions/:id/start` |
 | `competition_completed` | final match resolved |
 | `tournament_updated` | tournament-level CRUD |
 | `schedule_updated` | court/time edits, schedule regenerated |
 | `competitor_status_updated` | eligibility change (new kiken/fusenpai) |
+| `participants_updated` | participant add/edit/remove/import |
+| `lineup_updated` | team lineup freeze/change |
+| `draw_generated` / `draw_discarded` | pool/bracket draw created or rolled back |
+| `announcement` | operator posts/clears an announcement |
+| `password_reset` | tournament password changed via reset flow |
 
 ## Frontend Architecture
 
@@ -339,18 +261,24 @@ The SPA discovers the active mode via the public `GET /api/auth-config` endpoint
 App (app.jsx)
 ├── Viewer mode (public)
 │   ├── TournamentHome
-│   ├── CompetitionViewer (pools, bracket, results)
-│   └── ScheduleView
+│   ├── CompetitionViewer (pools, bracket, standings, results, awards)
+│   ├── ScheduleView, MatchView
+│   └── Notifications / Alerts / Watchlist
 │
-├── Display mode (/display — TV/lobby/overlay, public, query-param driven)
+├── Display mode (/display — TV/lobby/scoreboard/streaming overlay, public, query-param driven)
+│
+├── Registration / Reset (public self-service surfaces)
 │
 └── Admin mode (password-protected)
     └── AdminShell
         ├── AdminDashboard
-        ├── AdminTournament
-        ├── AdminCompetition (overview, participants, schedule, scoring, seeding)
+        ├── AdminTournament (+ branding, sponsors, announcements)
+        ├── AdminCompetition (overview, settings, bracket, swiss)
+        ├── AdminParticipants
         ├── AdminPools
         ├── AdminSchedule (score editor with chained court-scoped navigation)
+        ├── AdminShiaijo (per-court now-playing / up-next board)
+        ├── AdminScoring (individual / team modal with autosave)
         ├── AdminLineup (team lineup composer)
         └── ImportTournament
 ```
@@ -365,15 +293,17 @@ App (app.jsx)
 
 **Tie-breaking**: Multi-criteria cascade — wins → losses → draws → points scored → points lost (individual). Team tournaments add team-level criteria before individual criteria. See CLAUDE.md for the full precedence.
 
-**Decision types** (`internal/domain/decision.go`): 8 canonical wire values — `""`, `fought`, `hikiwake`, `kiken`, `fusenpai`, `fusensho`, `daihyosen`, `kachinuki-exhaustion`. Legacy YAML `decision: true` migrates to `hikiwake`, `false` to `fought` (Decision.UnmarshalYAML).
+**Decision types** (`internal/domain/decision.go` is the source of truth): the canonical wire values include `""`, `fought`, `hikiwake`, `kiken` (legacy), `kiken-voluntary` (FIK Art. 31, permanent), `kiken-injury` (FIK Art. 30, reinstateable), `fusenpai`, `fusensho`, `daihyosen`, `kachinuki-exhaustion`, `ippon-shobu`. Use `domain.IsKikenDecision`/`IsKikenDecisionStr` to match any kiken variant. Legacy YAML `decision: true` migrates to `hikiwake`, `false` to `fought`, and `kiken` to `kiken-voluntary` (Decision.UnmarshalYAML).
 
-**Competitor eligibility** (`engine/eligibility.go`, `state/competitor_status.go`): a kiken/fusenpai decision auto-writes `CompetitorStatus{Eligible: false}` for the loser. `engine.StartMatchTx` is the FR-035 pre-flight gate — returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`), mapped to HTTP 409 by the score handler. Re-scoring a match that itself created the ineligibility is permitted (undo path).
+**Competitor eligibility** (`engine/eligibility.go`, `state/competitor_status.go`): a kiken/fusenpai decision auto-writes `CompetitorStatus{Eligible: false}` for the loser. `engine.StartMatchTx` is the FR-035 pre-flight gate — returns `*IneligibleCompetitorError` (matches `errors.Is(err, ErrIneligibleCompetitor)`), mapped to HTTP 409 by the score handler. Re-scoring a match that itself created the ineligibility is permitted (undo path). Kiken-injury (FIK Art. 30) sets `Reinstateable: true`; an admin can restore eligibility via `POST /api/competitions/:id/competitors/:pid/reinstate`. Kiken-voluntary (Art. 31) and fusenpai are not reinstateable.
 
 **Team lineups & kachinuki** (`domain/team_lineup.go`, `engine/kachinuki.go`): TeamLineup pins position → player for a round. FIK 5-person rule: Senpo + Taisho mandatory; 1 vacancy must be Jiho, 2 must be Jiho+Fukusho, 3+ disqualifies. Kachinuki ("winner-stays-on") dynamically appends bouts via `engine.AdvanceKachinuki` until one team is exhausted (`DecisionKachinukiExhaustion`).
 
 **Schedule estimator** (`engine/schedule.go`): `EstimateSchedule(EstimateInput) ScheduleEstimate` returns total/per-court minutes from match duration × multiplier × slowest-court buffer. Exposed via stateless `GET /api/schedule/estimate` on both the CLI web server (`serve`) and the mobile app.
 
 **Swiss format** (`engine/swiss.go`): pairings + round advancement for Swiss-style competitions.
+
+**League tie-breaker** (`engine/league_tiebreak.go`, `engine/tiebreaker.go`): operator-driven play-off bouts to resolve tied standings in league/pool formats when the automatic multi-criteria cascade cannot separate competitors.
 
 ## Design Patterns & Principles
 
@@ -399,37 +329,32 @@ Docker images available via `Dockerfile` and `Dockerfile.mobile`.
 
 ## Codebase Size
 
-| Package | Source LOC | Test LOC | Ratio |
-|---|---|---|---|
-| engine | 4,942 | 7,360 | 1.5× |
-| helper | 4,582 | 9,245 | 2.0× |
-| state | 4,192 | 6,336 | 1.5× |
-| mobileapp | 5,333 | 8,205 | 1.5× |
-| cmd | 1,216 | 2,055 | 1.7× |
-| domain | 860 | 913 | 1.1× |
-| excel | 391 | 135 | 0.3× |
-| service / resources / test | 120 | 157 | — |
-| **Go total** | **~21,600** | **~34,400** | **1.6×** |
-| **Frontend (JSX/JS)** | **12,970** | **6,047** | **0.5×** |
+Relative sizing only — exact line counts go stale immediately and aren't worth hand-maintaining. Re-derive with a `wc -l` / `gocloc` sweep when you need numbers.
+
+**Package mass** (largest → smallest): `mobileapp` > `engine` > `helper` ≈ `state` ≫ `cmd` ≫ `domain` ≫ `excel`. The Go backend is somewhat larger than the JSX frontend, but they're the same order of magnitude.
+
+**Test investment** (test LOC ÷ source LOC): most packages sit around 1.5–1.9× — substantial, algorithm-heavy test bodies. Two outliers:
+
+- `excel` ≈ 0.3× — thinly tested directly; most Excel coverage lives in `helper/*_test.go` instead.
+- Frontend ≈ 0.8× — lighter than the Go side, though still a substantial Vitest suite.
 
 ## Known Architectural Observations
 
 ### Strengths
 
 - **Clean layering**: presentation → engine → state → filesystem with no circular dependencies.
-- **Strong algorithmic test coverage**: helper (2.0×), engine (1.5×), state (1.5×), and mobileapp (1.5×) all carry substantial test bodies.
+- **Strong algorithmic test coverage**: helper, engine, state, and mobileapp all carry substantial test bodies (roughly 1.5–1.9× source).
 - **Single-binary deployment**: all assets embedded at compile time.
 - **Fine-grained concurrency**: per-competition + per-file locking avoids global contention; non-reentrant mutex caught misuse via `StoreTx`.
 - **Multi-file atomicity**: WAL-backed `Store.WithTransaction` lets the score handler commit several files (match result + eligibility + lineup) atomically across a crash.
-- **Real-time push**: SSE hub with non-blocking broadcast handles stalled clients gracefully.
+- **Real-time push**: SSE hub with non-blocking broadcast handles stalled clients gracefully, with a broadcast coalescer (≤4 `match_updated`/s per match) and per-IP rate limiting bounding fan-out cost.
 - **Consumer-boundary interfaces** in `mobileapp/deps.go` keep handler tests light.
 
 ### Areas to Watch
 
-- **`helper/` is the largest package** (4.6K LOC) mixing tree algorithms, CSV parsing, Excel rendering, seeding, and utility functions. The newer `helper/{bracket,csv,pool,seeding}/` subpackages signal an ongoing extraction; `helper/` proper has not shrunk yet.
-- **`engine/` has grown rapidly** — 15 files, ~5K LOC — and now spans scoring, eligibility, kachinuki, daihyosen, Swiss, and scheduling. Further sub-splitting may be warranted.
-- **`mobileapp/` is approaching `helper/` in size** (5.3K LOC) due to the new handler families (decision, eligibility, lineup, daihyosen, Swiss, display).
-- **`excel/` has minimal test coverage** (0.3× ratio) despite Excel output being the primary CLI deliverable. Most Excel test coverage lives in `helper/*_test.go` instead.
-- **`schedule_updated` SSE event is broadcast but the frontend does not consume it** — admin schedule view doesn't auto-refresh after court/time moves (see memory `project_schedule_updated_gap`).
-- **`domain/` is now substantially larger** (860 LOC, 8 files) but most business logic in `helper/` still uses `helper.Player` directly rather than domain types — the migration is partial.
+- **`mobileapp/` is now the largest package** after the new handler families landed (decision, eligibility, lineup, daihyosen, Swiss, display, league tie-breaker, registration, announcement, branding, sponsors, print). It now carries supporting infra too (rate limiting, broadcast coalescer, viewer single-flight). Further grouping into subpackages may be warranted.
+- **`engine/` has grown rapidly** — spanning scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, and PDF export. Further sub-splitting may be warranted.
+- **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, and utilities. The `helper/{bracket,csv,seeding}/` subpackages signal an ongoing extraction (the earlier `pool/` subpackage was folded back to `pool_partial.go`); `helper/` proper has not shrunk yet.
+- **`excel/` has minimal direct test coverage** despite Excel output being the primary CLI deliverable. Most Excel test coverage lives in `helper/*_test.go` instead.
+- **`domain/` is still partially adopted**: most business logic in `helper/` uses `helper.Player` directly rather than domain types — the migration is incomplete.
 - **No Go interfaces** for `state.Store` or `engine.Engine` at the top level — interface adoption is happening incrementally via `mobileapp/deps.go`, but engine-to-state and helper-to-engine calls still go through concrete types.

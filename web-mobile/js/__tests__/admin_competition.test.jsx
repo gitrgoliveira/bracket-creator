@@ -448,6 +448,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'naginata',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
+    // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
+    // team-league competitions; safe to include for all formats because
+    // the backend PUT allowlist ignores unknown fields.
+    'leagueTiebreakTopN',
+    'leagueTwoThirdPlaces',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.

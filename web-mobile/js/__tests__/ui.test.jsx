@@ -21,6 +21,12 @@ describe('UI Components', () => {
       expect(badge.children).toContain('League');
     });
 
+    it('league status badge must NEVER render "Pools" (terminology boundary, mp-8rc9)', () => {
+      const badge = StatusBadge({ status: 'pools', format: 'league' });
+      // children = [runningDot?, label]; the label must be "League", not "Pools".
+      expect(badge.children).not.toContain('Pools');
+    });
+
     it('should still show "Pools" label for pools status when format is mixed', () => {
       const badge = StatusBadge({ status: 'pools', format: 'mixed' });
       expect(badge.children).toContain('Pools');

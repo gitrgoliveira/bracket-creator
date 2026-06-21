@@ -274,7 +274,9 @@ export function TWMatch({ m, highlight, onClick }) {
       <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
         {m.status === "completed" && scoreStr}
         {m.status === "completed" && m.score?.type === "bye" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>BYE</span>}
-        {m.status === "running" && <span className="bc-running">●</span>}
+        {/* No centre "●" dot: a running match is signalled by the row's
+            .tw-match--running highlight (accent ring). The labelled "● NOW"
+            badge elsewhere is a separate status affordance. */}
       </div>
     </Tag>
   );

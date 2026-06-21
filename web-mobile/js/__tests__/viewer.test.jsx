@@ -1287,6 +1287,125 @@ describe('VSchedItem live score rendering (mp-42rg)', () => {
 });
 
 // -----------------------------------------------------------------------
+// ViewerHome empty-state discoverability tests (mp-og2g)
+// -----------------------------------------------------------------------
+describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
+  const realReact = global.React;
+  let runtime;
+  let ViewerHomeComp;
+  let originalLocalStorageDescriptor;
+  const STUBBED = [
+    'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
+    'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
+    'roundLabel', 'matchScoreStr', 'ipponsFromScore',
+  ];
+  const savedGlobals = {};
+
+  function findNode(node, pred) {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) {
+      for (const k of node) { const f = findNode(k, pred); if (f) return f; }
+      return null;
+    }
+    if (pred(node)) return node;
+    const kids = node.children || node.props?.children || [];
+    for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }
+    return null;
+  }
+
+  const emptyTournament = { name: 'T', date: '10-06-2026', competitions: [] };
+  const withCompTournament = {
+    name: 'T', date: '10-06-2026',
+    competitions: [{ id: 'c1', name: 'Open', status: 'setup', players: [], poolMatches: [] }],
+  };
+  const NOOP = () => {};
+
+  beforeEach(async () => {
+    originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    const store = {};
+    Object.defineProperty(window, 'localStorage', {
+      value: {
+        getItem: (k) => (k in store ? store[k] : null),
+        setItem: (k, v) => { store[k] = String(v); },
+        removeItem: (k) => { delete store[k]; },
+        clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+      },
+      writable: true,
+      configurable: true,
+    });
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] } : { had: false };
+    });
+    global.window.StatusBadge = vi.fn(() => null);
+    global.window.formatDate = (d) => d || '';
+    global.window.formatLabel = (l) => l || '';
+    global.window.formatViewerHeaderEyebrow = () => '';
+    global.window.pluralize = (n, s) => `${n} ${s}`;
+    global.window.hasBothSides = () => true;
+    global.window.compareDmy = () => 0;
+    global.window.queueLabelCompact = null;
+    global.window.roundLabel = (i) => `Round ${i + 1}`;
+    global.window.matchScoreStr = () => '';
+    global.window.ipponsFromScore = () => [];
+    vi.resetModules();
+    ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    if (originalLocalStorageDescriptor) {
+      Object.defineProperty(window, 'localStorage', originalLocalStorageDescriptor);
+    }
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('adds viewer__admin-pill--prominent class to admin pill when no competitions exist', () => {
+    const tree = runtime.mount(ViewerHomeComp, {
+      tournament: emptyTournament,
+      sseConnected: true, onSelectCompetition: NOOP, onAdminClick: NOOP,
+      onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP,
+    });
+    const pill = findNode(tree, n => n.type === 'button' && String(n.props?.className || '').includes('viewer__admin-pill'));
+    expect(pill).toBeTruthy();
+    expect(pill.props.className).toContain('viewer__admin-pill--prominent');
+  });
+
+  it('does NOT add viewer__admin-pill--prominent when competitions exist', () => {
+    const tree = runtime.mount(ViewerHomeComp, {
+      tournament: withCompTournament,
+      sseConnected: true, onSelectCompetition: NOOP, onAdminClick: NOOP,
+      onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP,
+    });
+    const pill = findNode(tree, n => n.type === 'button' && String(n.props?.className || '').includes('viewer__admin-pill'));
+    expect(pill).toBeTruthy();
+    expect(pill.props.className).not.toContain('viewer__admin-pill--prominent');
+  });
+
+  it('renders empty-state "Open admin" CTA wired to onAdminClick when no competitions exist', () => {
+    const spy = vi.fn();
+    const tree = runtime.mount(ViewerHomeComp, {
+      tournament: emptyTournament,
+      sseConnected: true, onSelectCompetition: NOOP, onAdminClick: spy,
+      onOpenSchedule: NOOP, onRegister: NOOP, onOpenResults: NOOP,
+    });
+    const cta = findNode(tree, n => n.type === 'button' && String(n.props?.className || '').includes('empty__cta'));
+    expect(cta).toBeTruthy();
+    cta.props.onClick();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// -----------------------------------------------------------------------
 // ViewerHome globalRunning de-dup render test (mp-42rg)
 // -----------------------------------------------------------------------
 describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {

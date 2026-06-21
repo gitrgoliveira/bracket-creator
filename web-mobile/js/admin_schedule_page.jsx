@@ -82,10 +82,12 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
+          {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
           {m.sideB?.name || "TBD"}
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
+          {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
           {m.sideA?.name || "TBD"}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
@@ -109,7 +111,9 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
           return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.formatIpponsScore(tIpponsB, tIpponsA, m.score, m.decision, m.encho, m.decidedByHantei)}</div>;
         })()}
-        {m.status === "running" && <span className="bc-running">●</span>}
+        {/* No centre "●" dot: a running match is signalled by the row's
+            .tw-match--running highlight (accent border + ring). The labelled
+            "● NOW" / "● {count} now" badges elsewhere are a separate affordance. */}
         <CourtPicker
           value={m.court}
           courts={courts}

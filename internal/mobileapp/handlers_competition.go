@@ -167,6 +167,24 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	return 0, nil
 }
 
+// normalizePoolConfig silently zeroes PoolSize and PoolWinners for formats
+// that have no pool phase. League has a single implicit pool containing all
+// participants (engine overrides PoolSize at start time); playoffs is a direct
+// elimination bracket with no pools at all. Keeping these fields set for those
+// formats is misleading and inconsistent, so we discard them on ingest rather
+// than rejecting the request (the engine already ignores them at runtime, and
+// the mixed format is the only one where they carry meaning).
+//
+// Called in both the POST (create) and PUT (update/merge) paths so the API is
+// consistent regardless of how the client sends the competition.
+func normalizePoolConfig(comp *state.Competition) {
+	switch comp.Format {
+	case state.CompFormatLeague, state.CompFormatPlayoffs:
+		comp.PoolSize = 0
+		comp.PoolWinners = 0
+	}
+}
+
 // validateSwissConfig enforces FR-050a: when Format == swiss, SwissRounds
 // must be at least 1. Returns nil for non-swiss competitions. The caller
 // surfaces the error as HTTP 400.
@@ -176,6 +194,29 @@ func validateSwissConfig(comp *state.Competition) error {
 	}
 	if comp.SwissRounds < 1 {
 		return fmt.Errorf("swiss format requires swissRounds >= 1")
+	}
+	return nil
+}
+
+// validateLeagueTiebreakConfig validates the league-tiebreak configuration knobs
+// (LeagueTiebreakTopN, LeagueTwoThirdPlaces). These fields are only meaningful
+// for team-league competitions; they are silently ignored for other formats/kinds
+// and must not cause errors there. Returns nil for non-league or non-team comps.
+//
+// Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
+// on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so a comp with
+// TeamSize > 0 but Kind == "" cannot be persisted — the Kind check alone is
+// sufficient to identify a team league here.
+func validateLeagueTiebreakConfig(comp *state.Competition) error {
+	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
+		return nil
+	}
+	switch comp.LeagueTiebreakTopN {
+	case 0, 3, 4:
+		// 0 = unset (will default to 3 at draw time); 3 and 4 are the only
+		// legal explicit values (per owner decision Q1).
+	default:
+		return fmt.Errorf("leagueTiebreakTopN must be 3 or 4 (got %d)", comp.LeagueTiebreakTopN)
 	}
 	return nil
 }
@@ -372,8 +413,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Zero out pool-config fields that have no meaning for the chosen
+		// format (league / playoffs). The engine already ignores them at
+		// start time; this keeps the persisted config consistent with what
+		// the engine actually uses. See normalizePoolConfig for full rationale.
+		normalizePoolConfig(&comp)
+
 		// FR-050a: swiss-specific config validation.
 		if err := validateSwissConfig(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+		if err := validateLeagueTiebreakConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -658,8 +711,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return
 			}
 
+			// Zero out pool-config fields that have no meaning for the
+			// chosen format. Mirrors the same call in the POST handler.
+			normalizePoolConfig(&comp)
+
 			// FR-050a: swiss-specific config validation.
 			if err := validateSwissConfig(&comp); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+
+			// League tie-breaker config validation (leagueTiebreakTopN must be 0/3/4).
+			if err := validateLeagueTiebreakConfig(&comp); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -844,6 +907,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.SwissRounds = comp.SwissRounds
 				current.Naginata = comp.Naginata
 				current.CheckInEnabled = comp.CheckInEnabled
+				// League tie-breaker config (Phase 3b) is only settable pre-start.
+				// Once the competition has started (status past setup) the
+				// consequential-tie set is in play, so changing leagueTiebreakTopN
+				// or leagueTwoThirdPlaces could re-block or unblock completion and
+				// change which ties already-played tie-breakers were meant to resolve.
+				// Reject a change rather than silently ignoring it. The draw-ready
+				// state already returned early above; the PUT validator enforces
+				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
+				// the finalize endpoint, never here.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
+					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
+					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
+					return nil, nil
+				}
+				current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
+				current.LeagueTwoThirdPlaces = comp.LeagueTwoThirdPlaces
 				return current, nil
 			})
 			return updateErr

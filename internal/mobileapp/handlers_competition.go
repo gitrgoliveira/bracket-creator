@@ -847,19 +847,31 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// applied below. This mirrors the participant/seed 409s in
 				// handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
-					courtsChanged := len(comp.Courts) > 0 &&
-						strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",")
+					// Compare the EFFECTIVE (about-to-be-applied) values
+					// directly — no zero/empty sentinels. The settings merge
+					// below is a full replace, so a caller that sets an
+					// output-affecting field TO its zero/empty value (e.g.
+					// format:"" or poolFormat:"", both accepted by
+					// validateCompetitionFormat) would otherwise slip past a
+					// sentinel guard and corrupt the draw. The real client
+					// (admin_competition_settings.jsx finalNext) always PUTs
+					// the full config with current values for untouched fields,
+					// so a cosmetic-only edit never trips this. comp.Courts was
+					// already defaulted to >=1 court (tournament fallback) in the
+					// settings-validation block above. ApplyCompetitionDefaults
+					// touches only match-duration fields, so comparing here
+					// (pre-defaults) matches the merged result for these fields.
 					outputAffectingChanged :=
-						(comp.PoolSize != 0 && comp.PoolSize != current.PoolSize) ||
-							(comp.PoolWinners != 0 && comp.PoolWinners != current.PoolWinners) ||
-							(comp.PoolSizeMode != "" && comp.PoolSizeMode != current.PoolSizeMode) ||
-							courtsChanged ||
-							(comp.Format != "" && comp.Format != current.Format) ||
-							(comp.PoolFormat != "" && comp.PoolFormat != current.PoolFormat) ||
-							(comp.RoundRobin != current.RoundRobin) ||
-							(comp.Mirror != current.Mirror) ||
-							(comp.TeamSize != 0 && comp.TeamSize != current.TeamSize) ||
-							(comp.Kind != "" && comp.Kind != current.Kind)
+						comp.PoolSize != current.PoolSize ||
+							comp.PoolWinners != current.PoolWinners ||
+							comp.PoolSizeMode != current.PoolSizeMode ||
+							strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",") ||
+							comp.Format != current.Format ||
+							comp.PoolFormat != current.PoolFormat ||
+							comp.RoundRobin != current.RoundRobin ||
+							comp.Mirror != current.Mirror ||
+							comp.TeamSize != current.TeamSize ||
+							comp.Kind != current.Kind
 					if outputAffectingChanged {
 						drawReadyFlag = true
 						return nil, nil

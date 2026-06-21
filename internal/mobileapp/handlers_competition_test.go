@@ -2379,12 +2379,43 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 
+	t.Run("REJECT zero-value bypass: format set to empty while draw-ready", func(t *testing.T) {
+		// Regression for the Copilot finding: the gate must compare effective
+		// values directly (no zero/empty sentinels), else a caller can set an
+		// output-affecting field TO its empty value to slip past the gate and
+		// corrupt the draw. format:"" is accepted by validateCompetitionFormat.
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate",
+			"format":      "", // changed from stored "mixed" TO empty — must still 409
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    4,
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"setting format to empty while draw-ready must return 409 (no zero-value bypass): %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompFormatMixed, stored.Format,
+			"format must be unchanged after a rejected zero-value PUT")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+
 	t.Run("ALLOW cosmetic Name rename while draw-ready", func(t *testing.T) {
 		// All output-affecting fields match the stored comp; only Name differs.
-		// RoundRobin and Mirror are sent explicitly — the gate has no non-zero
-		// sentinel for booleans, so their comparison is always against the stored
-		// value; sending them explicitly guards against future regressions where
-		// the stored values are non-zero.
+		// The gate compares effective values directly (no sentinels): the real
+		// client always PUTs the full config, and the omitted fields here
+		// (poolSizeMode/poolFormat/teamSize) match the stored zero values, so no
+		// output-affecting change is detected and the rename is allowed.
 		body, _ := json.Marshal(map[string]any{
 			"id":          cid,
 			"name":        "Draw Ready Gate Renamed", // cosmetic change — allowed

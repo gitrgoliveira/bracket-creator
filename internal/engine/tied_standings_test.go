@@ -202,8 +202,9 @@ func TestMarkTiedStandings_AutoClear(t *testing.T) {
 	assert.Empty(t, tiedNames(resolved), "resolved tie must clear the highlight")
 }
 
-// TestMarkTiedStandings_NonLeagueNonMixed ensures the pools path also governs
-// playoffs-format pools (any non-league format routes through the pools gate).
+// TestMarkTiedStandings_EmptyStandings guards the empty-input path: an empty
+// standings slice must be a no-op (no panic, nothing marked), regardless of
+// format. League is used here as the non-trivial gating branch.
 func TestMarkTiedStandings_EmptyStandings(t *testing.T) {
 	comp := &state.Competition{Format: state.CompFormatLeague}
 	var sorted []state.PlayerStanding

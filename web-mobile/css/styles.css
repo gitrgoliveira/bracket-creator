@@ -7422,8 +7422,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .sponsor-strip { gap: 12px; padding: 12px 8px; }
 }
 
-/* mp-dm5e: tied standings row — amber caution highlight */
-.pool__row--tied { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-border); }
+/* mp-dm5e: tied standings row — amber caution highlight. Background-only,
+   matching the `.pool__row--me` row-tint idiom (no side accent).
+   Scoped to `.pool__table tr` so the amber fill wins over both `.pool__table
+   tr.advancing` (green, higher specificity) and `.pool__row--me` (navy, same
+   base specificity but defined later): a tie that needs breaking is the more
+   urgent signal, so it must not be masked for advancing qualifiers or the
+   followed player. */
+.pool__table tr.pool__row--tied { background: var(--warn-soft); }
 
 /* mp-wvkh: followed-player highlights */
 .pool__row--me { background: rgba(29,53,87,0.07); }

@@ -329,7 +329,7 @@ Auto-fill grid (320px min). Each pool is a card with `.pool__table` inside. `.po
 Row modifiers on `<tr>` inside `.pool__table`:
 - `tr.advancing` — light-green background + `▲` marker: player progressing to playoffs.
 - `tr.pool__row--me` — translucent navy tint (`rgba(29,53,87,0.07)`): the followed player (viewer).
-- `tr.pool__row--tied` — amber fill (`--warn-soft`) + 3px left inset border (`--warn-border`): two or more competitors tied on all ranking criteria. Appears only once the tie is observable (pool all-complete for pools format; emerging-tie trigger for league format). Clears automatically when the tie resolves. Uses amber tokens only — never `--red` (Aka/danger) or `--accent` (running state).
+- `tr.pool__row--tied` — amber fill (`--warn-soft`), background-only (same row-tint idiom as `pool__row--me`): two or more competitors tied on all ranking criteria. Scoped as `.pool__table tr.pool__row--tied` so the amber wins over `.advancing` (green) and `.pool__row--me` (navy). Appears only once the tie is observable (pool all-complete for pools format; emerging-tie trigger for league format). Clears automatically when the tie resolves. Uses amber tokens only — never `--red` (Aka/danger) or `--accent` (running state).
 
 ### Modals — `.modal-backdrop > .modal`
 

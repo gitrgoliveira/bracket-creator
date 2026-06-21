@@ -37,6 +37,13 @@ func createTournamentHandler(c *gin.Context) {
 		})
 		return
 	}
+	// Normalize line endings before splitting: textarea/form submissions
+	// commonly arrive CRLF, which would otherwise leave a trailing "\r" on
+	// every entry — bypassing the exact-match duplicate check and turning a
+	// blank "\r" line into a phantom entry. The downstream field parser
+	// TrimSpace's individual columns, but the entry-level dedup does not.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	entries := strings.Split(text, "\n")
 
 	// Parse form values
@@ -159,8 +166,12 @@ func createTournamentHandler(c *gin.Context) {
 
 		err := o.createPools(entries)
 		if err != nil {
+			// Generation failures here are overwhelmingly caused by invalid
+			// request input (pool-size/winners constraints, participant
+			// validation), so report 400 rather than 500 — the body carries
+			// the specific reason for the caller to surface.
 			log.Printf("failed to create pools: %s", err.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("Failed to create pools: %s", err.Error()),
 			})
 			return
@@ -182,8 +193,10 @@ func createTournamentHandler(c *gin.Context) {
 
 		err := o.createPlayoffs(entries)
 		if err != nil {
+			// As with pools, playoff generation failures are typically
+			// request-caused (invalid roster, seed validation) — report 400.
 			log.Printf("failed to create playoffs: %s", err.Error())
-			c.JSON(http.StatusInternalServerError, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("Failed to create playoffs: %s", err.Error()),
 			})
 			return

@@ -115,3 +115,21 @@ func TestCreateHandler_CommaInPlayerName_NotCorrupted(t *testing.T) {
 	}
 	require.True(t, found, "comma-containing player name was corrupted (split on the comma) in the data sheet")
 }
+
+// TestCreateHandler_CRLFRoster_Normalized guards the newline-normalization fix:
+// a CRLF roster (as a browser textarea / curl can send) must not leave a
+// trailing "\r" on the last field nor trip the exact-match duplicate check on a
+// blank "\r" line. The handler normalizes CRLF→LF before splitting.
+func TestCreateHandler_CRLFRoster_Normalized(t *testing.T) {
+	crlf := "Alice, DA\r\nBob, DB\r\nCharlie, DC\r\nDave, DD\r\nEve, DE\r\nFrank, DF\r\n"
+	f := postCreate(t, leagueForm(crlf)) // 200 — no phantom-duplicate 400, no parse error
+
+	rows, err := f.GetRows("data")
+	require.NoError(t, err)
+	for _, row := range rows {
+		// Column C (idx 2) is Player Dojo — it must not carry a trailing CR.
+		if len(row) > 2 && row[1] == "Frank" {
+			require.Equal(t, "DF", row[2], "dojo retained a trailing carriage return from CRLF input")
+		}
+	}
+}

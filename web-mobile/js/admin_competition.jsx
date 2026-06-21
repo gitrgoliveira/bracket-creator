@@ -112,7 +112,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const discardDraw = async () => {
-    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed and you can regenerate.`, confirmLabel: "Discard draw", danger: true }))) return;
+    if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true }))) return;
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setDiscarding(true);
@@ -138,34 +138,12 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
-  const regenerateDraw = async () => {
-    if (!(await confirmCheckInExclusion())) return;
-    // Regenerate discards the existing draw first (DELETE /draw is gated),
-    // so collect the elevated password up front before any work begins.
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
-    setGenerating(true);
-    try {
-      await window.API.discardDraw(c.id, password, admin);
-      if (!mountedRef.current) return;
-      // Refresh after discard so the UI reflects setup status immediately;
-      // if generateDraw then fails the UI is consistent with the server.
-      onRefreshCompetition?.();
-      await window.API.generateDraw(c.id, password);
-      if (!mountedRef.current) return;
-      onRefreshCompetition?.();
-      showToast(`Draw regenerated for ${c.name}`);
-      onSection(c.format === "playoffs" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
-    } catch (e) {
-      console.error("Regenerate draw failed:", e);
-      if (mountedRef.current) {
-        onRefreshCompetition?.();
-        showToast(e.message, "error");
-      }
-    } finally {
-      if (mountedRef.current) setGenerating(false);
-    }
-  };
+  // NOTE: there is intentionally no "regenerate draw" action. The draw is
+  // deterministic on its stored inputs (no RNG in helper seeding/pools/tree;
+  // Swiss round 1 uses a comp-id-seeded shuffle), so regenerating without
+  // changing inputs would reproduce the identical draw. To get a different
+  // draw the operator discards (which unlocks editing), changes inputs
+  // (e.g. Shuffle unseeded / seeds / settings), then generates again.
 
   const start = async () => {
     // draw-ready → running does not regenerate the draw; skip the confirmation
@@ -294,20 +272,16 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting || generating}>
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--ghost" onClick={regenerateDraw} disabled={generating || starting || discarding}>
-                    {generating && <span className="spinner" />}
-                    {generating ? "Regenerating…" : "Regenerate draw"}
-                  </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || generating || discarding}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || discarding}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start when ready</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start. To change it, discard and edit first.</div>
               </div>
             )}
             {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (

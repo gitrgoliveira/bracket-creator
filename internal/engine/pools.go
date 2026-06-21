@@ -11,6 +11,15 @@ import (
 )
 
 func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+	// PoolSize is the divisor in CreatePools (and is fed to PoolSeeding); a
+	// zero/negative value would otherwise reach helper.CreatePools and the
+	// guard there returns a plain error mapped to HTTP 500. Validate up front
+	// so a competition started with an unset PoolSize fails as a clean 400
+	// (validationErrorf → *ValidationError) with an actionable message. (mp-ebgz)
+	if comp.PoolSize <= 0 {
+		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d — set a pool size before starting", comp.ID, comp.PoolSize)
+	}
+
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {

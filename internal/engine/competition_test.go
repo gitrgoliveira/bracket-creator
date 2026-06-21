@@ -227,6 +227,33 @@ func TestStartCompetition_SwissFormat(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "bracket.json must not be created for Swiss start")
 }
 
+// TestStartCompetition_PoolSizeZero pins mp-ebgz: starting a pool-based
+// competition with PoolSize=0 must fail as a ValidationError (HTTP 400),
+// not divide-by-zero panic deep inside helper.CreatePools (HTTP 500).
+func TestStartCompetition_PoolSizeZero(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "poolsize-zero"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:        compID,
+		Name:      "Pool Size Zero Test",
+		Kind:      "individual",
+		Format:    state.CompFormatMixed,
+		PoolSize:  0, // unset — the bug trigger
+		Courts:    []string{"A", "B"},
+		StartTime: "09:00",
+		Status:    state.CompStatusSetup,
+	}))
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank", "Grace", "Heidi",
+	})
+
+	err := eng.StartCompetition(compID)
+	require.Error(t, err, "starting with PoolSize=0 must error, not panic")
+	var ve *ValidationError
+	assert.ErrorAs(t, err, &ve, "PoolSize=0 must surface as a ValidationError (→ HTTP 400)")
+}
+
 // TestStartCompetition_SwissRoundAlreadyGenerated verifies that StartCompetition
 // rejects the call when SwissCurrentRound != 0. This guards against
 // AdvanceSwissRound having partially run before start (matches written,

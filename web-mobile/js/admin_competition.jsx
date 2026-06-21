@@ -272,11 +272,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {isDrawReady && (
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={discarding || starting}>
+                  {/* navBusy (generating||starting||discarding) covers the brief
+                      window where generateDraw has flipped status to draw-ready
+                      but its setGenerating(false) hasn't run yet — without it
+                      these buttons would be momentarily clickable mid-generate. */}
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={starting || discarding}>
+                  <button type="button" className="btn btn--primary" onClick={start} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>

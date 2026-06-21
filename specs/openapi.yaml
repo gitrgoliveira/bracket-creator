@@ -492,6 +492,13 @@ paths:
                       Whether the destructive-ops password can be set via
                       PUT /api/auth/admin-password. True in file mode; false in locked
                       mode (the credential is the TOURNAMENT_ADMIN_PASSWORD_HASH env var).
+                  scheduleEnabled:
+                    type: boolean
+                    description: |
+                      Whether the admin tournament-schedule view is enabled. Controlled
+                      by the ENABLE_TOURNAMENT_SCHEDULE env var on the mobile-app server
+                      (default false). When false, the SPA hides the dashboard's
+                      "Tournament schedule" entry.
 
   /api/auth/admin-password:
     put:

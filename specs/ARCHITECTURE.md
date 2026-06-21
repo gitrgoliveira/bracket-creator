@@ -436,27 +436,21 @@ Docker images available via `Dockerfile` and `Dockerfile.mobile`.
 
 ## Codebase Size
 
-Approximate, top-level package only (subpackages excluded); refresh with the `wc -l` sweep over `*.go` / `*_test.go`.
+Relative sizing only — exact line counts go stale immediately and aren't worth hand-maintaining. Re-derive with a `wc -l` / `gocloc` sweep when you need numbers.
 
-| Package | Source LOC | Test LOC | Ratio |
-|---|---|---|---|
-| mobileapp | 11,478 | 21,880 | 1.9× |
-| engine | 8,453 | 15,571 | 1.8× |
-| helper | 5,572 | 10,836 | 1.9× |
-| state | 5,509 | 8,245 | 1.5× |
-| cmd | 1,831 | 3,111 | 1.7× |
-| domain | 807 | 944 | 1.2× |
-| excel | 391 | 135 | 0.3× |
-| service / resources / test | 121 | 175 | — |
-| **Go total** (incl. subpackages) | **~35,500** | **~62,100** | **1.7×** |
-| **Frontend (JSX/JS)** | **~27,300** | **~22,400** | **0.8×** |
+**Package mass** (largest → smallest): `mobileapp` ≫ `engine` ≳ `helper` ≈ `state` ≫ `cmd` ≫ `domain` ≫ `excel`. The Go backend and the JSX frontend are roughly comparable in size.
+
+**Test investment** (test LOC ÷ source LOC): most packages sit around 1.5–1.9× — substantial, algorithm-heavy test bodies. Two outliers:
+
+- `excel` ≈ 0.3× — thinly tested directly; most Excel coverage lives in `helper/*_test.go` instead.
+- Frontend ≈ 0.8× — lighter than the Go side, though still ~79 Vitest spec files.
 
 ## Known Architectural Observations
 
 ### Strengths
 
 - **Clean layering**: presentation → engine → state → filesystem with no circular dependencies.
-- **Strong algorithmic test coverage**: helper (2.0×), engine (1.5×), state (1.5×), and mobileapp (1.5×) all carry substantial test bodies.
+- **Strong algorithmic test coverage**: helper, engine, state, and mobileapp all carry substantial test bodies (roughly 1.5–1.9× source).
 - **Single-binary deployment**: all assets embedded at compile time.
 - **Fine-grained concurrency**: per-competition + per-file locking avoids global contention; non-reentrant mutex caught misuse via `StoreTx`.
 - **Multi-file atomicity**: WAL-backed `Store.WithTransaction` lets the score handler commit several files (match result + eligibility + lineup) atomically across a crash.
@@ -465,9 +459,9 @@ Approximate, top-level package only (subpackages excluded); refresh with the `wc
 
 ### Areas to Watch
 
-- **`mobileapp/` is now the largest package** (~11.5K LOC, ~35 source files) after the new handler families landed (decision, eligibility, lineup, daihyosen, Swiss, display, league tie-breaker, registration, announcement, branding, sponsors, print). It now carries supporting infra too (rate limiting, broadcast coalescer, viewer single-flight). Further grouping into subpackages may be warranted.
-- **`engine/` has grown rapidly** — ~23 source files, ~8.5K LOC — spanning scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, and PDF export. Further sub-splitting may be warranted.
-- **`helper/` mixes concerns** (~5.6K LOC): tree algorithms, CSV parsing, Excel rendering, seeding, and utilities. The `helper/{bracket,csv,seeding}/` subpackages signal an ongoing extraction (the earlier `pool/` subpackage was folded back to `pool_partial.go`); `helper/` proper has not shrunk yet.
-- **`excel/` has minimal test coverage** (0.3× ratio) despite Excel output being the primary CLI deliverable. Most Excel test coverage lives in `helper/*_test.go` instead.
-- **`domain/` is still partially adopted** (~800 LOC, 9 files): most business logic in `helper/` uses `helper.Player` directly rather than domain types — the migration is incomplete.
+- **`mobileapp/` is now the largest package** after the new handler families landed (decision, eligibility, lineup, daihyosen, Swiss, display, league tie-breaker, registration, announcement, branding, sponsors, print). It now carries supporting infra too (rate limiting, broadcast coalescer, viewer single-flight). Further grouping into subpackages may be warranted.
+- **`engine/` has grown rapidly** — spanning scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, and PDF export. Further sub-splitting may be warranted.
+- **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, and utilities. The `helper/{bracket,csv,seeding}/` subpackages signal an ongoing extraction (the earlier `pool/` subpackage was folded back to `pool_partial.go`); `helper/` proper has not shrunk yet.
+- **`excel/` has minimal direct test coverage** despite Excel output being the primary CLI deliverable. Most Excel test coverage lives in `helper/*_test.go` instead.
+- **`domain/` is still partially adopted**: most business logic in `helper/` uses `helper.Player` directly rather than domain types — the migration is incomplete.
 - **No Go interfaces** for `state.Store` or `engine.Engine` at the top level — interface adoption is happening incrementally via `mobileapp/deps.go`, but engine-to-state and helper-to-engine calls still go through concrete types.

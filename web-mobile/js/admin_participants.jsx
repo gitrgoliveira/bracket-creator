@@ -726,7 +726,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated — participants and seeds are locked. Discard the draw (from the competition header) to change them.
+          Draw generated — the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
         </div>
       )}
       {isStarted && (

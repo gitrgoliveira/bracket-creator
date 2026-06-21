@@ -719,7 +719,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
           )}
           {c.status === "draw-ready" && (
-            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start competition →</button>
+            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>

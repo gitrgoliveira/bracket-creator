@@ -5,6 +5,12 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Default on-clock minutes per match when a duration field is left blank.
+// Mirrors defaultPerMatchClockMinutes in internal/engine/scheduler_slots.go
+// (3 min = the FIK individual default). Surfaced in the duration inputs so the
+// operator knows what "blank" resolves to.
+const DEFAULT_MATCH_MINUTES = 3;
+
 const dmyToIso = window.dmyToIso;
 const isoToDmy = window.isoToDmy;
 const validateAndNormalizeDate = window.validateAndNormalizeDate;
@@ -549,9 +555,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 step="1"
                 value={Number.isFinite(local.poolMatchDuration) && local.poolMatchDuration > 0 ? local.poolMatchDuration : ""}
                 onChange={(e) => updateNumber("poolMatchDuration", e.target.value, 0)}
-                placeholder="default"
+                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">{local.format === "swiss" ? "Estimated minutes per Swiss-round match. Leave blank for default." : "Estimated minutes per pool match. Leave blank for default."}</div>
+              <div className="field__hint">{local.format === "swiss" ? `Estimated minutes per Swiss-round match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).` : `Estimated minutes per pool match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
           {(local.format === "playoffs" || local.format === "mixed") && (
@@ -564,9 +570,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 step="1"
                 value={Number.isFinite(local.playoffMatchDuration) && local.playoffMatchDuration > 0 ? local.playoffMatchDuration : ""}
                 onChange={(e) => updateNumber("playoffMatchDuration", e.target.value, 0)}
-                placeholder="default"
+                placeholder={`default: ${DEFAULT_MATCH_MINUTES}`}
               />
-              <div className="field__hint">Estimated minutes per playoff/knockout match. Leave blank for default.</div>
+              <div className="field__hint">{`Estimated minutes per playoff/knockout match. Leave blank for the default (${DEFAULT_MATCH_MINUTES} min).`}</div>
             </div>
           )}
         </div>

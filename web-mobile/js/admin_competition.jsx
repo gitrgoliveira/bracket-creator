@@ -310,20 +310,26 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         </div>
 
         <div className="workspace">
-          <div className="side-nav">
-            {sections.map((sec) => (
-              <div key={sec.sec}>
-                <div className="side-nav__sec">{sec.sec}</div>
-                {sec.items.map((it) => (
-                  <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
-                ))}
-              </div>
-            ))}
+          {/* Left column stacks the per-competition nav and, as a SEPARATE
+              card below it, the switcher to other competitions (mp-xsc1).
+              The Other-competitions card is position:static so it doesn't
+              fight the sticky nav above it. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="side-nav">
+              {sections.map((sec) => (
+                <div key={sec.sec}>
+                  <div className="side-nav__sec">{sec.sec}</div>
+                  {sec.items.map((it) => (
+                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} onClick={() => onSection(it.id)}>{it.label}</button>
+                  ))}
+                </div>
+              ))}
+            </div>
             {t.competitions.filter((cc) => cc.id !== c.id).length > 0 && (
-              <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                <div className="side-nav__sec" style={{ opacity: 0.6 }}>Other competitions</div>
+              <div className="side-nav" style={{ position: "static" }}>
+                <div className="side-nav__sec">Other competitions</div>
                 {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                  <button type="button" key={cc.id} style={{ opacity: 0.75 }} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                  <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
                 ))}
               </div>
             )}

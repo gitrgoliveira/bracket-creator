@@ -188,7 +188,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const navBusy = generating || starting || discarding;
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
-  const otherComps = t.competitions.filter((cc) => cc.id !== c.id);
+  const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
   const sections = [
     {
       sec: "Preparation", items: [

@@ -3593,6 +3593,9 @@ button.pool-match-row {
   font-size: 15px;
   margin: 0 0 4px;
 }
+.empty > div:not(.icon) {
+  font-size: 13px;
+}
 
 /* Primary CTA inside an empty state (e.g. "Open admin" when no competitions
    exist) — deliberate rhythm between the hint and the action, then a tighter

@@ -467,9 +467,7 @@ function Modal({ title, onClose, children, footer, size, dismissable = true, cla
       >
         <div className="modal__head">
           <div className="modal__title">{title}</div>
-          {dismissable && (
-            <button type="button" className="modal__close" onClick={onClose} aria-label="Close">&times;</button>
-          )}
+          <button type="button" className="modal__close" onClick={dismissable ? onClose : undefined} disabled={!dismissable} aria-label="Close">&times;</button>
         </div>
         <div className="modal__body">{children}</div>
         {footer && <div className="modal__foot">{footer}</div>}

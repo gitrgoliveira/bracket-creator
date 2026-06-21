@@ -362,10 +362,18 @@ func TestCreatePools(t *testing.T) {
 			},
 		},
 		{
-			name:      "panics when pool size is zero",
-			players:   createPlayers(4, 4),
-			poolSize:  0,
-			wantPanic: true,
+			// mp-ebgz: poolSize=0 used to divide-by-zero panic; it now
+			// returns a clean error so every caller is panic-proof.
+			name:     "errors (no panic) when pool size is zero",
+			players:  createPlayers(4, 4),
+			poolSize: 0,
+			wantErr:  true,
+		},
+		{
+			name:     "errors (no panic) when pool size is negative",
+			players:  createPlayers(4, 4),
+			poolSize: -1,
+			wantErr:  true,
 		},
 		{
 			name:     "errors when pool size larger than player count",

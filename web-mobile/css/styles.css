@@ -7422,6 +7422,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .sponsor-strip { gap: 12px; padding: 12px 8px; }
 }
 
+/* mp-dm5e: tied standings row — amber caution highlight */
+.pool__row--tied { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-border); }
+
 /* mp-wvkh: followed-player highlights */
 .pool__row--me { background: rgba(29,53,87,0.07); }
 /* Matrix row: top inset shadow on every cell so the highlight shows through win/loss/draw backgrounds */

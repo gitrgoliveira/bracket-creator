@@ -496,13 +496,14 @@ func TestRouterCreateEndpoint_PoolsSuccess(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	router.ServeHTTP(w, req)
 
-	// Template file may not be available, so either success or template error is acceptable
+	// Workbook generation may fail on the input, so either success or a 400
+	// (generation failures are reported as bad request) is acceptable.
 	if w.Code == http.StatusOK {
 		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
 		assert.Contains(t, w.Header().Get("Content-Disposition"), "pools-")
 		assert.Greater(t, w.Body.Len(), 0)
 	} else {
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	}
 }
 

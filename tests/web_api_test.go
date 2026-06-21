@@ -100,7 +100,10 @@ func TestAPI_CreateWithMissingSeed(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	// A seed referencing a participant absent from the roster is invalid
+	// request input, so /create reports 400 (not 500). The body still names
+	// the offending seed.
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "seeded participant not found")
 }
 

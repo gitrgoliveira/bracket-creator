@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -12,12 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"bufio"
-	"bytes"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/mobileapp"
 
@@ -174,202 +169,9 @@ func NewRouter() *gin.Engine {
 		c.Redirect(http.StatusMovedPermanently, "/create")
 	})
 
-	// Set up tournament creation endpoint
-	r.POST("/create", func(c *gin.Context) {
-		text := c.PostForm("playerList")
-		if text == "" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Player list cannot be empty",
-			})
-			return
-		}
-
-		// Parse form values
-		singleTree := c.PostForm("singleTree") == "on"
-		withZekkenName := c.PostForm("withZekkenName") == "on"
-		determined := c.PostForm("determined") == "on"
-		titlePrefix := c.PostForm("titlePrefix")
-		numberPrefix := c.PostForm("numberPrefix")
-
-		teamMatches, err := strconv.Atoi(c.PostForm("teamMatches"))
-		if err != nil {
-			teamMatches = 0
-		}
-
-		tournamentType := c.PostForm("tournamentType")
-		if tournamentType != "pools" && tournamentType != "playoffs" {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid tournament type",
-			})
-			return
-		}
-
-		winnersPerPool, err := strconv.Atoi(c.PostForm("winnersPerPool"))
-		if err != nil {
-			winnersPerPool = 2
-		}
-
-		playersPerPool, err := strconv.Atoi(c.PostForm("playersPerPool"))
-		if err != nil {
-			playersPerPool = 3
-		}
-
-		// Validate pool settings
-		if tournamentType == "pools" {
-			if winnersPerPool <= 0 {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "Winners per pool must be at least 1",
-				})
-				return
-			}
-
-			if playersPerPool <= 0 {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "Players per pool must be at least 1",
-				})
-				return
-			}
-
-			if winnersPerPool >= playersPerPool {
-				c.JSON(http.StatusBadRequest, gin.H{
-					"error": "Winners per pool must be less than players per pool",
-				})
-				return
-			}
-		}
-
-		roundRobin := c.PostForm("roundRobin") == "on"
-		poolSizeMode := c.PostForm("poolSizeMode")
-
-		// Parse courts (number of Shiaijo)
-		courts, err := strconv.Atoi(c.PostForm("courts"))
-		if err != nil || courts < 1 {
-			courts = 2
-		}
-		if err := helper.ValidateCourts(courts); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Reject duplicate participant entries up front so the user sees a
-		// clear error instead of silently dropped rows in the spreadsheet.
-		if dups := helper.CheckDuplicateEntries(strings.Split(text, "\n")); len(dups) > 0 {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("Duplicate participant entries: %s", strings.Join(dups, ", ")),
-			})
-			return
-		}
-
-		// Parse seeds if provided
-		var seedAssignments []domain.SeedAssignment
-		seedsJSON := c.PostForm("seeds")
-		if seedsJSON != "" {
-			err := json.Unmarshal([]byte(seedsJSON), &seedAssignments)
-			if err != nil {
-				log.Printf("failed to parse seeds JSON: %s", err.Error())
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid seed assignments format"})
-				return
-			}
-		}
-
-		// Prepare output
-		inMemoryBuffer := new(bytes.Buffer)
-		inMemoryWriter := bufio.NewWriter(inMemoryBuffer)
-
-		// Create tournament
-		switch tournamentType {
-		case "pools":
-			var numPlayers, maxPlayers int
-			if poolSizeMode == "max" {
-				maxPlayers = playersPerPool
-			} else {
-				numPlayers = playersPerPool
-			}
-
-			o := &poolOptions{
-				singleTree:      singleTree,
-				withZekkenName:  withZekkenName,
-				determined:      determined,
-				teamMatches:     teamMatches,
-				roundRobin:      roundRobin,
-				numPlayers:      numPlayers,
-				maxPlayers:      maxPlayers,
-				poolWinners:     winnersPerPool,
-				courts:          courts,
-				titlePrefix:     titlePrefix,
-				numberPrefix:    numberPrefix,
-				SeedAssignments: seedAssignments,
-			}
-			o.outputWriter = inMemoryWriter
-
-			err := o.createPools(strings.Split(text, "\n"))
-			if err != nil {
-				log.Printf("failed to create pools: %s", err.Error())
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("Failed to create pools: %s", err.Error()),
-				})
-				return
-			}
-
-		case "playoffs":
-			o := &playoffOptions{
-				singleTree:      singleTree,
-				withZekkenName:  withZekkenName,
-				determined:      determined,
-				teamMatches:     teamMatches,
-				courts:          courts,
-				titlePrefix:     titlePrefix,
-				numberPrefix:    numberPrefix,
-				SeedAssignments: seedAssignments,
-			}
-
-			o.outputWriter = inMemoryWriter
-
-			err := o.createPlayoffs(strings.Split(text, "\n"))
-			if err != nil {
-				log.Printf("failed to create playoffs: %s", err.Error())
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": fmt.Sprintf("Failed to create playoffs: %s", err.Error()),
-				})
-				return
-			}
-		default:
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid tournament type",
-			})
-			return
-		}
-
-		// Ensure data is written to the buffer
-		if err := inMemoryWriter.Flush(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": fmt.Sprintf("Failed to flush buffer: %s", err.Error()),
-			})
-			return
-		}
-
-		if inMemoryBuffer.Len() == 0 {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Failed to generate tournament data",
-			})
-			return
-		}
-
-		// Set response headers for file download
-		filename := fmt.Sprintf("%s-%s.xlsx", tournamentType, time.Now().Format("2006-01-02"))
-
-		// Mark the download as ready so the client can detect when download starts
-		downloadToken := c.PostForm("downloadToken")
-		if downloadToken != "" {
-			markDownloadReady(downloadToken)
-		}
-
-		c.Header("Content-Description", "File Transfer")
-		c.Header("Content-Transfer-Encoding", "binary")
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
-		c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", inMemoryBuffer.Bytes())
-	})
+	// Tournament generation endpoint — handler shared with the mobile-app
+	// server (registered in cmd/mobile_app.go) so both run the same generator.
+	r.POST("/create", createTournamentHandler)
 
 	return r
 }
@@ -378,8 +180,17 @@ func init() {
 	rootCmd.AddCommand(newServeCmd())
 }
 
+// downloadReadyTTL bounds how long an unconsumed download-ready token lingers
+// in downloadStatus. The serve web app consumes the token via the
+// /api/download-status poll (consumeDownloadReady deletes it), but a client
+// that navigates away — or the mobile-app server, which mounts /create without
+// that poll endpoint — would otherwise leak the entry forever. The TTL keeps
+// the map bounded regardless of which server runs the handler.
+const downloadReadyTTL = 60 * time.Second
+
 func markDownloadReady(token string) {
 	downloadStatus.Store(token, true)
+	time.AfterFunc(downloadReadyTTL, func() { downloadStatus.Delete(token) })
 }
 
 func consumeDownloadReady(token string) bool {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,21 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/spf13/cobra"
 )
+
+// ScheduleEnabledEnv is the env var that enables the "Tournament schedule"
+// feature in the SPA admin UI. Truthy values: "1", "true", "yes", "on"
+// (case-insensitive). Anything else / unset = false (default OFF). mp-fwce.
+const ScheduleEnabledEnv = "ENABLE_TOURNAMENT_SCHEDULE"
+
+// parseScheduleEnabled returns true when the env var value is one of the
+// canonical truthy strings ("1", "true", "yes", "on"), case-insensitive.
+func parseScheduleEnabled(val string) bool {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
 
 // Server tuning constants for the mobile-app HTTP listener. mp-663 Phase 2:
 // closes slowloris and never-drains-connection vectors that the default
@@ -168,7 +184,12 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	}
 	hub := mobileapp.NewHubWithLimits(mobileapp.DefaultHistorySize, maxClients)
 
-	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub)
+	// ENABLE_TOURNAMENT_SCHEDULE feature flag (mp-fwce). Default OFF;
+	// truthy values ("1", "true", "yes", "on") enable the admin schedule card.
+	scheduleEnabled := parseScheduleEnabled(os.Getenv(ScheduleEnabledEnv))
+	slog.Info("mobile-app: schedule feature flag", "scheduleEnabled", scheduleEnabled)
+
+	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub, scheduleEnabled)
 
 	// Mount the stateless tournament-generation endpoint (same handler the
 	// `serve` web app uses) so the in-app "Download .xlsx" button runs the

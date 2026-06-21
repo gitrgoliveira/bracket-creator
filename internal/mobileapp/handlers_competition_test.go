@@ -2335,3 +2335,82 @@ func TestPUTCompetition_MixedPoolConfigPreserved(t *testing.T) {
 	assert.Equal(t, 4, stored.PoolSize, "mixed PoolSize must be preserved")
 	assert.Equal(t, 1, stored.PoolWinners, "mixed PoolWinners must be preserved")
 }
+
+func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "draw-ready-gate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          cid,
+		Name:        "Draw Ready Gate",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		Courts:      []string{"A"},
+		PoolSize:    4,
+		PoolWinners: 2,
+		Status:      state.CompStatusDrawReady,
+	}))
+
+	t.Run("REJECT output-affecting PoolSize change while draw-ready", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate",
+			"format":      state.CompFormatMixed,
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    5, // changed from stored 4 — output-affecting
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing PoolSize while draw-ready must return 409: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "discard",
+			"409 body must mention discarding the draw")
+
+		// Status must remain draw-ready — gate must not mutate state.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+
+	t.Run("ALLOW cosmetic Name rename while draw-ready", func(t *testing.T) {
+		// All output-affecting fields match the stored comp; only Name differs.
+		// RoundRobin and Mirror are sent explicitly — the gate has no non-zero
+		// sentinel for booleans, so their comparison is always against the stored
+		// value; sending them explicitly guards against future regressions where
+		// the stored values are non-zero.
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate Renamed", // cosmetic change — allowed
+			"format":      state.CompFormatMixed,
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    4,     // same as stored
+			"poolWinners": 2,     // same as stored
+			"roundRobin":  false, // same as stored
+			"mirror":      false, // same as stored
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"renaming while draw-ready must be allowed: %s", w.Body.String())
+
+		// Rename must have persisted.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "Draw Ready Gate Renamed", stored.Name,
+			"cosmetic Name change must persist through the draw-ready gate")
+		// Status must remain draw-ready — a rename does not discard the draw.
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+}

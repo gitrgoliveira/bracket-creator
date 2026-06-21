@@ -36,6 +36,11 @@ type authConfigResponse struct {
 	ElevatedRequired   bool `json:"elevatedRequired"`
 	ElevatedConfigured bool `json:"elevatedConfigured"`
 	ElevatedEditable   bool `json:"elevatedEditable"`
+
+	// ScheduleEnabled controls whether the SPA renders the admin
+	// "Tournament schedule" card. Sourced from the ENABLE_TOURNAMENT_SCHEDULE
+	// env var (truthy: "1", "true", "yes", "on"). Default OFF — mp-fwce.
+	ScheduleEnabled bool `json:"scheduleEnabled"`
 }
 
 // RegisterAuthConfigHandlers wires GET /api/auth-config. The endpoint is
@@ -48,7 +53,11 @@ type authConfigResponse struct {
 // inferable from any 404 on /api/tournament/reset. Exposing it
 // explicitly lets the SPA branch up-front rather than relying on a
 // 404-probe race during form rendering.
-func RegisterAuthConfigHandlers(r *gin.RouterGroup, verifier PasswordVerifier, elevated ElevatedVerifier) {
+//
+// scheduleEnabled is sourced from ENABLE_TOURNAMENT_SCHEDULE in
+// cmd/mobile_app.go and threaded here so the env var is read once at
+// startup rather than on every request.
+func RegisterAuthConfigHandlers(r *gin.RouterGroup, verifier PasswordVerifier, elevated ElevatedVerifier, scheduleEnabled bool) {
 	r.GET("/auth-config", func(c *gin.Context) {
 		c.JSON(http.StatusOK, authConfigResponse{
 			Mode:               verifier.Mode(),
@@ -58,6 +67,7 @@ func RegisterAuthConfigHandlers(r *gin.RouterGroup, verifier PasswordVerifier, e
 			// Editable only in file mode — the locked-mode credential is the
 			// TOURNAMENT_ADMIN_PASSWORD_HASH env var, not settable via API.
 			ElevatedEditable: elevated.Mode() == "file",
+			ScheduleEnabled:  scheduleEnabled,
 		})
 	})
 }

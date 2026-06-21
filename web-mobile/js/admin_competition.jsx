@@ -121,7 +121,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
-      onSection("overview");
+      // After discard the status reverts to "setup", so draw-only/preview nav
+      // items (pools, bracket, swiss) disappear. If the operator is on one of
+      // those sections, fall back to participants — a sensible landing point
+      // after discarding. Otherwise leave them exactly where they are.
+      // (This fallback set mirrors the draw-only items gated on isDrawReady /
+      // draw artifacts in the sections array above.)
+      if (["pools", "bracket", "swiss"].includes(section)) {
+        onSection("participants");
+      }
     } catch (e) {
       console.error("Discard draw failed:", e);
       if (mountedRef.current) showToast(e.message, "error");
@@ -255,11 +263,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {(!c.status || c.status === "setup") && c.players.length >= 2 && (
               <>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button type="button" className="btn btn--ghost" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
+                  <button type="button" className="btn btn--primary" onClick={generateDraw} disabled={!isDateValid(c.date) || generating || starting}>
                     {generating && <span className="spinner" />}
-                    {generating ? "Generating…" : "Preview draw"}
+                    {generating ? "Generating…" : "Generate draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
+                  <button type="button" className="btn btn--ghost" onClick={start} disabled={!isDateValid(c.date) || starting || generating}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -311,12 +319,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 ))}
               </div>
             ))}
-            <div>
-              <div className="side-nav__sec">Other competitions</div>
-              {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
-                <button type="button" key={cc.id} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
-              ))}
-            </div>
+            {t.competitions.filter((cc) => cc.id !== c.id).length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+                <div className="side-nav__sec" style={{ opacity: 0.6 }}>Other competitions</div>
+                {t.competitions.filter((cc) => cc.id !== c.id).map((cc) => (
+                  <button type="button" key={cc.id} style={{ opacity: 0.75 }} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} />}

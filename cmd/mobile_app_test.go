@@ -176,3 +176,30 @@ func TestMobileAppOptions_LockPasswordEnvVarFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestParseScheduleEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"1 is truthy", "1", true},
+		{"true is truthy", "true", true},
+		{"TRUE is truthy", "TRUE", true},
+		{"yes is truthy", "yes", true},
+		{"on is truthy", "on", true},
+		{"empty string is false", "", false},
+		{"0 is false", "0", false},
+		{"false is false", "false", false},
+		{"no is false", "no", false},
+		{"off is false", "off", false},
+		{"garbage is false", "garbage", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseScheduleEnabled(tt.input)
+			assert.Equal(t, tt.want, got,
+				"parseScheduleEnabled(%q) = %v; want %v", tt.input, got, tt.want)
+		})
+	}
+}

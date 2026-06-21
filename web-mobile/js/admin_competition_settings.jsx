@@ -373,6 +373,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (nextCourts.length) updateNow("courts", nextCourts);
   };
 
+  // draw-ready lock: output-affecting fields (pools, courts, format, kind, team
+  // size, mirror) are disabled while a draw exists. Cosmetic fields (name,
+  // date, startTime, numberPrefix, checkInEnabled, naginata, withZekkenName)
+  // remain editable. Discard the draw from the competition header to unlock.
+  const isDrawReady = local.status === "draw-ready";
+
   return (
     <div className="card">
       <div className="card__head">
@@ -449,6 +455,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* Render NaN as "" so clearing the input stays empty instead of */}
           {/* collapsing to "0"; updateNumber gates the debounced save so a */}
           {/* cleared/invalid value never lands on the backend as 0. */}
+          {/* draw-ready lock: teamSize is output-affecting. */}
           <input
             className="input"
             type="number"
@@ -456,14 +463,21 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             max={MAX_TEAM_SIZE}
             value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
             onChange={(e) => updateNumber("teamSize", e.target.value, 1)}
+            disabled={isDrawReady}
           />
         </div>
       )}
       <div className="field">
         <label className="field__label">Assigned shiaijo (courts)</label>
+        {/* draw-ready lock: courts is output-affecting — discard the draw to reassign. */}
+        {isDrawReady && (
+          <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
+            Discard the draw to change pools, courts, or format.
+          </div>
+        )}
         <div className="radio-group">
           {tournament.courts.map((cc) => (
-            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
+            <button key={cc} className={`radio-pill ${local.courts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)} disabled={isDrawReady}>Shiaijo (court) {cc}</button>
           ))}
         </div>
         {(local.format === "league" || local.poolFormat === "partial") ? (() => {
@@ -485,9 +499,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
+            {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")}>maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")}>minimum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
           <div className="row">
@@ -500,6 +515,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               min="3"
               value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
               onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
+              disabled={isDrawReady}
             /></div>
             <div className="field"><label className="field__label">Winners per pool</label><input
               className="input"
@@ -507,6 +523,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               min="1"
               value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
               onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+              disabled={isDrawReady}
             /></div>
           </div>
         </>
@@ -617,7 +634,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} /> Round-robin in pools</label>
+        {/* draw-ready lock: roundRobin is output-affecting. */}
+        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>

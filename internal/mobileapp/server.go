@@ -48,14 +48,16 @@ func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) Elev
 // the long-lived SSE goroutines. The returned *APIRateLimiter should
 // also be closed on shutdown to stop the per-IP cleanup goroutine.
 func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub, *APIRateLimiter) {
-	return NewRouterWithHub(store, eng, res, verifier, NewHub())
+	return NewRouterWithHub(store, eng, res, verifier, NewHub(), false)
 }
 
 // NewRouterWithHub is the testable / configurable variant — pass a
 // pre-built Hub (e.g. one with NewHubWithLimits) instead of constructing
 // the default. cmd/mobile_app.go uses this to apply the SSE_MAX_CLIENTS
 // override; tests use it to inject a small-capacity hub.
-func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub) (*gin.Engine, *Hub, *APIRateLimiter) {
+// scheduleEnabled is sourced from ENABLE_TOURNAMENT_SCHEDULE (mp-fwce) and
+// forwarded to RegisterAuthConfigHandlers.
+func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub, scheduleEnabled bool) (*gin.Engine, *Hub, *APIRateLimiter) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -164,7 +166,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// inert payloads when locked mode is active — see handlers_reset.go
 	// and handlers_auth_config.go.
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier, elevated)
+	RegisterAuthConfigHandlers(api, verifier, elevated, scheduleEnabled)
 
 	// Admin API endpoints (protected). Split into three sub-groups by
 	// expected body size so the body cap fires BEFORE AuthMiddleware at

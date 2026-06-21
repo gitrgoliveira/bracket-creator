@@ -837,14 +837,33 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 
 				// Settings-only PUT (Players field absent in body).
-				// Block settings changes while a draw is pending — the
-				// draw artifacts (pools.csv / bracket.json) were generated
-				// from the current config; mutating PoolSize, Courts, or
-				// Format while draw-ready would leave config.md inconsistent
-				// with those artifacts when StartCompetition runs.
+				// Draw-ready gate: the draw artifacts (pools.csv /
+				// bracket.json) were generated from the current config.
+				// Mutating output-affecting fields while draw-ready would
+				// leave config.md inconsistent with those artifacts when
+				// StartCompetition runs. Cosmetic fields (Name, Date,
+				// StartTime, NumberPrefix, CheckInEnabled, Naginata,
+				// WithZekkenName) are still editable in draw-ready and are
+				// applied below. This mirrors the participant/seed 409s in
+				// handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
-					drawReadyFlag = true
-					return nil, nil
+					courtsChanged := len(comp.Courts) > 0 &&
+						strings.Join(comp.Courts, ",") != strings.Join(current.Courts, ",")
+					outputAffectingChanged :=
+						(comp.PoolSize != 0 && comp.PoolSize != current.PoolSize) ||
+							(comp.PoolWinners != 0 && comp.PoolWinners != current.PoolWinners) ||
+							(comp.PoolSizeMode != "" && comp.PoolSizeMode != current.PoolSizeMode) ||
+							courtsChanged ||
+							(comp.Format != "" && comp.Format != current.Format) ||
+							(comp.PoolFormat != "" && comp.PoolFormat != current.PoolFormat) ||
+							(comp.RoundRobin != current.RoundRobin) ||
+							(comp.Mirror != current.Mirror) ||
+							(comp.TeamSize != 0 && comp.TeamSize != current.TeamSize) ||
+							(comp.Kind != "" && comp.Kind != current.Kind)
+					if outputAffectingChanged {
+						drawReadyFlag = true
+						return nil, nil
+					}
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompFields BEFORE the transform, so a PUT to
@@ -937,7 +956,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify competition while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format/courts/pool config/kind) while a draw is pending; discard the draw first"})
 			return
 		}
 		if validationErr != nil {

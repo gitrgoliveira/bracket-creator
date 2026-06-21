@@ -725,8 +725,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   return (
     <>
       {isDrawReady && (
-        <div className="notice notice--info" style={{ marginBottom: 12 }}>
-          Draw pending — edits will update the draw in place.
+        <div className="alert alert--warn" style={{ marginBottom: 12 }}>
+          Draw generated — participants and seeds are locked. Discard the draw (from the competition header) to change them.
         </div>
       )}
       {isStarted && (
@@ -752,10 +752,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               {c.checkInEnabled && (
                 <button className="btn btn--sm" type="button" onClick={bulkCheckInAll} disabled={players.length === 0} title="Mark all as checked in">Check in all</button>
               )}
-              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
-              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
+              {/* draw-ready lock: seed mutations disabled until the draw is discarded */}
+              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to shuffle seeds" : "Shuffle unseeded players"}>Shuffle unseeded</button>
+              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={clearAllSeeds}>Clear seeds</button>
+              <button className="btn btn--sm" type="button" onClick={clearAllSeeds} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to clear seeds" : undefined}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>
@@ -910,13 +911,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch;
+                // draw-ready lock: reordering (and all seed mutations) disabled until the draw is discarded.
+                // Filter-active check is kept separate so both reasons can coexist.
+                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
                 return (
                   <div
                     key={p.id ?? p.name}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
-                    onDragStart={() => { dragIdxRef.current = i; }}
+                    onDragStart={() => { if (reorderDisabled) return; dragIdxRef.current = i; }}
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
@@ -971,7 +974,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                       <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
-                      {(isSetup || isDrawReady) && (
+                      {/* draw-ready lock: edit is setup-only; editing participants requires discarding the draw first */}
+                      {isSetup && (
                         <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
@@ -982,6 +986,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
+                        disabled={isDrawReady}
                       />
                   </div>
                 );
@@ -1003,20 +1008,21 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
             </div>
+            {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} title="Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV">Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps}>Apply changes</button>
+              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
             <div
-              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              className={`dropzone ${dragOver ? "dropzone--active" : ""} ${isDrawReady ? "dropzone--disabled" : ""}`}
+              onClick={() => { if (!isDrawReady) fileRef.current?.click(); }}
+              onDragOver={(e) => { if (isDrawReady) return; e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
-              style={{ flex: 1, height: 80, minHeight: 80 }}
+              onDrop={(e) => { if (isDrawReady) { e.preventDefault(); return; } onDrop(e); }}
+              style={{ flex: 1, height: 80, minHeight: 80, cursor: isDrawReady ? "not-allowed" : undefined, opacity: isDrawReady ? 0.5 : undefined }}
             >
               <div className="dropzone__icon">📥</div>
               <div>

@@ -18,8 +18,10 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // Pool daihyosen matches carry '-DH-' in their id.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
-export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks }) {
-  const [tab, setTab] = useState("overview");
+// mp-tidg: activeTab + onTabChange are controlled props — app.jsx owns the
+// tab state so browser back/forward across tabs works (each tab switch is a
+// history push in the URL-sync effect). Do not add internal tab state here.
+export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange }) {
   const c = competition;
 
   const allMatches = useMemo(() => {
@@ -156,6 +158,32 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
 
+  // Clamp the incoming activeTab to the set of tabs that are actually
+  // rendered for this competition — a tab that was valid on a previous
+  // comp (e.g. "bracket") may not exist yet on draw-ready or setup.
+  const effectiveTab = tabs.some(t => t.id === activeTab) ? activeTab : "overview";
+
+  // Controlled-tab writer. Maps the default tab to null so App keeps the
+  // canonical bare /competition/:id URL (the rest of the app stores null,
+  // not "overview", for the default), and tolerates a missing handler via
+  // optional chaining — some unit tests mount ViewerCompetition without an
+  // onTabChange just to assert tab presence. (mp-tidg / PR #307 review)
+  const selectTab = (id, replace = false) => onTabChange?.(id === "overview" ? null : id, replace);
+
+  // mp-tidg: when the requested tab isn't available (deep-link to /bracket
+  // before a draw, or a draw_discarded SSE while sitting on it) effectiveTab
+  // falls back to overview for display. Propagate that back to app state so
+  // the URL stops claiming a tab the user isn't actually on — otherwise a
+  // shared permalink would render Overview while still reading /…/bracket.
+  // Guard on a truthy activeTab: when no specific tab was requested (the
+  // default/nullish state) there is nothing to correct — the URL is already
+  // canonical.
+  React.useEffect(() => {
+    // replace=true: this is a correction, not a navigation — rewrite the
+    // invalid tab URL in place so Back doesn't return to it (PR #307 review).
+    if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab, true);
+  }, [effectiveTab, activeTab, onTabChange]);
+
   const currentMatch = useMemo(() => {
     if (runningMatches.length > 0) return runningMatches[0];
     return upcomingMatches[0] || null;
@@ -167,12 +195,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
   React.useEffect(() => {
-    if (tab === "bracket" && currentMatch) {
+    if (effectiveTab === "bracket" && currentMatch) {
       setBracketScrollTarget(currentMatch.id + "::" + Date.now());
     }
-  }, [tab, currentMatch?.id]);
+  }, [effectiveTab, currentMatch?.id]);
 
-  const hasBracketEl = tab === "bracket" && !!derivedBracket;
+  const hasBracketEl = effectiveTab === "bracket" && !!derivedBracket;
   React.useEffect(() => {
     if (!hasBracketEl) return;
     const el = bracketScrollRef.current;
@@ -214,7 +242,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
         </div>
         <div className="viewer__tabs">
           {tabs.map((tb) => (
-            <button type="button" key={tb.id} className={`viewer__tab ${tab === tb.id ? "is-active" : ""}`} onClick={() => setTab(tb.id)}>
+            <button type="button" key={tb.id} className={`viewer__tab ${effectiveTab === tb.id ? "is-active" : ""}`} onClick={() => selectTab(tb.id)}>
               {tb.label}
             </button>
           ))}
@@ -250,7 +278,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           </div>
         )}
         <div className="viewer__body">
-          {tab === "overview" && (
+          {effectiveTab === "overview" && (
             <ViewerOverview
               c={c}
               myPlayer={myPlayer}
@@ -265,13 +293,13 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               standings={standings}
               pools={pools}
               poolMatches={poolMatches}
-              onSwitchTab={setTab}
+              onSwitchTab={selectTab}
               hasActiveFilter={hasActiveFilter}
               filterLabel={filterLabel}
               highlightPlayers={highlightPlayers}
             />
           )}
-          {tab === "bracket" && derivedBracket && (
+          {effectiveTab === "bracket" && derivedBracket && (
             <div className={`viewer-bracket-bleed${bracketOverflowRight ? " viewer-bracket-bleed--overflow-right" : ""}`}>
               <div ref={bracketScrollRef} className="bracket-canvas" style={{ borderRadius: 0, borderLeft: 0, borderRight: 0 }}>
                 <div className="bracket-canvas__inner" style={{ padding: 18 }}>
@@ -297,13 +325,13 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               </div>
             </div>
           )}
-          {tab === "pools" && hasPools && (
+          {effectiveTab === "pools" && hasPools && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
           )}
-          {tab === "swiss" && isSwiss && (
+          {effectiveTab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
-          {tab === "results" && c.status === "completed" && (
+          {effectiveTab === "results" && c.status === "completed" && (
             // Pass the *real* server bracket (not derivedBracket) — the latter
             // is a TBD placeholder for visualization only and carries no
             // winner data. Using real server data ensures deriveAwards sees
@@ -437,7 +465,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             </thead>
             <tbody>
               {leagueStandings.slice(0, 5).map((s, i) => (
-                <tr key={s.player?.id || s.player?.name || i}>
+                <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
                       (s.rank), not the row index — DRY with the full standings and
                       the backend tiebreak/override logic. */}

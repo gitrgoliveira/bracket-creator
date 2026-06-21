@@ -520,7 +520,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               {(poolStandings || selectedPool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
                 const isTeamComp = c.kind === "team" || c.teamSize > 0;
                 return (
-                  <tr key={s.player.name}>
+                  <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
                     <td style={{ width: 60 }}>
                       <RankInput
                         initial={s.rank || i + 1}
@@ -676,7 +676,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
                     const isTeamComp = c.kind === "team" || c.teamSize > 0;
                     return (
-                      <tr key={s.player.name}>
+                      <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
                         <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
                           <RankInput
                             initial={s.rank || i + 1}

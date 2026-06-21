@@ -106,8 +106,18 @@ function parsePath(path) {
       return { mode: "display" };
     }
     if (path.startsWith("/competition/")) {
-      const id = path.split("/")[2];
-      return { mode: "viewer", viewerCompId: id };
+      const parts = path.split("/").filter(Boolean);
+      const id = parts[1];
+      // mp-tidg: the 3rd segment encodes the active tab so browser
+      // back/forward navigates across tabs. Decode defensively (same
+      // safeDecode pattern as the shiaijo court segment above). Normalize
+      // the default tab to null — the rest of the app treats "overview" as
+      // the nullish default (selectTab/pathFromState), so /competition/:id
+      // and /competition/:id/overview must both parse to viewerTab=null and
+      // never carry two representations of the same state.
+      let tab = parts[2] ? safeDecode(parts[2]) : null;
+      if (tab === "overview") tab = null;
+      return { mode: "viewer", viewerCompId: id, viewerTab: tab };
     }
     if (path === "/schedule") {
       return { mode: "viewer", viewerScreen: "schedule" };
@@ -137,7 +147,10 @@ function parsePath(path) {
 }
 
 // Pure helper: render the App's view state back into a URL pathname.
-function pathFromState(m, vs, vcid, av) {
+// mp-tidg: `vt` is the viewer competition tab ("overview", "bracket", …).
+// overview is the default and is NOT emitted in the URL (clean root path).
+// register takes precedence over vcid alone and must NOT get a tab suffix.
+function pathFromState(m, vs, vcid, av, vt) {
     if (m === "admin") {
       if (av.kind === "dashboard") return "/admin";
       if (av.kind === "schedule") return "/admin/schedule";
@@ -154,7 +167,15 @@ function pathFromState(m, vs, vcid, av) {
       return "/admin";
     }
     if (vs === "register" && vcid) return `/register/${vcid}`;
-    if (vcid) return `/competition/${vcid}`;
+    if (vcid) {
+      // Omit the tab segment for overview (default) so the canonical URL
+      // stays clean and parsePath(pathFromState(…)) round-trips correctly.
+      // encodeURIComponent mirrors the safeDecode on the parse side (and the
+      // shiaijo-court segment above) so the encode/decode round-trip stays
+      // symmetric even if a future tab id carries a URL-special character.
+      if (vt && vt !== "overview") return `/competition/${vcid}/${encodeURIComponent(vt)}`;
+      return `/competition/${vcid}`;
+    }
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
     if (vs === "reset") return "/reset";
@@ -314,6 +335,40 @@ function App() {
   });
   const [authPrompt, setAuthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
+  // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
+  // browser back/forward across tabs works — each tab push/pop is a
+  // history entry owned by App, making this the single source of truth.
+  const [viewerTab, setViewerTab] = useS(initialRoute.viewerTab || null);
+  // When the next state→URL sync should replaceState instead of pushState.
+  // A correction (an invalid/non-canonical tab rewritten to its canonical
+  // path) must REPLACE the bad entry, otherwise Back returns to the invalid
+  // URL which re-corrects and re-pushes — a back/forward trap (PR #307
+  // review). It is armed for (a) a non-canonical landing URL — e.g.
+  // /competition/:id/overview, which parsePath normalizes to viewerTab=null
+  // so the initial sync rewrites to the bare path — and (b) the clamp in
+  // ViewerCompetition (via handleTabChange's replace arg). Genuine tab
+  // navigations leave it false and push normally. Consumed (reset to false)
+  // by the sync effect only when it actually rewrites the URL.
+  const replaceNextUrlSync = useR(
+    typeof window !== "undefined" &&
+      initialRoute.mode !== "display" &&
+      window.location.pathname !==
+        pathFromState(
+          initialRoute.mode || "viewer",
+          initialRoute.viewerScreen || "home",
+          initialRoute.viewerCompId || null,
+          initialRoute.admin || { kind: "dashboard" },
+          initialRoute.viewerTab || null,
+        ),
+  );
+  // Controlled-tab writer for ViewerCompetition. `replace` is true when the
+  // change is a correction (clamped invalid/unavailable tab) so the URL sync
+  // replaces rather than pushes; tab clicks pass false. Set explicitly on
+  // every call so the flag never leaks across navigations.
+  const handleTabChange = useC((tab, replace = false) => {
+    replaceNextUrlSync.current = replace;
+    setViewerTab(tab);
+  }, []);
   const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
   const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
   const [toast, setToast] = useS(null);
@@ -398,15 +453,21 @@ function App() {
     // on its own. Skip URL syncing here to avoid stripping the
     // query string (pathFromState only emits the path, not the query).
     if (mode === "display") return;
-    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView);
+    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView, viewerTab);
     if (window.location.pathname !== url) {
+      // Consume the replace flag only when we actually rewrite, so a no-op
+      // pass (e.g. the mount render before a clamp resolves) doesn't drop it.
+      const replace = replaceNextUrlSync.current;
+      replaceNextUrlSync.current = false;
       if (AppRouter && AppRouter.route) {
-        AppRouter.route(url);
+        AppRouter.route(url, replace);
+      } else if (replace) {
+        history.replaceState(null, "", url);
       } else {
         history.pushState(null, "", url);
       }
     }
-  }, [mode, viewerScreen, viewerCompId, adminView]);
+  }, [mode, viewerScreen, viewerCompId, adminView, viewerTab]);
 
   // The popstate handler is preserved as a fallback for back/forward
   // navigation. preact-router would also fire its own listeners on
@@ -425,6 +486,7 @@ function App() {
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
+        setViewerTab(route.viewerTab || null);
         setViewerScreen(route.viewerScreen || "home");
       }
     };
@@ -880,8 +942,10 @@ function App() {
       {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
           // key on the competition id so switching comps remounts the
-          // component and resets per-comp UI state (active tab, open
-          // match modal, bracket scroll target).
+          // component and resets its internal per-comp UI state (open match
+          // modal, bracket scroll target). The active tab is NOT reset by the
+          // remount — it is controlled App state (viewerTab); the onBack /
+          // onSelectCompetition handlers clear it explicitly.
           key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}
@@ -889,11 +953,13 @@ function App() {
           poolMatches={selectedCompData.poolMatches}
           standings={selectedCompData.standings}
           bracket={selectedCompData.bracket}
-          onBack={() => setViewerCompId(null)}
+          onBack={() => { setViewerCompId(null); setViewerTab(null); }}
           onAdminClick={requestAdmin}
           authed={authed}
           onEditCompetition={(id) => { setMode("admin"); setAdminView({ kind: "competition", id, section: "settings" }); }}
           tweaks={THEME}
+          activeTab={viewerTab || "overview"}
+          onTabChange={handleTabChange}
         />
       ) : viewerScreen === "schedule" ? (
         <window.ViewerSchedule
@@ -934,6 +1000,7 @@ function App() {
               onBack={() => {
                 setViewerScreen("home");
                 setViewerCompId(null);
+                setViewerTab(null);
               }}
             />
           : <window.LoadingSpinner text="Loading…" />
@@ -949,11 +1016,12 @@ function App() {
       ) : (
         <window.ViewerHome
           tournament={tournament}
-          onSelectCompetition={setViewerCompId}
+          onSelectCompetition={(compId) => { setViewerCompId(compId); setViewerTab(null); }}
           onOpenSchedule={() => setViewerScreen("schedule")}
           onAdminClick={requestAdmin}
           onRegister={(compId) => {
             setViewerCompId(compId);
+            setViewerTab(null);
             setViewerScreen("register");
           }}
           onOpenResults={() => setViewerScreen("results")}
@@ -981,6 +1049,7 @@ function App() {
             // any other viewer route uses.
             if (mode === "admin") setMode("viewer");
             setViewerCompId(null);
+            setViewerTab(null);
             setViewerScreen("reset");
           }}
           onClose={() => {

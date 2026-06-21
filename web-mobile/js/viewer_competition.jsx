@@ -168,7 +168,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // not "overview", for the default), and tolerates a missing handler via
   // optional chaining — some unit tests mount ViewerCompetition without an
   // onTabChange just to assert tab presence. (mp-tidg / PR #307 review)
-  const selectTab = (id) => onTabChange?.(id === "overview" ? null : id);
+  const selectTab = (id, replace = false) => onTabChange?.(id === "overview" ? null : id, replace);
 
   // mp-tidg: when the requested tab isn't available (deep-link to /bracket
   // before a draw, or a draw_discarded SSE while sitting on it) effectiveTab
@@ -179,7 +179,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // default/nullish state) there is nothing to correct — the URL is already
   // canonical.
   React.useEffect(() => {
-    if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab);
+    // replace=true: this is a correction, not a navigation — rewrite the
+    // invalid tab URL in place so Back doesn't return to it (PR #307 review).
+    if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab, true);
   }, [effectiveTab, activeTab, onTabChange]);
 
   const currentMatch = useMemo(() => {

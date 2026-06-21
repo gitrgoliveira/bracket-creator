@@ -339,6 +339,36 @@ function App() {
   // browser back/forward across tabs works — each tab push/pop is a
   // history entry owned by App, making this the single source of truth.
   const [viewerTab, setViewerTab] = useS(initialRoute.viewerTab || null);
+  // When the next state→URL sync should replaceState instead of pushState.
+  // A correction (an invalid/non-canonical tab rewritten to its canonical
+  // path) must REPLACE the bad entry, otherwise Back returns to the invalid
+  // URL which re-corrects and re-pushes — a back/forward trap (PR #307
+  // review). It is armed for (a) a non-canonical landing URL — e.g.
+  // /competition/:id/overview, which parsePath normalizes to viewerTab=null
+  // so the initial sync rewrites to the bare path — and (b) the clamp in
+  // ViewerCompetition (via handleTabChange's replace arg). Genuine tab
+  // navigations leave it false and push normally. Consumed (reset to false)
+  // by the sync effect only when it actually rewrites the URL.
+  const replaceNextUrlSync = useR(
+    typeof window !== "undefined" &&
+      initialRoute.mode !== "display" &&
+      window.location.pathname !==
+        pathFromState(
+          initialRoute.mode || "viewer",
+          initialRoute.viewerScreen || "home",
+          initialRoute.viewerCompId || null,
+          initialRoute.admin || { kind: "dashboard" },
+          initialRoute.viewerTab || null,
+        ),
+  );
+  // Controlled-tab writer for ViewerCompetition. `replace` is true when the
+  // change is a correction (clamped invalid/unavailable tab) so the URL sync
+  // replaces rather than pushes; tab clicks pass false. Set explicitly on
+  // every call so the flag never leaks across navigations.
+  const handleTabChange = useC((tab, replace = false) => {
+    replaceNextUrlSync.current = replace;
+    setViewerTab(tab);
+  }, []);
   const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
   const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
   const [toast, setToast] = useS(null);
@@ -425,8 +455,14 @@ function App() {
     if (mode === "display") return;
     const url = pathFromState(mode, viewerScreen, viewerCompId, adminView, viewerTab);
     if (window.location.pathname !== url) {
+      // Consume the replace flag only when we actually rewrite, so a no-op
+      // pass (e.g. the mount render before a clamp resolves) doesn't drop it.
+      const replace = replaceNextUrlSync.current;
+      replaceNextUrlSync.current = false;
       if (AppRouter && AppRouter.route) {
-        AppRouter.route(url);
+        AppRouter.route(url, replace);
+      } else if (replace) {
+        history.replaceState(null, "", url);
       } else {
         history.pushState(null, "", url);
       }
@@ -923,7 +959,7 @@ function App() {
           onEditCompetition={(id) => { setMode("admin"); setAdminView({ kind: "competition", id, section: "settings" }); }}
           tweaks={THEME}
           activeTab={viewerTab || "overview"}
-          onTabChange={setViewerTab}
+          onTabChange={handleTabChange}
         />
       ) : viewerScreen === "schedule" ? (
         <window.ViewerSchedule

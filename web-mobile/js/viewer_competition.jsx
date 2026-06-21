@@ -11,6 +11,7 @@ import { usePrimaryWatch } from './viewer_schedule.jsx';
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
+const EmptyState = window.EmptyState;
 
 // Lazy callable — window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
@@ -366,11 +367,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   // setup: no draw yet — plain "not started" message.
   if (!c.status || c.status === "setup") {
     return (
-      <div className="empty" style={{ padding: 32 }}>
-        <div className="icon">⏳</div>
-        <h3>Not started yet</h3>
-        <div style={{ fontSize: 13 }}>Starts at {c.startTime}. Check back when the competition begins.</div>
-      </div>
+      <EmptyState icon="⏳" title="Not started yet" message={`Starts at ${c.startTime}. Check back when the competition begins.`} style={{ padding: 32 }} />
     );
   }
 
@@ -382,17 +379,12 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   if (c.status === "draw-ready") {
     const isSwiss = c.format === "swiss";
     return (
-      <div className="empty" style={{ padding: 32 }}>
-        <div className="icon">📋</div>
-        <h3>Draw is ready</h3>
-        <div style={{ fontSize: 13 }}>
-          Starts at {c.startTime}. {isSwiss
-            ? "Check the Standings tab to follow the rounds."
-            : isLeague
-            ? "Browse the League tab to see the draw."
-            : "Browse the Pools and Bracket tabs to see the draw."}
-        </div>
-      </div>
+      <EmptyState
+        icon="📋"
+        title="Draw is ready"
+        message={`Starts at ${c.startTime}. ${isSwiss ? "Check the Standings tab to follow the rounds." : isLeague ? "Browse the League tab to see the draw." : "Browse the Pools and Bracket tabs to see the draw."}`}
+        style={{ padding: 32 }}
+      />
     );
   }
 
@@ -565,7 +557,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
 
       {/* No running or upcoming */}
       {!currentMatch && upcomingMatches.length === 0 && runningMatches.length === 0 && (
-        <div className="empty" style={{ padding: 20 }}><h3>Nothing scheduled</h3></div>
+        <EmptyState title="Nothing scheduled" style={{ padding: 20 }} />
       )}
 
       {recentMatches.length > 0 && (

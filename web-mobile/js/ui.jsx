@@ -441,6 +441,18 @@ function Icon({ name, size = 16, className }) {
   );
 }
 
+function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...attrs }) {
+  return (
+    <div className={`empty${className ? " " + className : ""}`} style={style} {...attrs}>
+      {icon && <div className="icon">{icon}</div>}
+      {title && <h3>{title}</h3>}
+      {message && <div>{message}</div>}
+      {cta}
+      {ctaNote && <div className="hint--sm empty__cta-note">{ctaNote}</div>}
+    </div>
+  );
+}
+
 function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
 
@@ -497,7 +509,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -517,5 +529,6 @@ if (typeof window !== "undefined") {
   window.DialogHost = DialogHost;
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
+  window.EmptyState = EmptyState;
 }
 

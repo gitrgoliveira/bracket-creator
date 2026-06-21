@@ -7,6 +7,7 @@ import { withNumber } from './match_scoreboard.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
+const EmptyState = window.EmptyState;
 
 // mp-xhaa: the pinned-primary entry key (string), persisted separately from the
 // list so reordering/dedup of the list never disturbs the pin. Only meaningful
@@ -418,11 +419,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
 
       <div className="tw-courts">
         {allMatches.length === 0 ? (
-          <div className="empty" style={{ gridColumn: "1 / -1" }}>
-            <div className="icon">🗓</div>
-            <h3>No matches scheduled yet</h3>
-            <div style={{ fontSize: 13 }}>The schedule will appear here once the tournament begins.</div>
-          </div>
+          <EmptyState icon="🗓" title="No matches scheduled yet" message="The schedule will appear here once the tournament begins." style={{ gridColumn: "1 / -1" }} />
         ) : courts.map((cc) => {
           const list = byCourt[cc] || [];
           const runningOn = list.find((m) => m.status === "running");

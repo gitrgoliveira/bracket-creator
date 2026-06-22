@@ -286,6 +286,21 @@ describe('findNextPoolOnCourt', () => {
     ] };
     expect(findNextPoolOnCourt(c3, 'Pool A', 'A').name).toBe('Pool B');
   });
+  it('roster honours number prefix + zekken displayName via sideLabel', () => {
+    // Object sides with number + displayName; withZekkenName true → the roster
+    // must match the rest of the TV surface (e.g. "K1 Ryu", not "Tanaka").
+    const c = { withZekkenName: true, poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30',
+        sideA: { name: 'Tanaka', displayName: 'Ryu', number: 'K1' },
+        sideB: { name: 'Suzuki', displayName: 'Sho', number: 'K2' } },
+    ] };
+    const res = findNextPoolOnCourt(c, 'Pool A', 'A');
+    expect(res.players).toEqual([
+      { name: 'K1 Ryu', side: 'aka' },
+      { name: 'K2 Sho', side: 'shiro' },
+    ]);
+  });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
     const team = { kind: 'team', poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'Team Alpha', sideB: 'Team Beta',  status: 'running',   scheduledAt: '09:00' },

@@ -212,12 +212,16 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     const poolMatches = competition.poolMatches
         .filter(m => poolNameOf(m.id) === nextName)
         .sort((a, b) => String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id)));
+    // Use sideLabel (number prefix + zekken displayName) so the roster matches
+    // every other TV surface; dedupe on that display label.
+    const zekken = !!competition.withZekkenName;
     const seen = new Set();
     const players = [];
     for (const m of poolMatches) {
         for (const [sideRaw, side] of [[m.sideA, "aka"], [m.sideB, "shiro"]]) {
-            const name = typeof sideRaw === "string" ? sideRaw : (sideRaw && sideRaw.name) || "";
-            if (name && !seen.has(name)) { seen.add(name); players.push({ name, side }); }
+            if (!sideRaw) continue;
+            const name = sideLabel(sideRaw, zekken);
+            if (name && name !== "TBD" && !seen.has(name)) { seen.add(name); players.push({ name, side }); }
         }
     }
     return { name: nextName, players };

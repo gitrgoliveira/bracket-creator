@@ -3310,8 +3310,11 @@ button.pool-match-row {
 
 .vlist-item__bar>div {
   height: 100%;
+  width: 100%;
   background: var(--accent);
-  transition: width 300ms;
+  transform-origin: left;
+  transform: scaleX(var(--bar-fill, 0));
+  transition: transform 300ms;
 }
 
 .vlist-item__pct {
@@ -5816,7 +5819,7 @@ button.pool-match-row {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 500;
   pointer-events: none;
-  animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes toast-in {
@@ -6789,7 +6792,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -7896,9 +7898,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--red);
   border-radius: var(--r-sm);
-  border-left: 3px solid var(--red);
+  background: var(--red-soft);
 }
 .start-all__failed-name { font-weight: 600; color: var(--ink-1); }
 .start-all__failed-reason { font-size: 12px; color: var(--ink-3); }

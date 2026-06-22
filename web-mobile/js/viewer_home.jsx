@@ -381,7 +381,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                         </div>
                         {c.status && c.status !== "setup" && c.status !== "draw-ready" && total > 0 && (
                           <div className="vlist-item__progress">
-                            <div className="vlist-item__bar"><div style={{ width: pct + "%" }}></div></div>
+                            <div className="vlist-item__bar"><div style={{ '--bar-fill': pct / 100 }}></div></div>
                             <div className="vlist-item__pct">
                               {runningCount > 0 ? <span className="bc-running-count">● {runningCount} now</span> : pluralize(done, "match", "matches") + " / " + total}
                             </div>

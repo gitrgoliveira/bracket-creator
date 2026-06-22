@@ -348,7 +348,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
                 <EmptyState
                   icon="⚙️"
                   title="No competitions yet"
-                  message={<div className="hint--md">Head to Admin to set up the first competition.</div>}
+                  message="Head to Admin to set up the first competition."
                   cta={<button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>Open admin</button>}
                   ctaNote="Requires the admin password."
                 />

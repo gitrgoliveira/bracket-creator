@@ -599,6 +599,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
+      // Delay revoke so the browser initiates the download before the blob URL is torn down
       setTimeout(() => window.URL.revokeObjectURL(dlUrl), 100);
       if (showToast) showToast("PDFs generated — download started.");
     } catch (err) {

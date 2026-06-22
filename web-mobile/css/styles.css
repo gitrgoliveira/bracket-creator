@@ -1953,6 +1953,10 @@ a:hover {
     min-height: 44px;
   }
 }
+.modal__close:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
 /* ---------- Auth modal ---------- */
 .auth {

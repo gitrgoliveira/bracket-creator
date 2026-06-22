@@ -504,25 +504,39 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         )}
                         <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
                     </div>
-                    {courtsComps.length > 0 && (
-                        <div className="page-head__actions">
-                            <div className="shiaijo-comp-selector">
-                                <span className="shiaijo-comp-selector__label">Officiating:</span>
-                                {courtsComps.length === 1 ? (
-                                    <span className="shiaijo-comp-selector__name">{courtsComps[0].name}</span>
-                                ) : (
-                                    <select
-                                        className="input shiaijo-comp-select"
-                                        value={effectiveCompId || ""}
-                                        onChange={(e) => setSelectedCompId(e.target.value)}
-                                        aria-label="Select competition to officiate"
-                                    >
-                                        {courtsComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                    </select>
-                                )}
+                    {courtsComps.length > 0 && (() => {
+                        // Mirror of the Shiaijo title on the right: the competition being
+                        // officiated gets the same display-title treatment (big name + navy
+                        // chevron chip) so "which court" and "which competition" read as a
+                        // matched pair. Falls back to a plain title when only one comp is
+                        // on this court (no switch affordance needed).
+                        const officiating = courtsComps.find(c => c.id === effectiveCompId) || courtsComps[0];
+                        return (
+                            <div className="page-head__actions">
+                                <div className="shiaijo-officiating">
+                                    {courtsComps.length === 1 ? (
+                                        <h2 className="page-head__title shiaijo-officiating__name">{officiating.name}</h2>
+                                    ) : (
+                                        <div className="shiaijo-title-select shiaijo-title-select--right">
+                                            <h2 className="page-head__title shiaijo-officiating__name">
+                                                {officiating.name}
+                                                <span className="shiaijo-title-select__chevron" aria-hidden="true">▾</span>
+                                            </h2>
+                                            <select
+                                                className="shiaijo-title-select__native"
+                                                value={effectiveCompId || ""}
+                                                onChange={(e) => setSelectedCompId(e.target.value)}
+                                                aria-label="Select competition to officiate"
+                                            >
+                                                {courtsComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            </select>
+                                        </div>
+                                    )}
+                                    <div className="page-head__sub shiaijo-officiating__sub">Officiating</div>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        );
+                    })()}
                 </div>
 
                 {!courtKnown && (

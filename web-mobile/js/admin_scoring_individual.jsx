@@ -439,10 +439,73 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         </div>
 
         <div className="editor-modal__body">
+          <div className="scoring-board">
+              {/* Score slots + point buttons */}
+              <div className="sb-match">
+                {sides.map((s, idx) => (
+                  <React.Fragment key={s.key}>
+                    <div className={`sb-side sb-side--${s.color}`}>
+                      <div className="sb-name">{s.name}</div>
+                      <div className="sb-slots">
+                        {[0, 1].map((i) => (
+                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
+                            {s.pts[i] || "·"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="sb-points-grid">
+                        {getIpponButtons(isNaginata).map((cc) => (
+                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {idx === 0 && (
+                      <div className="sb-center">
+                        {!isDrawToggled && (
+                          <div className="sb-vs">
+                            {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
+                          </div>
+                        )}
+                        <button
+                          className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
+                          data-testid="scoring-modal-mark-draw"
+                          onClick={() => {
+                            const r = decideDrawToggle({ isDrawToggled, aTotal, bTotal });
+                            if (r.action === "cancel") { setIsDrawToggled(false); markScoringDirty(); } // C1
+                            else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
+                          }}
+                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
+                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw — decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
+                          aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
+                        >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
+                      </div>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+
+              {/* Independent foul counters */}
+              <div className="sb-fouls">
+                {sides.map((s) => (
+                  <FoulCounter
+                    key={s.key}
+                    label={s.label}
+                    fouls={s.fouls}
+                    setFouls={s.setFouls}
+                    onIncrement={s.onIncrement}
+                    color={s.color}
+                    disabled={boutDecided || decidedByHantei}
+                  />
+                ))}
+              </div>
+          </div>
+
           {/* FR-033 encho toggle: collapses to a small "⏱ Overtime" pill
               when no overtime is active. Click the pill (or set the
               counter through the existing flow) to mount the full
-              counter UI. Saves ~32px of vertical space pre-overtime. */}
+              counter UI. Saves ~32px of vertical space pre-overtime.
+              Sits below the scoring board so the score + foul boxes stay
+              the operator's first focus; overtime/hantei are follow-ups. */}
           <EnchoControl
             enchoPeriodCount={enchoPeriodCount}
             setEnchoPeriodCount={setEnchoPeriodCount}
@@ -454,7 +517,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               The winner is recorded with the hantei flag, distinguishable
               from an ippon-derived win for stats, audit, and Excel. */}
           {aTotal === bTotal && (
-            <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
+            <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
               <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
               <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
               {!decidedByHantei && (
@@ -516,66 +579,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
             </div>
           )}
-          <div className="scoring-board">
-              {/* Score slots + point buttons */}
-              <div className="sb-match">
-                {sides.map((s, idx) => (
-                  <React.Fragment key={s.key}>
-                    <div className={`sb-side sb-side--${s.color}`}>
-                      <div className="sb-name">{s.name}</div>
-                      <div className="sb-slots">
-                        {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : "Click to remove"}>
-                            {s.pts[i] || "·"}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="sb-points-grid">
-                        {getIpponButtons(isNaginata).map((cc) => (
-                          <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
-                        ))}
-                      </div>
-                    </div>
-                    {idx === 0 && (
-                      <div className="sb-center">
-                        {!isDrawToggled && (
-                          <div className="sb-vs">
-                            {aTotal === 0 && bTotal === 0 ? "VS" : `${bTotal}–${aTotal}`}
-                          </div>
-                        )}
-                        <button
-                          className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
-                          data-testid="scoring-modal-mark-draw"
-                          onClick={() => {
-                            const r = decideDrawToggle({ isDrawToggled, aTotal, bTotal });
-                            if (r.action === "cancel") { setIsDrawToggled(false); markScoringDirty(); } // C1
-                            else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
-                          }}
-                          disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
-                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked — hantei already recorded" : "Hantei armed — choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw — decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
-                          aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
-                        >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
-                      </div>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-
-              {/* Independent foul counters */}
-              <div className="sb-fouls">
-                {sides.map((s) => (
-                  <FoulCounter
-                    key={s.key}
-                    label={s.label}
-                    fouls={s.fouls}
-                    setFouls={s.setFouls}
-                    onIncrement={s.onIncrement}
-                    color={s.color}
-                    disabled={boutDecided || decidedByHantei}
-                  />
-                ))}
-              </div>
-          </div>
 
           {/* Ippon-type letter legend — discoverable "?" affordance mapping
               M/K/D/T/H (+S in naginata) to their kendo meaning, so operators

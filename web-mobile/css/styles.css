@@ -8096,29 +8096,23 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 4px;
 }
 
-/* Competition selector in page-head (AC3) */
-.shiaijo-comp-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Competition selector in page-head (AC3) — mirrors the Shiaijo title on the
+   right edge: the competition name gets the full display-title treatment (same
+   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
+   caption beneath that lines up with the title's own sub-caption on the left. */
+.shiaijo-officiating {
+  text-align: right;
 }
-.shiaijo-comp-selector__label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-.shiaijo-comp-selector__name {
-  font-size: 15px;
-  font-weight: 700;
+/* Navy so the changeable competition reads distinct from the fixed court name,
+   tying it to the navy chevron chip while keeping the identical title scale. */
+.shiaijo-officiating__name {
   color: var(--accent);
 }
-.shiaijo-comp-select {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--accent);
-  min-width: 140px;
-  width: auto;
+.shiaijo-officiating__sub {
+  text-align: right;
+}
+.shiaijo-title-select--right {
+  text-align: right;
 }
 
 /* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,

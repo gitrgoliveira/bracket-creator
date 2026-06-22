@@ -8,6 +8,7 @@ import { boutHansokuMark } from './match_scoreboard.jsx';
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
+const EmptyState = window.EmptyState;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
@@ -135,7 +136,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
 
       <div className="score-editor__list">
         {filtered.length === 0 && (
-          <div className="empty"><div className="icon">🔍</div><h3>No matches</h3><div style={{ fontSize: 12 }}>Adjust your filters or check that competitions have started.</div></div>
+          <EmptyState icon="🔍" title="No matches" message="Adjust your filters or check that competitions have started." />
         )}
         {/* "All matches scored" banner. Guarded against statusFilter === "complete"
             because the filter trivially makes filtered all-completed, which would

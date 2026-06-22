@@ -4,6 +4,7 @@
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
+const EmptyState = window.EmptyState;
 
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
@@ -886,11 +887,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
           {players.length === 0 ? (
-            <div className="empty" style={{ padding: 24 }}>
-              <div className="icon">🌱</div>
-              <h3>No participants yet</h3>
-              <div style={{ fontSize: 12 }}>Add names on the right, then "Apply".</div>
-            </div>
+            <EmptyState icon="🌱" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
           ) : (
             <div className="seed-list">
               {/* When a tag filter is active, reorder controls would operate on */}

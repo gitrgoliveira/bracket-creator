@@ -17,6 +17,7 @@ import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
 
 const { useState } = React;
+const EmptyState = window.EmptyState;
 
 // isPoolDaihyosenID — duplicated from viewer.jsx (that file also uses it in
 // ViewerCompetition which stays there; this copy serves PoolsViewer here).
@@ -418,7 +419,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   // field render as before (no header relabel, no winner badge).
   const isLeague = competition && competition.format === "league";
   if (!pools || pools.length === 0) {
-    return <div className="empty"><div className="icon">⏳</div><h3>{isLeague ? "League not drawn yet" : "Pools not drawn yet"}</h3></div>;
+    return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
   }
   const allMatchesComplete = isLeague && (() => {
     const all = poolMatches || [];

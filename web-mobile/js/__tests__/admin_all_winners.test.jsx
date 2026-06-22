@@ -10,19 +10,32 @@ import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '
 
 // ── tree helpers ─────────────────────────────────────────────────────────────
 
+function mergeChildrenIntoProps(node) {
+  const p = { ...(node.props || {}) };
+  if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+  return p;
+}
+
 function collectText(node) {
   if (node == null || node === false || node === true) return '';
   if (typeof node === 'string') return node;
   if (typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  if (typeof node.type === 'function') {
+    try { return collectText(node.type(mergeChildrenIntoProps(node))); } catch { /* fall through */ }
+  }
   if (node.children !== undefined) return collectText(node.children);
   return '';
 }
 
 function findAll(node, pred) {
   if (!node || typeof node !== 'object') return [];
-  const acc = Array.isArray(node) ? [] : (pred(node) ? [node] : []);
-  const kids = Array.isArray(node) ? node : (node.children ?? []);
+  if (Array.isArray(node)) return node.flatMap(k => findAll(k, pred));
+  const acc = pred(node) ? [node] : [];
+  if (typeof node.type === 'function') {
+    try { acc.push(...findAll(node.type(mergeChildrenIntoProps(node)), pred)); return acc; } catch { /* fall through */ }
+  }
+  const kids = node.children ?? [];
   for (const k of kids) acc.push(...findAll(k, pred));
   return acc;
 }

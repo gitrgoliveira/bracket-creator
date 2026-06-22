@@ -65,11 +65,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
 
   const total = dojoMatches.length + playerMatches.length;
 
-  React.useEffect(() => {
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  window.useClickOutside(ref, () => setOpen(false), open);
 
   const pickPlayer = (p) => { onPickPlayer(p); setQuery(""); setOpen(false); };
   const pickDojo = (d) => { onPickDojo(d); setQuery(""); setOpen(false); };

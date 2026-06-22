@@ -441,6 +441,41 @@ function Icon({ name, size = 16, className }) {
   );
 }
 
+function EmptyState({ icon, title, message, cta, ctaNote, className, style, ...attrs }) {
+  return (
+    <div className={`empty${className ? " " + className : ""}`} style={style} {...attrs}>
+      {icon && <div className="icon">{icon}</div>}
+      {title && <h3>{title}</h3>}
+      {message && <div>{message}</div>}
+      {cta}
+      {ctaNote && <div className="hint--sm empty__cta-note">{ctaNote}</div>}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children, footer, size, dismissable = true, className, style, ariaLabel }) {
+  useEscapeToClose(dismissable ? onClose : undefined);
+  return (
+    <div className="modal-backdrop" onClick={dismissable ? onClose : undefined}>
+      <div
+        className={`modal${size ? ` modal--${size}` : ""}${className ? ` ${className}` : ""}`}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel || (typeof title === "string" ? title : undefined)}
+        style={style}
+      >
+        <div className="modal__head">
+          <div className="modal__title">{title}</div>
+          <button type="button" className="modal__close" onClick={dismissable ? onClose : undefined} disabled={!dismissable} aria-label="Close">&times;</button>
+        </div>
+        <div className="modal__body">{children}</div>
+        {footer && <div className="modal__foot">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
 function LoadingSpinner({ text = "Loading...", delay = 200, size = 32 }) {
   const [visible, setVisible] = React.useState(delay === 0);
 
@@ -481,6 +516,22 @@ function useEscapeToClose(onClose) {
   }, []);
 }
 
+function useClickOutside(ref, callback, enabled = true) {
+  const { useRef, useEffect } = React;
+  const cbRef = useRef(callback);
+  useEffect(() => { cbRef.current = callback; }, [callback]);
+  useEffect(() => {
+    if (!enabled) return;
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target) && typeof cbRef.current === "function") {
+        cbRef.current(e);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [ref, enabled]);
+}
+
 // Returns true when el is a text-entry element (blocks navigation shortcuts
 // to avoid clobbering cursor movement in inputs).
 function isTextEntry(el) {
@@ -497,7 +548,7 @@ function isInteractiveTarget(el) {
   return tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || tag === "a" || !!el.isContentEditable;
 }
 
-export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner };
+export { StatusBadge, formatDate, Toast, StableInput, pluralize, useEscapeToClose, useClickOutside, isTextEntry, isInteractiveTarget, formatAdminHeaderSub, formatViewerHeaderEyebrow, confirmDialog, promptDialog, DialogHost, Icon, LoadingSpinner, EmptyState, Modal };
 
 if (typeof window !== "undefined") {
   window.StatusBadge = StatusBadge;
@@ -508,6 +559,7 @@ if (typeof window !== "undefined") {
   window.formatLabel = formatLabel;
   window.formatLabelShort = formatLabelShort;
   window.useEscapeToClose = useEscapeToClose;
+  window.useClickOutside = useClickOutside;
   window.isTextEntry = isTextEntry;
   window.isInteractiveTarget = isInteractiveTarget;
   window.formatAdminHeaderSub = formatAdminHeaderSub;
@@ -517,5 +569,7 @@ if (typeof window !== "undefined") {
   window.DialogHost = DialogHost;
   window.Icon = Icon;
   window.LoadingSpinner = LoadingSpinner;
+  window.EmptyState = EmptyState;
+  window.Modal = Modal;
 }
 

@@ -8,6 +8,13 @@ function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  if (typeof node.type === 'function') {
+    try {
+      const p = { ...(node.props || {}) };
+      if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+      return collectText(node.type(p));
+    } catch { /* fall through */ }
+  }
   if (node.children) return collectText(node.children);
   if (node.props?.children) return collectText(node.props.children);
   return '';
@@ -46,6 +53,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
+    'EmptyState',
   ];
 
   // A minimal mixed pools comp at draw-ready with one populated pool and a
@@ -81,6 +89,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.StatusBadge = function StatusBadge() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
@@ -184,7 +193,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   let runtime;
   let ViewerOverview;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'EmptyState'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -196,6 +205,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
         : { had: false };
     });
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
     global.window.teamIVScore = () => null;

@@ -713,11 +713,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
-  useEffectA(() => {
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setQuery(""); } };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  window.useClickOutside(ref, () => { setOpen(false); setQuery(""); }, open);
 
   const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
   const onKeyDown = (e) => {

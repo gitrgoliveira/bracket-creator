@@ -1297,9 +1297,16 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'matchScoreStr', 'ipponsFromScore',
+    'roundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
   ];
   const savedGlobals = {};
+
+  const emptyTournament = { name: 'T', date: '10-06-2026', competitions: [] };
+  const withCompTournament = {
+    name: 'T', date: '10-06-2026',
+    competitions: [{ id: 'c1', name: 'Open', status: 'setup', players: [], poolMatches: [] }],
+  };
+  const NOOP = () => {};
 
   function findNode(node, pred) {
     if (!node || typeof node !== 'object') return null;
@@ -1308,17 +1315,18 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
       return null;
     }
     if (pred(node)) return node;
+    if (typeof node.type === 'function') {
+      try {
+        const p = { ...(node.props || {}) };
+        if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+        const f = findNode(node.type(p), pred);
+        if (f) return f;
+      } catch { /* fall through */ }
+    }
     const kids = node.children || node.props?.children || [];
     for (const k of [].concat(kids)) { const f = findNode(k, pred); if (f) return f; }
     return null;
   }
-
-  const emptyTournament = { name: 'T', date: '10-06-2026', competitions: [] };
-  const withCompTournament = {
-    name: 'T', date: '10-06-2026',
-    competitions: [{ id: 'c1', name: 'Open', status: 'setup', players: [], poolMatches: [] }],
-  };
-  const NOOP = () => {};
 
   beforeEach(async () => {
     originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
@@ -1341,6 +1349,7 @@ describe('ViewerHome empty-state discoverability (mp-og2g)', () => {
         ? { had: true, val: global.window[k] } : { had: false };
     });
     global.window.StatusBadge = vi.fn(() => null);
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (l) => l || '';
     global.window.formatViewerHeaderEyebrow = () => '';
@@ -1417,7 +1426,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
   const STUBBED = [
     'StatusBadge', 'formatDate', 'formatLabel', 'formatViewerHeaderEyebrow',
     'pluralize', 'hasBothSides', 'compareDmy', 'queueLabelCompact',
-    'roundLabel', 'matchScoreStr', 'ipponsFromScore',
+    'roundLabel', 'matchScoreStr', 'ipponsFromScore', 'EmptyState',
   ];
   const savedGlobals = {};
 
@@ -1487,6 +1496,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.matchScoreStr = () => '';
     global.window.ipponsFromScore = () => [];
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     vi.resetModules();
     ({ ViewerHome: ViewerHomeComp } = await import('../viewer.jsx'));
   });

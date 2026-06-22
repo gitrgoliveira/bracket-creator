@@ -504,121 +504,129 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               when no overtime is active. Click the pill (or set the
               counter through the existing flow) to mount the full
               counter UI. Saves ~32px of vertical space pre-overtime.
-              Sits below the scoring board so the score + foul boxes stay
-              the operator's first focus; overtime/hantei are follow-ups. */}
-          <EnchoControl
-            enchoPeriodCount={enchoPeriodCount}
-            setEnchoPeriodCount={setEnchoPeriodCount}
-            maxEnchoPeriods={maxEnchoPeriods}
-          />
-          {/* A tied match may be decided by referee hantei. Surface the
-              affordance whenever the scoreline is tied — encho is optional,
-              not required (operators may go straight to a judges' decision).
-              The winner is recorded with the hantei flag, distinguishable
-              from an ippon-derived win for stats, audit, and Excel. */}
-          {aTotal === bTotal && (
-            <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginTop: 6, background: "var(--card-2, #fafafa)", borderRadius: 6, fontSize: 12 }}>
-              <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
-              <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
-              {!decidedByHantei && (
-                <button
-                  type="button"
-                  className="btn btn--sm"
-                  data-testid="scoring-modal-hantei-arm"
-                  onClick={() => setDecidedByHantei(true)}
-                  // Hantei declares a winner from a genuinely tied bout. Disable
-                  // the arm button when totals are unequal (an ippon-derived win
-                  // is already decided), when the bout is already decided by
-                  // ippons (boutDecided), or when a draw is already toggled.
-                  // (0-0 is still a valid tied state. Encho is NOT required.)
-                  disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
-                  title={
-                    submitting || decisionSubmitting
-                      ? "Saving…"
-                      : isDrawToggled
-                        ? "Cancel the draw toggle before using hantei"
-                        : aTotal !== bTotal || boutDecided
-                          ? "Hantei applies only to a tied scoreline"
-                          : "Record a judges' decision"
-                  }
-                  style={{ marginLeft: "auto" }}
-                >
-                  Decide by hantei…
-                </button>
-              )}
-              {decidedByHantei && (
-                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    data-testid="scoring-modal-hantei-shiro"
-                    onClick={() => submitHantei("b")}
-                    disabled={submitting || decisionSubmitting}
-                  >
-                    SHIRO wins
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--sm"
-                    data-testid="scoring-modal-hantei-aka"
-                    onClick={() => submitHantei("a")}
-                    disabled={submitting || decisionSubmitting}
-                  >
-                    AKA wins
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    data-testid="scoring-modal-hantei-cancel"
-                    onClick={() => setDecidedByHantei(false)}
-                    disabled={submitting || decisionSubmitting}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+              Centered below the scoring board so the score + foul boxes
+              stay the operator's first focus; overtime is a follow-up. */}
+          <div className="encho-center">
+            <EnchoControl
+              enchoPeriodCount={enchoPeriodCount}
+              setEnchoPeriodCount={setEnchoPeriodCount}
+              maxEnchoPeriods={maxEnchoPeriods}
+            />
+          </div>
 
           {/* Ippon-type letter legend — discoverable "?" affordance mapping
               M/K/D/T/H (+S in naginata) to their kendo meaning, so operators
               don't depend on the viewer-only glossary. */}
           <IpponLegend isNaginata={isNaginata} />
 
-          {/* T093–T098: decision (kiken/fusenpai) controls + remaining-matches
-              follow-up. Sits between the scoring board and the footer so the
-              flow is: enter score OR record a decision → either way the modal
-              closes (or surfaces the remaining-matches list for kiken). */}
-          {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
-            <div className="decision-controls" style={{ display: "flex", gap: 8, marginTop: 12, fontSize: 12, alignItems: "center" }}>
-              <span style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
-                  Kiken – Voluntary
-                </button>
-                <GlossaryHintAS name="kiken-voluntary" />
-              </div>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
-                  Kiken – Injury
-                </button>
-                <GlossaryHintAS name="kiken-injury" />
-              </div>
-              <div className="decision-btn-group">
-                <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
-                  Fusenpai
-                </button>
-                <GlossaryHintAS name="fusenpai" />
-              </div>
-              {/* Per-bout fusensho is a sub-match concept — implemented inside
-                  TeamScoreEditorModal. This placeholder explains the affordance
-                  to operators who open the individual-match editor. */}
-              <div className="decision-btn-group">
-                <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
-                  Fusensho (team only)
-                </button>
-                <GlossaryHintAS name="fusensho" />
-              </div>
+          {/* T093–T098: decision place. The judges'-decision (hantei) affordance
+              forms the TOP row whenever the scoreline is tied; the withdrawal/
+              forfeit controls (kiken/fusenpai/fusensho) form the BOTTOM row.
+              Hantei keeps its own tied-scoreline condition so it still surfaces
+              in self-report mode, where the admin-only controls below are hidden.
+              Sits between the scoring board and the footer so the flow is: enter
+              score OR record a decision → either way the modal closes (or
+              surfaces the remaining-matches list for kiken). */}
+          {(aTotal === bTotal || (!withdrawnPlayer && !decisionPromptKind && !selfReport)) && (
+            <div className="decision-controls decision-controls--stacked" style={{ marginTop: 12, fontSize: 12 }}>
+              <span className="decision-controls__label" style={{ color: "var(--ink-3)", fontWeight: 600 }}>Decision:</span>
+              {/* A tied match may be decided by referee hantei. The winner is
+                  recorded with the hantei flag, distinguishable from an
+                  ippon-derived win for stats, audit, and Excel. */}
+              {aTotal === bTotal && (
+                <div className="hantei-row" data-testid="scoring-modal-hantei-row" style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", background: "var(--card-2, #fafafa)", borderRadius: 6 }}>
+                  <span style={{ fontWeight: 600, color: "var(--ink-2)" }}>Hantei</span>
+                  <span style={{ color: "var(--ink-3)" }}>(judges' decision)</span>
+                  {!decidedByHantei && (
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      data-testid="scoring-modal-hantei-arm"
+                      onClick={() => setDecidedByHantei(true)}
+                      // Hantei declares a winner from a genuinely tied bout. Disable
+                      // the arm button when totals are unequal (an ippon-derived win
+                      // is already decided), when the bout is already decided by
+                      // ippons (boutDecided), or when a draw is already toggled.
+                      // (0-0 is still a valid tied state. Encho is NOT required.)
+                      disabled={submitting || decisionSubmitting || aTotal !== bTotal || boutDecided || isDrawToggled}
+                      title={
+                        submitting || decisionSubmitting
+                          ? "Saving…"
+                          : isDrawToggled
+                            ? "Cancel the draw toggle before using hantei"
+                            : aTotal !== bTotal || boutDecided
+                              ? "Hantei applies only to a tied scoreline"
+                              : "Record a judges' decision"
+                      }
+                      style={{ marginLeft: "auto" }}
+                    >
+                      Decide by hantei…
+                    </button>
+                  )}
+                  {decidedByHantei && (
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        data-testid="scoring-modal-hantei-shiro"
+                        onClick={() => submitHantei("b")}
+                        disabled={submitting || decisionSubmitting}
+                      >
+                        SHIRO wins
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm"
+                        data-testid="scoring-modal-hantei-aka"
+                        onClick={() => submitHantei("a")}
+                        disabled={submitting || decisionSubmitting}
+                      >
+                        AKA wins
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        data-testid="scoring-modal-hantei-cancel"
+                        onClick={() => setDecidedByHantei(false)}
+                        disabled={submitting || decisionSubmitting}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {!withdrawnPlayer && !decisionPromptKind && !selfReport && (
+                <div className="decision-controls__group">
+                  <div className="decision-btn-group">
+                    <button data-testid="scoring-modal-kiken-voluntary-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-voluntary"); }} disabled={submitting || decisionSubmitting}>
+                      Kiken – Voluntary
+                    </button>
+                    <GlossaryHintAS name="kiken-voluntary" />
+                  </div>
+                  <div className="decision-btn-group">
+                    <button data-testid="scoring-modal-kiken-injury-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("kiken-injury"); }} disabled={submitting || decisionSubmitting}>
+                      Kiken – Injury
+                    </button>
+                    <GlossaryHintAS name="kiken-injury" />
+                  </div>
+                  <div className="decision-btn-group">
+                    <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
+                      Fusenpai
+                    </button>
+                    <GlossaryHintAS name="fusenpai" />
+                  </div>
+                  {/* Per-bout fusensho is a sub-match concept — implemented inside
+                      TeamScoreEditorModal. This placeholder explains the affordance
+                      to operators who open the individual-match editor. */}
+                  <div className="decision-btn-group">
+                    <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
+                      Fusensho (team only)
+                    </button>
+                    <GlossaryHintAS name="fusensho" />
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {decisionErr && (

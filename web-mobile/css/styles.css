@@ -6868,6 +6868,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 4px;
 }
 
+/* Centered overtime pill — sits below the foul boxes in the individual scorer
+   (the EnchoControl renders its own .encho-row child, which this centers). */
+.encho-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Stacked decision place: a "Decision:" header, the judges'-decision (hantei)
+   affordance as the top row, then the withdrawal/forfeit controls as the
+   bottom row. Overrides the default inline-row .decision-controls layout. */
+.decision-controls--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.decision-controls--stacked .decision-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ？ icon that carries the glossary tooltip for a decision button. */
 .glossary-hint .tw-term {
   border-bottom: none;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number — it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -220,6 +220,49 @@ describe('partitionShiaijoMatches', () => {
   it('returns empty groups for an empty input', () => {
     const out = partitionShiaijoMatches([]);
     expect(out).toEqual({ sorted: [], running: [], scheduled: [], completed: [] });
+  });
+});
+
+
+describe('groupQueueMatches — Upcoming queue grouping', () => {
+  const pool = (poolName, id) => ({ phase: 'pool', compFormat: 'mixed', poolName, id });
+  const bracket = (round, roundIndex, id) => ({ phase: 'bracket', compFormat: 'mixed', round, roundIndex, id });
+
+  it('returns null (flat) for a league competition — no grouping', () => {
+    const matches = [
+      { phase: 'pool', compFormat: 'league', poolName: 'League table', id: 'l1' },
+      { phase: 'pool', compFormat: 'league', poolName: 'League table', id: 'l2' },
+    ];
+    expect(groupQueueMatches(matches)).toBeNull();
+  });
+
+  it('returns null for an empty list', () => {
+    expect(groupQueueMatches([])).toBeNull();
+  });
+
+  it('groups pool matches by pool name in first-appearance order', () => {
+    const groups = groupQueueMatches([
+      pool('Pool A', 'a1'), pool('Pool A', 'a2'), pool('Pool B', 'b1'),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(['Pool A', 'Pool B']);
+    expect(groups[0].matches.map((m) => m.id)).toEqual(['a1', 'a2']);
+    expect(groups[1].matches.map((m) => m.id)).toEqual(['b1']);
+  });
+
+  it('groups playoff matches by round, keyed by round index', () => {
+    const groups = groupQueueMatches([
+      bracket('Semifinals', 0, 's1'), bracket('Semifinals', 0, 's2'), bracket('Final', 1, 'f1'),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(['Semifinals', 'Final']);
+    expect(groups[0].matches.map((m) => m.id)).toEqual(['s1', 's2']);
+    expect(groups[1].matches.map((m) => m.id)).toEqual(['f1']);
+  });
+
+  it('keeps pools and rounds as separate groups for a mixed comp mid-transition', () => {
+    const groups = groupQueueMatches([
+      pool('Pool A', 'a1'), bracket('Semifinals', 0, 's1'),
+    ]);
+    expect(groups.map((g) => g.label)).toEqual(['Pool A', 'Semifinals']);
   });
 });
 

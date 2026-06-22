@@ -623,7 +623,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {filteredScheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
-                                    label="Upcoming" matches={upNext ? filteredScheduled.slice(1) : filteredScheduled}
+                                    label="Upcoming" subGroup matches={upNext ? filteredScheduled.slice(1) : filteredScheduled}
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={setLineupMatch}
                                     onPick={pickMatch}
@@ -819,20 +819,61 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 // `scheduled` is the full court scheduled list (used to derive first/last
 // position for disabling the ↑/↓ buttons). `onMove(m, direction)` swaps
 // scheduledAt with the adjacent row via two updateMatchTime calls.
-function ShiaijoQueueGroup({ label, matches, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+// Group an Upcoming slice for display so the operator sees what they'll be
+// scoring: pool matches by pool ("Pool A", "Pool B"), playoff matches by round
+// ("Final", "Round 16"). League is a single round-robin table and needs no
+// grouping → returns null, and the caller renders a flat list. Groups keep
+// first-appearance (i.e. scheduled-time) order; pools are seeded contiguously
+// per court, so each group stays a contiguous time block.
+export function groupQueueMatches(matches) {
+    if (!matches.length || matches.every((m) => m.compFormat === "league")) return null;
+    const order = [];
+    const byKey = new Map();
+    for (const m of matches) {
+        let key, label;
+        if (m.phase === "bracket") {
+            key = "round:" + (m.roundIndex != null ? m.roundIndex : (m.round || ""));
+            label = m.round || "Playoffs";
+        } else if (m.phase === "pool") {
+            key = "pool:" + (m.poolName || "");
+            label = m.poolName || "Pool";
+        } else {
+            key = "other";
+            label = null;
+        }
+        if (!byKey.has(key)) { byKey.set(key, { key, label, matches: [] }); order.push(key); }
+        byKey.get(key).matches.push(m);
+    }
+    return order.map((k) => byKey.get(k));
+}
+
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+    const renderRow = (m) => (
+        <ShiaijoQueueRow
+            key={matchKey(m)} m={m}
+            scheduled={scheduled}
+            courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick}
+            onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+        />
+    );
+    const groups = subGroup ? groupQueueMatches(matches) : null;
     return (
         <div className="shiaijo-group">
             {label && <div className="section-title">{label}</div>}
-            <div className="score-editor__list">
-                {matches.map((m) => (
-                    <ShiaijoQueueRow
-                        key={matchKey(m)} m={m}
-                        scheduled={scheduled}
-                        courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick}
-                        onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
-                    />
-                ))}
-            </div>
+            {groups
+                ? groups.map((g) => (
+                    <div className="shiaijo-subgroup" key={g.key}>
+                        {g.label && <div className="shiaijo-subgroup__title">{g.label}</div>}
+                        <div className="score-editor__list">
+                            {g.matches.map(renderRow)}
+                        </div>
+                    </div>
+                ))
+                : (
+                    <div className="score-editor__list">
+                        {matches.map(renderRow)}
+                    </div>
+                )}
         </div>
     );
 }

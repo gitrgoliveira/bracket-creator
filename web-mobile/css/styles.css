@@ -8024,6 +8024,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
 }
 
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+   round ("Final"), so the operator knows which pool/round they'll be scoring.
+   Lighter than the .section-title above it — a secondary tier, not a peer. */
+.shiaijo-subgroup + .shiaijo-subgroup {
+  margin-top: 14px;
+}
+.shiaijo-subgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+.shiaijo-subgroup__title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 /* Context panel (collapsible) */
 .shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .shiaijo-context__toggle { padding: 12px 14px; }

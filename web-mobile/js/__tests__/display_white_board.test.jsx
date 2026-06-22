@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, phaseProgressOnCourt, poolNameOf, sideLabel } from '../display.jsx';
+import { phaseLabel } from '../display_helpers.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -589,5 +590,28 @@ describe('phaseProgressOnCourt + phase strip', () => {
       const text = JSON.stringify(sp.props?.children ?? sp.children ?? '');
       expect(text).not.toContain('Pool A');
     }
+  });
+});
+
+// A league is a single round-robin table. The match carries a positive,
+// per-match round-robin round number (4, 5, 6, 0…) — meaningless to a
+// spectator and visibly inconsistent across the feed. phaseLabel must
+// suppress it for format === 'league' so only the completed/total counter
+// conveys progress (the round number leaked through as the phase label
+// before this fix — "4 · 10 / 28 MATCHES").
+describe('phaseLabel — league suppresses the round-robin round number', () => {
+  it('returns "" for a league match instead of String(round)', () => {
+    const m = { id: 'Pool A-3', round: 4, status: 'running' };
+    expect(phaseLabel(m, false, undefined, undefined, 'league')).toBe('');
+  });
+
+  it('still renders the bare round number when format is not given (back-compat)', () => {
+    const m = { id: 'Pool A-3', round: 4, status: 'running' };
+    expect(phaseLabel(m, false, undefined, undefined)).toBe('4');
+  });
+
+  it('pool (mixed) still derives the pool name from the id sentinel', () => {
+    const m = { id: 'Pool A-1', round: -1, status: 'scheduled' };
+    expect(phaseLabel(m, false, undefined, undefined, 'mixed')).toBe('Pool A');
   });
 });

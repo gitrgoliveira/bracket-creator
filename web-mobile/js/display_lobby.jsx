@@ -123,7 +123,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         cellBorder = LOBBY_COLORS.nextBorder;
     }
 
-    const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
+    const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
     const sfx = (kind === 'running' && window.decisionSuffix) ? window.decisionSuffix(match) : '';
 
@@ -328,7 +328,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     // match is "current" (same auto-promote logic, no rescan).
                                     const firstSlot = courtSlots[ci] && courtSlots[ci][0];
                                     const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
-                                    const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds) : '';
+                                    const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds, firstSlot.competition?.format) : '';
                                     const progress = firstSlot ? phaseProgressOnCourt({
                                         competition: firstSlot.competition,
                                         isBracket: firstSlot.isBracket,

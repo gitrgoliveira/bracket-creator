@@ -51,7 +51,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
-                    <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}</span>
+                    <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format)}</span>
                     {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
@@ -225,7 +225,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const all = gatherIndividualGroup(promoted, court);
     const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
     const rows = dropped > 0 ? all.slice(dropped) : all;
-    const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);
+    const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     // Suppress the bottom NEXT line when its match is already visible in the
     // body — in pool phase the whole pool's queue is now in the feed, so the
     // line would otherwise duplicate a row immediately above it.

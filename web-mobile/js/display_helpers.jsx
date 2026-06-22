@@ -219,7 +219,13 @@ function queueLabelCompact(m) {
 }
 
 // Compute a phase label for either a pool or a bracket match.
-function phaseLabel(m, isBracket, roundIndex, totalRounds) {
+//
+// `format` (optional) is the competition format. A league is a single
+// round-robin table, so the per-match round-robin round number is noise to a
+// spectator — and it varies per match across the feed (4, 5, 6, 0…), reading
+// like a bug. Suppress it; the completed/total counter carries the progress.
+function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
+    if (format === "league") return "";
     if (m.phaseName) return m.phaseName;
     if (m.poolName) return m.poolName;
     if (isBracket && typeof roundIndex === "number" && window.roundLabel) {

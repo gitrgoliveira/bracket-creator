@@ -272,7 +272,10 @@ function phaseProgressOnCourt(promoted, court) {
     if (promoted.isBracket) {
         const rounds = (comp.bracket && comp.bracket.rounds) || [];
         const round = rounds[promoted.roundIndex] || [];
-        group = round.filter(m => (m.court || "") === court);
+        // Exclude unresolved placeholders ("Winner of rX-mY" / "Pool X-1st") so
+        // the denominator matches the runnable matches the board actually shows
+        // (the feed filters them via bracketSidesReady too).
+        group = round.filter(m => (m.court || "") === court && bracketSidesReady(m));
     } else {
         const poolName = poolNameOf(promoted.match && promoted.match.id);
         if (!poolName) return null;

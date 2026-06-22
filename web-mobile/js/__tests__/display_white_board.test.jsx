@@ -284,6 +284,17 @@ describe('findNextPoolOnCourt', () => {
     ] };
     expect(findNextPoolOnCourt(c2, 'Pool A', 'A')).toBeNull();
   });
+  it('orders the next pool by queuePosition first (untimed schedule)', () => {
+    // No scheduledAt; queuePosition is the real per-court order. Pool C has the
+    // lower queue position than Pool B, so C is next even though B sorts first
+    // alphabetically (the old scheduledAt-only sort would have picked B).
+    const c = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   queuePosition: 1 },
+      { id: 'Pool B-0', court: 'A', sideA: 'P', sideB: 'Q', status: 'scheduled', queuePosition: 9 },
+      { id: 'Pool C-0', court: 'A', sideA: 'M', sideB: 'N', status: 'scheduled', queuePosition: 5 },
+    ] };
+    expect(findNextPoolOnCourt(c, 'Pool A', 'A').name).toBe('Pool C');
+  });
   it('picks earliest scheduledAt across pools; alphabetical tiebreak', () => {
     const c3 = { poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   scheduledAt: '09:00' },
@@ -627,19 +638,32 @@ describe('phaseProgressOnCourt + phase strip', () => {
     expect(result).toEqual({ done: 2, total: 3 });
   });
 
-  // b) Bracket round per-court
+  // b) Bracket round per-court (resolved sides required to count)
   it('bracket phase: counts matches in roundIndex on the requested court only', () => {
+    const S = (a, b) => ({ sideA: { name: a }, sideB: { name: b } });
     const competition = { bracket: { rounds: [
-      [ { id: 'm-r1-0', court: 'A', status: 'completed' },
-        { id: 'm-r1-1', court: 'A', status: 'scheduled' },
-        { id: 'm-r1-2', court: 'B', status: 'completed' },
-        { id: 'm-r1-3', court: 'B', status: 'completed' } ],
+      [ { id: 'm-r1-0', court: 'A', status: 'completed', ...S('A1', 'A2') },
+        { id: 'm-r1-1', court: 'A', status: 'scheduled', ...S('A3', 'A4') },
+        { id: 'm-r1-2', court: 'B', status: 'completed', ...S('B1', 'B2') },
+        { id: 'm-r1-3', court: 'B', status: 'completed', ...S('B3', 'B4') } ],
     ] } };
     const promoted = { competition, isBracket: true, roundIndex: 0, match: { id: 'm-r1-0' } };
     const result = phaseProgressOnCourt(promoted, 'A');
     expect(result).not.toBeNull();
     expect(result.done).toBe(1);
     expect(result.total).toBe(2);
+  });
+
+  // b2) Bracket placeholders ("Winner of …" / "Pool X-1st") excluded from total
+  it('bracket phase: excludes unresolved placeholder matches from the count', () => {
+    const competition = { bracket: { rounds: [
+      [ { id: 'm-r1-0', court: 'A', status: 'completed', sideA: { name: 'A1' }, sideB: { name: 'A2' } },
+        { id: 'm-r1-1', court: 'A', status: 'scheduled', sideA: { name: 'Winner of r0-m0' }, sideB: { name: 'A4' } },
+        { id: 'm-r1-2', court: 'A', status: 'scheduled', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-2nd' } } ],
+    ] } };
+    const promoted = { competition, isBracket: true, roundIndex: 0, match: { id: 'm-r1-0' } };
+    // Only the resolved match counts — the two placeholders are not runnable yet.
+    expect(phaseProgressOnCourt(promoted, 'A')).toEqual({ done: 1, total: 1 });
   });
 
   // c) League single pool — ids shaped "League-0", "League-1", …

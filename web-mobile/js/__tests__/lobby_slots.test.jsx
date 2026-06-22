@@ -356,4 +356,12 @@ describe('LobbyMatchCell — delegates body to IndividualScore (mp-0ky7 / score 
         const indiv = findIndiv(tree)[0];
         expect(indiv.props.showNames).toBe(true);
     });
+
+    it('comp-meta span is shrinkable (flex:1 + minWidth:0) so long text ellipsizes beside the decision suffix', () => {
+        const tree = LobbyMatchCell({ slot: makeRunningSlot(), rowKind: 'now' });
+        const meta = findAll(tree, n => n?.type === 'span' && n.props?.style?.textOverflow === 'ellipsis')[0];
+        expect(meta).toBeTruthy();
+        expect(meta.props.style.flex).toBe(1);
+        expect(meta.props.style.minWidth).toBe(0);
+    });
 });

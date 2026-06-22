@@ -172,24 +172,31 @@ function gatherIndividualGroup(promoted, court) {
 // the spectator can decide whether to stay). Looks across the SAME competition
 // (court routing is per-comp). Returns { name, players } or null.
 //
-// "Earliest scheduled match in the pool" picks the next pool deterministically
-// (alphabetical tiebreak when timestamps tie). Roster = union of sideA/sideB
-// across ALL of that pool's matches in the comp (not just on this court) — a
-// pool's roster is fixed, the courts list is just routing. For team
+// The pool with the lowest queue position (then earliest scheduledAt, then
+// pool name) plays next — matching findUpcomingOnCourt. Roster = union of
+// sideA/sideB across ALL of that pool's matches in the comp (not just on this
+// court) — a pool's roster is fixed, the courts list is just routing. For team
 // competitions, sides carry team names so the roster surfaces team names.
 function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (!competition || !competition.poolMatches) return null;
     const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
     // Candidate pools routed to this court (excluding the current one), tracked
-    // by their earliest scheduled time HERE — that orders which plays next.
-    const earliest = new Map();
+    // by their position in the per-court queue. Mirror findUpcomingOnCourt's
+    // ordering — queuePosition first, scheduledAt as a tiebreaker — so the UP
+    // NEXT pool matches the actual queue even in untimed schedules (where every
+    // scheduledAt is blank). We keep each pool's MIN queuePosition + scheduledAt.
+    const meta = new Map();
     for (const m of onCourt) {
         const p = poolNameOf(m.id);
         if (!p || p === currentPoolName) continue;
+        const qp = Number(m.queuePosition) || 9999;
         const ts = m.scheduledAt || "99:99";
-        if (ts < (earliest.get(p) || "99:99")) earliest.set(p, ts);
+        const cur = meta.get(p) || { qp: 9999, ts: "99:99" };
+        if (qp < cur.qp) cur.qp = qp;
+        if (ts < cur.ts) cur.ts = ts;
+        meta.set(p, cur);
     }
-    if (earliest.size === 0) return null;
+    if (meta.size === 0) return null;
     // A pool counts as already started if ANY of its matches is running or
     // completed on ANY court — matches can be moved between courts, so a pool
     // begun elsewhere is not a "future" pool here. (Scanning the whole comp,
@@ -201,10 +208,10 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
             if (p) started.add(p);
         }
     }
-    const future = [...earliest.entries()].filter(([p]) => !started.has(p));
+    const future = [...meta.entries()].filter(([p]) => !started.has(p));
     if (future.length === 0) return null;
     const nextName = future
-        .sort(([na, ta], [nb, tb]) => ta.localeCompare(tb) || na.localeCompare(nb))[0][0];
+        .sort(([na, a], [nb, b]) => (a.qp - b.qp) || a.ts.localeCompare(b.ts) || na.localeCompare(nb))[0][0];
     // Roster with each player's STARTING colour. Pool colour is per-match, so a
     // player's "starting colour" is the colour they'll have in their EARLIEST
     // bout of this pool: sideA = Aka (red), sideB = Shiro (dark). Walk the pool's

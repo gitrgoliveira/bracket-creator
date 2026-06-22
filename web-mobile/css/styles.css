@@ -3597,6 +3597,20 @@ button.pool-match-row {
   font-size: 15px;
   margin: 0 0 4px;
 }
+/* Inline recovery control inside an empty state (e.g. the court picker shown
+   for an unknown shiaijo). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.empty__action .input {
+  width: auto;
+  min-width: 130px;
+}
 .empty > div:not(.icon):not(.empty__cta-note) {
   font-size: 13px;
 }

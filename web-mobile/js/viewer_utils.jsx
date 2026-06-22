@@ -102,11 +102,16 @@ export function compMatches(c) {
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
   // to each pool match so the eyebrow and queue rows can show "Match N of M"
   // (AC2). Matches are ordered by their natural sort within the pool group;
-  // poolCount is the number of matches with the same poolName, which equals
-  // N*(N-1)/2 for a round-robin pool of N players.
+  // poolCount is the number of REGULAR round-robin matches with the same
+  // poolName, which equals N*(N-1)/2 for a pool of N players. Tiebreak
+  // ("-TB-") and pool-daihyosen ("-DH-") bouts are NOT part of the RR schedule,
+  // so they are excluded here — counting them would inflate poolCount and shift
+  // "Match N of M" for the regular bouts. Such bouts simply get no position.
+  const NON_RR_ID_RE = /-(?:TB|DH)-\d+$/;
   const poolMatchesByPool = {};
   for (const m of out) {
     if (m.phase !== "pool") continue;
+    if (NON_RR_ID_RE.test(m.id || "")) continue;
     const pn = m.poolName || "";
     if (!poolMatchesByPool[pn]) poolMatchesByPool[pn] = [];
     poolMatchesByPool[pn].push(m);

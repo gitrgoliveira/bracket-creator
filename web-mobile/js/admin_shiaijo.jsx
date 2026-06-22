@@ -237,11 +237,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     }, [contextMatch, filteredScheduled]);
 
     // Auto-advance target after a submit: next non-completed match in the
-    // selected competition (stays within the same comp, AC4/AC7).
+    // SUBMITTED match's competition (not the selected one). The scoring panel may
+    // be on a running bout from a different comp than the selector (AC7), so
+    // keying off m.compId keeps Submit+Next within the competition the operator
+    // just scored instead of hopping to the selected comp.
     const nextActiveAfter = (m) => {
-        // Build a filtered+sorted list: running matches (unfiltered) + selected
-        // comp's scheduled matches, then find the next after the submitted match.
-        const pool = [...running, ...filteredScheduled];
+        const pool = [...running, ...scheduled].filter((x) => x.compId === m.compId);
         const idx = pool.findIndex((x) => matchKey(x) === matchKey(m));
         if (idx < 0) return null;
         return pool.slice(idx + 1).find((x) => x.status !== "completed") || null;
@@ -427,9 +428,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const moveMatch = async (m, direction) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
-        const idx = scheduled.findIndex((x) => matchKey(x) === matchKey(m));
+        // Reorder WITHIN the filtered (selected-competition) queue — the same list
+        // the rows render and compute first/last against. Swapping against the full
+        // court list would exchange ScheduledAt with a hidden match from another
+        // competition, silently reordering a queue the operator can't even see.
+        const idx = filteredScheduled.findIndex((x) => matchKey(x) === matchKey(m));
         if (idx < 0) return;
-        const neighbour = direction === "up" ? scheduled[idx - 1] : scheduled[idx + 1];
+        const neighbour = direction === "up" ? filteredScheduled[idx - 1] : filteredScheduled[idx + 1];
         if (!neighbour) return; // already first/last
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
         const myTime = m.scheduledAt || "";
@@ -472,7 +477,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
 
     // allDone: selected comp has no more matches to run on this court (AC4).
+    // Scoped to the SELECTED competition, not the whole court — another comp may
+    // still have matches here (the nudge banner surfaces that).
     const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && filteredScheduled.length === 0;
+    const selectedCompName = (courtsComps.find((c) => c.id === effectiveCompId) || {}).name || "";
 
     return (
         <div className="app">
@@ -546,6 +554,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             This court isn't part of the tournament — it may have been renamed or removed.{" "}
                             <button type="button" onClick={onBack} className="linklike">Back to dashboard</button>.
                         </p>
+                        {/* The title-overlay court switcher is gated on courtKnown, so an
+                            unknown court would otherwise strand the operator. Offer a plain
+                            picker here to jump to a valid court without leaving the page. */}
+                        {courts.length > 0 && (
+                            <label className="empty__action">
+                                Go to a court:{" "}
+                                <select className="input" value="" onChange={(e) => { if (e.target.value) onSwitchCourt(e.target.value); }} aria-label="Switch to a valid court">
+                                    <option value="" disabled>Choose…</option>
+                                    {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
+                                </select>
+                            </label>
+                        )}
                     </div>
                 )}
 
@@ -685,9 +705,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             )}
                             {allDone && (
                                 <div className="empty">
-                                    <h3>All matches complete on Shiaijo {court}</h3>
+                                    <h3>{selectedCompName ? `${selectedCompName} is complete on Shiaijo ${court}` : `All matches complete on Shiaijo ${court}`}</h3>
                                     <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                                        {completed.length} match{completed.length === 1 ? "" : "es"} scored. Nothing left to run on this court.
+                                        {filteredCompleted.length} match{filteredCompleted.length === 1 ? "" : "es"} scored.{" "}
+                                        {nudgeBanner ? "Another competition still has matches on this court — switch above." : "Nothing left to run on this court."}
                                     </p>
                                 </div>
                             )}
@@ -816,9 +837,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 // running match in these groups (the running bout is officiated in the scoring
 // panel on the right), so only scheduled/completed states render here.
 //
-// `scheduled` is the full court scheduled list (used to derive first/last
-// position for disabling the ↑/↓ buttons). `onMove(m, direction)` swaps
-// scheduledAt with the adjacent row via two updateMatchTime calls.
+// `scheduled` is the filtered (selected-competition) scheduled list — the same
+// list `moveMatch` reorders against — used to derive first/last position for
+// disabling the ↑/↓ buttons. `onMove(m, direction)` swaps scheduledAt with the
+// adjacent same-competition row via two updateMatchTime calls.
 // Group an Upcoming slice for display so the operator sees what they'll be
 // scoring: pool matches by pool ("Pool A", "Pool B"), playoff matches by round
 // ("Final", "Round 16"). League is a single round-robin table and needs no

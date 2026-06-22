@@ -286,3 +286,37 @@ describe('LobbyMatchCell — hansoku foul marks on running match (mp-0ky7)', () 
         expect(marks[0]?.props?.style?.color).toContain('--danger');
     });
 });
+
+// ── LobbyMatchCell — score rendering: no "0" for empty ippons ────────────────
+// Kendo scoring is ippon-based; an absent ippon is empty, not "0". The lobby
+// score column must render only what's actually scored.
+describe('LobbyMatchCell — score column never renders "0" for empty ippons', () => {
+    it('one side scored → renders just that ippon, no stranded dash, no "0"', () => {
+        const slot = makeRunningSlot({ match: { ipponsA: ['M'], ipponsB: [] } });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        const str = treeStr(tree);
+        expect(str).toContain('"M"');
+        // No literal "0" character anywhere in the score column.
+        expect(str).not.toContain('"0"');
+        // No " - " separator when only one side has scored.
+        expect(str).not.toContain('" - "');
+    });
+
+    it('both sides scored → renders "M - K" style (dash between)', () => {
+        const slot = makeRunningSlot({ match: { ipponsA: ['M'], ipponsB: ['K'] } });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        const str = treeStr(tree);
+        expect(str).toContain('"M"');
+        expect(str).toContain('"K"');
+        expect(str).toContain('" - "');
+        expect(str).not.toContain('"0"');
+    });
+
+    it('running with no ippons yet → renders "vs" (matches scheduled row), no "0"', () => {
+        const slot = makeRunningSlot({ match: { ipponsA: [], ipponsB: [] } });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        const str = treeStr(tree);
+        expect(str).toContain('"vs"');
+        expect(str).not.toContain('"0"');
+    });
+});

@@ -136,17 +136,30 @@ function LobbyMatchCell({ slot, rowKind }) {
     const foulMarkA = kind === 'running' ? boutHansokuMark(match.hansokuA) : '';
 
     if (kind === 'running') {
-        const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('') || '0';
-        const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
+        // Kendo scoring is ippon-based, not numeric — an absent ippon is empty,
+        // not "0". Render only what's actually scored: both sides → "M - K";
+        // one side → just that ippon (no stranded dash); neither (running but
+        // no ippons yet) → "vs" to match the scheduled row.
+        const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('');
+        const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('');
         const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
-        vsContent = (
-            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: LOBBY_COLORS.ink }}>
-                {shiroScore}
-                <span style={{ opacity: 0.45 }}> - </span>
-                <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
-                {sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
-            </span>
-        );
+        const both = shiroScore && akaScore;
+        if (!shiroScore && !akaScore) {
+            vsContent = (
+                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>
+                    vs{sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
+                </span>
+            );
+        } else {
+            vsContent = (
+                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: LOBBY_COLORS.ink }}>
+                    {shiroScore}
+                    {both && <span style={{ opacity: 0.45 }}> - </span>}
+                    <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
+                    {sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
+                </span>
+            );
+        }
     } else {
         vsContent = (
             <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>vs</span>

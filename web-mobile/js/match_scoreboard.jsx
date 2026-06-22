@@ -294,12 +294,25 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // displayName ("K1 TANAKA") instead of the canonical full name.
   const shiroDisplay = withNumber(match.sideB, withZekkenName);
   const akaDisplay = withNumber(match.sideA, withZekkenName);
+  // Registration tags (registered / manual / transfer) ride on the side object
+  // (carried by buildPlayerMap). Surface them as a small neutral badge next to
+  // the name when present — neutral grey so it never competes with the navy
+  // running signal or the Aka red. Placed on the INNER side of each name (after
+  // Shiro, before Aka) so both badges sit toward the centre score.
+  const shiroTag = (match.sideB && typeof match.sideB === "object" && match.sideB.tag) || "";
+  const akaTag = (match.sideA && typeof match.sideA === "object" && match.sideA.tag) || "";
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? shiroDisplay : ""}</span>
+        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>
+          {showNames ? shiroDisplay : ""}
+          {showNames && shiroTag ? <span className="msb-tag" data-testid="indiv-shiro-tag">{shiroTag}</span> : null}
+        </span>
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? akaDisplay : ""}</span>
+        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>
+          {showNames && akaTag ? <span className="msb-tag" data-testid="indiv-aka-tag">{akaTag}</span> : null}
+          {showNames ? akaDisplay : ""}
+        </span>
       </div>
     </div>
   );

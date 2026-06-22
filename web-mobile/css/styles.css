@@ -6236,6 +6236,12 @@ button.pool-match-row {
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+/* Registration tag badge (registered / manual / transfer) next to a player
+   name. NEUTRAL grey — never navy (running signal) or red (Aka). */
+.msb-tag { display: inline-block; margin: 0 6px; padding: 1px 5px; border-radius: 4px;
+  font-size: 0.62em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  vertical-align: middle; background: #eef0f3; color: var(--ink-3, #6b7280);
+  border: 1px solid #e2e5ea; }
 .msb-marks { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   gap: 4px; min-width: 104px; }
 .msb-slots { display: flex; align-items: center; gap: 2px; }
@@ -6297,6 +6303,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
 .msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
 .msb--tv .msb-dh-tag { font-size: calc(1.8vh * var(--msb-scale, 1)); padding: 0.4vh 1.2vh; letter-spacing: .12em; }
+.msb--tv .msb-tag { font-size: calc(1.5vh * var(--msb-scale, 1)); margin: 0 0.8vw; padding: 0.2vh 0.8vh; }
 /* TV bout decisiveness: winning side's filled slots are slightly bolder
    so spectators can read the match result at a glance from distance. */
 .msb--tv .msb-slots--win .msb-slot { font-size: calc(3.2vh * var(--msb-scale, 1)); }

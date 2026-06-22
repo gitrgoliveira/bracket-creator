@@ -275,7 +275,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
 
         if (!selHasActive) {
-            const byComp = {};
+            // Null-prototype: compId is user-controlled (a comp id of "__proto__"
+            // must not pollute the map or collide with inherited keys).
+            const byComp = Object.create(null);
             for (const m of otherScheduled) {
                 if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
                 byComp[m.compId].count++;
@@ -296,14 +298,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const earlierOther = otherScheduled.filter(m => scheduledBefore(m, selUpNext));
 
         if (earlierOther.length > 0) {
-            const byComp = {};
+            // Null-prototype: compId is user-controlled (see Condition A above).
+            const byComp = Object.create(null);
             for (const m of earlierOther) {
                 const e = byComp[m.compId];
                 if (!e) byComp[m.compId] = { id: m.compId, name: m.compName, count: 1, earliestMatch: m };
                 else { e.count++; if (scheduledBefore(m, e.earliestMatch)) e.earliestMatch = m; }
             }
             const entries = Object.values(byComp);
-            entries.sort((a, b) => (scheduledBefore(a.earliestMatch, b.earliestMatch) ? -1 : 1));
+            // Full three-way comparator (return 0 on a tie) so the sort stays
+            // transitive/stable when two comps share an earliest match.
+            entries.sort((a, b) => {
+                if (scheduledBefore(a.earliestMatch, b.earliestMatch)) return -1;
+                if (scheduledBefore(b.earliestMatch, a.earliestMatch)) return 1;
+                return 0;
+            });
             return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "earlier" };
         }
 

@@ -719,7 +719,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
             {(isComplete || m.status !== "running") && (
-              <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+              <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>
                 {isComplete ? "CORRECTION" : "PRE-MATCH"}
               </div>
             )}

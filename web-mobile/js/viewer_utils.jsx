@@ -108,7 +108,10 @@ export function compMatches(c) {
   // so they are excluded here — counting them would inflate poolCount and shift
   // "Match N of M" for the regular bouts. Such bouts simply get no position.
   const NON_RR_ID_RE = /-(?:TB|DH)-\d+$/;
-  const poolMatchesByPool = {};
+  // Null-prototype: poolName is user-controlled, so a pool literally named
+  // "__proto__"/"constructor" must not pollute the map or collide with
+  // inherited keys (matches the Object.create(null) pattern used elsewhere).
+  const poolMatchesByPool = Object.create(null);
   for (const m of out) {
     if (m.phase !== "pool") continue;
     if (NON_RR_ID_RE.test(m.id || "")) continue;

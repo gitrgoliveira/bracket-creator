@@ -129,6 +129,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // independent of scoring, so the operator can set the lineup and close
     // without starting (or hit Start from inside the modal).
     const [lineupMatch, setLineupMatch] = useStateSh(null);
+    // Selected competition for filtering the queue. Default: running match's comp,
+    // else first comp with scheduled matches here, else any comp with matches here.
+    const [selectedCompId, setSelectedCompId] = useStateSh(null);
+
     // Short-circuit to [] for a blank/unknown court so an accidental landing
     // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
     // Same condition as courtKnown below.
@@ -146,6 +150,38 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const courts = tournament.courts || [];
     const courtKnown = courts.includes(court);
 
+    // All competitions that have at least one match on this court (AC3/AC4).
+    const courtsComps = useMemoSh(() => {
+        const seen = new Set();
+        const out = [];
+        for (const m of allMatches) {
+            if (!seen.has(m.compId)) {
+                seen.add(m.compId);
+                const comp = (tournament.competitions || []).find(c => c.id === m.compId);
+                out.push({ id: m.compId, name: m.compName || (comp && comp.name) || m.compId });
+            }
+        }
+        return out;
+    }, [allMatches, tournament]);
+
+    // Effective selected competition — default logic runs when selectedCompId is
+    // null or no longer present (e.g. a comp was removed). Priority: running
+    // match's comp; else first comp with scheduled matches here; else first comp
+    // with any matches. AC3/AC7.
+    const effectiveCompId = useMemoSh(() => {
+        if (!courtsComps.length) return null;
+        // If explicitly selected and still valid, keep it
+        if (selectedCompId && courtsComps.some(c => c.id === selectedCompId)) return selectedCompId;
+        // Default: running match's comp
+        if (running.length > 0) return running[0].compId;
+        // Else first comp with scheduled matches
+        for (const c of courtsComps) {
+            if (allMatches.some(m => m.compId === c.id && m.status === "scheduled")) return c.id;
+        }
+        // Else any comp
+        return courtsComps[0].id;
+    }, [selectedCompId, courtsComps, running, allMatches]);
+
     // The scoring panel shows the match the operator is officiating. By default
     // that's the running (NOW) bout, but the operator may pick any upcoming
     // match to run out of order via its "Score" button (pickMatch). Picking is
@@ -162,6 +198,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     );
     const selectedMatch = useMemoSh(() => pickedMatch || running[0] || null, [pickedMatch, running]);
 
+    // Filtered to the selected competition (AC4).
+    // Running matches are NEVER filtered: the panel must stay on the running
+    // bout even if the operator switches comp (AC7).
+    const filteredScheduled = useMemoSh(
+        () => effectiveCompId ? scheduled.filter(m => m.compId === effectiveCompId) : scheduled,
+        [scheduled, effectiveCompId]
+    );
+    const filteredCompleted = useMemoSh(
+        () => effectiveCompId ? completed.filter(m => m.compId === effectiveCompId) : completed,
+        [completed, effectiveCompId]
+    );
+
     // The standings/context panel follows the court's current focus — not
     // strictly the running match — so it stays visible (and updates) after a
     // bout is finished, instead of collapsing to the empty state. Priority:
@@ -169,30 +217,87 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // operator sees their result land in the standings; else the next
     // scheduled bout (before the court's first match).
     const contextMatch = useMemoSh(
-        () => selectedMatch || completed[completed.length - 1] || scheduled[0] || null,
-        [selectedMatch, completed, scheduled]
+        () => selectedMatch || filteredCompleted[filteredCompleted.length - 1] || filteredScheduled[0] || null,
+        [selectedMatch, filteredCompleted, filteredScheduled]
     );
 
-    // Up Next = the first non-completed, non-running match (the one to call).
-    const upNext = scheduled[0] || null;
+    // Up Next = the first scheduled match in the selected competition.
+    const upNext = filteredScheduled[0] || null;
 
     // "Which pool is next" for the context panel: the first upcoming pool on
-    // this court whose pool differs from the one currently in focus.
+    // this court (within the selected comp) whose pool differs from the one
+    // currently in focus.
     const nextPoolName = useMemoSh(() => {
         const cur = (contextMatch && contextMatch.phase === "pool") ? (contextMatch.poolName || "") : "";
-        for (const m of scheduled) {
+        for (const m of filteredScheduled) {
             const pn = m.poolName || "";
             if (m.phase === "pool" && pn && pn !== cur) return pn;
         }
         return null;
-    }, [contextMatch, scheduled]);
+    }, [contextMatch, filteredScheduled]);
 
-    // Auto-advance target after a submit: next non-completed match.
+    // Auto-advance target after a submit: next non-completed match in the
+    // selected competition (stays within the same comp, AC4/AC7).
     const nextActiveAfter = (m) => {
-        const idx = sorted.findIndex((x) => matchKey(x) === matchKey(m));
+        // Build a filtered+sorted list: running matches (unfiltered) + selected
+        // comp's scheduled matches, then find the next after the submitted match.
+        const pool = [...running, ...filteredScheduled];
+        const idx = pool.findIndex((x) => matchKey(x) === matchKey(m));
         if (idx < 0) return null;
-        return sorted.slice(idx + 1).find((x) => x.status !== "completed") || null;
+        return pool.slice(idx + 1).find((x) => x.status !== "completed") || null;
     };
+
+    // Amber nudge banner logic (AC6): fires when another competition on this
+    // court has matches waiting and the selected comp is done or has an earlier
+    // match. Never red/navy — uses --warn-* tokens only.
+    const nudgeBanner = useMemoSh(() => {
+        if (!effectiveCompId || !courtKnown) return null;
+
+        // All other comps' scheduled matches on this court
+        const otherScheduled = allMatches.filter(
+            m => m.compId !== effectiveCompId && m.status === "scheduled"
+        );
+
+        if (otherScheduled.length === 0) return null;
+
+        // Condition A: selected comp has no running + no scheduled matches here
+        const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
+
+        if (!selHasActive) {
+            const byComp = {};
+            for (const m of otherScheduled) {
+                if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
+                byComp[m.compId].count++;
+            }
+            const entries = Object.values(byComp);
+            entries.sort((a, b) => b.count - a.count);
+            return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "no-matches" };
+        }
+
+        // Condition B: another comp has a match EARLIER than the selected comp's upNext
+        const selUpNext = filteredScheduled[0];
+        if (!selUpNext) return null;
+        const selTime = selUpNext.scheduledAt || "99:99";
+
+        const earlierOther = otherScheduled.filter(m => {
+            const t = m.scheduledAt || "99:99";
+            return t < selTime; // lexicographic HH:MM comparison
+        });
+
+        if (earlierOther.length > 0) {
+            const byComp = {};
+            for (const m of earlierOther) {
+                if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0, earliest: m.scheduledAt || "99:99" };
+                byComp[m.compId].count++;
+                if ((m.scheduledAt || "99:99") < byComp[m.compId].earliest) byComp[m.compId].earliest = m.scheduledAt || "";
+            }
+            const entries = Object.values(byComp);
+            entries.sort((a, b) => a.earliest.localeCompare(b.earliest));
+            return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "earlier" };
+        }
+
+        return null;
+    }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
     // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
     // than re-declaring its shape — a second copy could silently drift. Both
@@ -366,7 +471,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && scheduled.length === 0;
+    // allDone: selected comp has no more matches to run on this court (AC4).
+    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && filteredScheduled.length === 0;
 
     return (
         <div className="app">
@@ -378,17 +484,36 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <h1 className="page-head__title">Shiaijo {court}</h1>
                         <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
                     </div>
-                    {courts.length > 1 && (
+                    {(courtsComps.length > 0 || courts.length > 1) && (
                         <div className="page-head__actions">
-                            <select
-                                className="input" style={{ width: "auto" }}
-                                value={courtKnown ? court : ""}
-                                onChange={(e) => onSwitchCourt(e.target.value)}
-                                aria-label="Switch court"
-                            >
-                                {!courtKnown && <option value="" disabled>Shiaijo {court} (unknown)</option>}
-                                {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
-                            </select>
+                            {courtsComps.length > 0 && (
+                                <div className="shiaijo-comp-selector">
+                                    <span className="shiaijo-comp-selector__label">Officiating:</span>
+                                    {courtsComps.length === 1 ? (
+                                        <span className="shiaijo-comp-selector__name">{courtsComps[0].name}</span>
+                                    ) : (
+                                        <select
+                                            className="input shiaijo-comp-select"
+                                            value={effectiveCompId || ""}
+                                            onChange={(e) => setSelectedCompId(e.target.value)}
+                                            aria-label="Select competition to officiate"
+                                        >
+                                            {courtsComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                        </select>
+                                    )}
+                                </div>
+                            )}
+                            {courts.length > 1 && (
+                                <select
+                                    className="input" style={{ width: "auto" }}
+                                    value={courtKnown ? court : ""}
+                                    onChange={(e) => onSwitchCourt(e.target.value)}
+                                    aria-label="Switch court"
+                                >
+                                    {!courtKnown && <option value="" disabled>Shiaijo {court} (unknown)</option>}
+                                    {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
+                                </select>
+                            )}
                         </div>
                     )}
                 </div>
@@ -420,7 +545,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <div className="shiaijo-upnext">
                                     <div className="section-title">Up next</div>
                                     <div className={`shiaijo-upnext__card ${calledKey === matchKey(upNext) ? "is-called" : ""}`}>
-                                        <div className="shiaijo-upnext__time">{upNext.scheduledAt || "—"} · {upNext.compName}</div>
+                                        <div className="shiaijo-upnext__time">
+                                            {upNext.scheduledAt || "—"} · {upNext.compName}
+                                            {upNext.phase === "pool" && upNext.poolPosition > 0 && upNext.poolCount > 0
+                                                ? ` · Match ${upNext.poolPosition} of ${upNext.poolCount}`
+                                                : upNext.phase === "bracket" && upNext.matchNumber > 0
+                                                ? ` · Match ${upNext.matchNumber}`
+                                                : ""}
+                                        </div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
                                             {/* Route through pickMatch (not startMatch) so starting the
@@ -450,7 +582,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                     {callingKey === matchKey(upNext) ? "Calling…" : (calledKey === matchKey(upNext) ? "Call again" : "Call to court")}
                                                 </button>
                                             )}
-                                            {window.API && typeof window.API.updateMatchTime === "function" && scheduled.length > 1 && (
+                                            {window.API && typeof window.API.updateMatchTime === "function" && filteredScheduled.length > 1 && (
                                                 <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={() => moveMatch(upNext, "down")} title="Move this match later in the queue">↓</button>
                                             )}
                                         </div>
@@ -468,18 +600,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 scoring panel on the right, so repeating it in the queue is
                                 redundant. */}
 
-                            {scheduled.length > (upNext ? 1 : 0) && (
+                            {filteredScheduled.length > (upNext ? 1 : 0) && (
                                 <ShiaijoQueueGroup
-                                    label="Upcoming" matches={upNext ? scheduled.slice(1) : scheduled}
+                                    label="Upcoming" matches={upNext ? filteredScheduled.slice(1) : filteredScheduled}
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={setLineupMatch}
                                     onPick={pickMatch}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
-                                    scheduled={scheduled}
+                                    scheduled={filteredScheduled}
                                 />
                             )}
 
-                            {completed.length > 0 && (
+                            {filteredCompleted.length > 0 && (
                                 <div className="shiaijo-completed">
                                     {/* Completed matches stay expanded — this is the operator's
                                         running record of what's been played on this court/pool today,
@@ -488,15 +620,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         COMPLETED_PREVIEW show by default; "Show all N" reveals the rest.
                                         completed is sorted ascending, so the most recent are the tail. */}
                                     <div className="section-title">
-                                        Completed <span className="shiaijo-count" aria-label={`${completed.length} matches`}>{completed.length}</span>
+                                        Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
                                     <ShiaijoQueueGroup
-                                        matches={(showAllCompleted || completed.length <= COMPLETED_PREVIEW)
-                                            ? completed
-                                            : completed.slice(-COMPLETED_PREVIEW)}
+                                        matches={(showAllCompleted || filteredCompleted.length <= COMPLETED_PREVIEW)
+                                            ? filteredCompleted
+                                            : filteredCompleted.slice(-COMPLETED_PREVIEW)}
                                         courts={courts} onMoveCourt={requestMoveCourt}
                                     />
-                                    {completed.length > COMPLETED_PREVIEW && (
+                                    {filteredCompleted.length > COMPLETED_PREVIEW && (
                                         <button
                                             type="button"
                                             className="linklike shiaijo-completed__more"
@@ -505,7 +637,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         >
                                             {showAllCompleted
                                                 ? "Show fewer"
-                                                : `Show all ${completed.length}`}
+                                                : `Show all ${filteredCompleted.length}`}
                                         </button>
                                     )}
                                 </div>
@@ -514,6 +646,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                         {/* ── Scoring / lineup + context (right) ──────── */}
                         <div className="shiaijo__main">
+                            {nudgeBanner && (
+                                <button
+                                    type="button"
+                                    className="alert alert--warn shiaijo-nudge"
+                                    onClick={() => setSelectedCompId(nudgeBanner.compId)}
+                                    aria-label={`Switch to ${nudgeBanner.comp}`}
+                                >
+                                    <span className="shiaijo-nudge__icon" aria-hidden="true">⚠</span>
+                                    <span className="shiaijo-nudge__text">
+                                        {nudgeBanner.reason === "no-matches"
+                                            ? `Switch to ${nudgeBanner.comp} — ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`
+                                            : `${nudgeBanner.comp} has ${nudgeBanner.count} earlier match${nudgeBanner.count === 1 ? "" : "es"} on this court.`}
+                                    </span>
+                                    <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
+                                </button>
+                            )}
                             {allDone && (
                                 <div className="empty">
                                     <h3>All matches complete on Shiaijo {court}</h3>
@@ -687,7 +835,14 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
     return (
         <div className={`shiaijo-qrow ${isComplete ? "shiaijo-qrow--complete" : ""}`}>
             <div className="shiaijo-qrow__top">
-                <span className="shiaijo-qrow__time">{m.scheduledAt || "—"} · {m.compName}</span>
+                <span className="shiaijo-qrow__time">
+                    {m.scheduledAt || "—"} · {m.compName}
+                    {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
+                        ? ` · Match ${m.poolPosition} of ${m.poolCount}`
+                        : m.phase === "bracket" && m.matchNumber > 0
+                        ? ` · Match ${m.matchNumber}`
+                        : ""}
+                </span>
                 <span className="shiaijo-qrow__state">
                     {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}

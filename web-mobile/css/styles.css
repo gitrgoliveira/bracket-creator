@@ -8040,6 +8040,68 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-2);
 }
 
+/* Competition selector in page-head (AC3) */
+.shiaijo-comp-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shiaijo-comp-selector__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.shiaijo-comp-selector__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.shiaijo-comp-select {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  min-width: 140px;
+  width: auto;
+}
+
+/* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,
+   never red/danger or navy/running). It is an actionable control: clicking
+   switches the page-head competition selector to the competition that needs this
+   court, so the operator never has to hunt the dropdown. */
+.shiaijo-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.shiaijo-nudge:hover {
+  background: var(--warn-border);
+}
+.shiaijo-nudge:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 2px;
+}
+.shiaijo-nudge__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.shiaijo-nudge__text {
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shiaijo-nudge__cta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .shiaijo { grid-template-columns: 1fr; }
   /* Stack layout for tablet portrait mode (queue below scoring). */

@@ -703,6 +703,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           <div style={{ flex: 1 }}>
             <div className="editor-modal__eyebrow">
               {m.compName} · {m.phase === "pool" ? window.poolLabel(m) : m.round}
+              {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
+                ? <span> · Match {m.poolPosition} of {m.poolCount}</span>
+                : m.phase === "bracket" && m.matchNumber > 0
+                ? <span> · Match {m.matchNumber}</span>
+                : null}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
             <div className="editor-modal__title">
@@ -710,9 +715,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
-              {isComplete ? "CORRECTION" : m.status === "running" ? "● NOW" : "PRE-MATCH"}
-            </div>
+            {(isComplete || m.status !== "running") && (
+              <div className={`editor-head-pill ${m.status === "running" ? "sched-row--running" : ""}`} style={{ fontSize: 10, fontWeight: 700 }}>
+                {isComplete ? "CORRECTION" : "PRE-MATCH"}
+              </div>
+            )}
             {/* C2: sync status indicator — only visible while the match is running */}
             <SyncStatusPill isRunning={m.status === "running"} />
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}

@@ -98,6 +98,27 @@ export function compMatches(c) {
     compKind: c.kind,
     teamSize: c.teamSize
   })));
+
+  // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
+  // to each pool match so the eyebrow and queue rows can show "Match N of M"
+  // (AC2). Matches are ordered by their natural sort within the pool group;
+  // poolCount is the number of matches with the same poolName, which equals
+  // N*(N-1)/2 for a round-robin pool of N players.
+  const poolMatchesByPool = {};
+  for (const m of out) {
+    if (m.phase !== "pool") continue;
+    const pn = m.poolName || "";
+    if (!poolMatchesByPool[pn]) poolMatchesByPool[pn] = [];
+    poolMatchesByPool[pn].push(m);
+  }
+  for (const pms of Object.values(poolMatchesByPool)) {
+    const count = pms.length;
+    pms.forEach((m, i) => {
+      m.poolPosition = i + 1;
+      m.poolCount = count;
+    });
+  }
+
   return out;
 }
 

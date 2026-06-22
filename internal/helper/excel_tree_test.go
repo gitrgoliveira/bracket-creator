@@ -107,3 +107,54 @@ func TestSetTreeSheetTitle(t *testing.T) {
 		})
 	}
 }
+
+// TestAssignMatchNumbers verifies that AssignMatchNumbers assigns sequential
+// numbers starting at 1, skips nil nodes, and does not re-number on subsequent
+// calls (i.e. each call is idempotent with a fresh counter — it overwrites).
+func TestAssignMatchNumbers(t *testing.T) {
+	t.Run("sequential numbering skips nil", func(t *testing.T) {
+		n1 := &Node{LeafNode: false}
+		n2 := &Node{LeafNode: false}
+		n3 := &Node{LeafNode: false}
+		n4 := &Node{LeafNode: false}
+
+		rounds := [][]*Node{
+			{n1, nil, n2}, // round 0: n1=1, nil skipped, n2=2
+			{n3, n4},      // round 1: n3=3, n4=4
+		}
+
+		AssignMatchNumbers(rounds)
+
+		assert.Equal(t, int64(1), n1.matchNum, "first non-nil node in round 0")
+		assert.Equal(t, int64(2), n2.matchNum, "second non-nil node in round 0 (nil skipped)")
+		assert.Equal(t, int64(3), n3.matchNum, "first node in round 1")
+		assert.Equal(t, int64(4), n4.matchNum, "second node in round 1")
+	})
+
+	t.Run("all nil round", func(t *testing.T) {
+		n1 := &Node{LeafNode: false}
+		rounds := [][]*Node{
+			{nil, nil},
+			{n1},
+		}
+
+		AssignMatchNumbers(rounds)
+
+		assert.Equal(t, int64(1), n1.matchNum, "first real node after all-nil round gets number 1")
+	})
+
+	t.Run("single match", func(t *testing.T) {
+		n := &Node{LeafNode: false}
+		rounds := [][]*Node{{n}}
+
+		AssignMatchNumbers(rounds)
+
+		assert.Equal(t, int64(1), n.matchNum)
+	})
+
+	t.Run("empty rounds", func(t *testing.T) {
+		// Must not panic
+		AssignMatchNumbers([][]*Node{})
+		AssignMatchNumbers(nil)
+	})
+}

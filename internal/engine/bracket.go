@@ -2,6 +2,8 @@ package engine
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -246,7 +248,89 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// recomputed after results resolve those placeholders into player names.
 	computeBracketDisplayMetadata(bracket)
 
+	// Assign sequential match numbers matching the Excel Tree sheet (AC8).
+	// Must run AFTER computeBracketDisplayMetadata sets Hidden so the skipping
+	// logic is identical to helper.AssignMatchNumbers (nil-node skip in Excel
+	// = Hidden or both-sides-empty in the web bracket).
+	assignBracketMatchNumbers(bracket)
+
 	return bracket, nil
+}
+
+// assignBracketMatchNumbers sets MatchNumber on every real (non-Hidden,
+// non-empty) bracket match. This is the web API's numbering implementation; the
+// Excel renderer has a SEPARATE one, helper.AssignMatchNumbers, which operates on
+// []*Node instead of *state.Bracket. The two are NOT a literally-shared function
+// (the types differ) — they are kept equal-by-contract so the on-screen "Match N"
+// always equals the printed Excel "Match N".
+//
+// Ordering — CRITICAL for byes: the Excel sheet numbers via eliminationMatchRounds,
+// which groups matches by DEPTH-FROM-ROOT (the unbalanced tree's deepest matches
+// come first), NOT by raw bracket.Rounds index. With a non-power-of-two roster the
+// pow2-padded bracket.Rounds order diverges from that depth grouping, so numbering
+// in raw Rounds order drifts (e.g. 5 entrants: the lone deep first-round bout must
+// be Match 1, not the shallow slot-0 bout). DisplayRound already encodes the Excel
+// depth grouping (verified by TestBracketDisplayMetadata_MatchesExcelRounds), so we
+// number by descending DisplayRound (deepest/earliest round first) then by the
+// 0-based position parsed from the match ID — identical to both the Excel
+// AssignMatchNumbers walk and the JS buildDisplayModel matchNumById ordering.
+//
+// Skip rule (matches the Excel nil-node skip): Hidden (structural-bye) matches and
+// both-sides-empty dead matches are excluded and do not consume a number.
+//
+// The printed Excel sheet is authoritative. The contract is enforced by
+// TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go), which builds
+// both numberings from identical entrant sets — including bye-producing, non-power-
+// of-two sizes — and asserts the real-match numbers are identical bout-for-bout.
+// If they ever diverge, fix THIS path to match the Excel one.
+//
+// Must run AFTER computeBracketDisplayMetadata, which sets Hidden / DisplayRound.
+func assignBracketMatchNumbers(b *state.Bracket) {
+	type ref struct {
+		m   *state.BracketMatch
+		pos int
+	}
+	var real []ref
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if m.Hidden {
+				continue
+			}
+			if m.SideA == "" && m.SideB == "" {
+				continue
+			}
+			real = append(real, ref{m: m, pos: bracketMatchPosFromID(m.ID)})
+		}
+	}
+	// Descending DisplayRound (deepest/earliest round first), then ascending
+	// position — mirrors the Excel eliminationMatchRounds walk.
+	sort.SliceStable(real, func(i, j int) bool {
+		if real[i].m.DisplayRound != real[j].m.DisplayRound {
+			return real[i].m.DisplayRound > real[j].m.DisplayRound
+		}
+		return real[i].pos < real[j].pos
+	})
+	for i, r := range real {
+		r.m.MatchNumber = i + 1
+	}
+}
+
+// bracketMatchPosFromID extracts the 0-based within-round position from a bracket
+// match ID of the form "m-r{ROUND}-{POS}" (e.g. "m-r2-1" → 1). It is the same
+// position the JS buildDisplayModel reads from the id suffix when ordering match
+// numbers, keeping the Go and JS numbering tie-breaks identical. Returns 0 for any
+// unparseable ID (defensive; real IDs always carry a trailing integer).
+func bracketMatchPosFromID(id string) int {
+	idx := strings.LastIndex(id, "-")
+	if idx < 0 || idx == len(id)-1 {
+		return 0
+	}
+	pos, err := strconv.Atoi(id[idx+1:])
+	if err != nil {
+		return 0
+	}
+	return pos
 }
 
 // computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every

@@ -3520,6 +3520,146 @@ button.pool-match-row {
   margin-top: 6px;
 }
 
+/* stat-box link variant — a button-reset that keeps the stat-box layout
+   but is clickable (e.g. "View podium →" in the completed stats strip). */
+.stat-box__link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+/* Stat value at text scale: the default .stat-box .v is 22px display, sized
+   for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
+   read better one step down. Modifier instead of scattered inline font-size. */
+.stat-box .v--sm {
+  font-size: 16px;
+}
+
+/* Clickable action card (mp-a5d6): the overview's navigate-on-click cards
+   (Scores/Results, draw preview, export) need the same affordance as the
+   dashboard's .tcard so they read as interactive, not static. Mirrors
+   .tcard:hover for system consistency. */
+.card--action {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.card--action:hover {
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card--action:active {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--action {
+    transition: none;
+  }
+  .card--action:hover {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .card--action:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Next-steps checklist (mp-a5d6) — status-aware overview for setup state.
+   Composes existing tokens; no new color values. */
+.comp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comp-step {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.comp-step:last-child {
+  border-bottom: none;
+}
+
+.comp-step__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.comp-step--done .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--active .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--todo .comp-step__icon {
+  color: var(--ink-3);
+}
+
+.comp-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comp-step__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.comp-step--done .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step--active .comp-step__label {
+  color: var(--ink);
+}
+
+.comp-step--todo .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step__detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.comp-step--active .comp-step__detail {
+  color: var(--ink-2);
+}
+
+.comp-step__cta {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.comp-steps__hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+}
+
 /* Sidebar (admin tournament) */
 .workspace {
   display: grid;

@@ -741,6 +741,11 @@ type BracketMatch struct {
 	ScoreB        string `json:"scoreB"`
 	IsOverridden  bool   `json:"isOverridden"`
 	QueuePosition int    `json:"queuePosition,omitempty"`
+	// MatchNumber is the sequential bracket match number, matching the
+	// "Match N" label printed on the Excel tree sheet. 0 means unset — for a
+	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved
+	// before numbering was assigned.
+	MatchNumber int `json:"matchNumber,omitempty"`
 	// Decision-type metadata mirrors MatchResult so an elimination-stage
 	// kiken/fusenpai/encho is reconstructable from bracket.json alone
 	// (label rendering, Excel export, SSE replays).

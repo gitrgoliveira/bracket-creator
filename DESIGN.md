@@ -41,6 +41,12 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
 2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface** — and the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine — give each side a tinted cell, a colored header, or a filled badge so the signal stays legible as the component shrinks. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
 3. **Running state is loud — but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, and a pulsing dot whose *motion* is the primary signal. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only** — running state must never use red, so the two never collide on the same card (a running match still shows its Aka side in red while the running ring stays navy).
+
+   **Pulse has exactly two sanctioned meanings, kept apart by hue — never by motion.** The *motion* always says "this needs your eyes"; the *color* says which kind:
+   - **Navy pulse (`--accent`)** = *happening now* — a live/running match on a court (the `.dot--running` dot, running ring/strip).
+   - **Amber pulse (`--warn`)** = *your expected next action* — a state where the operator should act but nothing is live yet, e.g. the court console nudging the operator to switch to the competition that now needs this court (active competition done/not-started while another has matches assignable here).
+
+   These two are mutually exclusive by hue so they can coexist on screen without ambiguity (navy = "watch this", amber = "do this next"). Do **not** add a third pulse meaning, and do **not** use red for either (red stays Aka/danger). A next-action pulse must clear itself the moment the action is no longer expected.
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)` — see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row` — readability wins.
@@ -60,7 +66,7 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
 | `--danger` | `var(--red)` | **Semantic alias of `--red`** for error/destructive intent (error text/borders, the hansoku ▲, invalid-input outlines). Prefer `--danger` over `--red` when the meaning is "error", not "Aka side" — it reads at the call site and keeps the value single-sourced. Never use for running state. |
 | `--danger-soft` | `var(--red-soft)` | Soft danger tint — faint error backgrounds. Alias of `--red-soft`. |
-| `--warn` | `#b45309` | Warning text/icon (amber-700, >=4.5:1 on `--warn-soft`). Caution/attention, **never error** (use `--danger`) and **never running** (use `--accent`). Per Principle 3 amber is non-overlapping with red and navy. |
+| `--warn` | `#b45309` | Warning text/icon (amber-700, >=4.5:1 on `--warn-soft`). Caution/attention, **never error** (use `--danger`) and **never running** (use `--accent`). Per Principle 3 amber is non-overlapping with red and navy — and is the **one sanctioned colour for an "expected next action" pulse** (e.g. the court-console competition-switch nudge), distinct from the navy running pulse. |
 | `--warn-strong` | `#f59e0b` | Saturated amber-500 accent border for status pills (offline sync pill) |
 | `--warn-soft` | `#fffbeb` | Warning fill (amber-50) — `.alert--warn`, `.tag-badge--warn`, offline pill background |
 | `--warn-border` | `#fde68a` | Warning hairline border (amber-200) |
@@ -168,7 +174,7 @@ Durations remain literals (de facto tokens, fold new work toward these):
 | `300ms` | Progress bars, toast slide-in |
 
 Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.css)):
-- `pulse` (1.6s infinite) — `.dot--running` only
+- `pulse` (1.6s infinite) — running state (`.dot--running`, navy `--accent`). The same motion is reused, tinted amber (`--warn`), for an **expected-next-action** nudge (see Principle 3); gate any next-action pulse behind `prefers-reduced-motion` and clear it when the action is no longer expected
 - `spin` (0.6s linear infinite) — loading spinners
 - `toast-in` (300ms) — toast entrance
 - `decision-prompt-in` (160ms, `var(--ease-out)`) — match-decision modal entrance

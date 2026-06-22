@@ -241,6 +241,32 @@ describe('Viewer Utils', () => {
       expect(compMatches(c)).toEqual([]);
     });
 
+    it('excludes tiebreak/daihyosen bouts from poolCount and poolPosition', () => {
+      // 3-player RR = 3 regular matches; the -TB- and -DH- bouts must NOT count
+      // toward "Match N of M" (they are not part of the round-robin schedule).
+      const c = mkComp({
+        poolMatches: [
+          { id: 'Pool A-0', status: 'completed' },
+          { id: 'Pool A-1', status: 'completed' },
+          { id: 'Pool A-2', status: 'completed' },
+          { id: 'Pool A-TB-0', status: 'scheduled' },
+          { id: 'Pool A-DH-0', status: 'scheduled' },
+        ],
+      });
+      const ms = compMatches(c);
+      const regular = ms.filter(m => /Pool A-\d+$/.test(m.id));
+      const tb = ms.find(m => m.id === 'Pool A-TB-0');
+      const dh = ms.find(m => m.id === 'Pool A-DH-0');
+      // Every regular bout sees a true RR total of 3.
+      expect(regular.map(m => m.poolCount)).toEqual([3, 3, 3]);
+      expect(regular.map(m => m.poolPosition)).toEqual([1, 2, 3]);
+      // TB/DH bouts get no position (undefined → the row hides "Match N of M").
+      expect(tb.poolCount).toBeUndefined();
+      expect(tb.poolPosition).toBeUndefined();
+      expect(dh.poolCount).toBeUndefined();
+      expect(dh.poolPosition).toBeUndefined();
+    });
+
     // mp-116: compKind/teamSize must be threaded onto every match so that
     // MatchDetailCard.isTeam and MatchViewerModal.isTeam evaluate correctly.
     it('threads compKind and teamSize onto pool matches for team comps', () => {

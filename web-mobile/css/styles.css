@@ -3751,6 +3751,20 @@ button.pool-match-row {
   font-size: 15px;
   margin: 0 0 4px;
 }
+/* Inline recovery control inside an empty state (e.g. the court picker shown
+   for an unknown shiaijo). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.empty__action .input {
+  width: auto;
+  min-width: 130px;
+}
 .empty > div:not(.icon):not(.empty__cta-note) {
   font-size: 13px;
 }
@@ -7021,6 +7035,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 4px;
 }
 
+/* Centered overtime pill — sits below the foul boxes in the individual scorer
+   (the EnchoControl renders its own .encho-row child, which this centers). */
+.encho-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Stacked decision place: a "Decision:" header, the judges'-decision (hantei)
+   affordance as the top row, then the withdrawal/forfeit controls as the
+   bottom row. Overrides the default inline-row .decision-controls layout. */
+.decision-controls--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.decision-controls--stacked .decision-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ？ icon that carries the glossary tooltip for a decision button. */
 .glossary-hint .tw-term {
   border-bottom: none;
@@ -8153,6 +8191,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
 }
 
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+   round ("Final"), so the operator knows which pool/round they'll be scoring.
+   Lighter than the .section-title above it — a secondary tier, not a peer. */
+.shiaijo-subgroup + .shiaijo-subgroup {
+  margin-top: 14px;
+}
+.shiaijo-subgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+.shiaijo-subgroup__title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 /* Context panel (collapsible) */
 .shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .shiaijo-context__toggle { padding: 12px 14px; }
@@ -8198,6 +8260,111 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 6px;
   font-size: 12px;
   color: var(--ink-2);
+}
+
+/* Page title doubles as the court switcher: the H1 shows a chevron and a
+   transparent native <select> overlays it (native picker + a11y, no duplicate
+   control). Only rendered when there is more than one court. */
+.shiaijo-title-select {
+  position: relative;
+  display: inline-block;
+}
+.shiaijo-title-select .page-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.shiaijo-title-select__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  line-height: 1;
+  transition: background 150ms ease, color 150ms ease;
+}
+.shiaijo-title-select:hover .shiaijo-title-select__chevron {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.shiaijo-title-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.shiaijo-title-select:focus-within .page-head__title {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Competition selector in page-head (AC3) — mirrors the Shiaijo title on the
+   right edge: the competition name gets the full display-title treatment (same
+   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
+   caption beneath that lines up with the title's own sub-caption on the left. */
+.shiaijo-officiating {
+  text-align: right;
+}
+/* Navy so the changeable competition reads distinct from the fixed court name,
+   tying it to the navy chevron chip while keeping the identical title scale. */
+.shiaijo-officiating__name {
+  color: var(--accent);
+}
+.shiaijo-officiating__sub {
+  text-align: right;
+}
+.shiaijo-title-select--right {
+  text-align: right;
+}
+
+/* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,
+   never red/danger or navy/running). It is an actionable control: clicking
+   switches the page-head competition selector to the competition that needs this
+   court, so the operator never has to hunt the dropdown. */
+.shiaijo-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.shiaijo-nudge:hover {
+  background: var(--warn-border);
+}
+.shiaijo-nudge:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 2px;
+}
+.shiaijo-nudge__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.shiaijo-nudge__text {
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shiaijo-nudge__cta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

@@ -421,8 +421,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 : null}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
             </div>
-            <div className="editor-modal__title">
-              <TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}
+            <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
+              {/* C2: sync status indicator — inline on the title line (no dedicated
+                  row); SyncStatusPill renders nothing unless the match is running. */}
+              <SyncStatusPill isRunning={m.status === "running"} />
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -431,8 +434,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 {isComplete ? "CORRECTION" : "PRE-MATCH"}
               </div>
             )}
-            {/* C2: sync status indicator — only visible while the match is running */}
-            <SyncStatusPill isRunning={m.status === "running"} />
             {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>

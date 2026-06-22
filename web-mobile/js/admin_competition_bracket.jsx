@@ -118,6 +118,10 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
 
   return (
     <div className="running-panel">
+      {/* The card fills the row to align with the bracket card above; this inner
+          column caps the content to a comfortable width and centres it so the
+          reused editor / result card aren't stretched edge-to-edge. */}
+      <div className="running-panel__inner">
       {/* Slim header: only the bits the reused components' own headers DON'T
           carry — the bracket match number and the move-court control. Comp /
           shiaijo / round / time / status come from the embedded component. */}
@@ -169,6 +173,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
           }}>Edit result</button>
         </div>
       )}
+      </div>
     </div>
   );
 });

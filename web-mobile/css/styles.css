@@ -2055,6 +2055,14 @@ a:hover {
   font-weight: 600;
   font-size: 16px;
 }
+/* Centred content column: the panel card fills the row (so it aligns with the
+   bracket card), but the reused editor / result card are capped here so they
+   read as a comfortable scoreboard width instead of stretching edge-to-edge. */
+.running-panel__inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
 /* Completed-match result view: the shared MatchDetailCard (same as the viewer)
    followed by the confirmation-gated edit action. */
 .running-panel__result {

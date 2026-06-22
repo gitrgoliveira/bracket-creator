@@ -98,6 +98,35 @@ export function compMatches(c) {
     compKind: c.kind,
     teamSize: c.teamSize
   })));
+
+  // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
+  // to each pool match so the eyebrow and queue rows can show "Match N of M"
+  // (AC2). Matches are ordered by their natural sort within the pool group;
+  // poolCount is the number of REGULAR round-robin matches with the same
+  // poolName, which equals N*(N-1)/2 for a pool of N players. Tiebreak
+  // ("-TB-") and pool-daihyosen ("-DH-") bouts are NOT part of the RR schedule,
+  // so they are excluded here — counting them would inflate poolCount and shift
+  // "Match N of M" for the regular bouts. Such bouts simply get no position.
+  const NON_RR_ID_RE = /-(?:TB|DH)-\d+$/;
+  // Null-prototype: poolName is user-controlled, so a pool literally named
+  // "__proto__"/"constructor" must not pollute the map or collide with
+  // inherited keys (matches the Object.create(null) pattern used elsewhere).
+  const poolMatchesByPool = Object.create(null);
+  for (const m of out) {
+    if (m.phase !== "pool") continue;
+    if (NON_RR_ID_RE.test(m.id || "")) continue;
+    const pn = m.poolName || "";
+    if (!poolMatchesByPool[pn]) poolMatchesByPool[pn] = [];
+    poolMatchesByPool[pn].push(m);
+  }
+  for (const pms of Object.values(poolMatchesByPool)) {
+    const count = pms.length;
+    pms.forEach((m, i) => {
+      m.poolPosition = i + 1;
+      m.poolCount = count;
+    });
+  }
+
   return out;
 }
 

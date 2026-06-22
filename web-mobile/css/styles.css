@@ -1953,6 +1953,10 @@ a:hover {
     min-height: 44px;
   }
 }
+.modal__close:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
 /* ---------- Auth modal ---------- */
 .auth {
@@ -3062,8 +3066,11 @@ button.pool-match-row {
 
 .vlist-item__bar>div {
   height: 100%;
+  width: 100%;
   background: var(--accent);
-  transition: width 300ms;
+  transform-origin: left;
+  transform: scaleX(var(--bar-fill, 0));
+  transition: transform 300ms;
 }
 
 .vlist-item__pct {
@@ -3276,6 +3283,157 @@ button.pool-match-row {
   margin-top: 6px;
 }
 
+/* stat-box link variant — a button-reset that keeps the stat-box layout
+   but is clickable (e.g. "View podium →" in the completed stats strip). */
+.stat-box__link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.stat-box__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+/* Stat value at text scale: the default .stat-box .v is 22px display, sized
+   for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
+   read better one step down. Modifier instead of scattered inline font-size. */
+.stat-box .v--sm {
+  font-size: 16px;
+}
+
+/* Clickable action card (mp-a5d6): the overview's navigate-on-click cards
+   (Scores/Results, draw preview, export) need the same affordance as the
+   dashboard's .tcard so they read as interactive, not static. Mirrors
+   .tcard:hover for system consistency. */
+.card--action {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.card--action:hover {
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card--action:active {
+  transform: translateY(0);
+}
+
+.card--action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow), var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--action {
+    transition: none;
+  }
+  .card--action:hover {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .card--action:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Next-steps checklist (mp-a5d6) — status-aware overview for setup state.
+   Composes existing tokens; no new color values. */
+.comp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comp-step {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.comp-step:last-child {
+  border-bottom: none;
+}
+
+.comp-step__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.comp-step--done .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--active .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--todo .comp-step__icon {
+  color: var(--ink-3);
+}
+
+.comp-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comp-step__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.comp-step--done .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step--active .comp-step__label {
+  color: var(--ink);
+}
+
+.comp-step--todo .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step__detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.comp-step--active .comp-step__detail {
+  color: var(--ink-2);
+}
+
+.comp-step__cta {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.comp-steps__hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+}
+
 /* Sidebar (admin tournament) */
 .workspace {
   display: grid;
@@ -3348,6 +3506,23 @@ button.pool-match-row {
   color: var(--ink-2);
   font-size: 15px;
   margin: 0 0 4px;
+}
+/* Inline recovery control inside an empty state (e.g. the court picker shown
+   for an unknown shiaijo). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.empty__action .input {
+  width: auto;
+  min-width: 130px;
+}
+.empty > div:not(.icon):not(.empty__cta-note) {
+  font-size: 13px;
 }
 
 /* Primary CTA inside an empty state (e.g. "Open admin" when no competitions
@@ -5394,7 +5569,7 @@ button.pool-match-row {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 500;
   pointer-events: none;
-  animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes toast-in {
@@ -6367,7 +6542,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -6595,6 +6769,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Centered overtime pill — sits below the foul boxes in the individual scorer
+   (the EnchoControl renders its own .encho-row child, which this centers). */
+.encho-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Stacked decision place: a "Decision:" header, the judges'-decision (hantei)
+   affordance as the top row, then the withdrawal/forfeit controls as the
+   bottom row. Overrides the default inline-row .decision-controls layout. */
+.decision-controls--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.decision-controls--stacked .decision-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ？ icon that carries the glossary tooltip for a decision button. */
@@ -7474,9 +7672,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--red);
   border-radius: var(--r-sm);
-  border-left: 3px solid var(--red);
+  background: var(--red-soft);
 }
 .start-all__failed-name { font-weight: 600; color: var(--ink-1); }
 .start-all__failed-reason { font-size: 12px; color: var(--ink-3); }
@@ -7729,6 +7927,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
 }
 
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+   round ("Final"), so the operator knows which pool/round they'll be scoring.
+   Lighter than the .section-title above it — a secondary tier, not a peer. */
+.shiaijo-subgroup + .shiaijo-subgroup {
+  margin-top: 14px;
+}
+.shiaijo-subgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+.shiaijo-subgroup__title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 /* Context panel (collapsible) */
 .shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .shiaijo-context__toggle { padding: 12px 14px; }
@@ -7774,6 +7996,111 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 6px;
   font-size: 12px;
   color: var(--ink-2);
+}
+
+/* Page title doubles as the court switcher: the H1 shows a chevron and a
+   transparent native <select> overlays it (native picker + a11y, no duplicate
+   control). Only rendered when there is more than one court. */
+.shiaijo-title-select {
+  position: relative;
+  display: inline-block;
+}
+.shiaijo-title-select .page-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.shiaijo-title-select__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  line-height: 1;
+  transition: background 150ms ease, color 150ms ease;
+}
+.shiaijo-title-select:hover .shiaijo-title-select__chevron {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.shiaijo-title-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.shiaijo-title-select:focus-within .page-head__title {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Competition selector in page-head (AC3) — mirrors the Shiaijo title on the
+   right edge: the competition name gets the full display-title treatment (same
+   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
+   caption beneath that lines up with the title's own sub-caption on the left. */
+.shiaijo-officiating {
+  text-align: right;
+}
+/* Navy so the changeable competition reads distinct from the fixed court name,
+   tying it to the navy chevron chip while keeping the identical title scale. */
+.shiaijo-officiating__name {
+  color: var(--accent);
+}
+.shiaijo-officiating__sub {
+  text-align: right;
+}
+.shiaijo-title-select--right {
+  text-align: right;
+}
+
+/* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,
+   never red/danger or navy/running). It is an actionable control: clicking
+   switches the page-head competition selector to the competition that needs this
+   court, so the operator never has to hunt the dropdown. */
+.shiaijo-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.shiaijo-nudge:hover {
+  background: var(--warn-border);
+}
+.shiaijo-nudge:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 2px;
+}
+.shiaijo-nudge__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.shiaijo-nudge__text {
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shiaijo-nudge__cta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

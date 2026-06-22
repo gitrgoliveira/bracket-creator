@@ -16,6 +16,7 @@ const formatDate = window.formatDate;
 const Icon = window.Icon;
 const formatLabelShort = window.formatLabelShort;
 const formatAdminHeaderSub = window.formatAdminHeaderSub;
+const Modal = window.Modal;
 
 // Maximum running-match chips rendered in the topbar status strip before the
 // "+N more" overflow indicator kicks in.
@@ -247,8 +248,6 @@ function AllWinnersModal({ comps, onClose }) {
   const completed = (comps || []).filter((c) => c.status === "completed");
   const [state, setState] = useStateA({ loading: true, results: [], error: null });
 
-  window.useEscapeToClose(onClose);
-
   // Stable signature of every comp's id:status. A pools+knockout podium can
   // change without the *completed* set changing — e.g. a mixed comp is already
   // completed (pools done) while its linked playoffs comp finishes its final.
@@ -272,62 +271,59 @@ function AllWinnersModal({ comps, onClose }) {
   }, [compsSig]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 640, width: "95%" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="All winners">
-        <div className="modal__head">
-          <div className="modal__title" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="trophy" size={18} />All winners</div>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {state.loading && (
-            <div style={{ textAlign: "center", color: "var(--ink-3)", padding: "24px 0" }}>Loading results…</div>
-          )}
-          {!state.loading && state.error && (
-            <div style={{ color: "var(--red)", padding: "8px 0" }}>Failed to load results: {state.error}</div>
-          )}
-          {!state.loading && !state.error && state.results.length === 0 && (
-            <div style={{ color: "var(--ink-3)", padding: "8px 0" }}>No completed competitions.</div>
-          )}
-          {!state.loading && state.results.map(({ comp, state: compState, podium, error: compErr }) => (
-            <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2)", borderRadius: 4, padding: "1px 6px" }}>
-                  {window.competitionKindLabel(comp)}
-                </div>
+    <Modal
+      title={<span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="trophy" size={18} />All winners</span>}
+      ariaLabel="All winners"
+      onClose={onClose}
+      style={{ maxWidth: 640, width: "95%" }}
+      footer={<button type="button" className="btn" onClick={onClose}>Close</button>}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {state.loading && (
+          <div style={{ textAlign: "center", color: "var(--ink-3)", padding: "24px 0" }}>Loading results…</div>
+        )}
+        {!state.loading && state.error && (
+          <div style={{ color: "var(--red)", padding: "8px 0" }}>Failed to load results: {state.error}</div>
+        )}
+        {!state.loading && !state.error && state.results.length === 0 && (
+          <div style={{ color: "var(--ink-3)", padding: "8px 0" }}>No completed competitions.</div>
+        )}
+        {!state.loading && state.results.map(({ comp, state: compState, podium, error: compErr }) => (
+          <div key={comp.id} className="card" style={{ padding: "12px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2)", borderRadius: 4, padding: "1px 6px" }}>
+                {window.competitionKindLabel(comp)}
               </div>
-              {compErr && (
-                <div style={{ fontSize: 13, color: "var(--red)" }}>Could not load results: {compErr}</div>
-              )}
-              {!compErr && compState === "in-progress" && podium.length === 0 && (
-                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Knockout in progress</div>
-              )}
-              {!compErr && compState !== "in-progress" && podium.length === 0 && (
-                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No results yet</div>
-              )}
-              {!compErr && podium.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {podium.map((entry, idx) => {
-                    const style = PLACE_STYLE_ADMIN[entry.place] || PLACE_STYLE_ADMIN[3];
-                    return (
-                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-                        <span style={{ fontSize: 16, minWidth: 22 }}>{style.icon}</span>
-                        <span style={{ fontWeight: 600, minWidth: 32, color: "var(--ink-3)", fontSize: 12 }}>{style.label}</span>
-                        <span style={{ fontWeight: 600 }}>{entry.name}</span>
-                        {entry.dojo && <span style={{ color: "var(--ink-3)", fontSize: 13 }}>{entry.dojo}</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          ))}
-        </div>
-        <div className="modal__foot">
-          <button type="button" className="btn" onClick={onClose}>Close</button>
-        </div>
+            {compErr && (
+              <div style={{ fontSize: 13, color: "var(--red)" }}>Could not load results: {compErr}</div>
+            )}
+            {!compErr && compState === "in-progress" && podium.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Knockout in progress</div>
+            )}
+            {!compErr && compState !== "in-progress" && podium.length === 0 && (
+              <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No results yet</div>
+            )}
+            {!compErr && podium.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {podium.map((entry, idx) => {
+                  const style = PLACE_STYLE_ADMIN[entry.place] || PLACE_STYLE_ADMIN[3];
+                  return (
+                    <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                      <span style={{ fontSize: 16, minWidth: 22 }}>{style.icon}</span>
+                      <span style={{ fontWeight: 600, minWidth: 32, color: "var(--ink-3)", fontSize: 12 }}>{style.label}</span>
+                      <span style={{ fontWeight: 600 }}>{entry.name}</span>
+                      {entry.dojo && <span style={{ color: "var(--ink-3)", fontSize: 13 }}>{entry.dojo}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -436,10 +432,33 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
               <button type="button" className="btn btn--danger" onClick={onStartAll}>Start all</button>
             )}
-            <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+            {/* When the tournament is empty the first-run empty state below carries
+                the single primary "Add competition" CTA, so we drop the duplicate
+                header button to keep one clear call to action on the first screen. */}
+            {!noComps && (
+              <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+            )}
           </div>
         </div>
 
+        {/* First-run: an empty tournament has no matches, so the match-count
+            stat strip ("Matches done 0/0", "Now 0"), the tournament-wide score
+            editor, and the per-shiaijo operator views are all dead widgets. Show
+            a single oriented empty state instead and skip the rest of the
+            dashboard until the first competition exists. */}
+        {noComps ? (
+          <div className="empty" style={{ padding: "48px 24px", marginBottom: 24 }}>
+            <div className="icon" aria-hidden="true">🥋</div>
+            <h3>Add your first competition</h3>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
+              A competition is one event within {t.name} — like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
+            </div>
+            <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+              <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+              <button type="button" className="btn" onClick={onOpenImport}>Import from folder</button>
+            </div>
+          </div>
+        ) : (<>
         <div className="stats-strip">
           <div className="stat-box"><div className="v">{comps.length}</div><div className="l">Competitions</div></div>
           <div className="stat-box"><div className="v">{totalParticipants}</div><div className="l">Participants</div></div>
@@ -488,10 +507,13 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <div className="section-title">All competitions</div>
         <div className="tlist">
           {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
-          <button type="button" className={`tcard tcard--add${noComps ? " tcard--add-cta" : ""}`} onClick={onCreateCompetition}>
-            <div style={{ fontSize: 28, color: noComps ? "var(--accent)" : "var(--ink-3)" }}>+</div>
-            <div style={{ fontWeight: noComps ? 700 : 600, marginTop: 4, color: noComps ? "var(--accent)" : undefined }}>Add competition</div>
-            <div style={{ fontSize: 12, color: noComps ? "var(--ink-2)" : "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
+          {/* This section only renders when competitions exist (the empty-tournament
+              case is handled by the first-run empty state above), so the dashed
+              tile stays a quiet "add another", not the promoted first-run CTA. */}
+          <button type="button" className="tcard tcard--add" onClick={onCreateCompetition}>
+            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
           <button type="button" className="tcard tcard--add" onClick={onOpenImport}>
             <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
@@ -499,6 +521,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
         </div>
+        </>)}
         {window.VersionFooter && <window.VersionFooter />}
       </div>
       {exportPdfOpen && (
@@ -551,32 +574,23 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
     }
   }, [url]);
 
-  window.useEscapeToClose(onClose);
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Share registration link">
-        <div className="modal__head">
-          <div className="modal__title">Share registration link</div>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">✕</button>
+    <Modal title="Share registration link" onClose={onClose} footer={<>
+      <button type="button" className="btn btn--primary" onClick={() => {
+        copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
+      }}>Copy link</button>
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+        <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
+        <div style={{ width: "100%", background: "var(--surface-2)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
+          {url}
         </div>
-        <div className="modal__body" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <canvas ref={canvasRef} style={{ display: "block", imageRendering: "pixelated" }} />
-          <div style={{ width: "100%", background: "var(--surface-2)", borderRadius: 6, padding: "8px 12px", fontFamily: "monospace", fontSize: 13, wordBreak: "break-all", userSelect: "all" }}>
-            {url}
-          </div>
-          <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
-            Participants can scan this QR code or open the link to register.
-          </p>
-        </div>
-        <div className="modal__foot">
-          <button type="button" className="btn btn--primary" onClick={() => {
-            copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
-          }}>Copy link</button>
-          <button type="button" className="btn" onClick={onClose}>Close</button>
-        </div>
+        <p style={{ margin: 0, fontSize: 13, color: "var(--ink-3)", textAlign: "center" }}>
+          Participants can scan this QR code or open the link to register.
+        </p>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -598,13 +612,8 @@ const PDF_EXPORT_TYPES = [
 function ExportPdfModal({ tournament, password, onClose, showToast }) {
   const [busyType, setBusyType] = useStateA("");
 
-  // Gate Escape-to-close while generating, the same as the backdrop/close
-  // button — otherwise Escape could unmount mid-download and the in-flight
-  // setBusyType("") would fire on an unmounted component.
-  window.useEscapeToClose(busyType ? undefined : onClose);
-
   const download = async (type) => {
-    if (busyType) return; // soffice is serialized server-side — one at a time
+    if (busyType) return;
     setBusyType(type);
     try {
       const blob = await window.API.exportPDFs(type, password);
@@ -617,9 +626,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Delay the revoke so the browser has time to initiate the download
-      // before the blob URL is torn down. An immediate revoke races with the
-      // download start and can produce an empty file in some browsers.
+      // Delay revoke so the browser initiates the download before the blob URL is torn down
       setTimeout(() => window.URL.revokeObjectURL(dlUrl), 100);
       if (showToast) showToast("PDFs generated — download started.");
     } catch (err) {
@@ -631,38 +638,31 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={busyType ? undefined : onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Export PDFs">
-        <div className="modal__head">
-          <div className="modal__title">Export PDFs</div>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Close" disabled={!!busyType}>✕</button>
-        </div>
-        <div className="modal__body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--ink-3)" }}>
-            Generates print-ready PDFs from the current tournament using LibreOffice.
-            Each download is a ZIP. Generation can take up to a minute.
-          </p>
-          {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
-            <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{label}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{hint}</div>
-              </div>
-              <button
-                className={"btn btn--sm" + (type === "all" ? " btn--primary" : "")}
-                onClick={() => download(type)}
-                disabled={!!busyType}
-              >
-                {busyType === type ? "Generating…" : "Download"}
-              </button>
+    <Modal title="Export PDFs" onClose={onClose} dismissable={!busyType}
+      footer={<button type="button" className="btn" onClick={onClose} disabled={!!busyType}>Close</button>}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <p style={{ margin: "0 0 4px", fontSize: 13, color: "var(--ink-3)" }}>
+          Generates print-ready PDFs from the current tournament using LibreOffice.
+          Each download is a ZIP. Generation can take up to a minute.
+        </p>
+        {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
+          <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>{label}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{hint}</div>
             </div>
-          ))}
-        </div>
-        <div className="modal__foot">
-          <button type="button" className="btn" onClick={onClose} disabled={!!busyType}>Close</button>
-        </div>
+            <button
+              className={"btn btn--sm" + (type === "all" ? " btn--primary" : "")}
+              onClick={() => download(type)}
+              disabled={!!busyType}
+            >
+              {busyType === type ? "Generating…" : "Download"}
+            </button>
+          </div>
+        ))}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -750,12 +750,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   const triggerRef = useRefA(null);
   const optionRefs = useRefA([]);
 
-  useEffectA(() => {
-    if (!open) return;
-    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
+  window.useClickOutside(ref, () => setOpen(false), open);
 
   // On open, seed the active option to the current court and move focus into
   // the popover. On close, return focus to the trigger so keyboard users

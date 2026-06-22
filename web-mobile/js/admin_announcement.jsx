@@ -144,24 +144,13 @@ function AnnouncementComposer({ password, showToast }) {
 // AnnouncementModal — dashboard entry point (mp-djc). Wraps the composer
 // in the shared .modal-backdrop / .modal pattern (mirrors AuthModal in
 // app.jsx). Backdrop click + Escape close.
+const Modal = window.Modal;
+
 function AnnouncementModal({ password, showToast, onClose }) {
-  window.useEscapeToClose(onClose);
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      {/* modal--lg (720px) matches the width the composer was designed for
-          on the Edit-details page (its card is maxWidth 720). At the default
-          460px the message-hint row's space-between flex wraps the char
-          counter into the middle of the sentence. */}
-      <div className="modal modal--lg" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__head">
-          <div className="modal__title">Broadcast announcement</div>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">&times;</button>
-        </div>
-        <div className="modal__body">
-          <AnnouncementComposer password={password} showToast={showToast} />
-        </div>
-      </div>
-    </div>
+    <Modal title="Broadcast announcement" onClose={onClose} size="lg">
+      <AnnouncementComposer password={password} showToast={showToast} />
+    </Modal>
   );
 }
 

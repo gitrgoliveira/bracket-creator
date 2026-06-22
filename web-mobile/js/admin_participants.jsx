@@ -4,6 +4,7 @@
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
+const EmptyState = window.EmptyState;
 
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
@@ -206,6 +207,16 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     return p.danGrade ? `${base}, ${p.danGrade}` : base;
   }).join("\n");
 
+  // Fill the roster textarea with a generated sample roster of `count`
+  // competitors. This lives in the Participants view (not the create form)
+  // so a sample is a starting point you review and edit before clicking
+  // "Apply changes" — it reuses the whole parse/validate/save path. The
+  // generated ids are placeholders; apply() assigns `${compId}-pN` ids.
+  const fillSample = (count) => {
+    const sample = window.makeCompetitors(count, c.kind, c.id, 0, c.gender || "M");
+    setText(generateText(sample));
+  };
+
   useEffectA(() => {
     if (!textFocusRef.current) {
       setText(generateText(c.players || []));
@@ -330,6 +341,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
+  // First-run: with no participants yet there is nothing to seed or check in,
+  // so the seeding panel is premature. Collapse it and let the roster-input
+  // panel fill the width — adding names is the only task at this point.
+  const emptyRoster = players.length === 0;
 
   // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
   // The draw assigns the final, pool-interleaved numbers (player.number);
@@ -734,29 +749,53 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
-      <div className="row" style={{ alignItems: "start" }}>
+      {/* Setup next-step cue: connects this landing page to the rest of the
+          preparation flow. Adding the roster here doesn't tell the operator
+          what comes next (the Generate draw button lives in the page header,
+          the full checklist on Overview), so state it explicitly. */}
+      {isSetup && (
+        <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div className="card__title" style={{ marginBottom: 2 }}>
+              {players.length >= 2 ? "Roster ready" : "Add your roster to begin"}
+            </div>
+            <div className="card__sub">
+              {players.length >= 2
+                ? `${players.length} ${c.kind === "team" ? "teams" : "participants"} added. Assign seeds (optional), then use “Generate draw” in the header to build the bracket.`
+                : `Add at least 2 ${c.kind === "team" ? "teams" : "participants"}, then you can generate the draw.`}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={() => onSection("overview")}>View setup steps →</button>
+        </div>
+      )}
+      <div className="row" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
+        {!emptyRoster && (
         <div className="card">
           <div className="card__head">
             <div>
-              <div className="card__title">Check-in & Seeding</div>
+              <div className="card__title">{c.checkInEnabled ? "Check-in & Seeding" : "Seeding"}</div>
               <div className="card__sub">
                 {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{players.filter((p) => p.seed).length} seeded
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Attendance cluster: only present when check-in tracking is on. */}
               {c.checkInEnabled && (
-                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
+                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" aria-pressed={showOnlyUnchecked} onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
                   {showOnlyUnchecked ? "Show all" : "Show unchecked"}
                 </button>
               )}
               {c.checkInEnabled && (
                 <button className="btn btn--sm" type="button" onClick={bulkCheckInAll} disabled={players.length === 0} title="Mark all as checked in">Check in all</button>
               )}
-              {/* draw-ready lock: seed mutations disabled until the draw is discarded */}
+              {/* Divider between the attendance and seeding clusters. */}
+              {c.checkInEnabled && <span aria-hidden="true" style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 2px" }} />}
+              {/* Seeding cluster. draw-ready lock: seed mutations disabled until the draw is discarded. */}
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to shuffle seeds" : "Shuffle unseeded players"}>Shuffle unseeded</button>
-              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
+              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import seeds (CSV)</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={clearAllSeeds} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to clear seeds" : undefined}>Clear seeds</button>
+              {/* Lone destructive action: ghost-danger, set apart from the constructive seeding buttons. */}
+              <button className="btn btn--sm btn--ghost btn--danger" type="button" onClick={clearAllSeeds} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to clear seeds" : "Remove all seed ranks"}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>
@@ -812,9 +851,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           )}
           {allTags.length > 0 && (
             <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button type="button" className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
+              <button type="button" aria-pressed={!tagFilter} className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
               {allTags.map(t => (
-                <button type="button" key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+                <button type="button" key={t} aria-pressed={tagFilter === t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
               ))}
             </div>
           )}
@@ -886,11 +925,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
           {players.length === 0 ? (
-            <div className="empty" style={{ padding: 24 }}>
-              <div className="icon">🌱</div>
-              <h3>No participants yet</h3>
-              <div style={{ fontSize: 12 }}>Add names on the right, then "Apply".</div>
-            </div>
+            <EmptyState icon="🌱" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
           ) : (
             <div className="seed-list">
               {/* When a tag filter is active, reorder controls would operate on */}
@@ -998,6 +1033,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
         </div>
+        )}
         <div className="card">
           <div className="card__head">
             <div>
@@ -1037,6 +1073,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
             </div>
           </div>
+
+          {/* Sample roster: only offered while the box is empty so it can't
+              clobber an in-progress list. Fills the textarea for review; the
+              operator still clicks "Apply changes" to save. */}
+          {!isDrawReady && lines.length === 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <span className="field__hint" style={{ margin: 0 }}>
+                No list yet? Fill with a sample {c.kind === "team" ? "team " : ""}roster:
+              </span>
+              <div className="radio-group" style={{ gap: 6 }}>
+                <button type="button" className="radio-pill" onClick={() => fillSample(8)}>Small (8)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(16)}>Medium (16)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(32)}>Large (32)</button>
+              </div>
+            </div>
+          )}
 
           {importSummary && (
             <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>

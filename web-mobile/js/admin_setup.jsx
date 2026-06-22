@@ -646,8 +646,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // (neighbour-only) is the new option for league-sized fields where a
   // full round-robin would not fit in the day's schedule.
   const [poolFormat, setPoolFormat] = useStateA("full");
-  const [useSample, setUseSample] = useStateA(false);
-  const [sampleSize, setSampleSize] = useStateA("medium");
   const [poolMode, setPoolMode] = useStateA("max");
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
@@ -761,7 +759,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       name: finalName,
       kind, gender,
       format,
-      sampleRoster: useSample ? sampleSize : null,
+      // New competitions start with an empty roster — participants (or a
+      // sample roster) are added in the Participants view, not here.
+      sampleRoster: null,
       seedCount: 0, status: "setup",
       startTime,
       date: normDate,
@@ -926,21 +926,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <div className="field__hint">Typical: 4 rounds for 16 players, 5 for 32, 6 for 64 (≈ log₂ of field size).</div>
             </div>
           )}
-
-          <div className="field">
-            <label className="checkbox field__label" style={{ display: "inline-flex" }}>
-              <input type="checkbox" checked={useSample} onChange={(e) => setUseSample(e.target.checked)} />
-              Pre-fill with sample roster
-            </label>
-            {useSample && (
-              <div className="radio-group" style={{ marginTop: 8 }}>
-                <button className={`radio-pill ${sampleSize === "small" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("small")}>Small (8)</button>
-                <button className={`radio-pill ${sampleSize === "medium" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("medium")}>Medium (16)</button>
-                <button className={`radio-pill ${sampleSize === "large" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("large")}>Large (32)</button>
-              </div>
-            )}
-            <div className="field__hint">Leave off to add real participants in the next step.</div>
-          </div>
 
           <div className="field">
             <label className="field__label">Assigned shiaijo (courts)</label>

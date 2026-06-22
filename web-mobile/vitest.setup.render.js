@@ -28,6 +28,11 @@ await import('./js/admin_helpers.jsx');
 // mounted admin components have those globals, mirroring the admin_helpers load.
 await import('./js/viewer_utils.jsx');
 
+// ui.jsx publishes window.EmptyState (and other shared UI primitives) that
+// consumer components alias at module-eval time. Load it so render tests see
+// the real component, mirroring the browser's index.html load order.
+await import('./js/ui.jsx');
+
 // Fail tests that produce unexpected console.warn or console.error — matches
 // the invariant enforced by the unit suite (vitest.setup.js).
 // Tests that intentionally trigger warnings (e.g. the GUARD test) must spy on

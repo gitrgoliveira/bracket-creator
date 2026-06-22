@@ -16,7 +16,7 @@ const compMatchStats = window.compMatchStats;
 // unit-testable without mounting any component.
 //
 // Shape:
-//   { id: string, label: string, detail: string,
+//   { id: string, label: string, detail: string, cta: string|null,
 //     state: 'done'|'active'|'todo', section: string|null }
 //
 // Rules:

@@ -398,7 +398,7 @@ describe('TvIndividualBoard', () => {
     expect(scores.some(s => s.props.match.status === 'running')).toBe(true);
   });
 
-  it('renders one IndividualScore row per pool match, current highlighted, in the top-anchored group', () => {
+  it('renders one IndividualScore row per pool match, current highlighted, in the space-evenly group', () => {
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     const tree = TvIndividualBoard({ ...base, promoted });
     const scores = [];
@@ -413,13 +413,12 @@ describe('TvIndividualBoard', () => {
     expect(str).toContain('tvd-indiv-row-now'); // the running match is flagged current
   });
 
-  it('NOW row uses navy treatment (accent-soft bg + accent left border); amber #fef3c7 is absent', () => {
-    // mp-pa6s: running row must use the DESIGN.md §3 navy running signal
-    // (accent-soft bg + accent left spine) and must NOT use the old amber
-    // background. The per-court fullscreen surface deliberately OMITS the
-    // inline "NOW" dot/label badge — on a one-row board it's information-free;
-    // the navy bg + spine carry the live signal. The badge lives on the
-    // multi-row lobby surface where it distinguishes NOW from queue rows.
+  it('NOW row uses navy treatment (accent-soft background only); amber #fef3c7 is absent', () => {
+    // mp-pa6s: running row uses the DESIGN.md §3 navy running signal — a quiet
+    // var(--accent-soft) BACKGROUND only (no spine/border, no transform, no
+    // pulse) — and must NOT use the old amber background. The per-court board
+    // also omits the inline "NOW" dot/label badge: every row is the same size
+    // and the bg tint alone marks the live row.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
     expect(str).toContain('tvd-indiv-row-now');
@@ -427,7 +426,7 @@ describe('TvIndividualBoard', () => {
   });
 
   it('completed (non-running) rows do NOT get the navy NOW treatment', () => {
-    // mp-pa6s: only the live row gets var(--accent-soft) / var(--accent) border.
+    // mp-pa6s: only the live row gets the var(--accent-soft) background tint.
     // Completed rows keep the grey #f9fafb background.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     // Walk the vnode tree and collect the wrapper div for each row by testid.
@@ -697,8 +696,8 @@ describe('phaseProgressOnCourt + phase strip', () => {
 
   // e) Render-level: phase strip and progress counter appear in TvIndividualBoard
   it('renders tvd-phase-strip with groupLabel and tvd-phase-progress showing "1 / 3"', () => {
-    // round: -1 is the sentinel phaseLabel uses to derive the pool name from the
-    // match id (e.g. "Pool A-1" → "Pool A"). Without it phaseLabel returns "".
+    // phaseLabel derives the pool name from the pool-shaped id via poolNameOf
+    // (e.g. "Pool A-1" → "Pool A"); round is incidental here.
     const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'A', round: -1, sideA: 'Tanaka', sideB: 'Suzuki', status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
       { id: 'Pool A-1', court: 'A', round: -1, sideA: 'Yamada', sideB: 'Mori',   status: 'running',   ipponsA: [], ipponsB: ['D'],  scheduledAt: '09:10' },
@@ -763,7 +762,7 @@ describe('phaseLabel — league suppresses the round-robin round number', () => 
     expect(phaseLabel(m, false, undefined, undefined)).toBe('4');
   });
 
-  it('pool (mixed) still derives the pool name from the id sentinel', () => {
+  it('pool (mixed) derives the pool name from the match id via poolNameOf', () => {
     const m = { id: 'Pool A-1', round: -1, status: 'scheduled' };
     expect(phaseLabel(m, false, undefined, undefined, 'mixed')).toBe('Pool A');
   });

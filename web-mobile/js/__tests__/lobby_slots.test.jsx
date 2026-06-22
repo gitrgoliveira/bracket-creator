@@ -232,6 +232,64 @@ describe('LobbyMatchCell — NOW row uses navy treatment, NEXT does not (mp-ulh9
     });
 });
 
+// ── visibleRows trimming — empty queue rows omitted ─────────────────────────
+// When all slots >= 2 are null across all visible courts, only the Now and
+// Next anchor rows should appear (slot < 2). Rows with slot >= 2 are included
+// only when at least one court has a non-null entry at that index.
+describe('visibleRows trimming — slot >= 2 rows omitted when all courts have null there', () => {
+    // Replicate the filter logic from LobbyDisplay so we can unit-test it without
+    // rendering the full component (consistent with the buildCourtSlots test pattern).
+    function computeVisibleRows(courtSlots) {
+        return LOBBY_ROWS.filter(row =>
+            row.slot < 2 || courtSlots.some(slots => slots[row.slot] != null)
+        );
+    }
+
+    it('only Now and Next rows render when all slot >= 2 entries are null', () => {
+        // Two courts, each with only slot[0] filled (running) — slots 2–5 null.
+        const compA = [makeComp('Open', 'A', [{ status: 'running' }])];
+        const compB = [makeComp('Open', 'B', [{ status: 'running' }])];
+        const courtSlots = [
+            buildCourtSlots(compA, 'A'),
+            buildCourtSlots(compB, 'B'),
+        ];
+        const rows = computeVisibleRows(courtSlots);
+        expect(rows).toHaveLength(2);
+        expect(rows[0].slot).toBe(0);
+        expect(rows[1].slot).toBe(1);
+    });
+
+    it('includes a slot >= 2 row when at least one court has a non-null entry there', () => {
+        // Court A: running + 3 scheduled → slots 0–3 filled, 4–5 null.
+        // Court B: running only → slots 1–5 null.
+        const compA = [makeComp('Open', 'A', [
+            { status: 'running' },
+            { status: 'scheduled' },
+            { status: 'scheduled' },
+            { status: 'scheduled' },
+        ])];
+        const compB = [makeComp('Open', 'B', [{ status: 'running' }])];
+        const courtSlots = [
+            buildCourtSlots(compA, 'A'),
+            buildCourtSlots(compB, 'B'),
+        ];
+        const rows = computeVisibleRows(courtSlots);
+        // Slots 0, 1, 2, 3 should be present; 4 and 5 are null on both courts.
+        expect(rows.map(r => r.slot)).toEqual([0, 1, 2, 3]);
+    });
+
+    it('always includes Now and Next even when all courts are completely empty', () => {
+        const courtSlots = [
+            buildCourtSlots([makeComp('Empty', 'A', [])], 'A'),
+            buildCourtSlots([makeComp('Empty', 'B', [])], 'B'),
+        ];
+        const rows = computeVisibleRows(courtSlots);
+        expect(rows).toHaveLength(2);
+        expect(rows[0].label).toBe('Now');
+        expect(rows[1].label).toBe('Next');
+    });
+});
+
 // ── LobbyMatchCell — hansoku foul marks (mp-0ky7) ───────────────────────────
 // ── LobbyMatchCell — delegates the matchup body to IndividualScore ────────────
 // The cell renders one IndividualScore row (same shared component the

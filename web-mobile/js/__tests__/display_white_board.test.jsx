@@ -362,6 +362,43 @@ describe('TvIndividualBoard', () => {
     expect(doneRow.props.style.borderLeft).toBeUndefined();
   });
 
+  it('NOW row has scale(1.3) transform on inner wrapper; queue rows have no transform', () => {
+    // Verifies Change 1: the live row's IndividualScore is wrapped in a scaled
+    // div (1.3×) so it reads larger than queue rows on wall screens.
+    // The wrapper div is the direct child of the row container div.
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const rows = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      const tid = n.props?.['data-testid'];
+      if (tid === 'tvd-indiv-row' || tid === 'tvd-indiv-row-now') rows.push(n);
+      const k = n.children || n.props?.children || [];
+      [].concat(k).forEach(walk);
+    })(TvIndividualBoard({ ...base, promoted }));
+    expect(rows.length).toBe(2);
+    const nowRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row-now');
+    const doneRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row');
+    // Find the inner wrapper div (first child of the row container).
+    const innerWrapper = (function findFirstDiv(n) {
+      if (!n || typeof n !== 'object') return null;
+      if (Array.isArray(n)) { for (const k of n) { const r = findFirstDiv(k); if (r) return r; } return null; }
+      if (n.type === 'div') return n;
+      return null;
+    })([].concat(nowRow.props?.children || nowRow.children || []));
+    // NOW inner wrapper must carry the scale transform.
+    expect(innerWrapper).toBeTruthy();
+    expect(innerWrapper.props?.style?.transform).toContain('scale');
+    // Queue row inner wrapper: no transform (style is undefined).
+    const doneInner = (function findFirstDiv(n) {
+      if (!n || typeof n !== 'object') return null;
+      if (Array.isArray(n)) { for (const k of n) { const r = findFirstDiv(k); if (r) return r; } return null; }
+      if (n.type === 'div') return n;
+      return null;
+    })([].concat(doneRow.props?.children || doneRow.children || []));
+    expect(doneInner?.props?.style).toBeUndefined();
+  });
+
   it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {
     const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol',  status: 'running',   scheduledAt: '09:00' },

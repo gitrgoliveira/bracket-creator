@@ -38,7 +38,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     // The shared scoreboard below carries the score (IV/PW summary for teams,
     // ippon slots for individuals), so the team-name row centre is just "vs"
     // (+ any decision suffix).
-    const nameCentre = <div style={{ fontSize: "2.4vh", color: "#9ca3af", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
 
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
@@ -50,14 +50,14 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 <div style={{ fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
-                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
+                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
                     <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds)}</span>
                     {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
                             style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
                             RECONNECTING
                         </span>
                     )}
@@ -67,7 +67,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             {/* Team name row — Shiro black (left), Aka red (right), no top score */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#6b7280" }}><TermD name="shiro">SHIRO</TermD></div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
@@ -105,10 +105,10 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             {/* Next line */}
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
-                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
+                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
                         <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName)}</span>
-                        <span style={{ color: "#9ca3af", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+                        <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName)}</span>
                     </span>
                 </div>
@@ -249,12 +249,12 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 <div style={{ fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
-                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "#6b7280" }}>
+                <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
                     <span>{promoted.competition?.name}{groupLabel ? " · " + groupLabel : ""}</span>
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
                             style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
                             RECONNECTING
                         </span>
                     )}
@@ -274,17 +274,19 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                         <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
                             className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "") + (isDone ? " tvd-indiv-row--done" : "")}
                             style={{
-                                padding: "1vh 1.5vw", borderRadius: "0.6vw",
+                                padding: isNow ? "2.5vh 2vw" : "0.8vh 1.5vw", borderRadius: "0.6vw",
                                 background: isNow ? "var(--accent-soft)" : isDone ? "#f9fafb" : "transparent",
                                 borderLeft: isNow ? "0.8vw solid var(--accent)" : undefined,
                                 opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
                             }}>
-                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                            <div style={isNow ? { transform: "scale(1.3)", transformOrigin: "left center", width: "77%" } : undefined}>
+                                <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
+                            </div>
                         </div>
                     );
                 })}
                 {rows.length === 0 && (
-                    <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "3vh", padding: "4vh 0" }}>No matches yet</div>
+                    <div style={{ textAlign: "center", color: "var(--ink-3)", fontSize: "3vh", padding: "4vh 0" }}>No matches yet</div>
                 )}
             </div>
 
@@ -293,9 +295,9 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 the current pool finishes here. */}
             {nextPool && (
                 <div data-testid="tvd-next-pool" style={{ display: "flex", alignItems: "baseline", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
-                    <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
+                    <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
                     <span style={{ fontSize: "2.4vh", color: "#111", fontWeight: 700, flexShrink: 0 }}>{nextPool.name}</span>
-                    <span style={{ fontSize: "2.4vh", color: "#9ca3af", flexShrink: 0 }}>·</span>
+                    <span style={{ fontSize: "2.4vh", color: "var(--ink-3)", flexShrink: 0 }}>·</span>
                     <span style={{ fontSize: "2.2vh", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {nextPool.players.join(" · ")}
                     </span>
@@ -308,10 +310,10 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 surfaces the very next match the operator will run here. */}
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
-                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
+                    <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
                         <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken)}</span>
-                        <span style={{ color: "#9ca3af", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+                        <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
                         <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
                     </span>
                 </div>
@@ -507,7 +509,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                 {!connected && (
                     <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
                         style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                        <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block", animation: "pulse 1.4s ease-in-out infinite" }} />
+                        <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
                         RECONNECTING
                     </span>
                 )}

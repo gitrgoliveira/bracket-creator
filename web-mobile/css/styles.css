@@ -6278,12 +6278,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-row { font-size: 3vh; padding: 1.2vh 1vw; border-top: 1px solid #e5e7eb; }
 .msb--tv .msb-name { font-size: 3vh; }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
-.msb--tv .msb-slot { min-width: 4vh; height: 4.6vh; font-size: 2.8vh; border-radius: 0.4vh; }
+.msb--tv .msb-slot { min-width: 5vh; height: 5.6vh; font-size: 3.5vh; border-radius: 0.4vh; }
 .msb--tv .msb-vs { min-width: 3vh; font-size: 2vh; }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
 .msb--tv .msb-row--summary .msb-slot { min-width: 6vh; font-size: 3.4vh; }
 .msb--tv .msb-lab { font-size: 1.2vh; }
-.msb--tv .msb-hansoku { font-size: 2.6vh; }
+.msb--tv .msb-hansoku { font-size: 2.8vh; font-weight: 900; }
 .msb--tv .msb-dh-tag { font-size: 1.8vh; padding: 0.4vh 1.2vh; letter-spacing: .12em; }
 /* TV bout decisiveness: winning side's filled slots are slightly bolder
    so spectators can read the match result at a glance from distance. */

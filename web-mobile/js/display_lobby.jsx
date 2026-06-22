@@ -32,8 +32,6 @@ const LOBBY_COLORS = {
     nextBg:     'rgba(0,0,0,0.02)',
     nextBorder: 'rgba(0,0,0,0.10)',
     schedBg:    'rgba(0,0,0,0.02)',
-    akaSoft:    '#c0392b',
-    akaVivid:   '#b91c1c',
 };
 
 // Row descriptor array — drives both the row-label column and the
@@ -208,6 +206,14 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // outside JSX so each cell renderer receives a plain object.
     const courtSlots = visible.map(cc => buildCourtSlots(competitions, cc));
 
+    // Trim queue rows: always show Now (slot 0) and Next (slot 1) as anchors;
+    // only include deeper rows (#3–#6) when at least one visible court has a
+    // non-null slot at that index. This avoids a table half-filled with "—"
+    // placeholders when the queue is short.
+    const visibleRows = LOBBY_ROWS.filter(row =>
+        row.slot < 2 || courtSlots.some(slots => slots[row.slot] != null)
+    );
+
     // Page label: "Shiaijo A–B · 1 / 2" or just "Shiaijo A" for single.
     const pageCourtLabel = visible.length === 2
         ? `Shiaijo ${visible[0]}–${visible[1]}`
@@ -232,7 +238,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '0.1em' }}>
+                <div style={{ fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
                     {tournament?.name || ''}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -351,7 +357,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {LOBBY_ROWS.map((row) => {
+                            {visibleRows.map((row) => {
                                 const rowKind = row.slot === 0 ? 'now' : row.slot === 1 ? 'next' : 'queue';
                                 return (
                                     <tr key={row.label}>
@@ -389,7 +395,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             <div style={{
                 padding: '10px 36px',
                 display: 'flex', justifyContent: 'center',
-                fontSize: 10, color: LOBBY_COLORS.inkMuted,
+                fontSize: '1.6vh', color: LOBBY_COLORS.inkMuted,
                 letterSpacing: '0.06em',
                 borderTop: `1px solid ${LOBBY_COLORS.line}`,
             }}>

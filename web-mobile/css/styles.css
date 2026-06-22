@@ -2018,9 +2018,13 @@ a:hover {
   min-width: 0;
 }
 .bracket-layout__panel {
+  /* Grows to fill its flex line. When it wraps below the bracket (the common
+     case at desktop widths) it fills the whole row, so its card lines up edge-
+     to-edge with the bracket card above — no max-width cap that would leave a
+     ragged right edge. min-width keeps the inline editor from squashing when
+     it DOES sit beside the bracket. */
   flex: 1 1 520px;
   min-width: 500px;
-  max-width: 680px;
 }
 /* Phones / small tablets: drop the minimum so the panel fills the single
    column instead of overflowing; the editor's own coarse-pointer rules handle

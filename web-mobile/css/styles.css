@@ -6241,8 +6241,8 @@ button.pool-match-row {
    the name. NEUTRAL grey — never navy (running signal) or red (Aka). */
 .msb-tag { flex-shrink: 0; display: inline-block; margin: 0 8px; padding: 0 8px; border-radius: 5px;
   font-size: 1em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
-  vertical-align: baseline; background: #eef0f3; color: var(--ink-3, #6b7280);
-  border: 1px solid #e2e5ea; }
+  vertical-align: baseline; background: #ffffff; color: var(--ink-3, #6b7280);
+  border: 1px solid #cfd5dc; }
 .msb-marks { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
   gap: 4px; min-width: 104px; }
 .msb-slots { display: flex; align-items: center; gap: 2px; }

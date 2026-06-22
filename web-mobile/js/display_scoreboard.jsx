@@ -124,6 +124,28 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     );
 }
 
+// poolMatchIndex — numeric trailing index of a pool-match id ("Pool A-10" → 10,
+// "Pool A-DH-0" → 0); large fallback when none. Used as a final ordering
+// tiebreaker so ids don't sort LEXICOGRAPHICALLY ("Pool A-10" before "Pool A-2").
+function poolMatchIndex(id) {
+    const m = /(\d+)$/.exec(typeof id === "string" ? id : "");
+    return m ? Number(m[1]) : 9999;
+}
+
+// compareByRunOrder — canonical per-court run order: queue position, then
+// scheduled time, then the numeric match index. Mirrors findUpcomingOnCourt and
+// survives untimed schedules (blank scheduledAt) without the lexicographic-id
+// pitfall of comparing ids as strings.
+function compareByRunOrder(a, b) {
+    const qa = Number(a.queuePosition) || 9999;
+    const qb = Number(b.queuePosition) || 9999;
+    if (qa !== qb) return qa - qb;
+    const ta = a.scheduledAt || "99:99";
+    const tb = b.scheduledAt || "99:99";
+    if (ta !== tb) return ta.localeCompare(tb);
+    return poolMatchIndex(a.id) - poolMatchIndex(b.id);
+}
+
 // gatherIndividualGroup — the sibling matches for an individual TV board:
 // every match in the same POOL (pool phase) or the same ROUND (knockout) as
 // the promoted match, **on the same court**. The TV display is per-court, so
@@ -160,11 +182,7 @@ function gatherIndividualGroup(promoted, court) {
         : onCourt; // POOL: include scheduled too
     // statusOrder: 0=completed (top), 1=current, 2=scheduled (bottom).
     const statusOrder = m => isCurrent(m) ? 1 : (m.status === "completed" ? 0 : 2);
-    return shown.slice().sort((a, b) => {
-        const d = statusOrder(a) - statusOrder(b);
-        if (d !== 0) return d;
-        return String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id));
-    });
+    return shown.slice().sort((a, b) => (statusOrder(a) - statusOrder(b)) || compareByRunOrder(a, b));
 }
 
 // findNextPoolOnCourt — for the per-court pool-phase board: the next POOL that
@@ -215,10 +233,10 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     // Roster with each player's STARTING colour. Pool colour is per-match, so a
     // player's "starting colour" is the colour they'll have in their EARLIEST
     // bout of this pool: sideA = Aka (red), sideB = Shiro (dark). Walk the pool's
-    // matches in scheduled order and colour each name on its first appearance.
+    // matches in run order and colour each name on its first appearance.
     const poolMatches = competition.poolMatches
         .filter(m => poolNameOf(m.id) === nextName)
-        .sort((a, b) => String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id)));
+        .sort(compareByRunOrder);
     // Use sideLabel (number prefix + zekken displayName) so the roster matches
     // every other TV surface; dedupe on that display label.
     const zekken = !!competition.withZekkenName;

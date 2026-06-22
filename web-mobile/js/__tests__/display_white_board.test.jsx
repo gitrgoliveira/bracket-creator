@@ -250,6 +250,21 @@ describe('gatherIndividualGroup', () => {
     const rows = gatherIndividualGroup(promoted, 'A');
     expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-2']);
   });
+  it('orders by NUMERIC match index in an untimed pool (no scheduledAt) — not lexicographic id', () => {
+    // 12 completed bouts + a running one, no scheduledAt / queuePosition.
+    // Lexicographic id sort would put "Pool A-10" before "Pool A-2"; the numeric
+    // tiebreak keeps 2 < 10. The running match sorts last (current slot).
+    const comp = { poolMatches: [
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `Pool A-${i}`, sideA: `A${i}`, sideB: `B${i}`, status: 'completed' })),
+      { id: 'Pool A-99', sideA: 'Run', sideB: 'Ner', status: 'running' },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[comp.poolMatches.length - 1], isBracket: false };
+    const rows = gatherIndividualGroup(promoted);
+    expect(rows.map(m => m.id)).toEqual([
+      ...Array.from({ length: 12 }, (_, i) => `Pool A-${i}`),
+      'Pool A-99',
+    ]);
+  });
 });
 
 describe('findNextPoolOnCourt', () => {
@@ -276,6 +291,19 @@ describe('findNextPoolOnCourt', () => {
   });
   it('returns null when there is no next pool on this court', () => {
     expect(findNextPoolOnCourt(comp, 'Pool B', 'A')).toBeNull();
+  });
+  it('colours the roster by NUMERIC match order in an untimed pool (not lexicographic id)', () => {
+    // No scheduledAt / queuePosition. Lexicographic id sort puts "Pool B-10"
+    // before "Pool B-2", which would mis-attribute the starting colour. The
+    // numeric tiebreak keeps B-2 first → "Early" is seen first as Aka.
+    const c = { poolMatches: [
+      { id: 'Pool A-0',  court: 'A', sideA: 'X',    sideB: 'Y',          status: 'running' },
+      { id: 'Pool B-10', court: 'A', sideA: 'Late', sideB: 'LateShiro',  status: 'scheduled' },
+      { id: 'Pool B-2',  court: 'A', sideA: 'Early',sideB: 'EarlyShiro', status: 'scheduled' },
+    ] };
+    const res = findNextPoolOnCourt(c, 'Pool A', 'A');
+    expect(res.name).toBe('Pool B');
+    expect(res.players[0]).toEqual({ name: 'Early', side: 'aka' });
   });
   it('ignores pools on other courts', () => {
     const c2 = { poolMatches: [

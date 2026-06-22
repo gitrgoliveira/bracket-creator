@@ -3597,7 +3597,7 @@ button.pool-match-row {
   font-size: 15px;
   margin: 0 0 4px;
 }
-.empty > div:not(.icon) {
+.empty > div:not(.icon):not(.empty__cta-note) {
   font-size: 13px;
 }
 

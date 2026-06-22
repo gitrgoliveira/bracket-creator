@@ -159,7 +159,7 @@ function overviewResultsSection(format, hasBracket) {
 // ---------------------------------------------------------------------------
 // AdminCompOverview — status-aware overview component
 // ---------------------------------------------------------------------------
-function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password }) {
+function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSection, password }) {
   // Prefer the props passed from the detail fetch, but fall back to whatever
   // is already on `c` when the detail hasn't loaded yet (or errored). Using ??
   // avoids overwriting non-null fields on `c` with undefined prop values.
@@ -221,12 +221,16 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
         }
       });
     return () => controller.abort();
-    // Re-fetch when config or participant count changes (participant count affects
-    // total match count, so the estimate becomes stale when roster changes).
+    // Re-fetch when config, participant count, or tournament-level timing changes.
+    // Tournament ceremony/timing fields are included so the estimate refreshes
+    // when the operator changes openingBlock, lunchBlock, closingBlock,
+    // clockToElapsedMultiplier, or slowestCourtBufferPct — mirroring AdminSettings.
   }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
     c.swissRounds, c.checkInEnabled, password,
-    (c.players || []).length]);
+    (c.players || []).length,
+    tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
+    tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
   // ---------------------------------------------------------------------------
   // Derived stat values

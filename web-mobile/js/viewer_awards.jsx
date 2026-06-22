@@ -5,6 +5,7 @@ import { WinnerBadge } from './viewer_standings.jsx';
 import { competitionKindLabel } from './viewer_utils.jsx';
 
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
+const EmptyState = window.EmptyState;
 
 // deriveAwards returns up to four placements for the closing ceremony per
 // FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
@@ -237,12 +238,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   };
 
   if (isSwissLoading || resolvedState === "loading") {
-    return (
-      <div className="empty" data-testid="awards-loading">
-        <div className="icon">🏆</div>
-        <h3>Loading final standings…</h3>
-      </div>
-    );
+    return <EmptyState icon="🏆" title="Loading final standings…" data-testid="awards-loading" />;
   }
 
   if (awards.length === 0) {
@@ -251,20 +247,14 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
     if (isMixed && resolvedState === "in-progress") {
       return (
         <div>
-          <div className="empty" data-testid="awards-in-progress">
-            <div className="icon">🏆</div>
-            <h3>Knockout in progress</h3>
-          </div>
+          <EmptyState icon="🏆" title="Knockout in progress" data-testid="awards-in-progress" />
           {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
         </div>
       );
     }
     return (
       <div>
-        <div className="empty" data-testid="awards-empty">
-          <div className="icon">🏆</div>
-          <h3>Final standings not yet available</h3>
-        </div>
+        <EmptyState icon="🏆" title="Final standings not yet available" data-testid="awards-empty" />
         {hasFsAwards && <FightingSpiritSection fsAwards={fsAwards} isFs={isFs} />}
       </div>
     );
@@ -534,11 +524,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
             </div>
           )}
           {!viewState.loading && !viewState.error && viewState.results.length === 0 && (
-            <div className="empty" data-testid="all-winners-empty">
-              <div className="icon">🏅</div>
-              <h3>No completed competitions</h3>
-              <div style={{ fontSize: 13 }}>Check back once competitions have finished.</div>
-            </div>
+            <EmptyState icon="🏅" title="No completed competitions" message="Check back once competitions have finished." data-testid="all-winners-empty" />
           )}
           {!viewState.loading && viewState.results.map(({ comp, state: compState, podium, error: compErr }) => (
             <div key={comp.id} className="card" style={{ padding: "12px 16px", marginBottom: 12 }} data-testid={`all-winners-card-${comp.id}`}>

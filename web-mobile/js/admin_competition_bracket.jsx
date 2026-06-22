@@ -8,6 +8,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const hasBothSides = window.hasBothSides;
 const hasPoolOriginPlaceholder = window.hasPoolOriginPlaceholder;
 const CourtPicker = window.CourtPicker;
+const EmptyState = window.EmptyState;
 
 // Pure result-builder for AdminBracket.recordWinner. Captures the schema
 // for a completed-ippon result so it's unit-testable and can't drift
@@ -213,7 +214,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
 
   if (!bracket || !bracket.rounds) {
     const previewMode = c && c.status === "draw-ready";
-    return <div className="empty"><div className="icon">⚙</div><h3>Bracket not generated yet</h3><div>{previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."}</div></div>;
+    return <EmptyState icon="⚙" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
   const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
   // Look up the selected match by ID rather than [ri][mi] index. The
@@ -309,9 +310,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
             password={password}
           />
         ) : selectedMatch ? (
-          <div className="empty"><h3>Match not ready</h3><div style={{ fontSize: 13 }}>Waiting for upstream winners.</div></div>
+          <EmptyState title="Match not ready" message="Waiting for upstream winners." />
         ) : (
-          <div className="empty"><div className="icon">👆</div><h3>Pick a match</h3><div style={{ fontSize: 13 }}>Click any match in the bracket to record results.</div></div>
+          <EmptyState icon="👆" title="Pick a match" message="Click any match in the bracket to record results." />
         )}
       </div>
     </div>

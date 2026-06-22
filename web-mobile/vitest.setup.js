@@ -62,3 +62,10 @@ global.prompt = vi.fn(() => 'mocked');
 // consumer modules see `undefined` and predicates like `next > MAX_RANK`
 // silently pass invalid input.
 import './js/admin_helpers.jsx';
+
+// Load ui.jsx for its side effects so window.EmptyState (and other
+// shared UI primitives) are populated for tests that import consumer
+// files which alias `const EmptyState = window.EmptyState`. In the
+// browser, index.html loads ui.js before its consumers; without this
+// import the alias resolves to undefined.
+import './js/ui.jsx';

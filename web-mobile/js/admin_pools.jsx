@@ -3,6 +3,7 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
+const EmptyState = window.EmptyState;
 // Canonical rank cap (admin_helpers.jsx) — mirrors helper.MaxRankOverride
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
@@ -480,7 +481,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   ) : null;
 
   if (!pools || pools.length === 0) {
-    return <div className="empty"><div className="icon">⏳</div><h3>{isLeague ? "League not drawn yet" : "Pools not drawn yet"}</h3><div style={{ fontSize: 13 }}>Add participants and start the competition to {isLeague ? "draw the league table" : "draw pools"}.</div></div>;
+    return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} message={`Add participants and start the competition to ${isLeague ? "draw the league table" : "draw pools"}.`} />;
   }
 
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;

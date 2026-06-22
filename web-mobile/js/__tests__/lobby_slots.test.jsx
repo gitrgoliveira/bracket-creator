@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourtSlots, LOBBY_ROWS, LobbyMatchCell, LOBBY_COLORS } from '../display.jsx';
+import { IndividualScore } from '../match_scoreboard.jsx';
 
 // Unit tests for buildCourtSlots — the slot-building logic that drives the
 // cross-court table in LobbyDisplay (mp-1nf).
@@ -232,91 +233,69 @@ describe('LobbyMatchCell — NOW row uses navy treatment, NEXT does not (mp-ulh9
 });
 
 // ── LobbyMatchCell — hansoku foul marks (mp-0ky7) ───────────────────────────
-describe('LobbyMatchCell — hansoku foul marks on running match (mp-0ky7)', () => {
-    it('renders ▲ with testid lobby-foul-mark-b when hansokuB=1 (odd)', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 1, hansokuA: 0 } });
+// ── LobbyMatchCell — delegates the matchup body to IndividualScore ────────────
+// The cell renders one IndividualScore row (same shared component the
+// per-court board and viewer card use). Attribution is positional — Shiro
+// ippons next to Shiro name, Aka ippons next to Aka name, hansoku ▲ on the
+// outer edge of the offending side — instead of a centred dash-separated
+// numeric string. No more hand-rolled lobby-only score rendering, no "0"
+// placeholder for empty ippons (kendo isn't numeric), no separate
+// lobby-foul-mark testids.
+describe('LobbyMatchCell — delegates body to IndividualScore (mp-0ky7 / score reuse)', () => {
+    const findIndiv = tree => findAll(tree, n => n?.type === IndividualScore);
+
+    it('renders exactly one IndividualScore vnode for a running slot', () => {
+        const slot = makeRunningSlot({ match: { ipponsA: ['M'], ipponsB: [], hansokuA: 0, hansokuB: 1 } });
         const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marks = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-b');
-        expect(marks.length).toBe(1);
-        expect(treeStr(marks[0])).toContain('▲');
+        expect(findIndiv(tree).length).toBe(1);
     });
 
-    it('does not render lobby-foul-mark-b when hansokuB=0 (even)', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 0, hansokuA: 0 } });
-        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marks = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-b');
-        expect(marks.length).toBe(0);
-    });
-
-    it('does not render lobby-foul-mark-b when hansokuB=2 (even — converted to ippon)', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 2, hansokuA: 0 } });
-        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marks = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-b');
-        expect(marks.length).toBe(0);
-    });
-
-    it('renders ▲ with testid lobby-foul-mark-a when hansokuA=1 (odd)', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 0, hansokuA: 1 } });
-        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marks = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-a');
-        expect(marks.length).toBe(1);
-        expect(treeStr(marks[0])).toContain('▲');
-    });
-
-    it('renders both marks when both sides have an odd foul count', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 1, hansokuA: 1 } });
-        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marksB = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-b');
-        const marksA = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-a');
-        expect(marksB.length).toBe(1);
-        expect(marksA.length).toBe(1);
-    });
-
-    it('does not render foul marks on a scheduled (non-running) slot', () => {
+    it('renders an IndividualScore vnode for a scheduled slot too (no separate "vs" branch in the cell)', () => {
         const tree = LobbyMatchCell({ slot: makeScheduledSlot(), rowKind: 'next' });
-        const str = treeStr(tree);
-        expect(str).not.toContain('lobby-foul-mark-b');
-        expect(str).not.toContain('lobby-foul-mark-a');
+        expect(findIndiv(tree).length).toBe(1);
     });
 
-    it('foul mark uses var(--danger) color', () => {
-        const slot = makeRunningSlot({ match: { hansokuB: 1, hansokuA: 0 } });
-        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const marks = findAll(tree, n => n?.props?.['data-testid'] === 'lobby-foul-mark-b');
-        expect(marks[0]?.props?.style?.color).toContain('--danger');
-    });
-});
-
-// ── LobbyMatchCell — score rendering: no "0" for empty ippons ────────────────
-// Kendo scoring is ippon-based; an absent ippon is empty, not "0". The lobby
-// score column must render only what's actually scored.
-describe('LobbyMatchCell — score column never renders "0" for empty ippons', () => {
-    it('one side scored → renders just that ippon, no stranded dash, no "0"', () => {
+    it('passes match.ipponsA / .ipponsB through; no hand-rolled "0" placeholder in the tree', () => {
         const slot = makeRunningSlot({ match: { ipponsA: ['M'], ipponsB: [] } });
         const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        const indiv = findIndiv(tree)[0];
+        expect(indiv.props.match.ipponsA).toEqual(['M']);
+        expect(indiv.props.match.ipponsB).toEqual([]);
+        // No literal "0" string-child anywhere in the cell (the prior
+        // "0 - M" fallback is gone). Whitelist the empty-array
+        // serialisation "[]" and any numeric "0" inside style values.
         const str = treeStr(tree);
-        expect(str).toContain('"M"');
-        // No literal "0" character anywhere in the score column.
-        expect(str).not.toContain('"0"');
-        // No " - " separator when only one side has scored.
-        expect(str).not.toContain('" - "');
+        expect(str).not.toMatch(/,"0"|>"0"/);
     });
 
-    it('both sides scored → renders "M - K" style (dash between)', () => {
-        const slot = makeRunningSlot({ match: { ipponsA: ['M'], ipponsB: ['K'] } });
+    it('does NOT render the dropped lobby-only foul testids; hansoku is owned by IndividualScore', () => {
+        const slot = makeRunningSlot({ match: { hansokuB: 1, hansokuA: 0, ipponsA: [], ipponsB: [] } });
         const tree = LobbyMatchCell({ slot, rowKind: 'now' });
         const str = treeStr(tree);
-        expect(str).toContain('"M"');
-        expect(str).toContain('"K"');
-        expect(str).toContain('" - "');
-        expect(str).not.toContain('"0"');
+        // The lobby-prefixed testids from the removed hand-rolled path must
+        // not appear anywhere. The canonical foul-mark-b/-a testids ship
+        // inside IndividualScore's rendered output (covered by
+        // match_scoreboard.test.jsx) and aren't visible here because the
+        // component vnode isn't expanded by these snapshot-style tests.
+        expect(str).not.toContain('lobby-foul-mark-');
+        // The hansoku count IS forwarded through the match prop so the
+        // shared component can render the ▲ on the offending side.
+        const indiv = findIndiv(tree)[0];
+        expect(indiv.props.match.hansokuB).toBe(1);
+        expect(indiv.props.match.hansokuA).toBe(0);
     });
 
-    it('running with no ippons yet → renders "vs" (matches scheduled row), no "0"', () => {
-        const slot = makeRunningSlot({ match: { ipponsA: [], ipponsB: [] } });
+    it('passes withZekkenName from the competition through to IndividualScore', () => {
+        const slot = makeRunningSlot({ competition: { id: 'c1', name: 'Open', withZekkenName: true } });
         const tree = LobbyMatchCell({ slot, rowKind: 'now' });
-        const str = treeStr(tree);
-        expect(str).toContain('"vs"');
-        expect(str).not.toContain('"0"');
+        const indiv = findIndiv(tree)[0];
+        expect(indiv.props.withZekkenName).toBe(true);
+    });
+
+    it('renders showNames so the IndividualScore prints competitor names (lobby cells have no separate name row)', () => {
+        const slot = makeRunningSlot();
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        const indiv = findIndiv(tree)[0];
+        expect(indiv.props.showNames).toBe(true);
     });
 });

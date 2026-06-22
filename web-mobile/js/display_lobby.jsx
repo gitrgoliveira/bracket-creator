@@ -1,8 +1,8 @@
 // display_lobby.jsx — lobby / schedule TV (LobbyDisplay).
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, countCourtMatches, sideLabel, phaseLabel } from './display_helpers.jsx';
-import { boutHansokuMark } from './match_scoreboard.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, countCourtMatches, phaseLabel } from './display_helpers.jsx';
+import { IndividualScore } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -127,44 +127,7 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
-
-    // Score column: running → actual scores + foul marks; upnext/scheduled → "vs"
-    let vsContent;
-    // Foul marks — only meaningful when the match is actively running.
-    // hansokuB = Shiro (left/white) foul count; hansokuA = Aka (right/red) foul count.
-    const foulMarkB = kind === 'running' ? boutHansokuMark(match.hansokuB) : '';
-    const foulMarkA = kind === 'running' ? boutHansokuMark(match.hansokuA) : '';
-
-    if (kind === 'running') {
-        // Kendo scoring is ippon-based, not numeric — an absent ippon is empty,
-        // not "0". Render only what's actually scored: both sides → "M - K";
-        // one side → just that ippon (no stranded dash); neither (running but
-        // no ippons yet) → "vs" to match the scheduled row.
-        const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('');
-        const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('');
-        const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
-        const both = shiroScore && akaScore;
-        if (!shiroScore && !akaScore) {
-            vsContent = (
-                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>
-                    vs{sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
-                </span>
-            );
-        } else {
-            vsContent = (
-                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: LOBBY_COLORS.ink }}>
-                    {shiroScore}
-                    {both && <span style={{ opacity: 0.45 }}> - </span>}
-                    <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
-                    {sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
-                </span>
-            );
-        }
-    } else {
-        vsContent = (
-            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>vs</span>
-        );
-    }
+    const sfx = (kind === 'running' && window.decisionSuffix) ? window.decisionSuffix(match) : '';
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -174,42 +137,20 @@ function LobbyMatchCell({ slot, rowKind }) {
                 minHeight: 54,
                 border: `1px solid ${cellBorder}`,
             }}>
-                {/* The row-label column already prints "Now" / "Next" / "#3"…
-                    so the live cell needs no inline NOW badge here — the navy
-                    bg + border carry the live signal. */}
                 {compMeta && (
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em' }}>
-                        {compMeta}
+                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</span>
+                        {sfx && <span style={{ flexShrink: 0, fontWeight: 700, color: LOBBY_COLORS.ink }}>{sfx}</span>}
                     </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
-                    {/* Shiro — white/left side; foul mark at end if outstanding */}
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {sideLabel(match.sideB, zekken)}
-                        </span>
-                        {foulMarkB && (
-                            <span data-testid="lobby-foul-mark-b" style={{ color: 'var(--danger, #c0392b)', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
-                                {foulMarkB}
-                            </span>
-                        )}
-                    </div>
-                    {/* Score / vs */}
-                    <div style={{ flexShrink: 0, minWidth: 64, textAlign: 'center' }}>
-                        {vsContent}
-                    </div>
-                    {/* Aka — pink/red text, right side; foul mark before name if outstanding */}
-                    <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, overflow: 'hidden' }}>
-                        {foulMarkA && (
-                            <span data-testid="lobby-foul-mark-a" style={{ color: 'var(--danger, #c0392b)', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
-                                {foulMarkA}
-                            </span>
-                        )}
-                        <span style={{ color: LOBBY_COLORS.akaSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {sideLabel(match.sideA, zekken)}
-                        </span>
-                    </div>
-                </div>
+                {/* One matchup = one IndividualScore row (same component the
+                    per-court board and viewer card use). Owns names, ippon
+                    slots, hansoku ▲ on the offending side, hantei / decision
+                    marks — attribution is positional, not color-only. For
+                    scheduled rows the match has no ippons, so the slots
+                    render empty (next to each name) which reads as "upcoming"
+                    consistently with the running case's progression. */}
+                <IndividualScore match={match} showNames withZekkenName={zekken} />
             </div>
         </td>
     );

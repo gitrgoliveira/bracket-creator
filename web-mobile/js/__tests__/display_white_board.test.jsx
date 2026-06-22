@@ -246,7 +246,13 @@ describe('findNextPoolOnCourt', () => {
     const res = findNextPoolOnCourt(comp, 'Pool A', 'A');
     expect(res).not.toBeNull();
     expect(res.name).toBe('Pool B');
-    expect(res.players).toEqual(['Philippe', 'Dave', 'Frank']);
+    // Each name carries its STARTING colour (first bout, scheduled order):
+    // B-0 Philippe(sideA→aka) vs Dave(sideB→shiro); B-1 …Frank(sideB→shiro).
+    expect(res.players).toEqual([
+      { name: 'Philippe', side: 'aka' },
+      { name: 'Dave', side: 'shiro' },
+      { name: 'Frank', side: 'shiro' },
+    ]);
   });
   it('returns null when there is no next pool on this court', () => {
     expect(findNextPoolOnCourt(comp, 'Pool B', 'A')).toBeNull();
@@ -275,7 +281,11 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(team, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
-    expect(res.players).toEqual(['Team Gamma', 'Team Delta', 'Team Epsilon']);
+    expect(res.players).toEqual([
+      { name: 'Team Gamma', side: 'aka' },
+      { name: 'Team Delta', side: 'shiro' },
+      { name: 'Team Epsilon', side: 'shiro' },
+    ]);
   });
   it('excludes a pool already started on ANOTHER court (matches can move courts)', () => {
     // Pool B is routed to court A (scheduled here) but already has a COMPLETED
@@ -427,15 +437,15 @@ describe('TvIndividualBoard', () => {
   });
 
   it('body container sets --msb-scale based on row count (text adapts to available room)', () => {
-    // Few rows → big text (scale toward 1.6); many rows → smaller text
-    // (scale toward 0.7). The CSS .msb--tv rules read this variable.
+    // Few rows → big text (scale toward the 2.4 cap); many rows → smaller text
+    // (scale toward the 0.85 floor). The CSS .msb--tv rules read this variable.
     const fewRows = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'A', sideB: 'B', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
     ] };
     const promotedFew = { competition: fewRows, match: fewRows.poolMatches[0], isBracket: false };
     const strFew = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedFew }));
-    // 1 row → scale = clamp(0.7, 4/1, 1.6) = 1.6
-    expect(strFew).toContain('"--msb-scale":1.6');
+    // 1 row → scale = clamp(0.85, 7/1, 2.4) = 2.4
+    expect(strFew).toContain('"--msb-scale":2.4');
 
     // Build a full pool with many matches so the row count grows.
     const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
@@ -447,8 +457,31 @@ describe('TvIndividualBoard', () => {
     ] };
     const promotedMany = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
     const strMany = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedMany }));
-    // 10 rows → scale = clamp(0.7, 4/10, 1.6) = 0.7
-    expect(strMany).toContain('"--msb-scale":0.7');
+    // 10 rows → scale = clamp(0.85, 7/10, 2.4) = 0.85
+    expect(strMany).toContain('"--msb-scale":0.85');
+  });
+
+  it('caps a LEAGUE board at 6 visible rows (windowed around the current match)', () => {
+    // 28-match round-robin all on court B → must show only 6, including the running row.
+    const league = { name: 'League', kind: 'individual', teamSize: 0, format: 'league', poolMatches: [
+      ...Array.from({ length: 12 }, (_, i) => ({
+        id: `Pool A-${i}`, court: 'B', sideA: `A${i}`, sideB: `B${i}`, status: 'completed',
+        ipponsA: ['M'], ipponsB: [], scheduledAt: `09:${String(i).padStart(2,'0')}`,
+      })),
+      { id: 'Pool A-12', court: 'B', sideA: 'Run', sideB: 'Cur', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '10:00' },
+      ...Array.from({ length: 15 }, (_, i) => ({
+        id: `Pool A-${i+13}`, court: 'B', sideA: `S${i}`, sideB: `T${i}`, status: 'scheduled',
+        ipponsA: [], ipponsB: [], scheduledAt: `10:${String(i+1).padStart(2,'0')}`,
+      })),
+    ] };
+    const promoted = { competition: league, match: league.poolMatches[12], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const scores = [];
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === IndividualScore) scores.push(n);
+      const k=n.children||n.props?.children||[]; [].concat(k).forEach(walk); })(tree);
+    expect(scores.length).toBe(6);
+    expect(scores.some(s => s.props.match.status === 'running')).toBe(true);
   });
 
   it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {
@@ -468,6 +501,21 @@ describe('TvIndividualBoard', () => {
     expect(str).toContain('Philippe');
     expect(str).toContain('Dave');
     expect(str).toContain('Frank');
+    // Each roster name is wrapped in a span coloured by its starting side:
+    // Philippe is sideA (Aka) in B-0 → red; Dave/Frank are sideB → dark #111.
+    const nameSpans = [];
+    const kidsOf = n => (n.children != null ? n.children : n.props?.children);
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === 'span') {
+        const c = kidsOf(n);
+        const text = typeof c === 'string' ? c : (Array.isArray(c) && c.length === 1 && typeof c[0] === 'string' ? c[0] : '');
+        if (['Philippe','Dave','Frank'].includes(text)) nameSpans.push({ text, color: n.props?.style?.color });
+      }
+      [].concat(kidsOf(n) || []).forEach(walk); })(tree);
+    const byName = Object.fromEntries(nameSpans.map(s => [s.text, s.color]));
+    expect(byName['Philippe']).toBe('var(--red, #b91c1c)');
+    expect(byName['Dave']).toBe('#111');
+    expect(byName['Frank']).toBe('#111');
   });
 
   it('does NOT render the UP NEXT pool strip when there is no following pool on this court', () => {

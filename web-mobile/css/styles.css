@@ -6287,6 +6287,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
 .msb--tv .msb-slot { min-width: calc(5vh * var(--msb-scale, 1)); height: calc(5.6vh * var(--msb-scale, 1)); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
 .msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
+/* Centre divider between the Shiro and Aka ippon slots on the fullscreen
+   boards. Only when the centre cell is otherwise empty — a draw "X" or hantei
+   "Ht" takes its place, so the dash never collides with a real mark. Scoped to
+   .msb--tv so the smaller lobby cells / viewer rows are unaffected. */
+.msb--tv .msb-vs:empty::before { content: "\2013"; color: #cbd1d8; }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }

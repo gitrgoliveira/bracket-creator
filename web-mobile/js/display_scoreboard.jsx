@@ -199,14 +199,19 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (future.length === 0) return null;
     const nextName = future
         .sort(([na, ta], [nb, tb]) => ta.localeCompare(tb) || na.localeCompare(nb))[0][0];
-    // Roster: union of sideA/sideB across the whole pool, preserving first-seen order.
+    // Roster with each player's STARTING colour. Pool colour is per-match, so a
+    // player's "starting colour" is the colour they'll have in their EARLIEST
+    // bout of this pool: sideA = Aka (red), sideB = Shiro (dark). Walk the pool's
+    // matches in scheduled order and colour each name on its first appearance.
+    const poolMatches = competition.poolMatches
+        .filter(m => poolNameOf(m.id) === nextName)
+        .sort((a, b) => String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id)));
     const seen = new Set();
     const players = [];
-    for (const m of competition.poolMatches) {
-        if (poolNameOf(m.id) !== nextName) continue;
-        for (const sideRaw of [m.sideA, m.sideB]) {
+    for (const m of poolMatches) {
+        for (const [sideRaw, side] of [[m.sideA, "aka"], [m.sideB, "shiro"]]) {
             const name = typeof sideRaw === "string" ? sideRaw : (sideRaw && sideRaw.name) || "";
-            if (name && !seen.has(name)) { seen.add(name); players.push(name); }
+            if (name && !seen.has(name)) { seen.add(name); players.push({ name, side }); }
         }
     }
     return { name: nextName, players };
@@ -247,7 +252,12 @@ function windowAroundCurrent(all, currentIdx, max) {
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
     const all = gatherIndividualGroup(promoted, court);
     const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");
-    const { rows, dropped } = windowAroundCurrent(all, currentIdx, TV_INDIV_MAX_VISIBLE);
+    // A league is one big round-robin table — showing its whole match list would
+    // cram the board, so cap it at a readable window around the current match.
+    // Pools/brackets keep showing their whole group (the pool must be visible in
+    // full — earlier product requirement), bounded only by TV_INDIV_MAX_VISIBLE.
+    const maxVisible = promoted.competition?.format === "league" ? 6 : TV_INDIV_MAX_VISIBLE;
+    const { rows, dropped } = windowAroundCurrent(all, currentIdx, maxVisible);
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     // Suppress the bottom NEXT line when its match is already visible in the
     // body — in pool phase the whole pool's queue is now in the feed, so the
@@ -266,9 +276,10 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     // more room per row → bigger glyphs (the screen fills). More rows → text
     // shrinks to fit. The CSS .msb--tv rules read --msb-scale from the body
     // container; default is 1 (full size) for surfaces that don't set it.
-    // Tuning: 4 rows is the "natural" TV size (scale 1); below that it grows
-    // up to 1.6× (single-row board), above that it shrinks down to 0.7×.
-    const rowScale = Math.min(1.6, Math.max(0.7, 4 / Math.max(1, rows.length)));
+    // Tuning: ~7 rows is the "natural" TV size (scale 1); a typical 4-match pool
+    // grows to ~1.75× to fill the screen, a single-match board to 2.4×, and a
+    // packed group shrinks to a 0.85 floor so it still fits.
+    const rowScale = Math.min(2.4, Math.max(0.85, 7 / Math.max(1, rows.length)));
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
@@ -333,7 +344,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 IndividualScore inside each row sizes itself to fit the available
                 room. All rows render at the SAME size; the live row is signalled
                 only by a quiet bg tint (no spine, no transform, no pulse). */}
-            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
                     const isDone = !isNow && m.status === "completed";
@@ -362,8 +373,15 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                     <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
                     <span style={{ fontSize: "2.4vh", color: "#111", fontWeight: 700, flexShrink: 0 }}>{nextPool.name}</span>
                     <span style={{ fontSize: "2.4vh", color: "var(--ink-3)", flexShrink: 0 }}>·</span>
-                    <span style={{ fontSize: "2.2vh", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {nextPool.players.join(" · ")}
+                    <span style={{ fontSize: "2.2vh", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {nextPool.players.map((p, i) => (
+                            <React.Fragment key={p.name}>
+                                {i > 0 && <span style={{ color: "var(--ink-3)" }}> · </span>}
+                                {/* Starting colour: Aka (red) if they're sideA in
+                                    their first bout, Shiro (dark) if sideB. */}
+                                <span style={{ color: p.side === "aka" ? "var(--red, #b91c1c)" : "#111", fontWeight: 600 }}>{p.name}</span>
+                            </React.Fragment>
+                        ))}
                     </span>
                 </div>
             )}

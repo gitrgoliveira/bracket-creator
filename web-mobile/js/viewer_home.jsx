@@ -13,6 +13,7 @@ const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const formatLabel = window.formatLabel;
 const formatViewerHeaderEyebrow = window.formatViewerHeaderEyebrow;
+const EmptyState = window.EmptyState;
 
 // Canonical "match has both sides for real participants" predicate.
 // Replaces the local `m.sideA && m.sideB` shorthand that treated the
@@ -344,15 +345,13 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             <>
               <div className="section-title">Competitions</div>
               <div className="vlist">
-                <div className="empty">
-                  <div className="icon">⚙️</div>
-                  <h3>No competitions yet</h3>
-                  <div className="hint--md">Head to Admin to set up the first competition.</div>
-                  <button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>
-                    Open admin
-                  </button>
-                  <div className="hint--sm empty__cta-note">Requires the admin password.</div>
-                </div>
+                <EmptyState
+                  icon="⚙️"
+                  title="No competitions yet"
+                  message="Head to Admin to set up the first competition."
+                  cta={<button type="button" className="btn btn--primary empty__cta" onClick={onAdminClick}>Open admin</button>}
+                  ctaNote="Requires the admin password."
+                />
               </div>
             </>
           ) : dates.map((d) => (

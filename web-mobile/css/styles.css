@@ -1953,6 +1953,10 @@ a:hover {
     min-height: 44px;
   }
 }
+.modal__close:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 
 /* ---------- Auth modal ---------- */
 .auth {
@@ -3732,6 +3736,9 @@ button.pool-match-row {
   color: var(--ink-2);
   font-size: 15px;
   margin: 0 0 4px;
+}
+.empty > div:not(.icon):not(.empty__cta-note) {
+  font-size: 13px;
 }
 
 /* Primary CTA inside an empty state (e.g. "Open admin" when no competitions

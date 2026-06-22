@@ -43,6 +43,7 @@ const AdminImportPage = window.AdminImportPage;
 const AdminSchedulePage = window.AdminSchedulePage;
 const AdminScoreEditorPage = window.AdminScoreEditorPage;
 const AdminShiaijoPage = window.AdminShiaijoPage;
+const Modal = window.Modal;
 
 // Pure helper for the "merge an updated competition into the latest
 // tournament state" pattern used by AdminApp's async handlers. Takes
@@ -718,71 +719,57 @@ function normalizeCreatedRecord(created) {
 // while phase === "running".
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {
   const dismissable = state.phase !== "running";
-  // Only wire Escape when we're allowed to close. Pass undefined (NOT a no-op)
-  // in the running phase: useEscapeToClose calls preventDefault() for ANY
-  // function callback, so a no-op would swallow Escape while doing nothing.
-  // undefined leaves Escape untouched. Matches the busyType ? undefined
-  // pattern in admin_shell.jsx.
-  window.useEscapeToClose(dismissable ? onClose : undefined);
-
   const { phase, comps = [], failed = [] } = state;
 
   let title = "Start all competitions";
   if (phase === "running") title = "Starting competitions…";
   else if (phase === "result") title = failed.length === 0 ? "All competitions started" : "Some competitions failed";
 
+  const footer = <>
+    {phase === "confirm" && <>
+      <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+      <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+    </>}
+    {phase === "result" && <>
+      {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}
+  </>;
+
   return (
-    <div className="modal-backdrop" onClick={dismissable ? onClose : undefined}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal__head">
-          <div className="modal__title">{title}</div>
-          {dismissable && <button type="button" className="modal__close" onClick={onClose} aria-label="Close">&times;</button>}
+    <Modal title={title} onClose={onClose} dismissable={dismissable} footer={footer}>
+      {phase === "confirm" && <>
+        <p className="start-all__lead">
+          This will start {window.pluralize(comps.length, "competition")} now. Once a
+          competition starts, its pools and bracket are generated and scoring opens.
+        </p>
+        <ul className="start-all__list">
+          {comps.map(c => <li key={c.id}>{c.name}</li>)}
+        </ul>
+      </>}
+      {phase === "running" && (
+        <div className="start-all__running">
+          <span className="spinner" aria-hidden="true"></span>
+          <span aria-live="polite">Starting {window.pluralize(comps.length, "competition")}…</span>
         </div>
-        <div className="modal__body">
-          {phase === "confirm" && <>
-            <p className="start-all__lead">
-              This will start {window.pluralize(comps.length, "competition")} now. Once a
-              competition starts, its pools and bracket are generated and scoring opens.
-            </p>
-            <ul className="start-all__list">
-              {comps.map(c => <li key={c.id}>{c.name}</li>)}
-            </ul>
-          </>}
-          {phase === "running" && (
-            <div className="start-all__running">
-              <span className="spinner" aria-hidden="true"></span>
-              <span aria-live="polite">Starting {window.pluralize(comps.length, "competition")}…</span>
-            </div>
-          )}
-          {phase === "result" && <>
-            <p className="start-all__lead" aria-live="polite">
-              Started {state.succeeded} of {comps.length}.
-              {failed.length > 0 && ` ${window.pluralize(failed.length, "competition")} failed to start.`}
-            </p>
-            {failed.length > 0 && (
-              <ul className="start-all__list start-all__list--failed">
-                {failed.map(f => (
-                  <li key={f.comp.id}>
-                    <span className="start-all__failed-name">{f.comp.name}</span>
-                    {f.reason && <span className="start-all__failed-reason">{f.reason}</span>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>}
-        </div>
-        <div className="modal__foot">
-          {phase === "confirm" && <>
-            <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
-            <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
-          </>}
-          {phase === "result" && <>
-            {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
-            <button type="button" className="btn" onClick={onClose}>Close</button>
-          </>}
-        </div>
-      </div>
-    </div>
+      )}
+      {phase === "result" && <>
+        <p className="start-all__lead" aria-live="polite">
+          Started {state.succeeded} of {comps.length}.
+          {failed.length > 0 && ` ${window.pluralize(failed.length, "competition")} failed to start.`}
+        </p>
+        {failed.length > 0 && (
+          <ul className="start-all__list start-all__list--failed">
+            {failed.map(f => (
+              <li key={f.comp.id}>
+                <span className="start-all__failed-name">{f.comp.name}</span>
+                {f.reason && <span className="start-all__failed-reason">{f.reason}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </>}
+    </Modal>
   );
 }
 

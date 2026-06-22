@@ -211,7 +211,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // competitors. This lives in the Participants view (not the create form)
   // so a sample is a starting point you review and edit before clicking
   // "Apply changes" — it reuses the whole parse/validate/save path. The
-  // generated ids are placeholders; apply() mints real UUIDs from the text.
+  // generated ids are placeholders; apply() assigns `${compId}-pN` ids.
   const fillSample = (count) => {
     const sample = window.makeCompetitors(count, c.kind, c.id, 0, c.gender || "M");
     setText(generateText(sample));

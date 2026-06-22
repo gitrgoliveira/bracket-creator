@@ -25,11 +25,13 @@ const compMatchStats = window.compMatchStats;
 //   - "Review seeds & settings" is always emitted as a non-done step: there is
 //     no reliable "seeds reviewed" signal, so it never auto-completes (its
 //     detail line reflects the current seed count, but its state stays
-//     todo/active and is resolved by the active-step pass below).
+//     todo/active and is resolved by the active-step pass below). Its CTA
+//     navigates to the "settings" section (format, courts, duration); seeds
+//     are accessible from the seeding card on the "participants" page.
 //   - Team comps get an extra "Set team lineups" step (→ "lineups") inserted
-//     AFTER "Review seeds & settings" and before "Generate the draw". (This is
-//     the checklist's logical setup order; it intentionally differs from the
-//     sidebar, which groups lineups before settings.)
+//     AFTER "Review seeds & settings" and before "Generate the draw". This is
+//     the checklist's logical setup order; the sidebar lists lineups after
+//     participants but before settings, which differs from this ordering.
 //   - "Generate the draw" is always non-done (the button is in the page-head).
 //   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
 //
@@ -77,8 +79,8 @@ function competitionNextSteps(c) {
       ? `${seededCount} seed${seededCount !== 1 ? "s" : ""} assigned`
       : "Optionally assign seeds and adjust format",
     state: "todo",
-    section: "participants",
-    cta: "Review seeds & settings →",
+    section: "settings",
+    cta: "Review settings →",
   });
 
   // Step 3b (team only) — lineups, after settings.
@@ -219,10 +221,12 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
         }
       });
     return () => controller.abort();
-    // Re-fetch whenever the saved competition config changes (same deps as AdminSettings).
+    // Re-fetch when config or participant count changes (participant count affects
+    // total match count, so the estimate becomes stale when roster changes).
   }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, c.checkInEnabled, password]);
+    c.swissRounds, c.checkInEnabled, password,
+    (c.players || []).length]);
 
   // ---------------------------------------------------------------------------
   // Derived stat values
@@ -413,6 +417,10 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
 
     // --- draw-ready ---
     if (isDrawReady) {
+      // Swiss rounds are generated dynamically on start; there is no static
+      // pools/bracket preview to show. Only non-swiss formats expose a preview
+      // section in the nav at this stage.
+      const isSwiss = c.format === "swiss";
       const previewSection = c.format === "playoffs" ? "bracket" : "pools";
       const previewLabel = c.format === "playoffs" ? "bracket" : "pools";
       return (
@@ -422,21 +430,25 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
             <div className="card__sub">{numPlayers} {participantLabel} · {seededCount > 0 ? `${seededCount} seeded` : "no seeds"}</div>
           </div>
           <div style={{ fontSize: 13.5, color: "var(--ink-2)", marginBottom: 14 }}>
-            The draw has been generated. Preview it below, then use the <strong>Start competition →</strong> button in the header to begin.
+            {isSwiss
+              ? <>Participants are set. Use the <strong>Start competition →</strong> button in the header to begin the first round.</>
+              : <>The draw has been generated. Preview it below, then use the <strong>Start competition →</strong> button in the header to begin.</>}
           </div>
           <div className="row">
-            <button
-              type="button"
-              className="card card--sm card--action"
-              style={{ textAlign: "left" }}
-              onClick={() => onSection(previewSection)}
-              data-testid="draw-ready-preview-btn"
-            >
-              <div className="card__title" style={{ marginBottom: 4 }}>
-                Preview {previewLabel} →
-              </div>
-              <div className="card__sub">Check placements before starting</div>
-            </button>
+            {!isSwiss && (
+              <button
+                type="button"
+                className="card card--sm card--action"
+                style={{ textAlign: "left" }}
+                onClick={() => onSection(previewSection)}
+                data-testid="draw-ready-preview-btn"
+              >
+                <div className="card__title" style={{ marginBottom: 4 }}>
+                  Preview {previewLabel} →
+                </div>
+                <div className="card__sub">Check placements before starting</div>
+              </button>
+            )}
             <div className="card card--sm" style={{ background: "var(--bg)" }}>
               <div className="card__title" style={{ marginBottom: 4, color: "var(--ink-2)" }}>To start</div>
               <div className="card__sub">

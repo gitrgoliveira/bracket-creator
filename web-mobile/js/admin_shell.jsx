@@ -432,10 +432,33 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             {comps.some(c => c.status === "setup" && (c.players || []).length >= 2) && (
               <button type="button" className="btn btn--danger" onClick={onStartAll}>Start all</button>
             )}
-            <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+            {/* When the tournament is empty the first-run empty state below carries
+                the single primary "Add competition" CTA, so we drop the duplicate
+                header button to keep one clear call to action on the first screen. */}
+            {!noComps && (
+              <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+            )}
           </div>
         </div>
 
+        {/* First-run: an empty tournament has no matches, so the match-count
+            stat strip ("Matches done 0/0", "Now 0"), the tournament-wide score
+            editor, and the per-shiaijo operator views are all dead widgets. Show
+            a single oriented empty state instead and skip the rest of the
+            dashboard until the first competition exists. */}
+        {noComps ? (
+          <div className="empty" style={{ padding: "48px 24px", marginBottom: 24 }}>
+            <div className="icon" aria-hidden="true">🥋</div>
+            <h3>Add your first competition</h3>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
+              A competition is one event within {t.name} — like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
+            </div>
+            <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+              <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
+              <button type="button" className="btn" onClick={onOpenImport}>Import from folder</button>
+            </div>
+          </div>
+        ) : (<>
         <div className="stats-strip">
           <div className="stat-box"><div className="v">{comps.length}</div><div className="l">Competitions</div></div>
           <div className="stat-box"><div className="v">{totalParticipants}</div><div className="l">Participants</div></div>
@@ -484,10 +507,13 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <div className="section-title">All competitions</div>
         <div className="tlist">
           {comps.map((c) => <CompCard key={c.id} c={c} onOpen={() => onOpenCompetition(c.id, initialSectionFor(c.status))} onStart={() => onStartCompetition(c.id)} tournament={t} showToast={showToast} />)}
-          <button type="button" className={`tcard tcard--add${noComps ? " tcard--add-cta" : ""}`} onClick={onCreateCompetition}>
-            <div style={{ fontSize: 28, color: noComps ? "var(--accent)" : "var(--ink-3)" }}>+</div>
-            <div style={{ fontWeight: noComps ? 700 : 600, marginTop: 4, color: noComps ? "var(--accent)" : undefined }}>Add competition</div>
-            <div style={{ fontSize: 12, color: noComps ? "var(--ink-2)" : "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
+          {/* This section only renders when competitions exist (the empty-tournament
+              case is handled by the first-run empty state above), so the dashed
+              tile stays a quiet "add another", not the promoted first-run CTA. */}
+          <button type="button" className="tcard tcard--add" onClick={onCreateCompetition}>
+            <div style={{ fontSize: 28, color: "var(--ink-3)" }}>+</div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>Add competition</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>Individual or Team</div>
           </button>
           <button type="button" className="tcard tcard--add" onClick={onOpenImport}>
             <div style={{ color: "var(--ink-3)" }}><Icon name="folder" size={28} /></div>
@@ -495,6 +521,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>From folder with manifest.yaml</div>
           </button>
         </div>
+        </>)}
         {window.VersionFooter && <window.VersionFooter />}
       </div>
       {exportPdfOpen && (

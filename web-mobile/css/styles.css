@@ -3310,8 +3310,11 @@ button.pool-match-row {
 
 .vlist-item__bar>div {
   height: 100%;
+  width: 100%;
   background: var(--accent);
-  transition: width 300ms;
+  transform-origin: left;
+  transform: scaleX(var(--bar-fill, 0));
+  transition: transform 300ms;
 }
 
 .vlist-item__pct {
@@ -3522,6 +3525,157 @@ button.pool-match-row {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-top: 6px;
+}
+
+/* stat-box link variant — a button-reset that keeps the stat-box layout
+   but is clickable (e.g. "View podium →" in the completed stats strip). */
+.stat-box__link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.stat-box__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+/* Stat value at text scale: the default .stat-box .v is 22px display, sized
+   for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
+   read better one step down. Modifier instead of scattered inline font-size. */
+.stat-box .v--sm {
+  font-size: 16px;
+}
+
+/* Clickable action card (mp-a5d6): the overview's navigate-on-click cards
+   (Scores/Results, draw preview, export) need the same affordance as the
+   dashboard's .tcard so they read as interactive, not static. Mirrors
+   .tcard:hover for system consistency. */
+.card--action {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.card--action:hover {
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card--action:active {
+  transform: translateY(0);
+}
+
+.card--action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow), var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--action {
+    transition: none;
+  }
+  .card--action:hover {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .card--action:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Next-steps checklist (mp-a5d6) — status-aware overview for setup state.
+   Composes existing tokens; no new color values. */
+.comp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comp-step {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.comp-step:last-child {
+  border-bottom: none;
+}
+
+.comp-step__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.comp-step--done .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--active .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--todo .comp-step__icon {
+  color: var(--ink-3);
+}
+
+.comp-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comp-step__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.comp-step--done .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step--active .comp-step__label {
+  color: var(--ink);
+}
+
+.comp-step--todo .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step__detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.comp-step--active .comp-step__detail {
+  color: var(--ink-2);
+}
+
+.comp-step__cta {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.comp-steps__hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
 }
 
 /* Sidebar (admin tournament) */
@@ -5665,7 +5819,7 @@ button.pool-match-row {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 500;
   pointer-events: none;
-  animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes toast-in {
@@ -6638,7 +6792,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -7745,9 +7898,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--red);
   border-radius: var(--r-sm);
-  border-left: 3px solid var(--red);
+  background: var(--red-soft);
 }
 .start-all__failed-name { font-weight: 600; color: var(--ink-1); }
 .start-all__failed-reason { font-size: 12px; color: var(--ink-3); }

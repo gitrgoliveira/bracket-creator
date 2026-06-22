@@ -761,3 +761,4 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
 
 window.AdminSettings = AdminSettings;
+window.formatCompMinutes = formatCompMinutes;

@@ -206,6 +206,16 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     return p.danGrade ? `${base}, ${p.danGrade}` : base;
   }).join("\n");
 
+  // Fill the roster textarea with a generated sample roster of `count`
+  // competitors. This lives in the Participants view (not the create form)
+  // so a sample is a starting point you review and edit before clicking
+  // "Apply changes" — it reuses the whole parse/validate/save path. The
+  // generated ids are placeholders; apply() mints real UUIDs from the text.
+  const fillSample = (count) => {
+    const sample = window.makeCompetitors(count, c.kind, c.id, 0, c.gender || "M");
+    setText(generateText(sample));
+  };
+
   useEffectA(() => {
     if (!textFocusRef.current) {
       setText(generateText(c.players || []));
@@ -1066,6 +1076,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
             </div>
           </div>
+
+          {/* Sample roster: only offered while the box is empty so it can't
+              clobber an in-progress list. Fills the textarea for review; the
+              operator still clicks "Apply changes" to save. */}
+          {!isDrawReady && lines.length === 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <span className="field__hint" style={{ margin: 0 }}>
+                No list yet? Fill with a sample {c.kind === "team" ? "team " : ""}roster:
+              </span>
+              <div className="radio-group" style={{ gap: 6 }}>
+                <button type="button" className="radio-pill" onClick={() => fillSample(8)}>Small (8)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(16)}>Medium (16)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(32)}>Large (32)</button>
+              </div>
+            </div>
+          )}
 
           {importSummary && (
             <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>

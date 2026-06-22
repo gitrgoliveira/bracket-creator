@@ -197,11 +197,15 @@ describe('gatherIndividualGroup', () => {
       { id: 'Pool A-3', sideA: 'Suzuki', sideB: 'Mori', status: 'scheduled', scheduledAt: '09:30' }, // not started
     ],
   };
-  it('gathers the same pool, completed first, current (running) LAST', () => {
+  it('gathers the whole pool — completed first, current next, scheduled LAST; other pools excluded', () => {
+    // Pool-phase per-court board shows the WHOLE pool so spectators see the
+    // pool's full progression (past → present → future) on one screen.
+    // Status sort: completed → current → scheduled. Pool B is excluded.
     const promoted = { competition: poolComp, match: poolComp.poolMatches[0], isBracket: false };
     const rows = gatherIndividualGroup(promoted);
-    expect(rows.map(m => m.id)).toEqual(['Pool A-1', 'Pool A-2', 'Pool A-0']); // running last; Pool B + scheduled excluded
-    expect(rows[rows.length - 1].status).toBe('running');
+    expect(rows.map(m => m.id)).toEqual(['Pool A-1', 'Pool A-2', 'Pool A-0', 'Pool A-3']);
+    // Status order check: completed, completed, running, scheduled.
+    expect(rows.map(m => m.status)).toEqual(['completed', 'completed', 'running', 'scheduled']);
   });
   it('gathers the same bracket round, current LAST', () => {
     const comp = { bracket: { rounds: [

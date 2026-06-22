@@ -122,10 +122,17 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
 // every match in the same POOL (pool phase) or the same ROUND (knockout) as
 // the promoted match, **on the same court**. The TV display is per-court, so
 // bracket rounds that span multiple courts must not leak cross-court matches.
-// Returns them ordered completed-first with the CURRENT (running, or the
-// promoted up-next) match LAST, so the feed keeps the active match at the
-// bottom of the visible list and older results scroll off the top.
-// Not-yet-started matches other than the promoted one are omitted (feed model).
+//
+// POOL phase: returns ALL pool matches on this court regardless of status, so
+// spectators see the pool's full progression (completed → live → upcoming) on
+// one screen, not just a feed of what's already happened.
+// BRACKET phase: keeps the feed model (completed + current only), because
+// scheduled bracket bouts often still carry placeholder sides like
+// "Winner of r1-m0" that wouldn't read as real matches yet.
+//
+// Sort order: completed first (oldest → newest), then the CURRENT (running /
+// promoted up-next) match, then scheduled (by scheduledAt), so the row order
+// reads top-to-bottom as past → present → future.
 function gatherIndividualGroup(promoted, court) {
     if (!promoted || !promoted.competition || !promoted.match) return [];
     const comp = promoted.competition;
@@ -142,9 +149,13 @@ function gatherIndividualGroup(promoted, court) {
     // Filter to the same court — bracket rounds can span multiple courts.
     const onCourt = group.filter(m => (m.court || "") === matchCourt);
     const isCurrent = m => m.id === cur.id || m.status === "running";
-    const shown = onCourt.filter(m => m.status === "completed" || isCurrent(m));
+    const shown = promoted.isBracket
+        ? onCourt.filter(m => m.status === "completed" || isCurrent(m))
+        : onCourt; // POOL: include scheduled too
+    // statusOrder: 0=completed (top), 1=current, 2=scheduled (bottom).
+    const statusOrder = m => isCurrent(m) ? 1 : (m.status === "completed" ? 0 : 2);
     return shown.slice().sort((a, b) => {
-        const d = (isCurrent(a) ? 1 : 0) - (isCurrent(b) ? 1 : 0); // current sinks to bottom
+        const d = statusOrder(a) - statusOrder(b);
         if (d !== 0) return d;
         return String(a.scheduledAt || a.id).localeCompare(String(b.scheduledAt || b.id));
     });
@@ -171,7 +182,12 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
     const rows = dropped > 0 ? all.slice(dropped) : all;
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds);
-    const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    // Suppress the bottom NEXT line when its match is already visible in the
+    // body — in pool phase the whole pool's queue is now in the feed, so the
+    // line would otherwise duplicate a row immediately above it.
+    const shownIds = new Set(rows.map(r => r.id));
+    const firstQueued = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    const next = (firstQueued && !shownIds.has(firstQueued.id)) ? firstQueued : null;
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",

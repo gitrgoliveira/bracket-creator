@@ -21,14 +21,17 @@ const compMatchStats = window.compMatchStats;
 //
 // Rules:
 //   - "Create competition" is always done (the comp already exists).
-//   - "Add participants" is active when players < 2; done otherwise.
-//   - Team comps get an extra "Set team lineups" step (→ "lineups") between
-//     participants and Generate, following the existing sidebar ordering.
-//   - "Review seeds & settings" is done once players >= 2 and we have seeds
-//     OR the user has navigated there (we can't know that, so treat it as
-//     "todo" after participants are added — same behaviour as before).
-//   - "Generate the draw" is always todo (the button is in the page-head).
-//   - The FIRST non-done step is "active"; all subsequent are "todo".
+//   - "Add participants" is done when players >= 2, else active.
+//   - "Review seeds & settings" is always emitted as a non-done step: there is
+//     no reliable "seeds reviewed" signal, so it never auto-completes (its
+//     detail line reflects the current seed count, but its state stays
+//     todo/active and is resolved by the active-step pass below).
+//   - Team comps get an extra "Set team lineups" step (→ "lineups") inserted
+//     AFTER "Review seeds & settings" and before "Generate the draw". (This is
+//     the checklist's logical setup order; it intentionally differs from the
+//     sidebar, which groups lineups before settings.)
+//   - "Generate the draw" is always non-done (the button is in the page-head).
+//   - The FIRST non-done step is promoted to "active"; the rest stay "todo".
 //
 // Exported on window.competitionNextSteps AND in the ES export block below.
 function competitionNextSteps(c) {
@@ -138,6 +141,20 @@ function overviewViewMode(status) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure helper: overviewResultsSection
+// ---------------------------------------------------------------------------
+// The section that holds standings/results for a given competition format.
+// Swiss competitions have no pools/bracket section — their results live in the
+// dedicated "swiss" section — so a Results/podium CTA that defaulted to
+// pools/bracket would strand the operator on an empty/hidden view. Route swiss
+// to "swiss"; otherwise prefer the bracket when one exists, else pools.
+// Pure + exported so the swiss routing is unit-tested (Copilot review #312).
+function overviewResultsSection(format, hasBracket) {
+  if (format === "swiss") return "swiss";
+  return hasBracket ? "bracket" : "pools";
+}
+
+// ---------------------------------------------------------------------------
 // AdminCompOverview — status-aware overview component
 // ---------------------------------------------------------------------------
 function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password }) {
@@ -233,6 +250,9 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
   // or textual values ("2 pools", "3h 10m") step down to 16px via .v--sm so
   // they don't crowd the box. The em-dash placeholder keeps the display size.
   const vClass = (val) => (val === "—" ? "v" : "v v--sm");
+
+  // Standings/results target for this competition's format (see helper above).
+  const resultsSection = overviewResultsSection(c.format, !!effectiveBracket);
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -331,7 +351,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
           <button
             type="button"
             className="stat-box__link"
-            onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}
+            onClick={() => onSection(resultsSection)}
           >
             <div className="v v--sm" style={{ color: "var(--accent)" }}>View podium →</div>
             <div className="l">Standings</div>
@@ -473,7 +493,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
               type="button"
               className="card card--action"
               style={{ textAlign: "left" }}
-              onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}
+              onClick={() => onSection(resultsSection)}
             >
               <div className="card__title" style={{ marginBottom: 6 }}>Results →</div>
               <div className="card__sub">Visual bracket / pool standings</div>
@@ -498,7 +518,7 @@ function AdminCompOverview({ c, pools, poolMatches, bracket, onSection, password
               type="button"
               className="card card--sm card--action"
               style={{ textAlign: "left" }}
-              onClick={() => onSection(effectiveBracket ? "bracket" : "pools")}
+              onClick={() => onSection(resultsSection)}
               data-testid="completed-results-btn"
             >
               <div className="card__title" style={{ marginBottom: 4 }}>Results →</div>
@@ -699,6 +719,7 @@ if (typeof window !== "undefined") {
   window.FightingSpiritAwardsEditor = FightingSpiritAwardsEditor;
   window.competitionNextSteps = competitionNextSteps;
   window.overviewViewMode = overviewViewMode;
+  window.overviewResultsSection = overviewResultsSection;
 }
 
-export { competitionNextSteps, overviewViewMode };
+export { competitionNextSteps, overviewViewMode, overviewResultsSection };

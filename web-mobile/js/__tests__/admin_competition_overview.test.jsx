@@ -2,7 +2,30 @@
 // The function is unit-testable without mounting any component — it takes
 // a plain competition object and returns a step array.
 import { describe, it, expect } from 'vitest';
-import { competitionNextSteps, overviewViewMode } from '../admin_competition_overview.jsx';
+import { competitionNextSteps, overviewViewMode, overviewResultsSection } from '../admin_competition_overview.jsx';
+
+// ---------------------------------------------------------------------------
+// overviewResultsSection — format → results/standings section
+// ---------------------------------------------------------------------------
+// Regression guard (Copilot review on PR #312): swiss competitions have no
+// pools/bracket section, so a Results/podium CTA must route to "swiss", not the
+// pools/bracket default — otherwise the operator lands on an empty/hidden view.
+describe('overviewResultsSection — results routing', () => {
+  it('routes swiss competitions to the "swiss" section regardless of bracket presence', () => {
+    expect(overviewResultsSection('swiss', false)).toBe('swiss');
+    expect(overviewResultsSection('swiss', true)).toBe('swiss');
+  });
+
+  it('routes to "bracket" when a bracket exists (non-swiss)', () => {
+    expect(overviewResultsSection('playoffs', true)).toBe('bracket');
+    expect(overviewResultsSection('mixed', true)).toBe('bracket');
+  });
+
+  it('routes to "pools" when no bracket exists (non-swiss)', () => {
+    expect(overviewResultsSection('mixed', false)).toBe('pools');
+    expect(overviewResultsSection('league', false)).toBe('pools');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // overviewViewMode — status → render-mode mapping

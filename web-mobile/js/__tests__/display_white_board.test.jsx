@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, poolNameOf, sideLabel } from '../display.jsx';
+import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, poolNameOf, sideLabel } from '../display.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -231,6 +231,53 @@ describe('gatherIndividualGroup', () => {
   });
 });
 
+describe('findNextPoolOnCourt', () => {
+  // Two pools both routed to court A; Pool A is current.
+  const comp = { poolMatches: [
+    { id: 'Pool A-0', court: 'A', sideA: 'Eduardo', sideB: 'Carol', status: 'running',   scheduledAt: '09:00' },
+    { id: 'Pool A-1', court: 'A', sideA: 'Eduardo', sideB: 'Erin',  status: 'scheduled', scheduledAt: '09:05' },
+    { id: 'Pool A-2', court: 'A', sideA: 'Carol',   sideB: 'Erin',  status: 'scheduled', scheduledAt: '09:10' },
+    { id: 'Pool B-0', court: 'A', sideA: 'Philippe',sideB: 'Dave',  status: 'scheduled', scheduledAt: '09:15' },
+    { id: 'Pool B-1', court: 'A', sideA: 'Philippe',sideB: 'Frank', status: 'scheduled', scheduledAt: '09:20' },
+    { id: 'Pool B-2', court: 'A', sideA: 'Dave',    sideB: 'Frank', status: 'scheduled', scheduledAt: '09:25' },
+  ] };
+  it('returns the next pool on this court with its roster (first-seen order)', () => {
+    const res = findNextPoolOnCourt(comp, 'Pool A', 'A');
+    expect(res).not.toBeNull();
+    expect(res.name).toBe('Pool B');
+    expect(res.players).toEqual(['Philippe', 'Dave', 'Frank']);
+  });
+  it('returns null when there is no next pool on this court', () => {
+    expect(findNextPoolOnCourt(comp, 'Pool B', 'A')).toBeNull();
+  });
+  it('ignores pools on other courts', () => {
+    const c2 = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',  scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'B', sideA: 'P', sideB: 'Q', status: 'scheduled', scheduledAt: '09:05' },
+    ] };
+    expect(findNextPoolOnCourt(c2, 'Pool A', 'A')).toBeNull();
+  });
+  it('picks earliest scheduledAt across pools; alphabetical tiebreak', () => {
+    const c3 = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   scheduledAt: '09:00' },
+      // Pool C first match at 10:00, Pool B first match at 10:00 → Pool B wins (alphabetical).
+      { id: 'Pool C-0', court: 'A', sideA: 'M', sideB: 'N', status: 'scheduled', scheduledAt: '10:00' },
+      { id: 'Pool B-0', court: 'A', sideA: 'P', sideB: 'Q', status: 'scheduled', scheduledAt: '10:00' },
+    ] };
+    expect(findNextPoolOnCourt(c3, 'Pool A', 'A').name).toBe('Pool B');
+  });
+  it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
+    const team = { kind: 'team', poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'Team Alpha', sideB: 'Team Beta',  status: 'running',   scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'A', sideA: 'Team Gamma', sideB: 'Team Delta', status: 'scheduled', scheduledAt: '09:30' },
+      { id: 'Pool B-1', court: 'A', sideA: 'Team Gamma', sideB: 'Team Epsilon', status: 'scheduled', scheduledAt: '09:40' },
+    ] };
+    const res = findNextPoolOnCourt(team, 'Pool A', 'A');
+    expect(res.name).toBe('Pool B');
+    expect(res.players).toEqual(['Team Gamma', 'Team Delta', 'Team Epsilon']);
+  });
+});
+
 describe('TvIndividualBoard', () => {
   const base = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false, queueMatches: [] };
   const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
@@ -313,6 +360,32 @@ describe('TvIndividualBoard', () => {
     // Completed row: grey bg, no accent border.
     expect(doneRow.props.style.background).toBe('#f9fafb');
     expect(doneRow.props.style.borderLeft).toBeUndefined();
+  });
+
+  it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {
+    const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol',  status: 'running',   scheduledAt: '09:00' },
+      { id: 'Pool A-1', court: 'B', sideA: 'Eduardo', sideB: 'Erin',   status: 'scheduled', scheduledAt: '09:05' },
+      { id: 'Pool B-0', court: 'B', sideA: 'Philippe',sideB: 'Dave',   status: 'scheduled', scheduledAt: '09:30' },
+      { id: 'Pool B-1', court: 'B', sideA: 'Philippe',sideB: 'Frank',  status: 'scheduled', scheduledAt: '09:35' },
+      { id: 'Pool B-2', court: 'B', sideA: 'Dave',    sideB: 'Frank',  status: 'scheduled', scheduledAt: '09:40' },
+    ] };
+    const promoted = { competition: multiPool, match: multiPool.poolMatches[0], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const str = JSON.stringify(tree);
+    expect(str).toContain('tvd-next-pool');
+    expect(str).toContain('UP NEXT');
+    expect(str).toContain('Pool B');
+    expect(str).toContain('Philippe');
+    expect(str).toContain('Dave');
+    expect(str).toContain('Frank');
+  });
+
+  it('does NOT render the UP NEXT pool strip when there is no following pool on this court', () => {
+    // The base fixture has only Pool A on court B; no next pool.
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
+    expect(str).not.toContain('tvd-next-pool');
   });
 
   it('passes match sides with .number through to IndividualScore (numberPrefix support)', () => {

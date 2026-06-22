@@ -161,6 +161,50 @@ function gatherIndividualGroup(promoted, court) {
     });
 }
 
+// findNextPoolOnCourt — for the per-court pool-phase board: the next POOL that
+// will play on this court after the current one finishes, plus its roster (so
+// the spectator can decide whether to stay). Looks across the SAME competition
+// (court routing is per-comp). Returns { name, players } or null.
+//
+// "Earliest scheduled match in the pool" picks the next pool deterministically
+// (alphabetical tiebreak when timestamps tie). Roster = union of sideA/sideB
+// across ALL of that pool's matches in the comp (not just on this court) — a
+// pool's roster is fixed, the courts list is just routing. For team
+// competitions, sides carry team names so the roster surfaces team names.
+function findNextPoolOnCourt(competition, currentPoolName, court) {
+    if (!competition || !competition.poolMatches) return null;
+    const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
+    // Group pools, tracking earliest scheduledAt + whether any match has
+    // already started (running or completed). Only pools that haven't started
+    // yet on this court are "next" — a pool already in progress isn't a
+    // future pool, even if you happen to be asking from a different one.
+    const byPool = new Map();
+    for (const m of onCourt) {
+        const p = poolNameOf(m.id);
+        if (!p || p === currentPoolName) continue;
+        const ts = m.scheduledAt || "99:99";
+        const cur = byPool.get(p) || { earliest: "99:99", started: false };
+        if (ts < cur.earliest) cur.earliest = ts;
+        if (m.status === "running" || m.status === "completed") cur.started = true;
+        byPool.set(p, cur);
+    }
+    const future = [...byPool.entries()].filter(([, v]) => !v.started);
+    if (future.length === 0) return null;
+    const nextName = future
+        .sort(([na, va], [nb, vb]) => va.earliest.localeCompare(vb.earliest) || na.localeCompare(nb))[0][0];
+    // Roster: union of sideA/sideB across the whole pool, preserving first-seen order.
+    const seen = new Set();
+    const players = [];
+    for (const m of competition.poolMatches) {
+        if (poolNameOf(m.id) !== nextName) continue;
+        for (const sideRaw of [m.sideA, m.sideB]) {
+            const name = typeof sideRaw === "string" ? sideRaw : (sideRaw && sideRaw.name) || "";
+            if (name && !seen.has(name)) { seen.add(name); players.push(name); }
+        }
+    }
+    return { name: nextName, players };
+}
+
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
 // so ~10 rows fit comfortably. Cap at TV_INDIV_MAX_VISIBLE and take the TAIL
 // of the gathered group so the current match (already sorted to the end by
@@ -188,6 +232,13 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const shownIds = new Set(rows.map(r => r.id));
     const firstQueued = queueMatches && queueMatches.length ? queueMatches[0] : null;
     const next = (firstQueued && !shownIds.has(firstQueued.id)) ? firstQueued : null;
+    // Pool-phase only: surface the next pool on this court + its roster so
+    // spectators know what's coming after the current pool finishes here.
+    // Bracket phase has no pools so this is null.
+    const currentPoolName = !promoted.isBracket ? poolNameOf(promoted.match.id) : "";
+    const nextPool = (!promoted.isBracket && currentPoolName)
+        ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
+        : null;
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
@@ -237,7 +288,24 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 )}
             </div>
 
-            {/* Next line */}
+            {/* Next pool on this court — name + roster (or team names for
+                team competitions). Tells the spectator what's coming after
+                the current pool finishes here. */}
+            {nextPool && (
+                <div data-testid="tvd-next-pool" style={{ display: "flex", alignItems: "baseline", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
+                    <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
+                    <span style={{ fontSize: "2.4vh", color: "#111", fontWeight: 700, flexShrink: 0 }}>{nextPool.name}</span>
+                    <span style={{ fontSize: "2.4vh", color: "#9ca3af", flexShrink: 0 }}>·</span>
+                    <span style={{ fontSize: "2.2vh", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {nextPool.players.join(" · ")}
+                    </span>
+                </div>
+            )}
+
+            {/* Next match line — shown only when there's a queued match NOT
+                already in the body and NOT subsumed by the next-pool strip
+                above. In multi-comp / multi-pool-on-one-court setups it
+                surfaces the very next match the operator will run here. */}
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "#6b7280", fontWeight: 700 }}>NEXT</span>
@@ -505,4 +573,4 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, emptyStateHeadline };
+export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, emptyStateHeadline };

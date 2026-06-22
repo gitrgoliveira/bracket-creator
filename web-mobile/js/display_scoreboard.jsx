@@ -409,7 +409,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                     <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
                     <span style={{ fontSize: "2.4vh", color: "#111", fontWeight: 700, flexShrink: 0 }}>{nextPool.name}</span>
                     <span style={{ fontSize: "2.4vh", color: "var(--ink-3)", flexShrink: 0 }}>·</span>
-                    <span style={{ fontSize: "2.2vh", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: "2.2vh", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {nextPool.players.map((p, i) => (
                             <React.Fragment key={p.name}>
                                 {i > 0 && <span style={{ color: "var(--ink-3)" }}> · </span>}

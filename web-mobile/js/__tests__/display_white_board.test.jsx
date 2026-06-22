@@ -589,6 +589,14 @@ describe('TvIndividualBoard', () => {
     expect(byName['Philippe']).toBe('var(--red, #b91c1c)');
     expect(byName['Dave']).toBe('#111');
     expect(byName['Frank']).toBe('#111');
+    // The roster container span must be a shrinkable flex item (flex:1 +
+    // minWidth:0) so a long roster ellipsizes instead of overflowing.
+    const kidsOf2 = n => (n.children != null ? n.children : n.props?.children);
+    const rosterSpan = (function find(n){ if(!n||typeof n!=='object') return null; if(Array.isArray(n)){for(const k of n){const r=find(k); if(r) return r;} return null;}
+      if(n.type==='span' && n.props?.style?.textOverflow==='ellipsis' && n.props?.style?.flex===1) return n;
+      const k=kidsOf2(n)||[]; for(const c of [].concat(k)){const r=find(c); if(r) return r;} return null; })(tree);
+    expect(rosterSpan).toBeTruthy();
+    expect(rosterSpan.props.style.minWidth).toBe(0);
   });
 
   it('does NOT render the UP NEXT pool strip when there is no following pool on this court', () => {

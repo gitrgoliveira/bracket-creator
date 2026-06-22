@@ -222,13 +222,14 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       });
     return () => controller.abort();
     // Re-fetch when config, participant count, or tournament-level timing changes.
-    // Tournament ceremony/timing fields are included so the estimate refreshes
-    // when the operator changes openingBlock, lunchBlock, closingBlock,
-    // clockToElapsedMultiplier, or slowestCourtBufferPct — mirroring AdminSettings.
+    // When check-in is enabled the backend counts only checked-in participants, so
+    // toggling check-in changes the effective count even if roster size stays fixed.
+    // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
   }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
     c.swissRounds, c.checkInEnabled, password,
     (c.players || []).length,
+    c.checkInEnabled ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 

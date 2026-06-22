@@ -92,22 +92,20 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundName, compName, onMoveCourt, onEditScore, password }) => {
+const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveCourt, onEditScore, password }) => {
   // Reuse the shared components wholesale — both off the window bridge at render
   // time so module load order never matters:
   //   ScoreEditorModal (variant="inline") — the ONE scoring editor the shiaijo /
   //     pools / scores screens use. We keep ITS header (it's the same in every
-  //     host), so the panel doesn't add a competing title.
+  //     host), so the panel doesn't add a competing title. `match` is enriched
+  //     upstream with the comp metadata the editor needs (compId, compKind,
+  //     teamSize, phase, round) — see AdminBracket.scoringMatch.
   //   MatchDetailCard — the SAME read-only result card the public viewer shows
   //     for a completed match (names + winner highlight + FINAL + score marks),
   //     instead of a stripped-down lookalike.
   const ScoreEditorModal = window.ScoreEditorModal;
   const MatchDetailCard = window.MatchDetailCard;
   const isComplete = match.status === "completed";
-  // Bracket match objects don't carry round/compName, so the shared headers
-  // would render sparse (a lone "·" with an empty round). Feed them the round
-  // we already computed + the competition name so their own headers read fully.
-  const m = { ...match, round: match.round || roundName, compName: match.compName || compName };
   // A completed match shows its read-only result by default; re-opening the
   // editor to change a recorded result is gated behind a confirmation so it's
   // not changed by accident. An un-played match goes straight to the editor
@@ -143,9 +141,13 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
       {showEditor ? (
         ScoreEditorModal && (
           <ScoreEditorModal
-            key={`${match.id}:${match.status}`}
+            // Include subResults.length: the editor reads team sub-bouts into
+            // refs on mount, so an SSE update that adds/removes a daihyosen
+            // sub-bout from another surface must remount to avoid a stale board
+            // (mirrors the shiaijo inline embed's key — admin_shiaijo.jsx).
+            key={`${match.id}:${match.status}:${(match.subResults || []).length}`}
             variant="inline"
-            match={m}
+            match={match}
             // Offer "close" only when there's a result card to fall back to
             // (editing a completed match); an un-played match has nowhere to go.
             canClose={isComplete}
@@ -162,7 +164,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
         )
       ) : (
         <div className="running-panel__result">
-          {MatchDetailCard && <MatchDetailCard match={m} escapeToClose={false} />}
+          {MatchDetailCard && <MatchDetailCard match={match} escapeToClose={false} />}
           <button type="button" className="btn btn--sm btn--full" onClick={async () => {
             const ok = await window.confirmDialog({
               title: "Edit recorded result?",
@@ -238,6 +240,28 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // onEditScore (the same path pools / scores / shiaijo use), so the bespoke
   // recordScore / overrideBracketWinner entry points are gone from this panel.
   const selectedMatch = findSelectedMatch();
+  // Compute the match's number/round ONCE (one scan of the display model).
+  const selectedMeta = selectedMatch ? matchMeta(selectedMatch.id) : { matchNum: null, roundName: null };
+  // Enrich the bracket match with the competition metadata the shared scorer
+  // (ScoreEditorModal / MatchDetailCard) reads off the match object — the raw
+  // bracket.rounds entries carry none of it. Mirrors enrichPoolMatchWithComp:
+  //   compId      → decision endpoints + maxEncho/naginata fetch
+  //   compKind /  → individual vs team editor routing
+  //   teamSize
+  //   phase       → "bracket" makes isKnockoutPhase true: blocks hikiwake (no
+  //                 draws in elimination — decide by hantei after encho)
+  //   compFormat, round, matchNumber → header/label fields
+  const scoringMatch = selectedMatch && {
+    ...selectedMatch,
+    compId: selectedMatch.compId || c.id || "",
+    compName: selectedMatch.compName || c.name || "",
+    compFormat: selectedMatch.compFormat || c.format || "",
+    compKind: selectedMatch.compKind || c.kind || "",
+    teamSize: selectedMatch.teamSize ?? c.teamSize ?? 0,
+    phase: selectedMatch.phase || "bracket",
+    round: selectedMatch.round || selectedMeta.roundName,
+    matchNumber: selectedMatch.matchNumber || selectedMeta.matchNum || 0,
+  };
   // mp-turx: per-match playability — a bracket match is running iff hasBothSides()
   // returns true (both sides are resolved real participants, not “Winner of rX-mY”
   // feeders or pool-origin placeholders like “Pool A-1st”). The old bracket-wide
@@ -278,12 +302,10 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
       <div className="bracket-layout__panel">
         {hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
-            match={selectedMatch}
+            match={scoringMatch}
             compId={c.id}
             courts={t?.courts || []}
-            matchNum={matchMeta(selectedMatch.id).matchNum}
-            roundName={matchMeta(selectedMatch.id).roundName}
-            compName={c.name}
+            matchNum={selectedMeta.matchNum}
             onMoveCourt={onMoveCourt}
             onEditScore={onEditScore}
             password={password}

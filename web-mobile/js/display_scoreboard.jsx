@@ -205,6 +205,31 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     return { name: nextName, players };
 }
 
+// phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
+// on this court so the per-court board can render "POOL A · 3 / 6" / "FINAL ·
+// 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator because the
+// whole board is per-court; the spectator wants to know how far into the phase
+// this court is, not the venue overall. Returns null when there's no group to
+// count (e.g. promoted.competition missing).
+function phaseProgressOnCourt(promoted, court) {
+    const comp = promoted.competition;
+    if (!comp) return null;
+    let group;
+    if (promoted.isBracket) {
+        const rounds = (comp.bracket && comp.bracket.rounds) || [];
+        const round = rounds[promoted.roundIndex] || [];
+        group = round.filter(m => (m.court || "") === court);
+    } else {
+        const poolName = poolNameOf(promoted.match && promoted.match.id);
+        if (!poolName) return null;
+        group = (comp.poolMatches || []).filter(m =>
+            poolNameOf(m.id) === poolName && (m.court || "") === court);
+    }
+    if (!group.length) return null;
+    const done = group.filter(m => m.status === "completed").length;
+    return { done, total: group.length };
+}
+
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
 // so ~10 rows fit comfortably. Cap at TV_INDIV_MAX_VISIBLE and take the TAIL
 // of the gathered group so the current match (already sorted to the end by
@@ -257,7 +282,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
-                    <span>{promoted.competition?.name}{groupLabel ? " · " + groupLabel : ""}</span>
+                    <span>{promoted.competition?.name || ""}</span>
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
                             style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
@@ -267,6 +292,39 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                     )}
                 </div>
             </div>
+
+            {/* Phase strip — prominent phase label + per-court progress counter.
+                Replaces the now-removed groupLabel from the top-right subtitle.
+                Uses the same dashed divider style as the UP NEXT strip below
+                for visual consistency. */}
+            {(() => {
+                const progress = phaseProgressOnCourt(promoted, court);
+                if (!groupLabel && !progress) return null;
+                return (
+                    <div data-testid="tvd-phase-strip" style={{
+                        display: "flex", alignItems: "baseline", gap: "1.5vw",
+                        paddingBottom: "1.6vh", marginBottom: "2vh",
+                        borderBottom: "1px dashed #d1d5db",
+                    }}>
+                        {groupLabel && (
+                            <span style={{ fontSize: "3.2vh", fontWeight: 800, color: "#111", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                {groupLabel}
+                            </span>
+                        )}
+                        {groupLabel && progress && (
+                            <span style={{ fontSize: "2.4vh", color: "var(--ink-3)" }}>·</span>
+                        )}
+                        {progress && (
+                            <>
+                                <span data-testid="tvd-phase-progress" style={{ fontSize: "2.8vh", color: "#111", fontFamily: "var(--font-mono)", fontWeight: 700 }}>
+                                    {progress.done} / {progress.total}
+                                </span>
+                                <span style={{ fontSize: "1.8vh", color: "var(--ink-3)", letterSpacing: "0.12em", fontWeight: 700 }}>MATCHES</span>
+                            </>
+                        )}
+                    </div>
+                );
+            })()}
 
             {/* Top-anchored match feed: the visible rows fill from the top of
                 the panel; gatherIndividualGroup sorts the current match LAST
@@ -583,4 +641,4 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, emptyStateHeadline };
+export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, phaseProgressOnCourt, emptyStateHeadline };

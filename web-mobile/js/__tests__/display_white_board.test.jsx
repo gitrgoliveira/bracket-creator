@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, poolNameOf, sideLabel } from '../display.jsx';
+import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, phaseProgressOnCourt, poolNameOf, sideLabel } from '../display.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -463,5 +463,131 @@ describe('TvIndividualBoard', () => {
     expect(scores.length).toBe(1);
     expect(scores[0].props.match.sideA.number).toBe('K2');
     expect(scores[0].props.match.sideB.number).toBe('K1');
+  });
+});
+
+describe('phaseProgressOnCourt + phase strip', () => {
+  // Shared vnode walker used throughout this file.
+  function findAll(node, pred) {
+    const found = [];
+    (function walk(n) {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (pred(n)) found.push(n);
+      const kids = n.children || n.props?.children || [];
+      [].concat(kids).forEach(walk);
+    })(node);
+    return found;
+  }
+  function findOne(node, pred) { return findAll(node, pred)[0] || null; }
+
+  // a) Pool phase per-court
+  it('pool phase: counts only matches of the current pool on the requested court', () => {
+    const competition = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', status: 'completed' },
+      { id: 'Pool A-1', court: 'A', status: 'running' },
+      { id: 'Pool A-2', court: 'A', status: 'scheduled' },
+      { id: 'Pool A-3', court: 'B', status: 'completed' },
+      { id: 'Pool A-4', court: 'B', status: 'completed' },
+      { id: 'Pool A-5', court: 'B', status: 'completed' },
+    ] };
+    const promoted = { competition, isBracket: false, match: { id: 'Pool A-0' } };
+    const result = phaseProgressOnCourt(promoted, 'A');
+    expect(result).not.toBeNull();
+    expect(result.done).toBe(1);
+    expect(result.total).toBe(3);
+  });
+
+  // b) Bracket round per-court
+  it('bracket phase: counts matches in roundIndex on the requested court only', () => {
+    const competition = { bracket: { rounds: [
+      [ { id: 'm-r1-0', court: 'A', status: 'completed' },
+        { id: 'm-r1-1', court: 'A', status: 'scheduled' },
+        { id: 'm-r1-2', court: 'B', status: 'completed' },
+        { id: 'm-r1-3', court: 'B', status: 'completed' } ],
+    ] } };
+    const promoted = { competition, isBracket: true, roundIndex: 0, match: { id: 'm-r1-0' } };
+    const result = phaseProgressOnCourt(promoted, 'A');
+    expect(result).not.toBeNull();
+    expect(result.done).toBe(1);
+    expect(result.total).toBe(2);
+  });
+
+  // c) League single pool — ids shaped "League-0", "League-1", …
+  it('league single pool: large match set — returns correct done/total for court', () => {
+    const total = 45;
+    const doneCount = 12;
+    const poolMatches = Array.from({ length: total }, (_, i) => ({
+      id: `League-${i}`,
+      court: 'A',
+      status: i < doneCount ? 'completed' : 'scheduled',
+    }));
+    const competition = { poolMatches };
+    const promoted = { competition, isBracket: false, match: { id: 'League-0' } };
+    const result = phaseProgressOnCourt(promoted, 'A');
+    expect(result).not.toBeNull();
+    expect(result.done).toBe(12);
+    expect(result.total).toBe(45);
+  });
+
+  // d) No group → null
+  it('returns null when poolMatches is empty and isBracket is false', () => {
+    const competition = { poolMatches: [] };
+    const promoted = { competition, isBracket: false, match: { id: 'Pool A-0' } };
+    expect(phaseProgressOnCourt(promoted, 'A')).toBeNull();
+  });
+
+  it('returns null when promoted.competition is null', () => {
+    const promoted = { competition: null, isBracket: false, match: { id: 'Pool A-0' } };
+    expect(phaseProgressOnCourt(promoted, 'A')).toBeNull();
+  });
+
+  // e) Render-level: phase strip and progress counter appear in TvIndividualBoard
+  it('renders tvd-phase-strip with groupLabel and tvd-phase-progress showing "1 / 3"', () => {
+    // round: -1 is the sentinel phaseLabel uses to derive the pool name from the
+    // match id (e.g. "Pool A-1" → "Pool A"). Without it phaseLabel returns "".
+    const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'A', round: -1, sideA: 'Tanaka', sideB: 'Suzuki', status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+      { id: 'Pool A-1', court: 'A', round: -1, sideA: 'Yamada', sideB: 'Mori',   status: 'running',   ipponsA: [], ipponsB: ['D'],  scheduledAt: '09:10' },
+      { id: 'Pool A-2', court: 'A', round: -1, sideA: 'Tanaka', sideB: 'Yamada', status: 'scheduled', ipponsA: [], ipponsB: [],    scheduledAt: '09:20' },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[1], isBracket: false };
+    const tree = TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted });
+    const str = JSON.stringify(tree);
+
+    // Strip container is present
+    expect(str).toContain('tvd-phase-strip');
+
+    // groupLabel text ("Pool A") appears inside the strip
+    const strip = findOne(tree, n => n.props?.['data-testid'] === 'tvd-phase-strip');
+    expect(strip).not.toBeNull();
+    const stripStr = JSON.stringify(strip);
+    expect(stripStr).toContain('Pool A');
+
+    // Progress counter node
+    const progress = findOne(tree, n => n.props?.['data-testid'] === 'tvd-phase-progress');
+    expect(progress).not.toBeNull();
+    const progressText = JSON.stringify(progress.props?.children ?? progress.children ?? '');
+    expect(progressText).toContain('1');
+    expect(progressText).toContain('3');
+  });
+
+  // f) Header subtitle no longer carries the phase label
+  it('top-right header span shows competition name only — no phase label', () => {
+    const comp = { name: 'MyComp', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const tree = TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted });
+    // Find the span that carries the competition name. It sits inside the
+    // top-right flex div that also holds the RECONNECTING badge.
+    // We look for a span whose serialised text contains "MyComp" — and assert
+    // it does NOT contain "Pool A" (the phase label must have moved to the strip).
+    const spans = findAll(tree, n => n.type === 'span' && JSON.stringify(n).includes('MyComp'));
+    expect(spans.length).toBeGreaterThan(0);
+    for (const sp of spans) {
+      const text = JSON.stringify(sp.props?.children ?? sp.children ?? '');
+      expect(text).not.toContain('Pool A');
+    }
   });
 });

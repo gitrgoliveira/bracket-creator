@@ -2,7 +2,7 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -203,31 +203,6 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
         }
     }
     return { name: nextName, players };
-}
-
-// phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
-// on this court so the per-court board can render "POOL A · 3 / 6" / "FINAL ·
-// 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator because the
-// whole board is per-court; the spectator wants to know how far into the phase
-// this court is, not the venue overall. Returns null when there's no group to
-// count (e.g. promoted.competition missing).
-function phaseProgressOnCourt(promoted, court) {
-    const comp = promoted.competition;
-    if (!comp) return null;
-    let group;
-    if (promoted.isBracket) {
-        const rounds = (comp.bracket && comp.bracket.rounds) || [];
-        const round = rounds[promoted.roundIndex] || [];
-        group = round.filter(m => (m.court || "") === court);
-    } else {
-        const poolName = poolNameOf(promoted.match && promoted.match.id);
-        if (!poolName) return null;
-        group = (comp.poolMatches || []).filter(m =>
-            poolNameOf(m.id) === poolName && (m.court || "") === court);
-    }
-    if (!group.length) return null;
-    const done = group.filter(m => m.status === "completed").length;
-    return { done, total: group.length };
 }
 
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
@@ -641,4 +616,4 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, phaseProgressOnCourt, emptyStateHeadline };
+export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, emptyStateHeadline };

@@ -248,6 +248,31 @@ function poolNameOf(id) {
     return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
 }
 
+// phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
+// on this court so per-court and lobby surfaces can render "POOL A · 3 / 6" /
+// "FINAL · 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator
+// because the board is per-court; the spectator wants to know how far into the
+// phase this court is, not the venue overall. Returns null when there's no
+// group to count (e.g. promoted.competition missing).
+function phaseProgressOnCourt(promoted, court) {
+    const comp = promoted.competition;
+    if (!comp) return null;
+    let group;
+    if (promoted.isBracket) {
+        const rounds = (comp.bracket && comp.bracket.rounds) || [];
+        const round = rounds[promoted.roundIndex] || [];
+        group = round.filter(m => (m.court || "") === court);
+    } else {
+        const poolName = poolNameOf(promoted.match && promoted.match.id);
+        if (!poolName) return null;
+        group = (comp.poolMatches || []).filter(m =>
+            poolNameOf(m.id) === poolName && (m.court || "") === court);
+    }
+    if (!group.length) return null;
+    const done = group.filter(m => m.status === "completed").length;
+    return { done, total: group.length };
+}
+
 // StreamingQR — minimal canvas QR code for the streaming overlay and TV
 // empty-state. Renders using renderQR from qr.jsx when available via
 // window.renderQR. Falls back gracefully (blank canvas) if QR rendering
@@ -293,6 +318,7 @@ export {
     queueLabelCompact,
     phaseLabel,
     poolNameOf,
+    phaseProgressOnCourt,
     sideLabel,
     TermD,
     StreamingQR,

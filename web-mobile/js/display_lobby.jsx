@@ -1,7 +1,7 @@
 // display_lobby.jsx — lobby / schedule TV (LobbyDisplay).
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, countCourtMatches, phaseLabel } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
 import { IndividualScore } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
@@ -326,10 +326,16 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     // Derive subtitle from the already-built courtSlots so
                                     // the header and the table body always agree on which
                                     // match is "current" (same auto-promote logic, no rescan).
-                                    const cts = countCourtMatches(competitions, cc);
-                                    const remaining = cts.running + cts.scheduled;
                                     const firstSlot = courtSlots[ci] && courtSlots[ci][0];
                                     const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
+                                    const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds) : '';
+                                    const progress = firstSlot ? phaseProgressOnCourt({
+                                        competition: firstSlot.competition,
+                                        isBracket: firstSlot.isBracket,
+                                        roundIndex: firstSlot.roundIndex,
+                                        match: firstSlot.match,
+                                    }, cc) : null;
+                                    const subtitle = [compName, phase, progress ? `${progress.done} / ${progress.total}` : null].filter(Boolean).join(' · ');
                                     return (
                                         <React.Fragment key={cc}>
                                             <th scope="col" style={{
@@ -341,9 +347,9 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                 background: LOBBY_COLORS.bg,
                                             }}>
                                                 Shiaijo {cc}
-                                                {compName && (
-                                                    <div style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
-                                                        {compName}{remaining > 0 ? ` · ${remaining} match${remaining === 1 ? '' : 'es'}` : ''}
+                                                {subtitle && (
+                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                        {subtitle}
                                                     </div>
                                                 )}
                                             </th>

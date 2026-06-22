@@ -503,9 +503,16 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         : !!(promoted && promoted.competition && promoted.competition.withZekkenName);
 
     // mp-13y: team match detection for the running promoted slot.
-    // competition.kind === "team" OR competition.teamSize > 0.
-    const isTeamMatch = !!(promoted && promoted.competition &&
+    // competition.kind === "team" OR competition.teamSize > 0 — EXCEPT a pool
+    // daihyosen / tiebreaker rep bout ("Pool X-DH-N" / "Pool X-TB-N"), which is
+    // a single INDIVIDUAL ippon-shobu even in a team competition. Mirrors the
+    // admin scorer's compKind override (admin_pools.jsx): without it the rep
+    // bout would render as an empty 5-person team grid since its score lives at
+    // the match top level, not in subResults.
+    const isSupplementaryBout = /-(?:DH|TB)-\d+$/.test((promoted && promoted.match && promoted.match.id) || "");
+    const isTeamComp = !!(promoted && promoted.competition &&
         (promoted.competition.kind === "team" || (promoted.competition.teamSize || 0) > 0));
+    const isTeamMatch = isTeamComp && !isSupplementaryBout;
     const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
 
     // mp-13y: fetch lineups for the running team match. useTeamLineups
@@ -570,6 +577,19 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                 promoted={promoted} promotedKind={promotedKind} isTeamMatch={isTeamMatch}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
                 showDH={showDH} queueMatches={queueMatches} zekken={zekken}
+            />;
+        }
+        // A pool DH/TB rep bout in a TEAM competition is individual, but it must
+        // NOT fall into TvIndividualBoard's whole-pool feed (which would render
+        // the sibling team encounters as individual rows). Show it as a single
+        // scoreboard via TvWhiteBoard's individual branch (big Shiro/Aka names +
+        // the rep bout's ippon slots).
+        if (isSupplementaryBout && isTeamComp) {
+            return <TvWhiteBoard
+                tournament={tournament} court={court} connected={connected}
+                promoted={promoted} promotedKind={promotedKind} isTeamMatch={false}
+                subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
+                showDH={false} queueMatches={queueMatches} zekken={zekken}
             />;
         }
         return <TvIndividualBoard

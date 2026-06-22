@@ -239,6 +239,13 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const nextPool = (!promoted.isBracket && currentPoolName)
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
+    // Text scale adapts to how much vertical room each row gets. Fewer rows →
+    // more room per row → bigger glyphs (the screen fills). More rows → text
+    // shrinks to fit. The CSS .msb--tv rules read --msb-scale from the body
+    // container; default is 1 (full size) for surfaces that don't set it.
+    // Tuning: 4 rows is the "natural" TV size (scale 1); below that it grows
+    // up to 1.6× (single-row board), above that it shrinks down to 0.7×.
+    const rowScale = Math.min(1.6, Math.max(0.7, 4 / Math.max(1, rows.length)));
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
@@ -266,7 +273,11 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 so it stays at the bottom of the visible list. When the group
                 exceeds TV_INDIV_MAX_VISIBLE, we slice the tail above so the
                 oldest completed rows drop off the top first. */}
-            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
+            {/* --msb-scale flows into the shared .msb--tv CSS rules so the
+                IndividualScore inside each row sizes itself to fit the available
+                room. All rows render at the SAME size; the live row is signalled
+                only by a quiet bg tint (no spine, no transform, no pulse). */}
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
                     const isDone = !isNow && m.status === "completed";
@@ -274,14 +285,11 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                         <div key={m.id} data-testid={isNow ? "tvd-indiv-row-now" : "tvd-indiv-row"}
                             className={"tvd-indiv-row" + (isNow ? " tvd-indiv-row--now" : "") + (isDone ? " tvd-indiv-row--done" : "")}
                             style={{
-                                padding: isNow ? "2.5vh 2vw" : "0.8vh 1.5vw", borderRadius: "0.6vw",
+                                padding: "1.2vh 1.5vw", borderRadius: "0.6vw",
                                 background: isNow ? "var(--accent-soft)" : isDone ? "#f9fafb" : "transparent",
-                                borderLeft: isNow ? "0.8vw solid var(--accent)" : undefined,
                                 opacity: isNow ? 1 : isDone ? 0.88 : 0.78,
                             }}>
-                            <div style={isNow ? { transform: "scale(1.3)", transformOrigin: "left center", width: "77%" } : undefined}>
-                                <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
-                            </div>
+                            <IndividualScore match={m} variant="tv" showNames withZekkenName={zekken} />
                         </div>
                     );
                 })}

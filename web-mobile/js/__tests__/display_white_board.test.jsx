@@ -354,18 +354,19 @@ describe('TvIndividualBoard', () => {
     expect(rows.length).toBe(2);
     const nowRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row-now');
     const doneRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row');
-    // NOW row: navy soft bg, left accent border.
+    // NOW row: navy soft bg as the live signal (no spine, no transform).
     expect(nowRow.props.style.background).toBe('var(--accent-soft)');
-    expect(nowRow.props.style.borderLeft).toContain('var(--accent)');
-    // Completed row: grey bg, no accent border.
+    expect(nowRow.props.style.borderLeft).toBeUndefined();
+    // Completed row: grey bg.
     expect(doneRow.props.style.background).toBe('#f9fafb');
     expect(doneRow.props.style.borderLeft).toBeUndefined();
   });
 
-  it('NOW row has scale(1.3) transform on inner wrapper; queue rows have no transform', () => {
-    // Verifies Change 1: the live row's IndividualScore is wrapped in a scaled
-    // div (1.3×) so it reads larger than queue rows on wall screens.
-    // The wrapper div is the direct child of the row container div.
+  it('all rows have the same padding and no transform — the live row is signalled by bg only', () => {
+    // Per user constraint: rows must be uniform size on /display?court=A.
+    // No transform, no spine, no asymmetric padding between live and queue —
+    // the bg tint alone carries the live signal. Text scales globally via
+    // --msb-scale based on row count (asserted separately below).
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
     const rows = [];
     (function walk(n) {
@@ -377,26 +378,43 @@ describe('TvIndividualBoard', () => {
       [].concat(k).forEach(walk);
     })(TvIndividualBoard({ ...base, promoted }));
     expect(rows.length).toBe(2);
-    const nowRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row-now');
-    const doneRow = rows.find(r => r.props['data-testid'] === 'tvd-indiv-row');
-    // Find the inner wrapper div (first child of the row container).
-    const innerWrapper = (function findFirstDiv(n) {
-      if (!n || typeof n !== 'object') return null;
-      if (Array.isArray(n)) { for (const k of n) { const r = findFirstDiv(k); if (r) return r; } return null; }
-      if (n.type === 'div') return n;
-      return null;
-    })([].concat(nowRow.props?.children || nowRow.children || []));
-    // NOW inner wrapper must carry the scale transform.
-    expect(innerWrapper).toBeTruthy();
-    expect(innerWrapper.props?.style?.transform).toContain('scale');
-    // Queue row inner wrapper: no transform (style is undefined).
-    const doneInner = (function findFirstDiv(n) {
-      if (!n || typeof n !== 'object') return null;
-      if (Array.isArray(n)) { for (const k of n) { const r = findFirstDiv(k); if (r) return r; } return null; }
-      if (n.type === 'div') return n;
-      return null;
-    })([].concat(doneRow.props?.children || doneRow.children || []));
-    expect(doneInner?.props?.style).toBeUndefined();
+    const padding = new Set(rows.map(r => r.props.style.padding));
+    expect(padding.size).toBe(1); // every row carries the same padding
+    // No row carries a transform; the IndividualScore is rendered directly
+    // (not wrapped in a scaled <div>).
+    for (const r of rows) {
+      const kids = [].concat(r.props?.children || r.children || []);
+      for (const k of kids) {
+        if (k && typeof k === 'object' && k.type === 'div') {
+          expect(k.props?.style?.transform).toBeUndefined();
+        }
+      }
+    }
+  });
+
+  it('body container sets --msb-scale based on row count (text adapts to available room)', () => {
+    // Few rows → big text (scale toward 1.6); many rows → smaller text
+    // (scale toward 0.7). The CSS .msb--tv rules read this variable.
+    const fewRows = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'B', sideA: 'A', sideB: 'B', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
+    ] };
+    const promotedFew = { competition: fewRows, match: fewRows.poolMatches[0], isBracket: false };
+    const strFew = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedFew }));
+    // 1 row → scale = clamp(0.7, 4/1, 1.6) = 1.6
+    expect(strFew).toContain('"--msb-scale":1.6');
+
+    // Build a full pool with many matches so the row count grows.
+    const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      ...Array.from({ length: 9 }, (_, i) => ({
+        id: `Pool A-${i + 1}`, court: 'B', sideA: `A${i+1}`, sideB: `B${i+1}`,
+        status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: `09:${String(10+i).padStart(2,'0')}`,
+      })),
+      { id: 'Pool A-0', court: 'B', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '11:00' },
+    ] };
+    const promotedMany = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
+    const strMany = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedMany }));
+    // 10 rows → scale = clamp(0.7, 4/10, 1.6) = 0.7
+    expect(strMany).toContain('"--msb-scale":0.7');
   });
 
   it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {

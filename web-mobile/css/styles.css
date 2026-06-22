@@ -6274,20 +6274,25 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb-dh-tag { display: inline-block; background: #111; color: #fff; font-size: 10px;
   font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 3px; }
 .msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: #6b7280; }
-/* TV variant — scale up for the fullscreen board */
-.msb--tv .msb-row { font-size: 3vh; padding: 1.2vh 1vw; border-top: 1px solid #e5e7eb; }
-.msb--tv .msb-name { font-size: 3vh; }
+/* TV variant — scale up for the fullscreen board.
+   Every size is multiplied by --msb-scale (default 1). The per-court board
+   sets this on the body container based on visible row count: fewer rows
+   → bigger scale, so the same row template fills the screen whether the
+   pool has 3 matches or 10. Other consumers of variant="tv" (TvWhiteBoard,
+   streaming overlay) leave --msb-scale unset and get the default sizes. */
+.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }
+.msb--tv .msb-name { font-size: calc(3vh * var(--msb-scale, 1)); }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
-.msb--tv .msb-slot { min-width: 5vh; height: 5.6vh; font-size: 3.5vh; border-radius: 0.4vh; }
-.msb--tv .msb-vs { min-width: 3vh; font-size: 2vh; }
+.msb--tv .msb-slot { min-width: calc(5vh * var(--msb-scale, 1)); height: calc(5.6vh * var(--msb-scale, 1)); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
+.msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
-.msb--tv .msb-row--summary .msb-slot { min-width: 6vh; font-size: 3.4vh; }
-.msb--tv .msb-lab { font-size: 1.2vh; }
-.msb--tv .msb-hansoku { font-size: 2.8vh; font-weight: 900; }
-.msb--tv .msb-dh-tag { font-size: 1.8vh; padding: 0.4vh 1.2vh; letter-spacing: .12em; }
+.msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
+.msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
+.msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
+.msb--tv .msb-dh-tag { font-size: calc(1.8vh * var(--msb-scale, 1)); padding: 0.4vh 1.2vh; letter-spacing: .12em; }
 /* TV bout decisiveness: winning side's filled slots are slightly bolder
    so spectators can read the match result at a glance from distance. */
-.msb--tv .msb-slots--win .msb-slot { font-size: 3.2vh; }
+.msb--tv .msb-slots--win .msb-slot { font-size: calc(3.2vh * var(--msb-scale, 1)); }
 
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {

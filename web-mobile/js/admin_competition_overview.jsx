@@ -255,9 +255,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   const pct = total ? Math.round((done / total) * 100) : 0;
 
-  // Stat values that are short numbers use the default 22px display size; long
-  // or textual values ("2 pools", "3h 10m") step down to 16px via .v--sm so
-  // they don't crowd the box. The em-dash placeholder keeps the display size.
+  // Stat values step down to 16px via .v--sm unless they are the em-dash
+  // placeholder "—" (which keeps the 22px display size). vClass is only called
+  // for boxes that hold textual or formatted values ("2 pools", "3h 10m").
   const vClass = (val) => (val === "—" ? "v" : "v v--sm");
 
   // Standings/results target for this competition's format (see helper above).
@@ -368,7 +368,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
         </div>
         <div className="stat-box">
           <div className={vClass(totalDuration)}>{totalDuration}</div>
-          <div className="l">Total duration</div>
+          <div className="l">Est. duration</div>
         </div>
       </div>
     );

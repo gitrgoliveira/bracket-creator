@@ -296,7 +296,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       const drawSizeVal = c.format === "playoffs" || (!poolCount && bracketRounds)
         ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "—")
         : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "—");
-      const drawSizeLabel = c.format === "playoffs" ? "Bracket size" : "Pools";
+      const drawSizeLabel = c.format === "playoffs" ? "Bracket size" : c.format === "league" ? "League" : "Pools";
       return (
         <div className="stats-strip">
           <div className="stat-box">
@@ -427,7 +427,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       // section in the nav at this stage.
       const isSwiss = c.format === "swiss";
       const previewSection = c.format === "playoffs" ? "bracket" : "pools";
-      const previewLabel = c.format === "playoffs" ? "bracket" : "pools";
+      const previewLabel = c.format === "playoffs" ? "bracket" : c.format === "league" ? "league" : "pools";
       return (
         <div className="card" style={{ marginBottom: 16 }} data-testid="draw-ready-card">
           <div className="card__head">

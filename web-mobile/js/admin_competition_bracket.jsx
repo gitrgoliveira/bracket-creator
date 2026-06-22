@@ -91,20 +91,33 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const RunningMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride, onEditScore, password }) => {
-  const [mode, setMode] = useStateA("tap");
-  // The "Scoreboard" tab embeds the ONE shared scoring editor
-  // (ScoreEditorModal, variant="inline") — the same component the shiaijo
-  // operator view and the pools/scores editors use — rather than a bespoke
-  // scoreboard. Pulled off the window bridge (admin_scoring_modal.jsx) at
-  // render time so load order with this module never matters.
+const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundName, onMoveCourt, onEditScore, password }) => {
+  // Two shared components, both off the window bridge at render time so module
+  // load order never matters:
+  //   ScoreEditorModal (variant="inline") — the ONE scoring editor the shiaijo /
+  //     pools / scores screens use (ippons, draws, hantei, fouls, encho,
+  //     kiken/fusenpai). It IS the manual-override path, so there's no separate
+  //     "force winner" affordance.
+  //   IndividualScore — the SAME read-only result card the viewer / TV show.
   const ScoreEditorModal = window.ScoreEditorModal;
-  const a = match.sideA, b = match.sideB;
+  const IndividualScore = window.IndividualScore;
   const isComplete = match.status === "completed";
+  // A completed match shows its read-only result by default; re-opening the
+  // editor to change a recorded result is gated behind a confirmation so it's
+  // not changed by accident. An un-played match goes straight to the editor
+  // (nothing to overwrite). Reset when switching matches.
+  const [editing, setEditing] = useStateA(false);
+  useEffectA(() => { setEditing(false); }, [match.id]);
+  const showEditor = !isComplete || editing;
+
   return (
     <div className="running-panel">
       <div className="running-panel__head">
-        <div className="running-panel__title">Match · {match.id.slice(-6)}</div>
+        <div className="running-panel__title">
+          {matchNum != null
+            ? <>Match M{matchNum}{roundName ? <span className="running-panel__round"> · {roundName}</span> : null}</>
+            : <>{roundName || `Match · ${match.id.slice(-6)}`}</>}
+        </div>
         <div className="running-panel__court">
           {onMoveCourt && courts && courts.length ? (
             <>
@@ -122,82 +135,48 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRe
           )}
         </div>
       </div>
-      <div className="mode-tabs">
-        <button type="button" className={mode === "tap" ? "is-active" : ""} onClick={() => setMode("tap")}>Tap winner</button>
-        <button type="button" className={mode === "card" ? "is-active" : ""} onClick={() => setMode("card")}>Match card</button>
-        <button type="button" className={mode === "scoreboard" ? "is-active" : ""} onClick={() => setMode("scoreboard")}>Scoreboard</button>
-      </div>
-      {mode === "tap" && (<>
-        {/* Layout convention: SHIRO (White, sideB) on the LEFT, AKA (Red, sideA) on the RIGHT. */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === b.id ? "var(--accent)" : "var(--line)", background: match.winner?.id === b.id ? "var(--accent)" : "var(--surface)", color: match.winner?.id === b.id ? "white" : "inherit" }} onClick={() => onRecord("b", "ippon")}>
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em" }}>SHIRO (WHITE)</div>
-            <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{b.name}</div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{b.dojo}</div>
-          </button>
-          <button type="button" className="card" style={{ padding: 16, textAlign: "center", cursor: "pointer", borderColor: match.winner?.id === a.id ? "var(--red)" : "var(--line)", background: match.winner?.id === a.id ? "var(--red)" : "var(--surface)", color: match.winner?.id === a.id ? "white" : "inherit" }} onClick={() => onRecord("a", "ippon")}>
-            {/* Label tinted red when unselected (button is on white), inherits white when selected (button background is red) */}
-            <div style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, letterSpacing: "0.1em", color: match.winner?.id === a.id ? "inherit" : "var(--red)" }}>AKA (RED)</div>
-            <div style={{ fontWeight: 600, fontSize: 15, marginTop: 6 }}>{a.name}</div>
-            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{a.dojo}</div>
-          </button>
-        </div>
-        <div className="field__hint" style={{ textAlign: "center" }}>Tap the winner. Use Match card or Scoreboard for detail.</div>
-      </>)}
-      {mode === "card" && (
-        <div className="score-card">
-          <div className="score-side score-side--white">
-            <div><div className="score-side__lbl">Shiro (White)</div><div className="score-side__name">{b.name}</div><div className="score-side__dojo">{b.dojo}</div></div>
-            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--primary" onClick={() => onRecord("b", "ippon", ["M"])}>Win (Ippon)</button></div>
-          </div>
-          <div className="score-vs">VS</div>
-          <div className="score-side score-side--red">
-            <div><div className="score-side__lbl">Aka (Red)</div><div className="score-side__name">{a.name}</div><div className="score-side__dojo">{a.dojo}</div></div>
-            <div className="score-side__buttons"><button type="button" className="btn btn--sm btn--danger" onClick={() => onRecord("a", "ippon", ["M"])}>Win (Ippon)</button></div>
-          </div>
-        </div>
-      )}
-      {mode === "scoreboard" && ScoreEditorModal && (
-        // Reuse the shared inline scoring editor — full FIK scoreboard with
-        // ippons, draws (hikiwake), hantei, fouls, encho and kiken/fusenpai
-        // decisions — instead of a bespoke board. onSubmit is wired exactly as
-        // the pools/shiaijo embeddings: onEditScore(compId, matchId, patch, match).
-        <ScoreEditorModal
-          key={`${match.id}:${match.status}`}
-          variant="inline"
-          match={match}
-          onClose={() => {}}
-          canClose={false}
-          onSubmit={async (patch) => {
-            try { await onEditScore(compId, match.id, patch, match); }
-            catch (_e) { /* surfaced via toast in the parent */ }
-          }}
-          onSubmitAndNext={null}
-          password={password}
-        />
-      )}
-      {isComplete && (
-        <div style={{ marginTop: 12, padding: 10, background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, fontSize: 12.5, color: "#065f46" }}>
-          ✓ Recorded — {match.winner?.name} advances
+
+      {showEditor ? (
+        ScoreEditorModal && (
+          <ScoreEditorModal
+            key={`${match.id}:${match.status}`}
+            variant="inline"
+            match={match}
+            // Offer "close" only when there's a result card to fall back to
+            // (editing a completed match); an un-played match has nowhere to go.
+            canClose={isComplete}
+            onClose={() => setEditing(false)}
+            onSubmit={async (patch) => {
+              try {
+                await onEditScore(compId, match.id, patch, match);
+                setEditing(false); // recorded → fall back to the result card
+              } catch (_e) { /* surfaced via toast in the parent */ }
+            }}
+            onSubmitAndNext={null}
+            password={password}
+          />
+        )
+      ) : (
+        <div className="running-panel__result">
+          {IndividualScore && <IndividualScore match={match} variant="card" showNames />}
+          {match.winner?.name && (
+            <div className="running-panel__advances">✓ {match.winner.name} advances</div>
+          )}
+          <button type="button" className="btn btn--sm btn--full" onClick={async () => {
+            const ok = await window.confirmDialog({
+              title: "Edit recorded result?",
+              message: `${matchNum != null ? `Match M${matchNum}` : "This match"} already has a result. Re-open scoring to change it?`,
+              confirmLabel: "Edit result",
+            });
+            if (ok) setEditing(true);
+          }}>Edit result</button>
         </div>
       )}
-      <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
-        <button type="button" className="btn btn--sm btn--full" onClick={async () => {
-          // promptDialog returns null on empty/cancel and a string otherwise.
-          // A whitespace-only value would be truthy under `if (name)` and would
-          // persist a whitespace key as `m.Winner` on the backend (and then
-          // mismatch the canonical SideA / SideB names downstream). Trim
-          // defensively and only override when there's a real value to record.
-          const raw = await window.promptDialog({ title: "Override winner", message: "Enter the name of the winner to override:", defaultValue: match.winner?.name || match.sideA?.name });
-          const name = raw?.trim();
-          if (name) onOverride(name);
-        }}>Force winner (manual override)</button>
-      </div>
     </div>
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, showToast }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -210,6 +189,28 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   useEffectA(() => {
     if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
   }, [runningMatchId]);
+
+  // Label a selected match with the SAME number ("M1") and round the bracket
+  // tree shows — derived from the shared buildDisplayModel so the panel and the
+  // cards/columns can never disagree. Recomputed from bracket.rounds (not stored
+  // at click time) so it survives SSE topology refreshes. Hook stays above the
+  // early return below so the hook order is stable.
+  const displayModel = React.useMemo(
+    () => (bracket?.rounds && window.buildDisplayModel ? window.buildDisplayModel(bracket.rounds) : { hasMeta: false, matchNumById: null }),
+    [bracket]
+  );
+  const matchMeta = (matchId) => {
+    if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };
+    const cols = displayModel.hasMeta ? displayModel.columns : bracket.rounds;
+    let ci = -1;
+    for (let i = 0; i < cols.length; i++) {
+      if ((cols[i] || []).some((m) => m && m.id === matchId)) { ci = i; break; }
+    }
+    return {
+      matchNum: displayModel.matchNumById ? displayModel.matchNumById[matchId] : null,
+      roundName: (ci >= 0 && window.roundLabel) ? window.roundLabel(ci, cols.length) : null,
+    };
+  };
 
   if (!bracket || !bracket.rounds) {
     const previewMode = c && c.status === "draw-ready";
@@ -231,33 +232,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     }
     return null;
   };
-  // winnerIppons/loserIppons are arrays of letter codes. Tap mode (no
-  // detail) and card mode (single explicit letter) pass a single-element
-  // array; scoreboard mode passes the full points it accumulated for
-  // each side. See buildRunningIpponResult above for the schema rationale.
-  const recordWinner = (winnerSide, _mode = "ippon", winnerIppons = ["M"], loserIppons = []) => {
-    const m = findSelectedMatch();
-    if (!m) return;
-    const winner = winnerSide === "a" ? m.sideA : m.sideB;
-    if (!winner) return;
-
-    const result = buildRunningIpponResult(winnerSide, m.sideA, m.sideB, winnerIppons, loserIppons);
-
-    // Don't call onUpdate(c) on success — AdminApp's onUpdate is the
-    // competition-config PUT, which would overwrite server state with
-    // the (now-stale) c prop. SSE + patchCompetitionData in AdminApp
-    // already refreshes the bracket after a recordScore.
-    window.API.recordScore(c.id, m.id, result, password, m)
-      .catch(err => showToast(err.message, "error"));
-  };
-
-  const overrideWinner = (winnerName) => {
-    if (!selected) return;
-    // Same reason as recordWinner: rely on SSE to refresh, don't
-    // route the success path through the config-PUT callback.
-    window.API.overrideBracketWinner(c.id, selected.matchId, winnerName, password)
-      .catch(err => showToast(err.message, "error"));
-  };
+  // All bracket scoring now flows through the shared inline ScoreEditorModal →
+  // onEditScore (the same path pools / scores / shiaijo use), so the bespoke
+  // recordScore / overrideBracketWinner entry points are gone from this panel.
   const selectedMatch = findSelectedMatch();
   // mp-turx: per-match playability — a bracket match is running iff hasBothSides()
   // returns true (both sides are resolved real participants, not “Winner of rX-mY”
@@ -302,9 +279,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
             match={selectedMatch}
             compId={c.id}
             courts={t?.courts || []}
+            matchNum={matchMeta(selectedMatch.id).matchNum}
+            roundName={matchMeta(selectedMatch.id).roundName}
             onMoveCourt={onMoveCourt}
-            onRecord={recordWinner}
-            onOverride={overrideWinner}
             onEditScore={onEditScore}
             password={password}
           />

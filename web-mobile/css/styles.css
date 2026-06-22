@@ -2047,6 +2047,30 @@ a:hover {
   font-weight: 600;
   font-size: 16px;
 }
+/* Round suffix on the panel title ("Match M1 · Semifinals") — subordinate to
+   the match number so the eye lands on the identifier first. */
+.running-panel__round {
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+/* Completed-match result view: the shared read-only IndividualScore card, a
+   "winner advances" confirmation line, then the (confirmation-gated) edit
+   action. */
+.running-panel__result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.running-panel__advances {
+  padding: 10px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: #065f46;
+  text-align: center;
+}
 
 .running-panel__court {
   font-family: var(--font-mono);
@@ -2055,104 +2079,6 @@ a:hover {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-
-.score-card {
-  display: grid;
-  grid-template-columns: 1fr 60px 1fr;
-  align-items: stretch;
-  gap: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-
-.score-side {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* Aka/Shiro side treatment (DESIGN.md §4): a thick coloured top bar gives
-     each side real colour area so the two read apart at a glance, not just a
-     faint tint. The bar colour is the side identity. */
-  border-top: 5px solid var(--line);
-  /* Mirrored head-to-head: content is vertically centred and the two sides
-     face the central "vs" — Shiro (left) leans right-toward-centre, Aka
-     (right) leans left-toward-centre. Matches the live scoreboard. */
-  justify-content: center;
-}
-
-.score-side--white {
-  background: var(--white-side);
-  /* framed white: dark cool bar + 45° hatch so "white" reads as a side */
-  border-top-color: var(--shiro-edge);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
-}
-
-/* Aka is on the right: align its content to the outer (right) edge so the
-   two sides mirror each other — Shiro left-aligned, Aka right-aligned.
-   Both sides are vertically centred by the justify-content:center above. */
-.score-side--red {
-  align-items: flex-end;
-  text-align: right;
-}
-.score-side--red .score-side__buttons,
-.score-side--red .score-side__points {
-  justify-content: flex-end;
-}
-
-.score-side--red {
-  background: var(--red-soft);
-  border-top-color: var(--red);
-}
-
-.score-side__lbl {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 800;
-  font-family: var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-/* filled identity chip — the obvious cue, present before any winner is chosen */
-.score-side--white .score-side__lbl {
-  background: #fff;
-  color: var(--shiro-edge);
-  border: 1.5px solid var(--shiro-edge);
-}
-.score-side--red .score-side__lbl {
-  background: var(--red);
-  color: #fff;
-}
-
-.score-side__name {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.score-side__dojo {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.score-side__points {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.score-side__buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .ipt-btn {
@@ -2168,45 +2094,6 @@ a:hover {
 
 .ipt-btn:hover {
   border-color: var(--ink-4);
-}
-
-.score-vs {
-  display: grid;
-  place-items: center;
-  background: white;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--ink-3);
-  font-family: var(--font-display);
-}
-
-/* Mode tabs */
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--line-2);
-  border-radius: 10px;
-  margin-bottom: 16px;
-}
-
-.mode-tabs button {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-2);
-}
-
-.mode-tabs button.is-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ---------- Viewer (mobile) ---------- */

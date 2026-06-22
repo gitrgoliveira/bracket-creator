@@ -51,7 +51,13 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
-                    <span>{promoted.competition?.name} · {phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format)}</span>
+                    {(() => {
+                        const name = promoted.competition?.name || "";
+                        const phase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
+                        // phaseLabel is "" for league — omit the separator so the
+                        // subtitle reads just the competition name (no dangling " · ").
+                        return <span>{[name, phase].filter(Boolean).join(" · ")}</span>;
+                    })()}
                     {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
@@ -335,11 +341,12 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 );
             })()}
 
-            {/* Top-anchored match feed: the visible rows fill from the top of
-                the panel. Pool phase is ordered completed → current → scheduled,
-                so the current match sits among its upcoming matches; when the
-                group exceeds TV_INDIV_MAX_VISIBLE, windowAroundCurrent keeps the
-                running row visible (dropping oldest completed from the head). */}
+            {/* Match feed distributed space-evenly down the panel so the rows
+                fill the screen (justifyContent below). Pool phase is ordered
+                completed → current → scheduled, so the current match sits among
+                its upcoming matches; when the group exceeds the visible cap,
+                windowAroundCurrent keeps the running row visible (dropping
+                oldest completed from the head). */}
             {/* --msb-scale flows into the shared .msb--tv CSS rules so the
                 IndividualScore inside each row sizes itself to fit the available
                 room. All rows render at the SAME size; the live row is signalled

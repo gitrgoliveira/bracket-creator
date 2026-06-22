@@ -80,6 +80,19 @@ describe('TvWhiteBoard', () => {
     lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
   };
 
+  it('league board header shows just the competition name — no dangling " · " separator', () => {
+    // phaseLabel returns "" for league; the subtitle must not render "Name · ".
+    const p = teamPromoted();
+    p.competition = { id: 'c1', name: 'Veterans League', kind: 'team', teamSize: 5, format: 'league' };
+    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5 };
+    const subtitle = findVnode(TvWhiteBoard(props), n =>
+      n.type === 'span' && JSON.stringify(n).includes('Veterans League'));
+    const text = [].concat(subtitle.children ?? subtitle.props?.children ?? []).join('');
+    expect(text).toBe('Veterans League');
+    expect(text).not.toContain('·');
+  });
+
   it('renders a white board for a running team match, delegating to TeamScoreboard, NO "LIVE"', () => {
     const p = teamPromoted();
     const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,

@@ -53,16 +53,6 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
-// Queue-order comparison for two SCHEDULED matches, matching the
-// (scheduledAt, queuePosition) tie-break in sortShiaijoMatches — so the nudge's
-// "another competition has an earlier match" test agrees with the real court
-// queue order, not just the HH:MM string. Returns true when `a` is earlier.
-const scheduledBefore = (a, b) => {
-    const t = (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
-    if (t !== 0) return t < 0;
-    return (Number(a.queuePosition) || 0) < (Number(b.queuePosition) || 0);
-};
-
 // How many of the most-recent completed bouts the Completed section shows
 // before the "Show all N" toggle. Keeps the live queue + standings above the
 // fold on a full-day court without hiding the recent record.
@@ -258,65 +248,37 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return pool.slice(idx + 1).find((x) => x.status !== "completed") || null;
     };
 
-    // Amber nudge banner logic (AC6): fires when another competition on this
-    // court has matches waiting and the selected comp is done or has an earlier
-    // match. Never red/navy — uses --warn-* tokens only.
+    // Amber nudge banner logic (AC6): fires ONLY when the SELECTED competition
+    // has no more matches to run on this court (it has finished, or hasn't
+    // started yet — no running and no scheduled bouts here) AND another
+    // competition still has scheduled matches on the court. That's the "you're
+    // on the wrong competition, switch" case. It deliberately does NOT fire just
+    // because another competition has an earlier match while this one is still
+    // active — the operator runs their current competition to completion first.
+    // Never red/navy — uses --warn-* tokens only.
     const nudgeBanner = useMemoSh(() => {
         if (!effectiveCompId || !courtKnown) return null;
 
-        // All other comps' scheduled matches on this court
+        // Selected comp still has a running or scheduled match here → no nudge.
+        const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
+        if (selHasActive) return null;
+
+        // Other competitions' scheduled matches still on this court.
         const otherScheduled = allMatches.filter(
             m => m.compId !== effectiveCompId && m.status === "scheduled"
         );
-
         if (otherScheduled.length === 0) return null;
 
-        // Condition A: selected comp has no running + no scheduled matches here
-        const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
-
-        if (!selHasActive) {
-            // Null-prototype: compId is user-controlled (a comp id of "__proto__"
-            // must not pollute the map or collide with inherited keys).
-            const byComp = Object.create(null);
-            for (const m of otherScheduled) {
-                if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
-                byComp[m.compId].count++;
-            }
-            const entries = Object.values(byComp);
-            entries.sort((a, b) => b.count - a.count);
-            return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "no-matches" };
+        // Null-prototype: compId is user-controlled (a comp id of "__proto__"
+        // must not pollute the map or collide with inherited keys).
+        const byComp = Object.create(null);
+        for (const m of otherScheduled) {
+            if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0 };
+            byComp[m.compId].count++;
         }
-
-        // Condition B: another comp has a match EARLIER than the selected comp's
-        // upNext in the REAL court queue order — (scheduledAt, queuePosition), the
-        // same key sortShiaijoMatches uses — not just the HH:MM string. Comparing
-        // only the time would miss a same-time match that sorts ahead by queue
-        // position.
-        const selUpNext = filteredScheduled[0];
-        if (!selUpNext) return null;
-
-        const earlierOther = otherScheduled.filter(m => scheduledBefore(m, selUpNext));
-
-        if (earlierOther.length > 0) {
-            // Null-prototype: compId is user-controlled (see Condition A above).
-            const byComp = Object.create(null);
-            for (const m of earlierOther) {
-                const e = byComp[m.compId];
-                if (!e) byComp[m.compId] = { id: m.compId, name: m.compName, count: 1, earliestMatch: m };
-                else { e.count++; if (scheduledBefore(m, e.earliestMatch)) e.earliestMatch = m; }
-            }
-            const entries = Object.values(byComp);
-            // Full three-way comparator (return 0 on a tie) so the sort stays
-            // transitive/stable when two comps share an earliest match.
-            entries.sort((a, b) => {
-                if (scheduledBefore(a.earliestMatch, b.earliestMatch)) return -1;
-                if (scheduledBefore(b.earliestMatch, a.earliestMatch)) return 1;
-                return 0;
-            });
-            return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "earlier" };
-        }
-
-        return null;
+        const entries = Object.values(byComp);
+        entries.sort((a, b) => b.count - a.count);
+        return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
     // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
@@ -715,9 +677,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 >
                                     <span className="shiaijo-nudge__icon" aria-hidden="true">⚠</span>
                                     <span className="shiaijo-nudge__text">
-                                        {nudgeBanner.reason === "no-matches"
-                                            ? `Switch to ${nudgeBanner.comp} — ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`
-                                            : `${nudgeBanner.comp} has ${nudgeBanner.count} earlier match${nudgeBanner.count === 1 ? "" : "es"} on this court.`}
+                                        {`Switch to ${nudgeBanner.comp} — ${nudgeBanner.count} match${nudgeBanner.count === 1 ? "" : "es"} waiting on this court.`}
                                     </span>
                                     <span className="shiaijo-nudge__cta" aria-hidden="true">Switch →</span>
                                 </button>

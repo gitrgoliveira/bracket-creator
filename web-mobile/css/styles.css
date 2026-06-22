@@ -6275,9 +6275,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 3px; }
 .msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: #6b7280; }
 /* TV variant — scale up for the fullscreen board.
-   Every size is multiplied by --msb-scale (default 1). The per-court board
-   sets this on the body container based on visible row count: fewer rows
-   → bigger scale, so the same row template fills the screen whether the
+   The font sizes and slot box dimensions are multiplied by --msb-scale
+   (default 1); a few fixed values (horizontal padding, slot border-radius)
+   are intentionally left unscaled so they stay crisp. The per-court board
+   sets --msb-scale on the body container based on visible row count: fewer
+   rows → bigger scale, so the same row template fills the screen whether the
    pool has 3 matches or 10. Other consumers of variant="tv" (TvWhiteBoard,
    streaming overlay) leave --msb-scale unset and get the default sizes. */
 .msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }

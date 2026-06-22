@@ -174,24 +174,31 @@ function gatherIndividualGroup(promoted, court) {
 function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (!competition || !competition.poolMatches) return null;
     const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
-    // Group pools, tracking earliest scheduledAt + whether any match has
-    // already started (running or completed). Only pools that haven't started
-    // yet on this court are "next" — a pool already in progress isn't a
-    // future pool, even if you happen to be asking from a different one.
-    const byPool = new Map();
+    // Candidate pools routed to this court (excluding the current one), tracked
+    // by their earliest scheduled time HERE — that orders which plays next.
+    const earliest = new Map();
     for (const m of onCourt) {
         const p = poolNameOf(m.id);
         if (!p || p === currentPoolName) continue;
         const ts = m.scheduledAt || "99:99";
-        const cur = byPool.get(p) || { earliest: "99:99", started: false };
-        if (ts < cur.earliest) cur.earliest = ts;
-        if (m.status === "running" || m.status === "completed") cur.started = true;
-        byPool.set(p, cur);
+        if (ts < (earliest.get(p) || "99:99")) earliest.set(p, ts);
     }
-    const future = [...byPool.entries()].filter(([, v]) => !v.started);
+    if (earliest.size === 0) return null;
+    // A pool counts as already started if ANY of its matches is running or
+    // completed on ANY court — matches can be moved between courts, so a pool
+    // begun elsewhere is not a "future" pool here. (Scanning the whole comp,
+    // not just this court, is what makes that cross-court check correct.)
+    const started = new Set();
+    for (const m of competition.poolMatches) {
+        if (m.status === "running" || m.status === "completed") {
+            const p = poolNameOf(m.id);
+            if (p) started.add(p);
+        }
+    }
+    const future = [...earliest.entries()].filter(([p]) => !started.has(p));
     if (future.length === 0) return null;
     const nextName = future
-        .sort(([na, va], [nb, vb]) => va.earliest.localeCompare(vb.earliest) || na.localeCompare(nb))[0][0];
+        .sort(([na, ta], [nb, tb]) => ta.localeCompare(tb) || na.localeCompare(nb))[0][0];
     // Roster: union of sideA/sideB across the whole pool, preserving first-seen order.
     const seen = new Set();
     const players = [];
@@ -206,25 +213,41 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
 }
 
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
-// so ~10 rows fit comfortably. Cap at TV_INDIV_MAX_VISIBLE and take the TAIL
-// of the gathered group so the current match (already sorted to the end by
-// gatherIndividualGroup) is always shown — the oldest completed rows drop off
-// the top first. The visible rows then render top-anchored on the panel so
-// there's no empty space above when the pool is small.
+// so ~10 rows fit comfortably. When the gathered group exceeds this, we take a
+// WINDOW anchored on the current match (see windowAroundCurrent) rather than a
+// fixed tail — the pool-phase sort is completed → current → scheduled, so a
+// blind tail slice could drop the running row when there are many upcoming
+// matches. The visible rows render top-anchored on the panel.
 const TV_INDIV_MAX_VISIBLE = 10;
+
+// windowAroundCurrent — pick at most `max` consecutive rows from `all` that are
+// guaranteed to include the anchored current match. A couple of completed rows
+// are kept above the current one for context; the rest of the window fills with
+// upcoming matches below it. Returns { rows, dropped } where `dropped` is the
+// number removed from the HEAD (used for the data-dropped attribute).
+function windowAroundCurrent(all, currentIdx, max) {
+    if (all.length <= max) return { rows: all, dropped: 0 };
+    const anchor = currentIdx < 0 ? all.length - 1 : currentIdx;
+    const LOOKBACK = 2; // completed rows shown above the current match
+    let start = Math.max(0, anchor - LOOKBACK);
+    // Don't run past the end — pull the window back so it stays `max` tall.
+    if (start + max > all.length) start = all.length - max;
+    start = Math.max(0, start);
+    return { rows: all.slice(start, start + max), dropped: start };
+}
 
 // TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
 // name, via the shared IndividualScore). Layout: TOP-anchored — the rows fill
-// from the top of the panel; the running match stays at the bottom of the
-// visible list because gatherIndividualGroup sorts current LAST. When the
-// group exceeds TV_INDIV_MAX_VISIBLE, the oldest completed rows drop off the
-// top so the current match stays on screen (no animation). FIK §263.
+// from the top of the panel. gatherIndividualGroup orders pool phase as
+// completed → current → scheduled, so the current match sits among its upcoming
+// matches; windowAroundCurrent keeps it on screen when the group overflows
+// TV_INDIV_MAX_VISIBLE (no animation). FIK §263.
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
     const all = gatherIndividualGroup(promoted, court);
-    const dropped = Math.max(0, all.length - TV_INDIV_MAX_VISIBLE);
-    const rows = dropped > 0 ? all.slice(dropped) : all;
+    const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");
+    const { rows, dropped } = windowAroundCurrent(all, currentIdx, TV_INDIV_MAX_VISIBLE);
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     // Suppress the bottom NEXT line when its match is already visible in the
     // body — in pool phase the whole pool's queue is now in the feed, so the
@@ -302,10 +325,10 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
             })()}
 
             {/* Top-anchored match feed: the visible rows fill from the top of
-                the panel; gatherIndividualGroup sorts the current match LAST
-                so it stays at the bottom of the visible list. When the group
-                exceeds TV_INDIV_MAX_VISIBLE, we slice the tail above so the
-                oldest completed rows drop off the top first. */}
+                the panel. Pool phase is ordered completed → current → scheduled,
+                so the current match sits among its upcoming matches; when the
+                group exceeds TV_INDIV_MAX_VISIBLE, windowAroundCurrent keeps the
+                running row visible (dropping oldest completed from the head). */}
             {/* --msb-scale flows into the shared .msb--tv CSS rules so the
                 IndividualScore inside each row sizes itself to fit the available
                 room. All rows render at the SAME size; the live row is signalled
@@ -346,10 +369,11 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
             )}
 
             {/* Next match line — shown only when there's a queued match NOT
-                already in the body and NOT subsumed by the next-pool strip
-                above. In multi-comp / multi-pool-on-one-court setups it
-                surfaces the very next match the operator will run here. */}
-            {next && (
+                already in the body and the UP NEXT pool strip isn't already
+                shown (that strip's next pool subsumes this matchup). In
+                multi-comp / multi-pool-on-one-court setups it surfaces the very
+                next match the operator will run here. */}
+            {next && !nextPool && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>

@@ -277,6 +277,17 @@ describe('findNextPoolOnCourt', () => {
     expect(res.name).toBe('Pool B');
     expect(res.players).toEqual(['Team Gamma', 'Team Delta', 'Team Epsilon']);
   });
+  it('excludes a pool already started on ANOTHER court (matches can move courts)', () => {
+    // Pool B is routed to court A (scheduled here) but already has a COMPLETED
+    // match on court C — it has begun elsewhere, so it must not surface as the
+    // future "UP NEXT" pool on court A.
+    const c = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'A', sideA: 'P', sideB: 'Q', status: 'scheduled', scheduledAt: '09:15' },
+      { id: 'Pool B-1', court: 'C', sideA: 'P', sideB: 'R', status: 'completed', scheduledAt: '08:50' },
+    ] };
+    expect(findNextPoolOnCourt(c, 'Pool A', 'A')).toBeNull();
+  });
 });
 
 describe('TvIndividualBoard', () => {
@@ -307,6 +318,28 @@ describe('TvIndividualBoard', () => {
     expect(scores[0].props.match.id).toBe('Pool A-7'); // 15 - (10-1) = 7
     const str = JSON.stringify(tree);
     expect(str).toContain('"data-dropped":6'); // 16 total - 10 visible
+  });
+
+  it('keeps the running row visible when many scheduled matches follow it (windowed, not tail-sliced)', () => {
+    // Pool phase order is completed → current → scheduled. With 1 completed +
+    // 1 running + 20 scheduled, a blind tail slice would show only scheduled
+    // rows and DROP the running match. windowAroundCurrent must keep it on screen.
+    const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-done', court: 'B', sideA: 'D1', sideB: 'D2', status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+      { id: 'Pool A-run', court: 'B', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:05' },
+      ...Array.from({ length: 20 }, (_, i) => ({
+        id: `Pool A-s${i}`, court: 'B', sideA: `S${i}`, sideB: `T${i}`, status: 'scheduled',
+        ipponsA: [], ipponsB: [], scheduledAt: `10:${String(i).padStart(2,'0')}`,
+      })),
+    ] };
+    const promoted = { competition: many, match: many.poolMatches[1], isBracket: false };
+    const tree = TvIndividualBoard({ ...base, promoted });
+    const scores = [];
+    (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if(n.type === IndividualScore) scores.push(n);
+      const k=n.children||n.props?.children||[]; [].concat(k).forEach(walk); })(tree);
+    expect(scores.length).toBe(10);
+    expect(scores.some(s => s.props.match.status === 'running')).toBe(true);
   });
 
   it('renders one IndividualScore row per pool match, current highlighted, in the top-anchored group', () => {

@@ -259,8 +259,9 @@ function poolNameOf(id) {
 // "FINAL · 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator
 // because the board is per-court; the spectator wants to know how far into the
 // phase this court is, not the venue overall. Returns null when there's no
-// group to count (e.g. promoted.competition missing).
+// group to count (e.g. promoted / promoted.competition missing).
 function phaseProgressOnCourt(promoted, court) {
+    if (!promoted) return null;
     const comp = promoted.competition;
     if (!comp) return null;
     let group;

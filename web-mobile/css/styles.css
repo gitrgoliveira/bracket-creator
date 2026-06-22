@@ -3537,6 +3537,12 @@ button.pool-match-row {
   font: inherit;
 }
 
+.stat-box__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
 /* Stat value at text scale: the default .stat-box .v is 22px display, sized
    for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
    read better one step down. Modifier instead of scattered inline font-size. */
@@ -3561,6 +3567,11 @@ button.pool-match-row {
 
 .card--action:active {
   transform: translateY(0);
+}
+
+.card--action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow), var(--focus-ring);
 }
 
 @media (prefers-reduced-motion: reduce) {

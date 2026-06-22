@@ -82,8 +82,9 @@ function makeComp(overrides = {}) {
   };
 }
 
+let _playerSeq = 0;
 function makePlayer(seed = null) {
-  return { id: `p-${Math.random()}`, name: 'Player', seed };
+  return { id: `p-${++_playerSeq}`, name: 'Player', seed };
 }
 
 // ---------------------------------------------------------------------------

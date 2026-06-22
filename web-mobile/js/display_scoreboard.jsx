@@ -239,7 +239,7 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
 // WINDOW anchored on the current match (see windowAroundCurrent) rather than a
 // fixed tail — the pool-phase sort is completed → current → scheduled, so a
 // blind tail slice could drop the running row when there are many upcoming
-// matches. The visible rows render top-anchored on the panel.
+// matches. The visible rows are distributed space-evenly to fill the panel.
 const TV_INDIV_MAX_VISIBLE = 10;
 
 // windowAroundCurrent — pick at most `max` consecutive rows from `all` that are
@@ -261,11 +261,11 @@ function windowAroundCurrent(all, currentIdx, max) {
 // TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
-// name, via the shared IndividualScore). Layout: TOP-anchored — the rows fill
-// from the top of the panel. gatherIndividualGroup orders pool phase as
-// completed → current → scheduled, so the current match sits among its upcoming
-// matches; windowAroundCurrent keeps it on screen when the group overflows
-// TV_INDIV_MAX_VISIBLE (no animation). FIK §263.
+// name, via the shared IndividualScore). Layout: rows are distributed
+// space-evenly down the panel to fill the screen. gatherIndividualGroup orders
+// pool phase as completed → current → scheduled, so the current match sits
+// among its upcoming matches; windowAroundCurrent keeps it on screen when the
+// group overflows the visible cap (no animation). FIK §263.
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
     const all = gatherIndividualGroup(promoted, court);
     const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");

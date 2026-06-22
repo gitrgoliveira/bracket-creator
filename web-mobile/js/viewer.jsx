@@ -64,4 +64,7 @@ if (typeof window !== 'undefined') {
     window.TermV = TermV;
     window.VSchedItem = VSchedItem;
     window.WATCHLIST_MAX = WATCHLIST_MAX;
+    // The admin bracket panel reuses the SAME read-only result card the viewer
+    // shows for a completed match, instead of a stripped-down lookalike.
+    window.MatchDetailCard = MatchDetailCard;
 }

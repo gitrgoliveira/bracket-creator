@@ -231,27 +231,31 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
         return window.roundLabel(roundIndex, totalRounds);
     }
-    // Pool matches reach the display feed with round === -1 (a sentinel, not a
-    // real round) and no poolName, but their id is shaped "<PoolName>-<index>".
-    // Derive the pool name from the id rather than rendering the bare "-1".
-    if (typeof m.round === "number" && m.round < 0) {
-        const id = typeof m.id === "string" ? m.id : "";
-        const cut = id.lastIndexOf("-");
-        if (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) return id.slice(0, cut);
-        return "";
-    }
+    // Pool matches reach the feed with a pool-shaped id "<PoolName>-<index>"
+    // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
+    // left at round 0 by the engine). Derive the pool name from the id so we
+    // never render a bare "-1" or "0" — covers regular, daihyosen and tiebreaker
+    // bouts alike via poolNameOf.
+    const fromId = poolNameOf(m.id);
+    if (fromId) return fromId;
     // Render a numeric round explicitly so a 0-based round index (round === 0)
     // is not swallowed by the falsy-`||` fallback into an empty label.
     if (typeof m.round === "number") return String(m.round);
     return m.round || "";
 }
 
-// poolNameOf — derive the pool name from a pool-match id shaped "<Pool>-<idx>"
-// (e.g. "Pool A-0" → "Pool A"). Returns "" when the id isn't pool-shaped.
+// Strip the trailing match-index segment from a pool-match id to recover the
+// pool name. Backend formats: "PoolName-N", "PoolName-DH-N" (daihyosen),
+// "PoolName-TB-N" (tiebreaker). The non-greedy capture leaves hyphenated pool
+// names intact ("Pool A-East-0" → "Pool A-East"). Mirror of POOL_MATCH_ID_RE /
+// poolNameFromMatchId in admin_pools.jsx — keep the two in sync.
+const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
+
+// poolNameOf — derive the pool name from a pool-match id (incl. DH/TB
+// supplementary bouts). Returns "" when the id isn't pool-shaped.
 function poolNameOf(id) {
     if (typeof id !== "string") return "";
-    const cut = id.lastIndexOf("-");
-    return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
+    return id.match(POOL_MATCH_ID_RE)?.[1] ?? "";
 }
 
 // phaseProgressOnCourt — count completed vs total matches of the CURRENT phase

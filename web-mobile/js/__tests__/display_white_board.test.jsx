@@ -190,14 +190,21 @@ describe('poolNameOf', () => {
     expect(poolNameOf('Pool A-0')).toBe('Pool A');
     expect(poolNameOf('Pool B-12')).toBe('Pool B');
   });
+  it('strips DH/TB supplementary-bout suffixes to the base pool', () => {
+    // Backend ids: "Pool X-DH-N" (daihyosen), "Pool X-TB-N" (tiebreaker).
+    expect(poolNameOf('Pool A-DH-0')).toBe('Pool A');
+    expect(poolNameOf('Pool A-TB-1')).toBe('Pool A');
+    expect(poolNameOf('Pool B-DH-2')).toBe('Pool B');
+  });
+  it('keeps hyphenated pool names intact (non-greedy capture)', () => {
+    expect(poolNameOf('Pool A-East-0')).toBe('Pool A-East');
+    expect(poolNameOf('Pool A-East-DH-0')).toBe('Pool A-East');
+  });
   it('returns "" when the id has no "<name>-<digits>" tail', () => {
     expect(poolNameOf('')).toBe('');
     expect(poolNameOf(undefined)).toBe('');
     expect(poolNameOf('Pool A')).toBe('');     // no trailing -<digits>
     expect(poolNameOf('Pool A-x')).toBe('');   // trailing token not digits
-    // Note: a bracket id "m-r1-0" looks pool-shaped to this helper (last - is
-    // followed by digits), so it would return "m-r1". That's harmless because
-    // gatherIndividualGroup only calls poolNameOf on the pool-phase branch.
   });
 });
 
@@ -608,6 +615,18 @@ describe('phaseProgressOnCourt + phase strip', () => {
     expect(result.total).toBe(3);
   });
 
+  // a2) A DH/TB supplementary bout promoted → still counts under its base pool
+  it('pool phase: a promoted DH/TB bout counts under the base pool (suffix stripped)', () => {
+    const competition = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', status: 'completed' },
+      { id: 'Pool A-1', court: 'A', status: 'completed' },
+      { id: 'Pool A-DH-0', court: 'A', status: 'running' },
+    ] };
+    const promoted = { competition, isBracket: false, match: { id: 'Pool A-DH-0' } };
+    const result = phaseProgressOnCourt(promoted, 'A');
+    expect(result).toEqual({ done: 2, total: 3 });
+  });
+
   // b) Bracket round per-court
   it('bracket phase: counts matches in roundIndex on the requested court only', () => {
     const competition = { bracket: { rounds: [
@@ -714,13 +733,21 @@ describe('phaseLabel — league suppresses the round-robin round number', () => 
     expect(phaseLabel(m, false, undefined, undefined, 'league')).toBe('');
   });
 
-  it('still renders the bare round number when format is not given (back-compat)', () => {
-    const m = { id: 'Pool A-3', round: 4, status: 'running' };
+  it('renders the bare round number for a non-pool, non-bracket match (back-compat)', () => {
+    // No pool-shaped id → falls through to the round-number fallback.
+    const m = { round: 4, status: 'running' };
     expect(phaseLabel(m, false, undefined, undefined)).toBe('4');
   });
 
   it('pool (mixed) still derives the pool name from the id sentinel', () => {
     const m = { id: 'Pool A-1', round: -1, status: 'scheduled' };
     expect(phaseLabel(m, false, undefined, undefined, 'mixed')).toBe('Pool A');
+  });
+
+  it('labels a pool DH/TB supplementary bout as its base pool, not "0"', () => {
+    // The engine leaves Round at 0 for DH/TB bouts; without id-derivation this
+    // rendered a bogus "0". poolNameOf strips the -DH-/-TB- suffix.
+    expect(phaseLabel({ id: 'Pool A-DH-0', round: 0 }, false, undefined, undefined, 'mixed')).toBe('Pool A');
+    expect(phaseLabel({ id: 'Pool A-TB-0', round: 0 }, false, undefined, undefined, 'mixed')).toBe('Pool A');
   });
 });

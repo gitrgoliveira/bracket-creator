@@ -109,8 +109,8 @@ func TestSetTreeSheetTitle(t *testing.T) {
 }
 
 // TestAssignMatchNumbers verifies that AssignMatchNumbers assigns sequential
-// numbers starting at 1, skips nil nodes, and does not re-number on subsequent
-// calls (i.e. each call is idempotent with a fresh counter — it overwrites).
+// numbers starting at 1 and skips nil nodes. Each call restarts the counter
+// from 1, overwriting any numbers a previous call assigned (not preserved).
 func TestAssignMatchNumbers(t *testing.T) {
 	t.Run("sequential numbering skips nil", func(t *testing.T) {
 		n1 := &Node{LeafNode: false}

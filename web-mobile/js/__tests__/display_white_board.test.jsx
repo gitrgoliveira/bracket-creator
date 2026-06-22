@@ -84,7 +84,7 @@ describe('TvWhiteBoard', () => {
     // phaseLabel returns "" for league; the subtitle must not render "Name · ".
     const p = teamPromoted();
     p.competition = { id: 'c1', name: 'Veterans League', kind: 'team', teamSize: 5, format: 'league' };
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
+    const props = { ...base, promoted: p, isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
     const subtitle = findVnode(TvWhiteBoard(props), n =>
       n.type === 'span' && JSON.stringify(n).includes('Veterans League'));
@@ -95,7 +95,7 @@ describe('TvWhiteBoard', () => {
 
   it('renders a white board for a running team match, delegating to TeamScoreboard, NO "LIVE"', () => {
     const p = teamPromoted();
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
+    const props = { ...base, promoted: p, isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
     const str = render(props);
     expect(str).toContain('tvd--white');
@@ -116,7 +116,7 @@ describe('TvWhiteBoard', () => {
         ipponsB: ['K'], ipponsA: ['M'], subResults: [] },
       competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
     };
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: false, subResults: [], teamSize: 0 };
+    const props = { ...base, promoted: p, isTeamMatch: false, subResults: [], teamSize: 0 };
     const str = render(props);
     expect(str).toContain('tvd--white');
     expect(str).not.toContain('tvd-team-bouts');
@@ -133,7 +133,7 @@ describe('TvWhiteBoard', () => {
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: -1, ipponsB: ['M'], ipponsA: [] },
     ];
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
+    const props = { ...base, promoted: p, isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5, showDH: true };
     const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
     expect(sb).toBeTruthy();
@@ -145,7 +145,7 @@ describe('TvWhiteBoard', () => {
     // persisted with the team name as the winner — the round-5 win-mark fix
     // never reaches the TV display path.
     const p = teamPromoted();
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: true,
+    const props = { ...base, promoted: p, isTeamMatch: true,
       subResults: p.match.subResults, teamSize: 5 };
     const sb = findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard);
     expect(sb).toBeTruthy();
@@ -162,7 +162,7 @@ describe('TvWhiteBoard', () => {
         ipponsB: [], ipponsA: [], subResults: [] },
       competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
     };
-    const props = { ...base, promoted: p, promotedKind: 'running', isTeamMatch: false,
+    const props = { ...base, promoted: p, isTeamMatch: false,
       subResults: [], teamSize: 0, zekken: true };
     const is = findVnode(TvWhiteBoard(props), n => n.type === IndividualScore);
     expect(is).toBeTruthy();
@@ -175,7 +175,7 @@ describe('TvWhiteBoard', () => {
     // "↑ up next" badge was dropped.
     const p = teamPromoted('upnext');
     p.match.subResults = [];
-    const props = { ...base, promoted: p, promotedKind: 'upnext', isTeamMatch: true, subResults: [], teamSize: 5 };
+    const props = { ...base, promoted: p, isTeamMatch: true, subResults: [], teamSize: 5 };
     const str = render(props);
     expect(str).not.toContain('Starts soon');
     expect(str).not.toContain('up next');

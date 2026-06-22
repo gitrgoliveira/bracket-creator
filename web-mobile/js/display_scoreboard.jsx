@@ -489,10 +489,8 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // double-rendering the same card.
     let promoted = null;
     let queueMatches = upcoming;
-    let promotedKind = null; // "running" | "upnext" | null
     if (running) {
         promoted = { kind: "running", match: running.match, competition: running.competition, isBracket: running.isBracket, roundIndex: running.roundIndex, totalRounds: running.totalRounds };
-        promotedKind = "running";
     } else if (upcoming.length > 0) {
         const first = upcoming[0];
         promoted = {
@@ -503,7 +501,6 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
             roundIndex: first._roundIndex,
             totalRounds: first._totalRounds,
         };
-        promotedKind = "upnext";
         queueMatches = upcoming.slice(1, 3);
     } else {
         queueMatches = [];
@@ -592,7 +589,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         if (isTeamMatch) {
             return <TvWhiteBoard
                 tournament={tournament} court={court} connected={connected}
-                promoted={promoted} promotedKind={promotedKind} isTeamMatch={isTeamMatch}
+                promoted={promoted} isTeamMatch={isTeamMatch}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
                 showDH={showDH} queueMatches={queueMatches} zekken={zekken}
             />;
@@ -605,7 +602,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         if (isSupplementaryBout && isTeamComp) {
             return <TvWhiteBoard
                 tournament={tournament} court={court} connected={connected}
-                promoted={promoted} promotedKind={promotedKind} isTeamMatch={false}
+                promoted={promoted} isTeamMatch={false}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
                 showDH={false} queueMatches={queueMatches} zekken={zekken}
             />;

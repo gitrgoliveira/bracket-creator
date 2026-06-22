@@ -92,17 +92,22 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundName, onMoveCourt, onEditScore, password }) => {
-  // Two shared components, both off the window bridge at render time so module
-  // load order never matters:
+const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundName, compName, onMoveCourt, onEditScore, password }) => {
+  // Reuse the shared components wholesale — both off the window bridge at render
+  // time so module load order never matters:
   //   ScoreEditorModal (variant="inline") — the ONE scoring editor the shiaijo /
-  //     pools / scores screens use (ippons, draws, hantei, fouls, encho,
-  //     kiken/fusenpai). It IS the manual-override path, so there's no separate
-  //     "force winner" affordance.
-  //   IndividualScore — the SAME read-only result card the viewer / TV show.
+  //     pools / scores screens use. We keep ITS header (it's the same in every
+  //     host), so the panel doesn't add a competing title.
+  //   MatchDetailCard — the SAME read-only result card the public viewer shows
+  //     for a completed match (names + winner highlight + FINAL + score marks),
+  //     instead of a stripped-down lookalike.
   const ScoreEditorModal = window.ScoreEditorModal;
-  const IndividualScore = window.IndividualScore;
+  const MatchDetailCard = window.MatchDetailCard;
   const isComplete = match.status === "completed";
+  // Bracket match objects don't carry round/compName, so the shared headers
+  // would render sparse (a lone "·" with an empty round). Feed them the round
+  // we already computed + the competition name so their own headers read fully.
+  const m = { ...match, round: match.round || roundName, compName: match.compName || compName };
   // A completed match shows its read-only result by default; re-opening the
   // editor to change a recorded result is gated behind a confirmation so it's
   // not changed by accident. An un-played match goes straight to the editor
@@ -113,28 +118,22 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
 
   return (
     <div className="running-panel">
+      {/* Slim header: only the bits the reused components' own headers DON'T
+          carry — the bracket match number and the move-court control. Comp /
+          shiaijo / round / time / status come from the embedded component. */}
       <div className="running-panel__head">
-        <div className="running-panel__title">
-          {matchNum != null
-            ? <>Match M{matchNum}{roundName ? <span className="running-panel__round"> · {roundName}</span> : null}</>
-            : <>{roundName || `Match · ${match.id.slice(-6)}`}</>}
-        </div>
-        <div className="running-panel__court">
-          {onMoveCourt && courts && courts.length ? (
-            <>
-              <CourtPicker
-                value={match.court}
-                courts={courts}
-                onChange={(cc) => onMoveCourt(compId, match.id, cc)}
-                btnClassName="running-panel__court-btn"
-                label="SHIAIJO "
-              />
-              <span> · {match.scheduledAt || "TBA"}</span>
-            </>
-          ) : (
-            <span>SHIAIJO {match.court} · {match.scheduledAt || "TBA"}</span>
-          )}
-        </div>
+        <div className="running-panel__title">{matchNum != null ? `Match M${matchNum}` : `Match · ${match.id.slice(-6)}`}</div>
+        {onMoveCourt && courts && courts.length ? (
+          <div className="running-panel__court">
+            <CourtPicker
+              value={match.court}
+              courts={courts}
+              onChange={(cc) => onMoveCourt(compId, match.id, cc)}
+              btnClassName="running-panel__court-btn"
+              label="SHIAIJO "
+            />
+          </div>
+        ) : null}
       </div>
 
       {showEditor ? (
@@ -142,7 +141,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
           <ScoreEditorModal
             key={`${match.id}:${match.status}`}
             variant="inline"
-            match={match}
+            match={m}
             // Offer "close" only when there's a result card to fall back to
             // (editing a completed match); an un-played match has nowhere to go.
             canClose={isComplete}
@@ -159,10 +158,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, roundNa
         )
       ) : (
         <div className="running-panel__result">
-          {IndividualScore && <IndividualScore match={match} variant="card" showNames />}
-          {match.winner?.name && (
-            <div className="running-panel__advances">✓ {match.winner.name} advances</div>
-          )}
+          {MatchDetailCard && <MatchDetailCard match={m} escapeToClose={false} />}
           <button type="button" className="btn btn--sm btn--full" onClick={async () => {
             const ok = await window.confirmDialog({
               title: "Edit recorded result?",
@@ -282,6 +278,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
             courts={t?.courts || []}
             matchNum={matchMeta(selectedMatch.id).matchNum}
             roundName={matchMeta(selectedMatch.id).roundName}
+            compName={c.name}
             onMoveCourt={onMoveCourt}
             onEditScore={onEditScore}
             password={password}

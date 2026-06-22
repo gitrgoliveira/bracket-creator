@@ -2055,29 +2055,12 @@ a:hover {
   font-weight: 600;
   font-size: 16px;
 }
-/* Round suffix on the panel title ("Match M1 · Semifinals") — subordinate to
-   the match number so the eye lands on the identifier first. */
-.running-panel__round {
-  font-weight: 500;
-  color: var(--ink-3);
-}
-
-/* Completed-match result view: the shared read-only IndividualScore card, a
-   "winner advances" confirmation line, then the (confirmation-gated) edit
-   action. */
+/* Completed-match result view: the shared MatchDetailCard (same as the viewer)
+   followed by the confirmation-gated edit action. */
 .running-panel__result {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-.running-panel__advances {
-  padding: 10px;
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  border-radius: 8px;
-  font-size: 12.5px;
-  color: #065f46;
-  text-align: center;
 }
 
 .running-panel__court {

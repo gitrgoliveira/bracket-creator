@@ -330,6 +330,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
   const players = useMemoA(() => c.players || [], [c.players]);
+  // First-run: with no participants yet there is nothing to seed or check in,
+  // so the seeding panel is premature. Collapse it and let the roster-input
+  // panel fill the width — adding names is the only task at this point.
+  const emptyRoster = players.length === 0;
 
   // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
   // The draw assigns the final, pool-interleaved numbers (player.number);
@@ -734,7 +738,27 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
-      <div className="row" style={{ alignItems: "start" }}>
+      {/* Setup next-step cue: connects this landing page to the rest of the
+          preparation flow. Adding the roster here doesn't tell the operator
+          what comes next (the Generate draw button lives in the page header,
+          the full checklist on Overview), so state it explicitly. */}
+      {isSetup && (
+        <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div className="card__title" style={{ marginBottom: 2 }}>
+              {players.length >= 2 ? "Roster ready" : "Add your roster to begin"}
+            </div>
+            <div className="card__sub">
+              {players.length >= 2
+                ? `${players.length} ${c.kind === "team" ? "teams" : "participants"} added. Assign seeds (optional), then use “Generate draw” in the header to build the bracket.`
+                : `Add at least 2 ${c.kind === "team" ? "teams" : "participants"}, then you can generate the draw.`}
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={() => onSection("overview")}>View setup steps →</button>
+        </div>
+      )}
+      <div className="row" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
+        {!emptyRoster && (
         <div className="card">
           <div className="card__head">
             <div>
@@ -998,6 +1022,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           )}
         </div>
+        )}
         <div className="card">
           <div className="card__head">
             <div>

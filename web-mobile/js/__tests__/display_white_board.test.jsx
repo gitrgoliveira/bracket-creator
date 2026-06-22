@@ -534,6 +534,32 @@ describe('TvIndividualBoard', () => {
     expect(strMany).toContain('"--msb-scale":0.85');
   });
 
+  it('shrinks ONLY the name (--msb-name-scale < 1) when a long name + tag would overflow; tag still renders', () => {
+    // A long name beside a full-size registration tag overflows its half of the
+    // row — the NAME shrinks (never truncates) while the tag keeps full size.
+    const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'A', round: -1, status: 'running',
+        sideA: { name: 'Maximiliano Fernandez', tag: 'registered' },
+        sideB: { name: 'Aleksandr Voloshyn', tag: 'transfer' },
+        ipponsA: [], ipponsB: [] },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted }));
+    const m = str.match(/"--msb-name-scale":([0-9.]+)/);
+    expect(m).toBeTruthy();
+    expect(Number(m[1])).toBeLessThan(1);
+    expect(str).toContain('registered'); // tag still present (full size)
+  });
+
+  it('keeps --msb-name-scale at 1 when names fit (short names, no tags)', () => {
+    const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'A', round: -1, status: 'running', sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: [], ipponsB: [] },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted }));
+    expect(str).toContain('"--msb-name-scale":1');
+  });
+
   it('caps a LEAGUE board at 6 visible rows (windowed around the current match)', () => {
     // 28-match round-robin all on court B → must show only 6, including the running row.
     const league = { name: 'League', kind: 'individual', teamSize: 0, format: 'league', poolMatches: [

@@ -199,20 +199,19 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (!competition || !competition.poolMatches) return null;
     const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
     // Candidate pools routed to this court (excluding the current one), tracked
-    // by their position in the per-court queue. Mirror findUpcomingOnCourt's
-    // ordering — queuePosition first, scheduledAt as a tiebreaker — so the UP
-    // NEXT pool matches the actual queue even in untimed schedules (where every
-    // scheduledAt is blank). We keep each pool's MIN queuePosition + scheduledAt.
+    // by their FIRST match's (queuePosition, scheduledAt). Mirror
+    // findUpcomingOnCourt's ordering — queuePosition first, scheduledAt as a
+    // tiebreaker — so the UP NEXT pool matches the actual queue even in untimed
+    // schedules. The (qp, ts) pair is taken from the SAME match (lexicographic
+    // minimum) so we never synthesise a pair from two different matches.
     const meta = new Map();
     for (const m of onCourt) {
         const p = poolNameOf(m.id);
         if (!p || p === currentPoolName) continue;
         const qp = Number(m.queuePosition) || 9999;
         const ts = m.scheduledAt || "99:99";
-        const cur = meta.get(p) || { qp: 9999, ts: "99:99" };
-        if (qp < cur.qp) cur.qp = qp;
-        if (ts < cur.ts) cur.ts = ts;
-        meta.set(p, cur);
+        const cur = meta.get(p);
+        if (!cur || qp < cur.qp || (qp === cur.qp && ts < cur.ts)) meta.set(p, { qp, ts });
     }
     if (meta.size === 0) return null;
     // A pool counts as already started if ANY of its matches is running or
@@ -276,6 +275,39 @@ function windowAroundCurrent(all, currentIdx, max) {
     return { rows: all.slice(start, start + max), dropped: start };
 }
 
+// nameFitForRows — the largest NAME-only scale (≤ 1) at which every visible
+// row's name fits its half of the row ALONGSIDE a full-size registration tag.
+// The tag stays at the row's name size (full prominence); only the name shrinks,
+// so names never truncate. Measured on the actual displayed string (sideLabel =
+// number prefix + zekken display name when enabled). `scale` is the current
+// --msb-scale (so the reserved tag width is computed at the real font size).
+function nameFitForRows(rows, zekken, scale) {
+    if (!rows || !rows.length) return 1;
+    const vw = (typeof window !== "undefined" && window.innerWidth) || 1920;
+    const vh = (typeof window !== "undefined" && window.innerHeight) || 1080;
+    // Board padding is 5vw each side; .msb--tv .msb-marks reserves a 22vw centre.
+    // 0.96 safety on the half-row; char-width factors are deliberately generous
+    // (the board font is wider than a naive estimate) so the fit is conservative
+    // and names don't spill into an ellipsis.
+    const perSidePx = Math.max(1, 0.96 * (0.90 * vw - 0.22 * vw) / 2);
+    const fontPx = 0.03 * vh * (scale || 1);            // name/tag nominal px
+    const tagChromePx = 2 * 0.01 * vw + 2 * 0.012 * vh; // .msb--tv .msb-tag margin + padding
+    const FLOOR = 0.3;                                   // below this, ellipsis is the last resort
+    const sideN = (side) => {
+        const nameLen = String(sideLabel(side, zekken) || "").length;
+        if (nameLen <= 0) return 1;
+        const tag = (side && typeof side === "object" && side.tag) || "";
+        const tagPx = tag ? tag.length * 0.70 * fontPx + tagChromePx : 0;
+        const nameBudgetPx = perSidePx - tagPx;
+        if (nameBudgetPx <= 0) return FLOOR;             // tag alone over budget
+        const nameNominalPx = nameLen * 0.66 * fontPx;
+        return Math.min(1, nameBudgetPx / nameNominalPx);
+    };
+    let minN = 1;
+    for (const m of rows) minN = Math.min(minN, sideN(m.sideB), sideN(m.sideA));
+    return Math.max(FLOOR, minN);
+}
+
 // TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
@@ -307,14 +339,15 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const nextPool = (!promoted.isBracket && currentPoolName)
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
-    // Text scale adapts to how much vertical room each row gets. Fewer rows →
-    // more room per row → bigger glyphs (the screen fills). More rows → text
-    // shrinks to fit. The CSS .msb--tv rules read --msb-scale from the body
-    // container; default is 1 (full size) for surfaces that don't set it.
-    // Tuning: ~7 rows is the "natural" TV size (scale 1); a typical 4-match pool
-    // grows to ~1.75× to fill the screen, a single-match board to 2.4×, and a
-    // packed group shrinks to a 0.85 floor so it still fits.
+    // rowScale (--msb-scale) is VERTICAL: fewer rows get more room so glyphs grow
+    // to fill the screen (~7 rows ≈ 1×, a 4-match pool ≈ 1.75×, a single match ≈
+    // 2.4×). The registration tag is pinned to this size — it's as prominent as
+    // the name. nameScale (--msb-name-scale) is the HORIZONTAL fit applied to the
+    // NAME ONLY: when "name + full-size tag" is too wide for its half of the row,
+    // the name shrinks (never truncates) while the tag keeps full size. Measured
+    // on the actual displayed string (sideLabel = zekken display name + number).
     const rowScale = Math.min(2.4, Math.max(0.85, 7 / Math.max(1, rows.length)));
+    const nameScale = nameFitForRows(rows, zekken, rowScale);
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
@@ -380,7 +413,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 IndividualScore inside each row sizes itself to fit the available
                 room. All rows render at the SAME size; the live row is signalled
                 only by a quiet bg tint (no spine, no transform, no pulse). */}
-            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: "1vh", overflow: "hidden" }}>
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, "--msb-name-scale": nameScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
                     const isDone = !isNow && m.status === "completed";

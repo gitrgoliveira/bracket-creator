@@ -53,6 +53,16 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
+// Queue-order comparison for two SCHEDULED matches, matching the
+// (scheduledAt, queuePosition) tie-break in sortShiaijoMatches — so the nudge's
+// "another competition has an earlier match" test agrees with the real court
+// queue order, not just the HH:MM string. Returns true when `a` is earlier.
+const scheduledBefore = (a, b) => {
+    const t = (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
+    if (t !== 0) return t < 0;
+    return (Number(a.queuePosition) || 0) < (Number(b.queuePosition) || 0);
+};
+
 // How many of the most-recent completed bouts the Completed section shows
 // before the "Show all N" toggle. Keeps the live queue + standings above the
 // fold on a full-day court without hiding the recent record.
@@ -275,25 +285,25 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "no-matches" };
         }
 
-        // Condition B: another comp has a match EARLIER than the selected comp's upNext
+        // Condition B: another comp has a match EARLIER than the selected comp's
+        // upNext in the REAL court queue order — (scheduledAt, queuePosition), the
+        // same key sortShiaijoMatches uses — not just the HH:MM string. Comparing
+        // only the time would miss a same-time match that sorts ahead by queue
+        // position.
         const selUpNext = filteredScheduled[0];
         if (!selUpNext) return null;
-        const selTime = selUpNext.scheduledAt || "99:99";
 
-        const earlierOther = otherScheduled.filter(m => {
-            const t = m.scheduledAt || "99:99";
-            return t < selTime; // lexicographic HH:MM comparison
-        });
+        const earlierOther = otherScheduled.filter(m => scheduledBefore(m, selUpNext));
 
         if (earlierOther.length > 0) {
             const byComp = {};
             for (const m of earlierOther) {
-                if (!byComp[m.compId]) byComp[m.compId] = { id: m.compId, name: m.compName, count: 0, earliest: m.scheduledAt || "99:99" };
-                byComp[m.compId].count++;
-                if ((m.scheduledAt || "99:99") < byComp[m.compId].earliest) byComp[m.compId].earliest = m.scheduledAt || "";
+                const e = byComp[m.compId];
+                if (!e) byComp[m.compId] = { id: m.compId, name: m.compName, count: 1, earliestMatch: m };
+                else { e.count++; if (scheduledBefore(m, e.earliestMatch)) e.earliestMatch = m; }
             }
             const entries = Object.values(byComp);
-            entries.sort((a, b) => a.earliest.localeCompare(b.earliest));
+            entries.sort((a, b) => (scheduledBefore(a.earliestMatch, b.earliestMatch) ? -1 : 1));
             return { comp: entries[0].name, compId: entries[0].id, count: entries[0].count, reason: "earlier" };
         }
 

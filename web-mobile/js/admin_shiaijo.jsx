@@ -481,39 +481,46 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: onBack }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head">
                     <div>
-                        <h1 className="page-head__title">Shiaijo {court}</h1>
-                        <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
-                    </div>
-                    {(courtsComps.length > 0 || courts.length > 1) && (
-                        <div className="page-head__actions">
-                            {courtsComps.length > 0 && (
-                                <div className="shiaijo-comp-selector">
-                                    <span className="shiaijo-comp-selector__label">Officiating:</span>
-                                    {courtsComps.length === 1 ? (
-                                        <span className="shiaijo-comp-selector__name">{courtsComps[0].name}</span>
-                                    ) : (
-                                        <select
-                                            className="input shiaijo-comp-select"
-                                            value={effectiveCompId || ""}
-                                            onChange={(e) => setSelectedCompId(e.target.value)}
-                                            aria-label="Select competition to officiate"
-                                        >
-                                            {courtsComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                        </select>
-                                    )}
-                                </div>
-                            )}
-                            {courts.length > 1 && (
+                        {courts.length > 1 && courtKnown ? (
+                            // The page title doubles as the court switcher — clicking it
+                            // opens a native court picker (transparent <select> overlay), so
+                            // there's no separate, duplicate "Shiaijo A" control in the actions.
+                            <div className="shiaijo-title-select">
+                                <h1 className="page-head__title">
+                                    Shiaijo {court}
+                                    <span className="shiaijo-title-select__chevron" aria-hidden="true">▾</span>
+                                </h1>
                                 <select
-                                    className="input" style={{ width: "auto" }}
-                                    value={courtKnown ? court : ""}
+                                    className="shiaijo-title-select__native"
+                                    value={court}
                                     onChange={(e) => onSwitchCourt(e.target.value)}
                                     aria-label="Switch court"
                                 >
-                                    {!courtKnown && <option value="" disabled>Shiaijo {court} (unknown)</option>}
                                     {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
                                 </select>
-                            )}
+                            </div>
+                        ) : (
+                            <h1 className="page-head__title">Shiaijo {court}</h1>
+                        )}
+                        <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
+                    </div>
+                    {courtsComps.length > 0 && (
+                        <div className="page-head__actions">
+                            <div className="shiaijo-comp-selector">
+                                <span className="shiaijo-comp-selector__label">Officiating:</span>
+                                {courtsComps.length === 1 ? (
+                                    <span className="shiaijo-comp-selector__name">{courtsComps[0].name}</span>
+                                ) : (
+                                    <select
+                                        className="input shiaijo-comp-select"
+                                        value={effectiveCompId || ""}
+                                        onChange={(e) => setSelectedCompId(e.target.value)}
+                                        aria-label="Select competition to officiate"
+                                    >
+                                        {courtsComps.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    </select>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

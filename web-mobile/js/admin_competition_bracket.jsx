@@ -91,21 +91,14 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMoveCourt, onRecord, onOverride }) => {
+const RunningMatchPanel = React.memo(({ match, compId, courts, onMoveCourt, onRecord, onOverride, onEditScore, password }) => {
   const [mode, setMode] = useStateA("tap");
-  const [aPoints, setAPoints] = useStateA([]);
-  const [bPoints, setBPoints] = useStateA([]);
-  useEffectA(() => {
-    // Load both sides' letters from the canonical match.ipponsA /
-    // match.ipponsB fields so the read shape matches what
-    // buildRunningIpponResult writes — see loadScoreboardPoints above.
-    const { aPoints: a, bPoints: b } = loadScoreboardPoints(match);
-    setAPoints(a);
-    setBPoints(b);
-    // Include status + both sides' ippons in deps so an SSE update for
-    // the same match (e.g. an off-panel correction) doesn't leave the
-    // scoreboard view showing stale points.
-  }, [match.id, match.status, match.ipponsA?.join(","), match.ipponsB?.join(",")]);
+  // The "Scoreboard" tab embeds the ONE shared scoring editor
+  // (ScoreEditorModal, variant="inline") — the same component the shiaijo
+  // operator view and the pools/scores editors use — rather than a bespoke
+  // scoreboard. Pulled off the window bridge (admin_scoring_modal.jsx) at
+  // render time so load order with this module never matters.
+  const ScoreEditorModal = window.ScoreEditorModal;
   const a = match.sideA, b = match.sideB;
   const isComplete = match.status === "completed";
   return (
@@ -164,69 +157,25 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
           </div>
         </div>
       )}
-      {mode === "scoreboard" && (
-        // Proposal C layout (DESIGN.md §4 Aka/Shiro): SHIRO (sideB) on the
-        // LEFT, AKA (sideA) on the RIGHT. Colour runs edge-to-edge; the two
-        // competitors meet at the centre. Side name appears once, in the
-        // centre identity chip — the button rails are unlabelled (their colour
-        // + position already say which side). Source order is rail→who→who→rail
-        // so the phone single-column stack reads top-to-bottom per side.
-        <div className="sc-board">
-          <div className="sc-board__rail sc-board__shiro">
-            <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn" onClick={() => setBPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button type="button" className="ipt-btn" onClick={() => setBPoints([])}>↺</button>
-            </div>
-          </div>
-          <div className="sc-board__who sc-board__who--shiro sc-board__shiro">
-            <span className="sc-board__lbl">Shiro (White)</span>
-            <span className="sc-board__nm">{b.name}</span>
-            <span className="sc-board__tally">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--shiro ${bPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{bPoints[i] || "·"}</span>))}</span>
-          </div>
-          <div className="sc-board__who sc-board__who--aka sc-board__aka">
-            <span className="sc-board__lbl">Aka (Red)</span>
-            <span className="sc-board__nm">{a.name}</span>
-            <span className="sc-board__tally">{[0, 1].map((i) => (<span key={i} className={`score-pt score-pt--aka ${aPoints[i] ? "score-pt--filled" : "score-pt--empty"}`}>{aPoints[i] || "·"}</span>))}</span>
-          </div>
-          <div className="sc-board__rail sc-board__aka">
-            <div className="sc-board__btnrow">
-              {(isNaginata ? ["M", "K", "D", "T", "S"] : ["M", "K", "D", "T"]).map((cc) => (<button type="button" key={cc} className="ipt-btn ipt-btn--aka" onClick={() => setAPoints((p) => p.length < 2 ? [...p, cc] : p)}>{cc}</button>))}
-              <button type="button" className="ipt-btn" onClick={() => setAPoints([])}>↺</button>
-            </div>
-          </div>
-          <div className="sc-board__vs">vs</div>
-        </div>
+      {mode === "scoreboard" && ScoreEditorModal && (
+        // Reuse the shared inline scoring editor — full FIK scoreboard with
+        // ippons, draws (hikiwake), hantei, fouls, encho and kiken/fusenpai
+        // decisions — instead of a bespoke board. onSubmit is wired exactly as
+        // the pools/shiaijo embeddings: onEditScore(compId, matchId, patch, match).
+        <ScoreEditorModal
+          key={`${match.id}:${match.status}`}
+          variant="inline"
+          match={match}
+          onClose={() => {}}
+          canClose={false}
+          onSubmit={async (patch) => {
+            try { await onEditScore(compId, match.id, patch, match); }
+            catch (_e) { /* surfaced via toast in the parent */ }
+          }}
+          onSubmitAndNext={null}
+          password={password}
+        />
       )}
-      {mode === "scoreboard" && (() => {
-        // Submit is only valid when one side strictly leads. Tied counts
-        // (e.g. 1–1) would otherwise silently get attributed to SHIRO via
-        // `aWins ? "a" : "b"`. For draws, use the full editor's hikiwake toggle.
-        const aWins = aPoints.length > bPoints.length;
-        const bWins = bPoints.length > aPoints.length;
-        const hasWinner = aWins || bWins;
-        const isTied = !hasWinner && (aPoints.length > 0 || bPoints.length > 0);
-        // Submit the FULL points arrays — pre-fix, only aPoints[0]/bPoints[0]
-        // (a single letter) was passed and recordWinner hardcoded winnerPts=1,
-        // so a 2-ippon win was silently truncated to 1 ippon. recordWinner now
-        // builds winnerPts / ipponsA / ipponsB from the array lengths via
-        // buildRunningIpponResult.
-        const winnerArr = aWins ? aPoints : bPoints;
-        const loserArr = aWins ? bPoints : aPoints;
-        return (
-          <div className="running-panel__actions">
-            <button type="button"
-              className="btn btn--primary btn--full"
-              disabled={!hasWinner}
-              onClick={() => onRecord(aWins ? "a" : "b", "ippon", winnerArr, loserArr)}
-            >Submit result</button>
-            {isTied && (
-              <div className="field__hint" style={{ textAlign: "center", marginTop: 6 }}>
-                Tied — open the full score editor to record a draw (hikiwake).
-              </div>
-            )}
-          </div>
-        );
-      })()}
       {isComplete && (
         <div style={{ marginTop: 12, padding: 10, background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, fontSize: 12.5, color: "#065f46" }}>
           ✓ Recorded — {match.winner?.name} advances
@@ -248,7 +197,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, isNaginata, onMov
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
-function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, showToast }) {
   const [selected, setSelected] = useStateA(null);
   const scrollRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -322,8 +271,12 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
   // bye-containing brackets legitimately have.
   const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
   return (
-    <div className="row" style={{ gridTemplateColumns: "1fr 360px", alignItems: "start" }}>
-      <div>
+    // Flex-wrap rather than a fixed 2-col grid (see .bracket-layout in
+    // styles.css): the scoring panel keeps a minimum width so the reused inline
+    // editor never squashes/clips, and when the bracket + that min width can't
+    // sit side by side, the panel wraps to a full-width row BELOW the bracket.
+    <div className="bracket-layout">
+      <div className="bracket-layout__bracket">
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
             <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
@@ -343,16 +296,17 @@ function AdminBracket({ c, t, bracket, onMoveCourt, tweaks, password, showToast 
           </div>
         </div>
       </div>
-      <div>
+      <div className="bracket-layout__panel">
         {hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
             match={selectedMatch}
             compId={c.id}
             courts={t?.courts || []}
-            isNaginata={!!c.naginata}
             onMoveCourt={onMoveCourt}
             onRecord={recordWinner}
             onOverride={overrideWinner}
+            onEditScore={onEditScore}
+            password={password}
           />
         ) : selectedMatch ? (
           <div className="empty"><h3>Match not ready</h3><div style={{ fontSize: 13 }}>Waiting for upstream winners.</div></div>

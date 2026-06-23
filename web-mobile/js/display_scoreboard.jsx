@@ -584,7 +584,9 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // White scoreboard for any promoted match.
     // Team → TvWhiteBoard (IV/PW summary + bout grid). Individual → grouped
     // board listing every match in the same POOL (pool phase) or ROUND
-    // (knockout), bottom-anchored with the current match at the bottom.
+    // (knockout), ordered completed → current → scheduled and distributed
+    // space-evenly; when the group overflows, windowAroundCurrent keeps a
+    // window centred on the current match so it's never scrolled off.
     if (promoted) {
         if (isTeamMatch) {
             return <TvWhiteBoard

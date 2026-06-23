@@ -680,10 +680,10 @@ func TestAddParticipant_DefaultsManualTag(t *testing.T) {
 
 	var added domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
-	assert.Equal(t, "manual", added.Tag, "single-add without an explicit tag must default to manual")
+	assert.Equal(t, "manual", added.Source, "single-add without an explicit source must default to manual")
 
-	// An explicit tag must be respected (not overwritten by the default).
-	body, _ = json.Marshal(map[string]interface{}{"name": "Bob", "dojo": "Dojo B", "tag": "registered"})
+	// An explicit source must be respected (not overwritten by the default).
+	body, _ = json.Marshal(map[string]interface{}{"name": "Bob", "dojo": "Dojo B", "source": "registered"})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -692,7 +692,7 @@ func TestAddParticipant_DefaultsManualTag(t *testing.T) {
 
 	var bob domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &bob))
-	assert.Equal(t, "registered", bob.Tag, "explicit tag must override the manual default")
+	assert.Equal(t, "registered", bob.Source, "explicit source must override the manual default")
 }
 
 // TestZekkenAddAndReplace covers the previously-missing path for

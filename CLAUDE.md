@@ -142,19 +142,19 @@ See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
 
 **With UUIDs (new format)** — first field is a UUID v4 (lowercase hex):
 ```
-<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 ```
 
 **Without UUIDs (legacy format)** — detected automatically when first field is not a UUID:
 ```
-Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 ```
 
 - The zekken/display-name column is only present when `withZekkenName=true` for the competition.
 - `DanGrade` is optional; omit or leave empty.
-- `tag` is the last column when present and must be one of: `manual`, `registered`, `transfer`.
+- `source` is the last column when present and must be one of: `manual`, `registered`, `transfer`. This is the registration provenance (admin-only). It is distinct from the competitor's "tag" (their assigned competitor number, which is the `Number`/`number` field, optionally prefixed via `numberPrefix` — e.g. "A1").
 - Seeds are stored separately in `seeds.csv` and merged at load time — do **not** include seed ranks in `participants.csv`.
-- The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.js:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
+- The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.jsx:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
 
 ## Common Pitfalls
 

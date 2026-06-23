@@ -125,8 +125,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-						player.Tag = meta[len(meta)-1]
+					if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
+						player.Source = meta[len(meta)-1]
 						meta = meta[:len(meta)-1]
 					}
 					if len(meta) > 0 {
@@ -143,8 +143,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-					player.Tag = meta[len(meta)-1]
+				if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
+					player.Source = meta[len(meta)-1]
 					meta = meta[:len(meta)-1]
 				}
 				if len(meta) > 0 {
@@ -168,7 +168,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-func isParticipantTag(s string) bool {
+func isRegistrationSource(s string) bool {
 	switch strings.ToLower(s) {
 	case "manual", "registered", "transfer", "reserved":
 		return true

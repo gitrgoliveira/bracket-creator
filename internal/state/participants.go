@@ -576,12 +576,12 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 //
 // withZekkenName MUST match the value the next LoadParticipants will use.
 // The on-disk column layout differs between the two modes:
-//   - non-zekken: [id, Name, Dojo, ...Metadata, Tag?, "checked_in"?]
-//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Tag?, "checked_in"?]
+//   - non-zekken: [id, Name, Dojo, ...Metadata, Source?, "checked_in"?]
+//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Source?, "checked_in"?]
 //
 // Pre-fix the function tried to be clever by writing the 2-column form (id,
 // Name, Dojo) when DisplayName was empty or auto-derivable. That broke zekken
-// reloads as soon as Tag or Metadata were present — e.g. the manual-tag
+// reloads as soon as Source or Metadata were present — e.g. the manual-source
 // default added by the single-add endpoint produced [id, Name, Dojo, "manual"]
 // for zekken comps, which CreatePlayersFromRecords(_, true) then read as
 // Name=Name, DisplayName=Dojo, Dojo="manual" (corrupted). Branch on
@@ -600,7 +600,7 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 			// Always include the DisplayName column so a subsequent
 			// LoadParticipants(_, true) reads [Name, DisplayName, Dojo, ...]
 			// — even when DisplayName equals SanitizeName(Name) and even when
-			// Tag/Metadata are present.
+			// Source/Metadata are present.
 			dn := p.DisplayName
 			if dn == "" {
 				dn = helper.SanitizeName(p.Name)
@@ -610,8 +610,8 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 			record = []string{id, p.Name, p.Dojo}
 		}
 		record = append(record, p.Metadata...)
-		if p.Tag != "" {
-			record = append(record, p.Tag)
+		if p.Source != "" {
+			record = append(record, p.Source)
 		}
 		if p.CheckedIn {
 			record = append(record, "checked_in")

@@ -214,14 +214,14 @@ func TestRegistration_POST_SelfRun_Setup_CreatesParticipant(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &player))
 	assert.Equal(t, "Alice Tanaka", player.Name)
 	assert.Equal(t, "Raizan", player.Dojo)
-	assert.Equal(t, "registered", player.Tag)
+	assert.Equal(t, "registered", player.Source)
 	assert.NotEmpty(t, player.ID)
 
 	// Verify persisted
 	players, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, players, 1)
-	assert.Equal(t, "registered", players[0].Tag)
+	assert.Equal(t, "registered", players[0].Source)
 	assert.Equal(t, []string{"3 Dan"}, players[0].Metadata)
 
 	// Verify broadcast
@@ -507,12 +507,12 @@ func TestRegistration_POST_TagAlwaysRegistered(t *testing.T) {
 
 	w := doRegister(r, compID, map[string]any{
 		"name": "Bob", "dojo": "Dojo B",
-		// Even if a caller somehow included a 'tag' field, our handler
+		// Even if a caller somehow included a 'source' field, our handler
 		// hardcodes "registered" and doesn't read it.
 	})
 	require.Equal(t, http.StatusOK, w.Code)
 
 	var player domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &player))
-	assert.Equal(t, "registered", player.Tag)
+	assert.Equal(t, "registered", player.Source)
 }

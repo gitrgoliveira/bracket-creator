@@ -271,7 +271,7 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 // Metadata slice is also count-capped — 16 entries is generous given
 // the current schema (Dan, Grade, optional flags) but rejects abusive
 // payloads that would inflate participants.csv into the megabytes.
-func validatePlayerLengths(name, displayName, dojo, tag string, metadata []string) error {
+func validatePlayerLengths(name, displayName, dojo, source string, metadata []string) error {
 	if err := validateMaxLen("name", name, MaxLenPlayerName); err != nil {
 		return err
 	}
@@ -281,7 +281,7 @@ func validatePlayerLengths(name, displayName, dojo, tag string, metadata []strin
 	if err := validateMaxLen("dojo", dojo, MaxLenPlayerDojo); err != nil {
 		return err
 	}
-	if err := validateMaxLen("tag", tag, MaxLenPlayerMetadata); err != nil {
+	if err := validateMaxLen("source", source, MaxLenPlayerMetadata); err != nil {
 		return err
 	}
 	if len(metadata) > MaxPlayerMetadataItems {

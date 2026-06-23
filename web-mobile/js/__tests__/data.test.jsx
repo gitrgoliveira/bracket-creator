@@ -100,10 +100,10 @@ describe('parseParticipantLines', () => {
     expect(p.dojo).toBe('checked_in');
   });
 
-  it('detects both tag and checkedIn when "..., tag, checked_in"', () => {
+  it('detects both source and checkedIn when "..., source, checked_in"', () => {
     const [p] = parseParticipantLines(['Name, Dojo, registered, checked_in'], false);
     expect(p.checkedIn).toBe(true);
-    expect(p.tag).toBe('registered');
+    expect(p.source).toBe('registered');
     expect(p.name).toBe('Name');
     expect(p.dojo).toBe('Dojo');
   });

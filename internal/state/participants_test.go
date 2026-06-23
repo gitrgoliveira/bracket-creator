@@ -30,7 +30,7 @@ func TestParticipants(t *testing.T) {
 
 	// 2. Save participants
 	playersToSave := []domain.Player{
-		{Name: "Alice", Dojo: "Dojo A", Tag: "manual"},
+		{Name: "Alice", Dojo: "Dojo A", Source: "manual"},
 		{Name: "Bob", Dojo: "Dojo B"},
 	}
 	err = store.SaveParticipants(compID, playersToSave)
@@ -44,13 +44,13 @@ func TestParticipants(t *testing.T) {
 	assert.Equal(t, "Alice", loadedPlayers[0].Name)
 	assert.Equal(t, "ALICE", loadedPlayers[0].DisplayName)
 	assert.Equal(t, "Dojo A", loadedPlayers[0].Dojo)
-	assert.Equal(t, "manual", loadedPlayers[0].Tag)
+	assert.Equal(t, "manual", loadedPlayers[0].Source)
 
 	assert.NotEmpty(t, loadedPlayers[1].ID) // UUID generated
 	assert.Equal(t, "Bob", loadedPlayers[1].Name)
 	assert.Equal(t, "BOB", loadedPlayers[1].DisplayName)
 	assert.Equal(t, "Dojo B", loadedPlayers[1].Dojo)
-	assert.Empty(t, loadedPlayers[1].Tag)
+	assert.Empty(t, loadedPlayers[1].Source)
 
 	// 4. Save and load participants with existing IDs
 	playersToSaveWithID := []domain.Player{
@@ -271,7 +271,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 
 	players := []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A", Metadata: []string{"2d"}},
-		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Tag: "registered"},
+		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Source: "registered"},
 		{Name: "Carol", Dojo: "Dojo C"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
@@ -287,7 +287,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	require.Len(t, loaded, 3)
 	assert.Equal(t, []string{"2d"}, loaded[0].Metadata, "Alice's danGrade must round-trip")
 	assert.Equal(t, []string{"3d"}, loaded[1].Metadata, "Bob's danGrade must round-trip")
-	assert.Equal(t, "registered", loaded[1].Tag, "Bob's tag must round-trip alongside danGrade")
+	assert.Equal(t, "registered", loaded[1].Source, "Bob's source must round-trip alongside danGrade")
 	assert.Empty(t, loaded[2].Metadata, "Carol with no metadata must stay empty")
 }
 
@@ -617,9 +617,9 @@ func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
 
 	// DisplayName left blank — SaveParticipants must still write the
 	// DisplayName column for zekken comps so the row is round-trip safe.
-	// Tag="manual" mirrors what the single-add endpoint defaults to.
+	// Source="manual" mirrors what the single-add endpoint defaults to.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Akira Tanaka", Dojo: "Gyokusen", Tag: "manual"},
+		{Name: "Akira Tanaka", Dojo: "Gyokusen", Source: "manual"},
 	}))
 
 	loaded, err := store.LoadParticipants(compID, true)
@@ -627,7 +627,7 @@ func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
 	assert.Equal(t, "Gyokusen", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
-	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
+	assert.Equal(t, "manual", loaded[0].Source, "Source must NOT shift into Dojo (regression)")
 	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
 }
 

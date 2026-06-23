@@ -77,8 +77,9 @@ function rdTokenScore(needle, hay) {
   }
   // Reject scattered "matches": if the characters are spread far apart (e.g.
   // "yama" landing on r-y-o n-a-k-a-m-…-a) it isn't a real hit. A tight typo
-  // ("tnk" → tanaka) keeps small gaps; a coincidental spread doesn't.
-  if (gaps > needle.length) return null;
+  // ("tnk" → tanaka, gaps 2 < len 3) keeps small gaps; a coincidental spread
+  // (gaps ≥ needle length, e.g. "yama"→"ryonakama" with gaps 4 == len 4) doesn't.
+  if (gaps >= needle.length) return null;
   return 200 + start + gaps; // any subsequence ranks below any contiguous hit
 }
 
@@ -209,11 +210,7 @@ function RdPlayerTag({ comp, player, size }) {
 // Rail — competition selector. Pinned "All competitions" entry on top, then one
 // row per competition with a check-in progress meter.
 // ---------------------------------------------------------------------------
-function RdRail({ comps, peopleIndex, selected, onSelect }) {
-  const allTotal = peopleIndex.size;
-  let allPresent = 0;
-  peopleIndex.forEach((rec) => { if (rdPresence(rec.entries) === "all") allPresent += 1; });
-
+function RdRail({ comps, allStats, selected, onSelect }) {
   const item = (key, label, sub, present, total, status) => {
     const pct = total > 0 ? Math.round((present / total) * 100) : 0;
     const done = total > 0 && present === total;
@@ -242,7 +239,7 @@ function RdRail({ comps, peopleIndex, selected, onSelect }) {
 
   return (
     <nav className="rd-rail" aria-label="Competitions">
-      {item("all", "All competitions", `${pluralizeRD(comps.length, "competition")} · everyone`, allPresent, allTotal, null)}
+      {item("all", "All competitions", `${pluralizeRD(comps.length, "competition")} · everyone`, allStats.present, allStats.total, null)}
       <div className="rd-rail__divider" role="presentation" />
       {comps.map((c) => {
         const players = c.players || [];
@@ -266,14 +263,13 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
       <span className="rd-chips__label">{label || "Also in"}</span>
       {entries.map(({ comp, player }) => {
         const checked = player.checkedIn;
-        const withdrawn = player.__ineligible; // reserved guard (see desk notes)
         return (
           <button
             type="button"
             key={comp.id}
-            className={`rd-chip${checked ? " is-checked" : ""}${withdrawn ? " is-withdrawn" : ""}`}
-            disabled={busy || withdrawn}
-            title={withdrawn ? "Withdrawn from this competition" : checked ? `Checked in — ${comp.name}` : `Check in for ${comp.name}`}
+            className={`rd-chip${checked ? " is-checked" : ""}`}
+            disabled={busy}
+            title={checked ? `Checked in — ${comp.name}` : `Check in for ${comp.name}`}
             onClick={() => !checked && onToggle(comp.id, rdPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -511,13 +507,21 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
 // Page.
 // ---------------------------------------------------------------------------
 function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, onUpdate, onLogout, onViewerMode }) {
-  // Local authoritative copy of competitions, seeded from the parent. While
-  // this view is mounted the parent tournament only changes when WE call
-  // onUpdate, so re-seeding on prop change can't clobber an optimistic write.
+  // `comps` is the desk's own authoritative copy, seeded once from the parent
+  // and thereafter mutated only via setLocal (optimistic) and refresh() (server
+  // truth). We deliberately do NOT re-seed from the tournament prop: app.jsx
+  // runs its own SSE-driven setTournament independently of this desk, so a
+  // prop-sync effect would clobber an in-flight optimistic check-in with
+  // possibly-stale parent data. The desk's own SSE subscription (below) keeps
+  // it fresh; tRef tracks the latest tournament only so refresh()'s onUpdate
+  // merge starts from the newest snapshot.
   const [comps, setComps] = useStateRD(() => tournament.competitions || []);
   const tRef = useRefRD(tournament);
   useEffectRD(() => { tRef.current = tournament; }, [tournament]);
-  useEffectRD(() => { setComps(tournament.competitions || []); }, [tournament.competitions]);
+  // Number of check-in writes in flight. While > 0 the SSE-driven refresh
+  // defers, so a concurrent reload (this desk's echo or another desk's event)
+  // can't momentarily revert an optimistic check-in mid-write.
+  const inFlightRef = useRefRD(0);
 
   const [selected, setSelected] = useStateRD("all");
   const [query, setQuery] = useStateRD("");
@@ -556,16 +560,31 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   useEffectRD(() => {
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     let timer = null;
+    const fire = () => {
+      // Don't reconcile while our own writes are mid-flight — wait for them to
+      // settle so the refetch can't transiently revert an optimistic check-in.
+      if (inFlightRef.current > 0) { timer = setTimeout(fire, 300); return; }
+      timer = null;
+      refresh();
+    };
     const unsub = window.API.subscribeToEvents((event) => {
       if (event && (event.type === "participants_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted")) {
         if (timer) return;
-        timer = setTimeout(() => { timer = null; refresh(); }, 600);
+        timer = setTimeout(fire, 600);
       }
     });
     return () => { if (timer) clearTimeout(timer); unsub(); };
   }, [refresh]);
 
   const peopleIndex = useMemoRD(() => rdBuildPeopleIndex(comps), [comps]);
+  // Tournament-wide presence, computed once and shared by the rail's "All
+  // competitions" item and the "all" headline (previously each re-walked the
+  // index independently).
+  const allStats = useMemoRD(() => {
+    let present = 0;
+    peopleIndex.forEach((rec) => { if (rdPresence(rec.entries) === "all") present += 1; });
+    return { present, total: peopleIndex.size };
+  }, [peopleIndex]);
   const selectedComp = selected === "all" ? null : comps.find((c) => c.id === selected);
 
   // Optimistic local mutation of one check-in flag.
@@ -583,6 +602,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // Toggle one (competition, participant). Optimistic; SSE refresh reconciles.
   const toggleOne = async (compId, pid, val, opts = {}) => {
     setLocal(compId, pid, val);
+    inFlightRef.current += 1;
     try {
       await window.API.toggleCheckIn(compId, pid, val, password);
       if (val && opts.handoff) announceHandoff(opts.handoff.name, opts.handoff.tags);
@@ -590,26 +610,59 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       if (!mountedRef.current) return;
       showToast(e.message, "error");
       setLocal(compId, pid, !val); // revert
+    } finally {
+      inFlightRef.current -= 1;
+    }
+  };
+
+  // Core "set this person's check-in across every competition they entered" —
+  // optimistic local writes + parallel API calls, returning the failure count.
+  // No busy/refresh side effects so callers can coordinate one bulk operation
+  // around many people without each clearing the shared busy flag early.
+  const checkPersonEntries = async (rec, makeChecked) => {
+    const targets = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
+    if (!targets.length) return { failed: 0, total: 0 };
+    targets.forEach(({ comp, player }) => setLocal(comp.id, rdPid(player), makeChecked));
+    inFlightRef.current += 1;
+    try {
+      const results = await Promise.allSettled(
+        targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdPid(player), makeChecked, password))
+      );
+      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length };
+    } finally {
+      inFlightRef.current -= 1;
     }
   };
 
   // Person-level toggle in "all" mode: check into every competition (or undo all).
   const togglePerson = async (rec) => {
-    const presence = rdPresence(rec.entries);
-    const makeChecked = presence !== "all"; // none/partial → check all; all → undo all
-    const targets = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
-    if (!targets.length) return;
+    const makeChecked = rdPresence(rec.entries) !== "all"; // none/partial → check all; all → undo all
     setBusy(true);
-    targets.forEach(({ comp, player }) => setLocal(comp.id, rdPid(player), makeChecked));
     try {
-      const results = await Promise.allSettled(
-        targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdPid(player), makeChecked, password))
-      );
-      const failed = results.filter((r) => r.status === "rejected");
-      if (failed.length) showToast(`${failed.length} of ${targets.length} check-ins failed — reloading`, "error");
-      if (makeChecked && !failed.length) {
+      const { failed, total } = await checkPersonEntries(rec, makeChecked);
+      if (total === 0) return;
+      if (failed) showToast(`${failed} of ${total} check-ins failed — reloading`, "error");
+      else if (makeChecked) {
         announceHandoff(rec.name, rec.entries.map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
       }
+      await refresh();
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  // Bulk-check a whole dojo of people into all their competitions ("all" mode).
+  // One coordinated operation: busy is set once, every person's writes run
+  // concurrently, and a single refresh reconciles — instead of N independent
+  // togglePerson calls each racing the shared busy flag.
+  const bulkCheckPeople = async (recs) => {
+    const pending = recs.filter((rec) => rdPresence(rec.entries) !== "all");
+    if (!pending.length) return;
+    setBusy(true);
+    try {
+      const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
+      const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
+      if (failed) showToast(`${failed} check-in(s) failed — reloading`, "error");
       await refresh();
     } finally {
       if (mountedRef.current) setBusy(false);
@@ -621,13 +674,20 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     if (!pids.length) return;
     setBusy(true);
     pids.forEach((pid) => setLocal(compId, pid, true));
+    inFlightRef.current += 1;
     try {
-      await window.API.bulkCheckIn(compId, pids, password);
+      const res = await window.API.bulkCheckIn(compId, pids, password);
+      // A 200 can still report unmatched ids (e.g. legacy name-keyed pids the
+      // server couldn't resolve) — surface that rather than silently dropping it.
+      if (res && res.notFound && res.notFound.length) {
+        showToast(`${res.notFound.length} not matched — reloading`, "error");
+      }
       await refresh();
     } catch (e) {
       showToast(e.message, "error");
       await refresh();
     } finally {
+      inFlightRef.current -= 1;
       if (mountedRef.current) setBusy(false);
     }
   };
@@ -697,14 +757,12 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // Headline metric for the current view.
   const headline = useMemoRD(() => {
     if (selected === "all") {
-      let present = 0;
-      peopleIndex.forEach((rec) => { if (rdPresence(rec.entries) === "all") present += 1; });
-      return { present, total: peopleIndex.size, noun: "people" };
+      return { present: allStats.present, total: allStats.total, noun: "people" };
     }
     const comp = comps.find((c) => c.id === selected);
     const players = comp ? comp.players || [] : [];
     return { present: players.filter((p) => p.checkedIn).length, total: players.length, noun: comp && comp.kind === "team" ? "teams" : "competitors" };
-  }, [selected, comps, peopleIndex]);
+  }, [selected, comps, allStats]);
 
   // Enter on the search box checks in the single top hit — the arrival loop.
   const onSearchKeyDown = (e) => {
@@ -755,7 +813,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
           </div>
         ) : (
           <div className="workspace rd-workspace">
-            <RdRail comps={comps} peopleIndex={peopleIndex} selected={selected} onSelect={setSelected} />
+            <RdRail comps={comps} allStats={allStats} selected={selected} onSelect={setSelected} />
 
             <div className="rd-main">
               <div className="rd-header">
@@ -873,8 +931,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 onEdit={(row) => setEditTarget({ comp: row.comp, player: row.player })}
                 onBulkDojo={(dojo, theseRows) => {
                   if (selected === "all") {
-                    // check every listed person from this dojo into all their comps
-                    theseRows.forEach((r) => r.presence !== "all" && togglePerson(r.rec));
+                    // One coordinated op: check every listed person from this dojo
+                    // into all their competitions (single busy + single refresh).
+                    bulkCheckPeople(theseRows.map((r) => r.rec));
                   } else {
                     const pids = theseRows.filter((r) => !r.player.checkedIn).map((r) => rdPid(r.player));
                     bulkDojoComp(selected, pids);

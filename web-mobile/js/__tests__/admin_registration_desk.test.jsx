@@ -58,6 +58,12 @@ describe('rdTokenScore (fuzzy)', () => {
     // real hit — the gap cap rejects it.
     expect(rdTokenScore('yama', 'ryo nakamura wakaba transfer')).toBeNull();
   });
+  it('rejects at the gap-cap boundary (gaps == needle length)', () => {
+    // "yama" over "ryonakama": y@1,a@5,m@8,a@9 → gaps 3+2+0 = ... the boundary
+    // case where total gaps equal the needle length must be rejected (>=), not
+    // accepted. A spread this wide is never a real desk hit.
+    expect(rdTokenScore('yama', 'ryonakama')).toBeNull();
+  });
   it('returns null when a character is missing entirely', () => {
     expect(rdTokenScore('zzz', 'tanaka')).toBeNull();
   });

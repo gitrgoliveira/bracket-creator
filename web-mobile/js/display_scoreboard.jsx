@@ -101,6 +101,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                         MatchDetailCard). */}
                     <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
                         teamSize={teamSize} showDH={showDH} variant="tv"
+                        isRunning={promoted.match?.status === "running"}
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")} />

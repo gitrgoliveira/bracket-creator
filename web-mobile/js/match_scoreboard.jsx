@@ -321,7 +321,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // TeamScoreboard — §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB }) {
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
@@ -351,15 +351,17 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   // exceed teamSize, so never shrink below regular.length.
   const rowCount = Math.max(regular.length, teamSize || 0);
   const scoredAt = (i) => i < regular.length && isScored(regular[i]);
-  // currentIdx = first not-yet-scored position. Only highlight a "now" bout once
-  // the encounter is under way (≥1 scored bout); an up-next board stays all-queued.
+  // currentIdx = first not-yet-scored position (-1 when every position is
+  // scored → completed). The "now" highlight is only shown once the encounter
+  // is under way — either the match is RUNNING (so a 0–0 running board still
+  // highlights bout 1) or at least one bout is already scored. An up-next board
+  // (not running, nothing scored) stays all-queued.
   let currentIdx = -1;
-  if (regular.some(isScored)) {
-    for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { currentIdx = i; break; } }
-  }
-  const allScored = regular.length > 0 && regular.every(isScored);
+  for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { currentIdx = i; break; } }
+  const liveHighlight = !!isRunning || regular.some(isScored);
   const rowState = (i) => {
-    if (currentIdx === -1) return allScored ? "done" : "queued"; // completed → done; up-next → queued
+    if (currentIdx === -1) return "done";          // every position scored → completed
+    if (!liveHighlight) return "queued";           // up-next: nothing live yet
     return i < currentIdx ? "done" : (i === currentIdx ? "now" : "queued");
   };
 

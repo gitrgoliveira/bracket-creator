@@ -339,6 +339,13 @@ describe('match_scoreboard components', () => {
     expect(states.every(s => s === 'queued')).toBe(true);
   });
 
+  it('TeamScoreboard highlights bout 1 as "now" for a RUNNING 0-0 encounter (isRunning)', () => {
+    // A running team match with no bouts scored yet must still mark the first
+    // bout live, so it doesn't look identical to an up-next board.
+    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
+    expect(boutRows(tree).map(r => r.state)).toEqual(['now', 'queued', 'queued', 'queued', 'queued']);
+  });
+
   it('TeamScoreboard renders the DAIHYOSEN banner + rep-bout row when showDH AND the match is tied', () => {
     const subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: ['M'] },   // 1-1 → IV 0-0, PW 1-1 → tied

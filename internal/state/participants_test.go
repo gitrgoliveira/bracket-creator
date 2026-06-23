@@ -392,7 +392,7 @@ func TestUpdateParticipant(t *testing.T) {
 }
 
 func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
-	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,tag][,checked_in]".
+	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,source][,checked_in]".
 	// A 3-part UUID row "uuid,Alice,checked_in" must NOT be misclassified: "checked_in" is the Dojo.
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -599,20 +599,20 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name+dojo must be rejected")
 }
 
-// TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-
+// TestZekkenWithSourceDoesNotCorruptCSV pins the marshalParticipantsCSV column-
 // layout fix: a zekken competition where DisplayName equals SanitizeName(Name)
-// AND Tag is non-empty (e.g. the "manual" default applied by the single-add
-// endpoint) used to produce a 4-field row [id, Name, Dojo, Tag] that
+// AND Source is non-empty (e.g. the "manual" default applied by the single-add
+// endpoint) used to produce a 4-field row [id, Name, Dojo, Source] that
 // CreatePlayersFromRecords(_, true) misparsed as
-// (Name, DisplayName=Dojo, Dojo=Tag) — silently corrupting the row.
+// (Name, DisplayName=Dojo, Dojo=Source) — silently corrupting the row.
 // The writer now always emits the DisplayName column for zekken comps.
-func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
+func TestZekkenWithSourceDoesNotCorruptCSV(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
-	compID := "zekken-tag"
+	compID := "zekken-source"
 	require.NoError(t, store.SaveCompetition(&Competition{
-		ID: compID, Name: "Zekken Tag", WithZekkenName: true,
+		ID: compID, Name: "Zekken Source", WithZekkenName: true,
 	}))
 
 	// DisplayName left blank — SaveParticipants must still write the

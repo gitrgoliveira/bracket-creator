@@ -492,16 +492,16 @@ func TestRegistration_POST_CompNotFound_Returns404(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST — tag is always "registered" regardless of caller
+// POST — source is always "registered" regardless of caller
 // ---------------------------------------------------------------------------
 
-func TestRegistration_POST_TagAlwaysRegistered(t *testing.T) {
+func TestRegistration_POST_SourceAlwaysRegistered(t *testing.T) {
 	r, store, _, _ := setupRegistrationRouter(t, selfRunTournament())
 
-	const compID = "comp-tag-check"
+	const compID = "comp-source-check"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Name:   "Tag Check",
+		Name:   "Source Check",
 		Status: state.CompStatusSetup,
 	}))
 

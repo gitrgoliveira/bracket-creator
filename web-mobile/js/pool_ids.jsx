@@ -8,6 +8,11 @@
 // Backend id formats: "PoolName-N", "PoolName-DH-N" (daihyosen), "PoolName-TB-N"
 // (tiebreaker). The non-greedy capture leaves hyphenated pool names intact
 // ("Pool A-East-0" → "Pool A-East"); ids without a recognisable suffix yield "".
+// CAVEAT: this matches ANY id ending in "-<digits>" (with an optional DH-/TB-),
+// so non-pool ids are NOT rejected — e.g. a Swiss id "Swiss-R1-0" yields
+// "Swiss-R1". Call sites that must distinguish a real pool from Swiss/other
+// phases should gate on the competition format or a "Pool " prefix, not on a
+// truthy poolNameOf() result alone (see findNextPoolOnCourt's "mixed" gate).
 export const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 
 // poolNameOf — derive the pool name from a pool-match id (incl. DH/TB

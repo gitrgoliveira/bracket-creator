@@ -126,7 +126,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				if len(line) > 3 {
 					meta := line[3:]
 					if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
-						player.Tag = meta[len(meta)-1]
+						player.Tag = CanonicalParticipantTag(meta[len(meta)-1])
 						meta = meta[:len(meta)-1]
 					}
 					if len(meta) > 0 {
@@ -144,7 +144,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			if len(line) > 2 {
 				meta := line[2:]
 				if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
-					player.Tag = meta[len(meta)-1]
+					player.Tag = CanonicalParticipantTag(meta[len(meta)-1])
 					meta = meta[:len(meta)-1]
 				}
 				if len(meta) > 0 {
@@ -177,6 +177,13 @@ func IsParticipantTag(s string) bool {
 		return true
 	}
 	return false
+}
+
+// CanonicalParticipantTag returns the canonical lower-case form of a tag. Tags
+// are validated case-insensitively, so store this form to avoid duplicate
+// buckets ("Registered" vs "registered") in tag filters and the display.
+func CanonicalParticipantTag(s string) string {
+	return strings.ToLower(s)
 }
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses

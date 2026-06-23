@@ -291,7 +291,7 @@ func validatePlayerLengths(name, displayName, dojo, tag string, metadata []strin
 	if tag != "" && !helper.IsParticipantTag(tag) {
 		return &ValidationError{
 			Field:   "tag",
-			Message: `must be one of "manual", "registered", "transfer", "reserved"`,
+			Message: `must be one of "manual", "registered", "transfer", "reserved" (case-insensitive; stored lower-case)`,
 		}
 	}
 	if len(metadata) > MaxPlayerMetadataItems {

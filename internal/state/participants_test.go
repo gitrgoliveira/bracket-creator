@@ -27,12 +27,15 @@ func TestSaveParticipants_CanonicalizesSource(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A", Source: "Manual"},
 		{Name: "Bob", Dojo: "Dojo B", Source: "  Registered "},
+		{Name: "Carol", Dojo: "Dojo C", Source: "vip"}, // unknown → dropped, not round-tripped
 	}))
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
-	require.Len(t, loaded, 2)
+	require.Len(t, loaded, 3)
 	assert.Equal(t, "manual", loaded[0].Source, "Source must be lower-cased on write")
 	assert.Equal(t, "registered", loaded[1].Source, "Source must be trimmed + lower-cased on write")
+	assert.Empty(t, loaded[2].Source, "unknown Source must NOT be persisted")
+	assert.Empty(t, loaded[2].Metadata, "unknown Source must NOT round-trip into Metadata")
 }
 
 func TestParticipants(t *testing.T) {

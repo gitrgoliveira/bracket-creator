@@ -613,8 +613,11 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		// Canonicalize (trim + lower-case) at the write chokepoint so participants.csv
 		// is always normalized regardless of which handler built the Player — keeps
 		// the loader from shifting a stray-cased value into Metadata and avoids
-		// split filter buckets.
-		if src := helper.CanonicalRegistrationSource(p.Source); src != "" {
+		// split filter buckets. Only persist a RECOGNIZED source: an unknown value
+		// (set by some internal caller bypassing the API validator) would otherwise
+		// be written as a column and reloaded as Metadata — a lossy round-trip — so
+		// drop it instead.
+		if src := helper.CanonicalRegistrationSource(p.Source); helper.IsRegistrationSource(src) {
 			record = append(record, src)
 		}
 		if p.CheckedIn {

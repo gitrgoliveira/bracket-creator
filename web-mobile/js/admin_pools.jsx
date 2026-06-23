@@ -57,7 +57,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // hyphenated names preserved, unrecognised ids → "").
 
 // Filter a flat poolMatches array down to entries belonging to a single pool.
-// Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
+// Uses poolNameFromMatchId (./pool_ids.jsx) so DH/TB suffix variants are handled correctly.
 //
 // pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
 // score data. poolMatches (state.MatchResult) has the full data including the

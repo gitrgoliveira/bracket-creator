@@ -32,8 +32,6 @@ const BreadcrumbsRD = window.Breadcrumbs;
 const StatusBadgeRD = window.StatusBadge;
 const pluralizeRD = window.pluralize;
 
-const PARTICIPANT_TAGS_RD = ["manual", "registered", "transfer"];
-
 // ---------------------------------------------------------------------------
 // Pure helpers (no React) — kept module-scoped so they're unit-testable.
 // ---------------------------------------------------------------------------
@@ -263,6 +261,11 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
       <span className="rd-chips__label">{label || "Also in"}</span>
       {entries.map(({ comp, player }) => {
         const checked = player.checkedIn;
+        // The player tag (number) to hand over for THIS competition. Individuals
+        // get a per-competition number ("M1"); teams' tag is the team name,
+        // which is already the row's name, so we don't repeat it on the chip.
+        const tag = rdPlayerTag(comp, player);
+        const num = tag.kind === "number" ? tag.value : null;
         return (
           <button
             type="button"
@@ -274,6 +277,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
             <span className="rd-chip__name">{comp.name}</span>
+            {num && <span className="rd-chip__num">{num}</span>}
           </button>
         );
       })}
@@ -288,8 +292,6 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
 // ---------------------------------------------------------------------------
 function RdRow({ mode, comp, player, zekken, entries, others, checked, presence, busy, onPrimary, onToggle, onEdit, isLast }) {
   const danGrade = player.danGrade || (player.metadata && player.metadata[0]) || "";
-  const tag = (player.tag || "").toLowerCase();
-  const showTag = PARTICIPANT_TAGS_RD.includes(tag);
 
   const stateClass = mode === "all"
     ? (presence === "all" ? "is-checked" : presence === "partial" ? "is-partial" : "")
@@ -329,7 +331,6 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {zekken && (
             <span className="rd-row__zekken" title="Zekken / display name">{zekken}</span>
           )}
-          {showTag && <span className={`tag-badge${tag === "manual" ? " tag-badge--warn" : ""}`}>{tag}</span>}
         </div>
         <div className="rd-row__meta">
           {player.dojo && <span className="rd-row__dojo">{player.dojo}</span>}
@@ -533,7 +534,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 
   const [selected, setSelected] = useStateRD("all");
   const [query, setQuery] = useStateRD("");
-  const [tagFilter, setTagFilter] = useStateRD("all");
   const [dojoFilter, setDojoFilter] = useStateRD("all");
   const [uncheckedOnly, setUncheckedOnly] = useStateRD(false);
   const [groupByDojo, setGroupByDojo] = useStateRD(false);
@@ -706,7 +706,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const rows = useMemoRD(() => {
     const matchesFilters = (player) => {
       if (uncheckedOnly && player.checkedIn) return false;
-      if (tagFilter !== "all" && (player.tag || "").toLowerCase() !== tagFilter) return false;
       if (dojoFilter !== "all" && player.dojo !== dojoFilter) return false;
       return true;
     };
@@ -752,7 +751,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       return a.player.name.localeCompare(b.player.name);
     });
     return out;
-  }, [selected, comps, peopleIndex, queryNorm, uncheckedOnly, tagFilter, dojoFilter]);
+  }, [selected, comps, peopleIndex, queryNorm, uncheckedOnly, dojoFilter]);
 
   // Dojo list for the filter (scoped to the selected competition / all).
   const dojoOptions = useMemoRD(() => {
@@ -863,13 +862,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
               </div>
 
               <div className="rd-toolbar">
-                <label className="rd-filter">
-                  <span>Tag</span>
-                  <select className="select" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
-                    <option value="all">All</option>
-                    {PARTICIPANT_TAGS_RD.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </label>
                 {dojoOptions.length > 0 && (
                   <label className="rd-filter">
                     <span>Dojo</span>

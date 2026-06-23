@@ -8816,6 +8816,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   cursor: default;
 }
 
+/* Player number (the tag to hand over) for this competition, shown on the chip
+   so it's visible in "all competitions" mode where there's no single tag. */
+.rd-chip__num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 1px;
+}
+
+.rd-chip.is-checked .rd-chip__num {
+  color: var(--ok-ink);
+  background: var(--surface);
+}
+
 .rd-chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

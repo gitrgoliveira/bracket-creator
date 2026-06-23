@@ -1358,7 +1358,7 @@ paths:
       tags: [participants]
       summary: Update a participant
       description: |
-        Updates an individual participant's name, dojo, displayName, danGrade, metadata, and tag.
+        Updates an individual participant's name, dojo, displayName, danGrade, metadata, and source.
 
         Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
         but not started). In draw-ready state the change **cascades** through draw
@@ -1405,9 +1405,10 @@ paths:
                   type: array
                   items:
                     type: string
-                tag:
+                source:
                   type: string
-                  description: Provenance tag (e.g. "manual", "registered").
+                  enum: [manual, registered, transfer]
+                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field.
       responses:
         '200':
           description: |
@@ -2781,15 +2782,17 @@ components:
           items:
             type: string
             maxLength: 200
-        tag:
+        source:
           type: string
           maxLength: 200
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case).
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
         number:
           type: string
-          description: Match number prefix + sequence (e.g. "K1"). Only present when number-prefix is set.
+          description: The competitor's "tag" — assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
 
     Participant:
       type: object
@@ -2812,9 +2815,11 @@ components:
           items:
             type: string
             maxLength: 200
-        tag:
+        source:
           type: string
           maxLength: 200
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case).
 
     SeedAssignment:
       type: object

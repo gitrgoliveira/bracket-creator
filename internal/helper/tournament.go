@@ -126,7 +126,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				if len(line) > 3 {
 					meta := line[3:]
 					if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
-						player.Source = meta[len(meta)-1]
+						player.Source = strings.ToLower(meta[len(meta)-1])
 						meta = meta[:len(meta)-1]
 					}
 					if len(meta) > 0 {
@@ -144,7 +144,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			if len(line) > 2 {
 				meta := line[2:]
 				if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
-					player.Source = meta[len(meta)-1]
+					player.Source = strings.ToLower(meta[len(meta)-1])
 					meta = meta[:len(meta)-1]
 				}
 				if len(meta) > 0 {
@@ -170,7 +170,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 
 func isRegistrationSource(s string) bool {
 	switch strings.ToLower(s) {
-	case "manual", "registered", "transfer", "reserved":
+	case "manual", "registered", "transfer":
 		return true
 	}
 	return false

@@ -11,7 +11,7 @@ type Player struct {
 	DisplayName string   `json:"displayName"`
 	Dojo        string   `json:"dojo"`
 	Metadata    []string `json:"metadata,omitempty"`
-	Source      string   `json:"source,omitempty"` // registration source — how the entry was created: registered (self-registered), manual (operator-added), transfer (imported), reserved
+	Source      string   `json:"source,omitempty"` // registration source — how the entry was created: registered (self-registered), manual (operator-added), transfer (imported)
 	CheckedIn   bool     `json:"checkedIn"`
 
 	PoolPosition int64 `json:"-"` // internal: used for Excel output and pool-draw ordering; not serialised to JSON because the value is inconsistently indexed across producer paths (0-based in handlers, 1-based in helper). Draw order on the wire is conveyed by pool.players array ordering.

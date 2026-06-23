@@ -339,18 +339,18 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   // exceed teamSize, so never shrink below regular.length.
   const rowCount = Math.max(regular.length, teamSize || 0);
   const scoredAt = (i) => i < regular.length && isScored(regular[i]);
-  // currentIdx = first not-yet-scored position (-1 when every position is
-  // scored → completed). The "now" highlight is only shown once the encounter
-  // is under way — either the match is RUNNING (so a 0–0 running board still
-  // highlights bout 1) or at least one bout is already scored. An up-next board
-  // (not running, nothing scored) stays all-queued.
-  let currentIdx = -1;
-  for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { currentIdx = i; break; } }
-  const liveHighlight = !!isRunning || regular.some(isScored);
+  // Per-row state: a scored bout is "done"; the first unscored bout is "now"
+  // ONLY when the match is RUNNING (so a 0–0 running board highlights bout 1);
+  // every other unscored bout is "queued". Gating "now" on isRunning means a
+  // completed match — including a quick-score that synthesised fewer
+  // subResults than teamSize — never lights up a padded blank row, and an
+  // up-next board stays all-queued.
+  let firstUnscored = -1;
+  for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { firstUnscored = i; break; } }
   const rowState = (i) => {
-    if (currentIdx === -1) return "done";          // every position scored → completed
-    if (!liveHighlight) return "queued";           // up-next: nothing live yet
-    return i < currentIdx ? "done" : (i === currentIdx ? "now" : "queued");
+    if (scoredAt(i)) return "done";
+    if (isRunning && i === firstUnscored) return "now";
+    return "queued";
   };
 
   return (

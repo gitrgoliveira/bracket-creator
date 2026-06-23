@@ -291,14 +291,28 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
   });
 
-  it('TeamScoreboard highlights the first unplayed bout as "now" across the padded positions (mp-1oy3)', () => {
-    // 2 scored + 3 padded → done, done, now (first to-come), queued, queued.
+  it('TeamScoreboard highlights the first unplayed bout as "now" across the padded positions when RUNNING (mp-1oy3)', () => {
+    // 2 scored + 3 padded on a RUNNING match → done, done, now (first to-come), queued, queued.
     const subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: 2, ipponsB: [], ipponsA: ['D'] },
     ];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false });
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
     expect(boutRows(tree).map(r => r.state)).toEqual(['done', 'done', 'now', 'queued', 'queued']);
+  });
+
+  it('TeamScoreboard does NOT light a padded row "now" on a COMPLETED match with fewer subResults than teamSize (quick-score)', () => {
+    // A quick-score can synthesise fewer subResults than teamSize; with the match
+    // NOT running, the padded positions must stay "queued", never "now".
+    const subResults = [
+      { position: 1, ipponsB: ['M'], ipponsA: [] },
+      { position: 2, ipponsB: [], ipponsA: ['D'] },
+      { position: 3, ipponsB: ['K'], ipponsA: [] },
+    ];
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false /* not running */ });
+    const states = boutRows(tree).map(r => r.state);
+    expect(states).toEqual(['done', 'done', 'done', 'queued', 'queued']);
+    expect(states).not.toContain('now');
   });
 
   it('TeamScoreboard leaves an up-next board (no scored bouts) all queued — no "now"', () => {

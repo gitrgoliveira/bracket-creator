@@ -2000,6 +2000,43 @@ a:hover {
 }
 
 /* ---------- Running match panel (admin) ---------- */
+/* Bracket page layout: the tree and the winner-picker / scoring panel sit
+   side by side when there's room. The panel keeps a minimum width so the
+   reused inline scoring editor never squashes or clips; when the bracket and
+   that minimum can't both fit, the panel wraps to a full-width row BELOW the
+   bracket (flex line-break on basis 560 + 520 > available). */
+.bracket-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.bracket-layout__bracket {
+  /* grows to fill; min-width:0 lets it shrink so .bracket-canvas scrolls
+     (overflow-x:auto) instead of forcing page overflow. */
+  flex: 1 1 560px;
+  min-width: 0;
+}
+.bracket-layout__panel {
+  /* Grows to fill its flex line. When it wraps below the bracket (the common
+     case at desktop widths) it fills the whole row, so its card lines up edge-
+     to-edge with the bracket card above — no max-width cap that would leave a
+     ragged right edge. min-width keeps the inline editor from squashing when
+     it DOES sit beside the bracket. */
+  flex: 1 1 520px;
+  min-width: 500px;
+}
+/* Phones / small tablets: drop the minimum so the panel fills the single
+   column instead of overflowing; the editor's own coarse-pointer rules handle
+   compact sizing from here. */
+@media (max-width: 760px) {
+  .bracket-layout__panel {
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 .running-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2018,6 +2055,21 @@ a:hover {
   font-weight: 600;
   font-size: 16px;
 }
+/* Centred content column: the panel card fills the row (so it aligns with the
+   bracket card), but the reused editor / result card are capped here so they
+   read as a comfortable scoreboard width instead of stretching edge-to-edge. */
+.running-panel__inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Completed-match result view: the shared MatchDetailCard (same as the viewer)
+   followed by the confirmation-gated edit action. */
+.running-panel__result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 .running-panel__court {
   font-family: var(--font-mono);
@@ -2026,133 +2078,6 @@ a:hover {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-
-.score-card {
-  display: grid;
-  grid-template-columns: 1fr 60px 1fr;
-  align-items: stretch;
-  gap: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-
-.score-side {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* Aka/Shiro side treatment (DESIGN.md §4): a thick coloured top bar gives
-     each side real colour area so the two read apart at a glance, not just a
-     faint tint. The bar colour is the side identity. */
-  border-top: 5px solid var(--line);
-  /* Mirrored head-to-head: content is vertically centred and the two sides
-     face the central "vs" — Shiro (left) leans right-toward-centre, Aka
-     (right) leans left-toward-centre. Matches the live scoreboard. */
-  justify-content: center;
-}
-
-.score-side--white {
-  background: var(--white-side);
-  /* framed white: dark cool bar + 45° hatch so "white" reads as a side */
-  border-top-color: var(--shiro-edge);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
-}
-
-/* Aka is on the right: align its content to the outer (right) edge so the
-   two sides mirror each other — Shiro left-aligned, Aka right-aligned.
-   Both sides are vertically centred by the justify-content:center above. */
-.score-side--red {
-  align-items: flex-end;
-  text-align: right;
-}
-.score-side--red .score-side__buttons,
-.score-side--red .score-side__points {
-  justify-content: flex-end;
-}
-
-.score-side--red {
-  background: var(--red-soft);
-  border-top-color: var(--red);
-}
-
-.score-side__lbl {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 800;
-  font-family: var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-/* filled identity chip — the obvious cue, present before any winner is chosen */
-.score-side--white .score-side__lbl {
-  background: #fff;
-  color: var(--shiro-edge);
-  border: 1.5px solid var(--shiro-edge);
-}
-.score-side--red .score-side__lbl {
-  background: var(--red);
-  color: #fff;
-}
-
-.score-side__name {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.score-side__dojo {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.score-side__points {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.score-pt {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.score-pt--filled {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
-
-.score-side--red .score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--empty {
-  color: var(--ink-4);
-}
-
-.score-side__buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .ipt-btn {
@@ -2168,180 +2093,6 @@ a:hover {
 
 .ipt-btn:hover {
   border-color: var(--ink-4);
-}
-
-.score-vs {
-  display: grid;
-  place-items: center;
-  background: white;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--ink-3);
-  font-family: var(--font-display);
-}
-
-/* ---------- Scoreboard editor (Proposal C) ----------
-   4 columns: [Shiro button rail | Shiro who | Aka who | Aka button rail].
-   The Aka/Shiro colour runs continuously edge-to-edge (no neutral gap); the
-   two competitors meet at the centre facing a floating "vs". Side name is
-   stated ONCE, in the centre identity chip (rails are unlabelled — their
-   colour + position already say which side). DESIGN.md §4 Aka/Shiro. */
-.sc-board {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr 1fr auto;
-  align-items: stretch;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-.sc-board__rail,
-.sc-board__who {
-  border-top: 5px solid var(--line);
-}
-/* side fills — shared by rail + who so colour is continuous */
-.sc-board__shiro {
-  background: var(--white-side);
-  border-top-color: var(--accent);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
-}
-.sc-board__aka {
-  background: var(--red-soft);
-  border-top-color: var(--red);
-}
-.sc-board__rail {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px;
-}
-.sc-board__btnrow {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 156px;
-}
-.sc-board__who {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-  padding: 18px;
-}
-.sc-board__who--shiro { align-items: flex-end; text-align: right; padding-right: 32px; }
-.sc-board__who--aka { align-items: flex-start; text-align: left; padding-left: 32px; }
-.sc-board__lbl {
-  display: inline-flex;
-  align-items: center;
-  font: 800 11px/1 var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-.sc-board__who--shiro .sc-board__lbl {
-  background: #fff;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-}
-.sc-board__who--aka .sc-board__lbl {
-  background: var(--red);
-  color: #fff;
-}
-.sc-board__nm {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.sc-board__tally { display: flex; gap: 6px; }
-/* the meeting line — a floating vs pill dead-centre */
-.sc-board__vs {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  font: 800 12px/1 var(--font-display);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 6px 9px;
-  z-index: 2;
-}
-/* Portrait phones/tablets: the 4-column side-by-side doesn't fit, so each side
-   becomes its own horizontal band — name + tally on the inner side, the score
-   buttons on the same line to the outer side. Landscape (incl. landscape
-   phones) keeps the side-by-side Proposal C above. Orientation-based per the
-   operator's request. The two shiro/aka DOM nodes (rail + who) are re-placed
-   into a 2×2 grid: [who | rail] per row. */
-@media (max-width: 600px) {
-  /* Narrow screens (true phones, portrait or landscape): a side-by-side rail
-     competes with the name for horizontal space and overflows. So each side
-     becomes a single full-width block — identity chip + name + tally, then the
-     score buttons full-width beneath, wrapping as needed. One column = can't
-     overflow at any width, every button keeps its 44px touch target. Wider
-     tablets (incl. portrait ≥600px) keep the side-by-side Proposal C above. */
-  .sc-board {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    grid-auto-flow: row;
-  }
-  /* re-order so each side's buttons sit directly under that side's name:
-     shiro who → shiro rail → aka who → aka rail */
-  .sc-board__who--shiro { order: 1; }
-  .sc-board__rail.sc-board__shiro { order: 2; }
-  .sc-board__who--aka { order: 3; }
-  .sc-board__rail.sc-board__aka { order: 4; }
-  .sc-board__who--shiro,
-  .sc-board__who--aka {
-    align-items: flex-start; text-align: left; padding: 14px 16px 8px;
-  }
-  /* rail no longer its own column — full width under the name, buttons left-aligned.
-     Its top border would double the divider, so drop it here. */
-  .sc-board__rail { border-top: none; padding: 0 16px 14px; justify-content: flex-start; }
-  .sc-board__btnrow { max-width: none; justify-content: flex-start; }
-  /* the floating centre "vs" is meaningless once stacked */
-  .sc-board__vs { display: none; }
-}
-
-.running-panel__actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-
-/* Mode tabs */
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--line-2);
-  border-radius: 10px;
-  margin-bottom: 16px;
-}
-
-.mode-tabs button {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-2);
-}
-
-.mode-tabs button.is-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ---------- Viewer (mobile) ---------- */
@@ -3996,9 +3747,8 @@ button.pool-match-row {
     min-height: 44px;
     padding: 8px 10px;
   }
-  /* Scoring buttons are the operator's most-tapped control — meet the 44px
-     touch target on tablets/phones (DESIGN.md §6). The portrait sc-board
-     button rail is sized (max-width ~100px) so two 44px buttons fit per row. */
+  /* Scoring buttons (sb-points-grid) are the operator's most-tapped control —
+     meet the 44px touch target on tablets/phones (DESIGN.md §6). */
   .ipt-btn {
     min-width: 44px;
     min-height: 44px;
@@ -5695,25 +5445,6 @@ button.pool-match-row {
   color: var(--accent);
   border: 1px solid var(--accent);
   margin-left: 4px;
-}
-
-/* Aka ippon buttons in scoreboard */
-.ipt-btn--aka {
-  background: var(--red-soft);
-  border-color: var(--red);
-  color: var(--red);
-}
-
-.score-pt--aka.score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--shiro.score-pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
 }
 
 /* Team header color label */

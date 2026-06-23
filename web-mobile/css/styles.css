@@ -8172,6 +8172,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .rd-workspace {
   align-items: start;
+  /* Cap the main column so the competitor's name and the number they're handed
+     read as a pair instead of being flung to opposite edges of an ultra-wide
+     row; centre the rail+main block so wide screens stay balanced rather than
+     left-shifted. The <860px media query below resets this to a single column. */
+  grid-template-columns: 240px minmax(0, 720px);
+  justify-content: center;
 }
 
 /* --- Rail: competition selector ----------------------------------------- */

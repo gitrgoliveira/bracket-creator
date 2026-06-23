@@ -883,7 +883,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
               {handoff && (
                 <div className="rd-handoff" role="status" aria-live="polite">
                   <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
-                  <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — hand over to <strong>{handoff.name}</strong></div>
+                  <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — <strong>{handoff.name}</strong></div>
                   {handoff.tags.some((t) => t.kind !== "pending") && (
                     <div className="rd-handoff__tags">
                       {handoff.tags.filter((t) => t.kind !== "pending").map((t, i) => (

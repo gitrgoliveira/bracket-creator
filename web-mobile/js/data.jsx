@@ -318,6 +318,14 @@ const SAMPLE_TOURNAMENTS = [
 
 const REGISTRATION_SOURCES = new Set(["manual", "registered", "transfer"]);
 
+// canonicalRegistrationSource mirrors Go's helper.CanonicalRegistrationSource:
+// trim + lower-case, and alias the legacy "reserved" token to "manual" so an
+// older CSV row round-trips consistently with the backend.
+function canonicalRegistrationSource(s) {
+  const c = (s || "").trim().toLowerCase();
+  return c === "reserved" ? "manual" : c;
+}
+
 // normalizeParticipantName applies the shared normalization used by the
 // duplicate-detection system (Tier-1 dedup key and Tier-2 near-dup signals).
 //
@@ -354,10 +362,12 @@ function parseParticipantLines(lines, withZekken) {
       parts.pop();
     }
 
-    // Detect trailing source column (must be a known registration source string, not a number)
-    const last = parts[parts.length - 1]?.toLowerCase();
-    if (REGISTRATION_SOURCES.has(last)) {
-      source = last;
+    // Detect trailing source column (must be a known registration source string, not a number).
+    // Canonicalize first so the legacy "reserved" alias is recognized (→ "manual"),
+    // mirroring the Go parser.
+    const canonLast = canonicalRegistrationSource(parts[parts.length - 1]);
+    if (REGISTRATION_SOURCES.has(canonLast)) {
+      source = canonLast;
       parts.pop();
     }
 

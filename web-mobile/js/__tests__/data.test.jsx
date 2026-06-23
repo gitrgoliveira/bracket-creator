@@ -107,4 +107,17 @@ describe('parseParticipantLines', () => {
     expect(p.name).toBe('Name');
     expect(p.dojo).toBe('Dojo');
   });
+
+  it('aliases the legacy "reserved" source to "manual" (mirrors Go)', () => {
+    const [p] = parseParticipantLines(['Jane Doe, Osaka, reserved'], false);
+    expect(p.source).toBe('manual');
+    expect(p.dojo).toBe('Osaka');
+    expect(p.danGrade).toBe(''); // "reserved" consumed as source, not left as danGrade
+  });
+
+  it('leaves an unknown trailing token as danGrade, not source', () => {
+    const [p] = parseParticipantLines(['Bob Lee, Kyoto, vip'], false);
+    expect(p.source).toBe('');
+    expect(p.danGrade).toBe('vip');
+  });
 });

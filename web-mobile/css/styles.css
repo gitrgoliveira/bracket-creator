@@ -6237,8 +6237,11 @@ button.pool-match-row {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
 /* Registration tag badge (registered / manual / transfer) next to a player
-   name. Rendered at the SAME font size as the name — the tag is as relevant as
-   the name. NEUTRAL grey — never navy (running signal) or red (Aka). */
+   name. Sized at the row's nominal name size (`em` here; `3vh * --msb-scale` in
+   TV mode) — as prominent as the name. On the TV board the NAME may shrink below
+   this via --msb-name-scale to fit beside the full-size tag (see
+   .msb--tv .msb-name), so the tag can end up larger than the name there — that's
+   intentional. NEUTRAL grey — never navy (running signal) or red (Aka). */
 .msb-tag { flex-shrink: 0; display: inline-block; margin: 0 8px; padding: 0 8px; border-radius: 5px;
   font-size: 1em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em;
   vertical-align: baseline; background: #ffffff; color: var(--ink-3, #6b7280);

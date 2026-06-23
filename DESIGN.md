@@ -71,6 +71,11 @@ All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Ref
 | `--warn-soft` | `#fffbeb` | Warning fill (amber-50) — `.alert--warn`, `.tag-badge--warn`, offline pill background |
 | `--warn-border` | `#fde68a` | Warning hairline border (amber-200) |
 | `--warn-ink` | `#78350f` | Strongest warning text (amber-900, ~8:1 on `--warn-soft`) |
+| `--ok` | `#16a34a` | **Success / present** green — check-in fills, win accents, progress-done. The "this succeeded / is checked-in / advancing / won" signal. Mirrors the `--warn` ramp; **never** for Aka/danger (use `--danger`) or running (use `--accent`). Distinct from the **status-pipeline playoffs** green (`#ecfdf5`/`#065f46`/`#a7f3d0`, badge-only carve-out). |
+| `--ok-strong` | `#15803d` | Stronger success text/border on `--ok-soft` (green-700) |
+| `--ok-soft` | `#f0fdf4` | Success fill — checked-in rows, success alerts, hand-over callout (green-50) |
+| `--ok-border` | `#dcfce7` | Success hairline border (green-100) |
+| `--ok-ink` | `#166534` | Strongest success text, AA on `--ok-soft` (green-800) |
 | `--shiro-edge` | `#2a3346` | Shiro framing on dark surfaces (rare; most Shiro frames use `--accent`) |
 | `--shiro-hatch` | `rgba(42,51,70,0.07)` | 45° diagonal hatch on the Shiro side |
 | `--aka-bright` | `#ff3b3b` | Luminous Aka red for dark TV/overlay surfaces (scoreboard glow) |
@@ -110,15 +115,21 @@ Base: 15px / 1.4. Use the documented sizes below — don't introduce new in-betw
 
 | Size | Use |
 |---|---|
+| 9px | Micro tags/markers (`.pmf__checkin-tag`, scoreboard micro-labels) |
 | 10px | Decision chips, encho marker (`.bc-decision-chip`, `.bc-encho`) |
 | 10.5px | Pill labels, court tags, table column headers |
+| 11px | Dense secondary meta (rail sub-text, row meta, chips) — load-bearing at ~70 uses |
 | 12px | Hints, breadcrumbs, secondary meta |
 | 13–13.5px | Buttons, inputs, badges, bracket sides |
+| 14px | Compact card/list titles, modal body emphasis — ~30 uses |
 | 15px | Body text |
 | 16–18px | Card titles, modal titles |
 | 22px | Large scoreboard numbers (`.sb-name`, `.match-detail-card__ippons-val`, `.stat-box .v`) |
+| 24px | Secondary headings / large modal numerals |
 | 26px | Page-head titles |
 | 28px | Player-viewer hero (`.my-match__name`) — intentionally larger than page-head so the player's name dominates on the viewer screen |
+
+The former in-between strays (11.5 / 12.5 / 9.5 / 14.5 / 17 / 30) were folded into the scale; `9 / 11 / 14 / 24` are promoted as real sizes (they were used consistently, not accidentally). A few `8` and `20` px values remain on specialized scoreboard surfaces — reconcile when next touching those.
 
 Common weights: 500 (default UI), 600 (titles, active state), 700 (badges, scores). 800 appears in localized emphasis (podium step numbers, running strip); 400 in de-emphasis. Prefer the common three unless matching an existing emphasis pattern.
 
@@ -240,6 +251,7 @@ Quick lookup — scan, then `Ctrl+F` the class name to jump to its subsection.
 | Schedule rows | `.sched-row` (admin), `.vsched-item` (viewer) | Schedule list items |
 | Podium | `.podium-step--{1,2,3}` | Final-standings podium |
 | "My Match" hero | `.my-match` | Player-viewer hero card |
+| Registration desk | `.rd-*` | Cross-competition check-in surface (rail + roster + hand-over tag) |
 
 ### Buttons — `.btn`
 
@@ -377,6 +389,19 @@ Three-column layout with `order:` reordering so 1st sits in the middle (visual h
 
 Player-viewer-only. Solid `--accent` background, `--accent-fg` text. The only place white-on-navy body text appears.
 
+### Registration desk — `.rd-*`
+
+Admin-only cross-competition check-in surface ([admin_registration_desk.jsx](web-mobile/js/admin_registration_desk.jsx)). Reuses the `.workspace` shell (rail + main), `.badge`, `.tag-badge`, `.input`, `.select`, `.btn`, `.modal`, and `--focus-ring`. Structure:
+
+- `.rd-rail` / `.rd-rail__item` — competition selector with a per-competition check-in progress meter (`.rd-rail__bar-fill`, navy → `--ok` when complete). Collapses to a horizontal scroller under 860px.
+- `.rd-search` — the surface's visual anchor (16px, autofocused); Enter checks in the top fuzzy hit.
+- `.rd-row` — roster row: `.rd-check` toggle (role=checkbox, `--ok` when checked, `--warn-strong` when partial), identity block, and the **player tag** (`.rd-tag--{number,team,pending}`) — the number/team-name handed to the competitor.
+- `.rd-handoff` — `--ok-soft` callout shown after a check-in, surfacing the tag large enough to read against a placard.
+- `.rd-chip` — a person's other-competition entries; checked chips use the `--ok` family.
+- `.rd-walkup` (inline add, setup-only) and the edit modal reuse the standard field/modal vocabulary.
+
+**Colour:** checked-in = `--ok` family (matches the seeding panel's check-in green); the active rail item and search focus use `--accent`; partial presence uses `--warn-strong`. No red (Aka/danger) appears here.
+
 ## 5. Patterns
 
 ### Page shell
@@ -484,7 +509,7 @@ Before introducing a new component, color, or pattern:
 
 1. **Reuse first.** Check the component list in §4 — there is almost always a match (especially for status badges, cards, table rows).
 2. **Extend, don't fork.** A new button shape is a `.btn--<modifier>`, not a new `.action-button`.
-3. **Token-only colors, with two carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root` — add it there and reference it. Two existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), and (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`. New exceptions need to be argued for, not assumed — and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent.
+3. **Token-only colors, with two carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root` — add it there and reference it. Two existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), and (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`. New exceptions need to be argued for, not assumed — and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent. (The success/present green was exactly this kind of spreading literal — it lived in ~8 component blocks before being promoted to the `--ok*` ramp; if you find another hue repeating across components, tokenize it the same way.)
 4. **Domain-specific is fine.** Match-side colors and podium gradients live inside their component blocks intentionally. Don't generalize them.
 5. **Verify visually.** UI changes are validated in a running browser via `make run-mobile`, not by diff inspection — see [CLAUDE.md](CLAUDE.md) "Common Pitfalls".
 6. **Match the prefix.** Pick the existing prefix that covers your concept (`bc-`, `pool-`, `sched-`, `vsched-`, `tcard-`, `viewer-`, `score-`, `running-`, `my-match-`) before inventing a new one.

@@ -78,7 +78,9 @@ function rdTokenScore(needle, hay) {
   // ("tnk" → tanaka, gaps 2 < len 3) keeps small gaps; a coincidental spread
   // (gaps ≥ needle length, e.g. "yama"→"ryonakama" with gaps 4 == len 4) doesn't.
   if (gaps >= needle.length) return null;
-  return 200 + start + gaps; // any subsequence ranks below any contiguous hit
+  // Base offset large enough that a subsequence can never outrank a contiguous
+  // hit, even for a long haystack where a contiguous match's `at` index is big.
+  return 1e6 + start + gaps;
 }
 
 // Whole-query score: every whitespace-separated token must match (AND), so

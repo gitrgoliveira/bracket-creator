@@ -133,7 +133,7 @@ function ipponLetters(arr) {
 // outer edge is the left), aka fills right→left (its outer edge is the right),
 // so for aka we reverse the visual cell order. The testid stays on the logical
 // outer cell (letters[0]) regardless of which side renders it.
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)" };
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win" };
 
 function slotCells(letters, side, testid) {
   const cells = [0, 1].map(i => {

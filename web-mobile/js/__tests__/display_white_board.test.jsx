@@ -376,7 +376,7 @@ describe('findNextPoolOnCourt', () => {
 
 describe('TvIndividualBoard', () => {
   const base = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false, queueMatches: [] };
-  const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+  const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
     { id: 'Pool A-0', court: 'B', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
     { id: 'Pool A-1', court: 'B', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
   ] };
@@ -409,10 +409,10 @@ describe('TvIndividualBoard', () => {
     // 1 running + 20 scheduled, a blind tail slice would show only scheduled
     // rows and DROP the running match. windowAroundCurrent must keep it on screen.
     const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
-      { id: 'Pool A-done', court: 'B', sideA: 'D1', sideB: 'D2', status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
-      { id: 'Pool A-run', court: 'B', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:05' },
+      { id: 'Pool A-0', court: 'B', sideA: 'D1', sideB: 'D2', status: 'completed', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
+      { id: 'Pool A-1', court: 'B', sideA: 'Cur', sideB: 'Run', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:05' },
       ...Array.from({ length: 20 }, (_, i) => ({
-        id: `Pool A-s${i}`, court: 'B', sideA: `S${i}`, sideB: `T${i}`, status: 'scheduled',
+        id: `Pool A-${i + 2}`, court: 'B', sideA: `S${i}`, sideB: `T${i}`, status: 'scheduled',
         ipponsA: [], ipponsB: [], scheduledAt: `10:${String(i).padStart(2,'0')}`,
       })),
     ] };
@@ -584,7 +584,7 @@ describe('TvIndividualBoard', () => {
   });
 
   it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {
-    const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+    const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol',  status: 'running',   scheduledAt: '09:00' },
       { id: 'Pool A-1', court: 'B', sideA: 'Eduardo', sideB: 'Erin',   status: 'scheduled', scheduledAt: '09:05' },
       { id: 'Pool B-0', court: 'B', sideA: 'Philippe',sideB: 'Dave',   status: 'scheduled', scheduledAt: '09:30' },
@@ -628,6 +628,19 @@ describe('TvIndividualBoard', () => {
   it('does NOT render the UP NEXT pool strip when there is no following pool on this court', () => {
     // The base fixture has only Pool A on court B; no next pool.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
+    expect(str).not.toContain('tvd-next-pool');
+  });
+
+  it('does NOT render the UP NEXT pool strip for a Swiss competition (poolNameOf treats Swiss ids as pools)', () => {
+    // Swiss matches live in poolMatches with ids "Swiss-R{n}-{i}"; the strip is
+    // gated to format === "mixed" so a Swiss board never floods it with the next
+    // round's roster.
+    const swiss = { name: 'Swiss Open', kind: 'individual', teamSize: 0, format: 'swiss', poolMatches: [
+      { id: 'Swiss-R1-0', court: 'B', sideA: 'A', sideB: 'B', status: 'running',   scheduledAt: '09:00' },
+      { id: 'Swiss-R2-0', court: 'B', sideA: 'C', sideB: 'D', status: 'scheduled', scheduledAt: '10:00' },
+    ] };
+    const promoted = { competition: swiss, match: swiss.poolMatches[0], isBracket: false };
     const str = JSON.stringify(TvIndividualBoard({ ...base, promoted }));
     expect(str).not.toContain('tvd-next-pool');
   });

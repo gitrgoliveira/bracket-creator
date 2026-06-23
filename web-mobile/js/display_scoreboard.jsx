@@ -2,7 +2,7 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, StreamingQR } from './display_helpers.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 
 const { useMemo: useMD } = React;
@@ -35,6 +35,11 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
     const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
+    // Header subtitle: competition name + phase, joined only when both exist
+    // (phaseLabel is "" for league, so no dangling " · ").
+    const compName = promoted.competition?.name || "";
+    const compPhase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
+    const headerSubtitle = [compName, compPhase].filter(Boolean).join(" · ");
     // The shared scoreboard below carries the score (IV/PW summary for teams,
     // ippon slots for individuals), so the team-name row centre is just "vs"
     // (+ any decision suffix).
@@ -51,13 +56,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                     {tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
-                    {(() => {
-                        const name = promoted.competition?.name || "";
-                        const phase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
-                        // phaseLabel is "" for league — omit the separator so the
-                        // subtitle reads just the competition name (no dangling " · ").
-                        return <span>{[name, phase].filter(Boolean).join(" · ")}</span>;
-                    })()}
+                    <span>{headerSubtitle}</span>
                     {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
@@ -172,6 +171,7 @@ function gatherIndividualGroup(promoted, court) {
         group = rounds[promoted.roundIndex] || [];
     } else {
         const pool = poolNameOf(cur.id);
+        if (!pool) return []; // non-pool-shaped id → don't collect every other non-pool match
         group = (comp.poolMatches || []).filter(m => poolNameOf(m.id) === pool);
     }
     // Filter to the same court — bracket rounds can span multiple courts.
@@ -266,12 +266,13 @@ const TV_INDIV_MAX_VISIBLE = 10;
 // number removed from the HEAD (used for the data-dropped attribute).
 function windowAroundCurrent(all, currentIdx, max) {
     if (all.length <= max) return { rows: all, dropped: 0 };
-    const anchor = currentIdx < 0 ? all.length - 1 : currentIdx;
+    // No current match found → show the FIRST max (upcoming), not the tail.
+    const anchor = currentIdx < 0 ? 0 : currentIdx;
     const LOOKBACK = 2; // completed rows shown above the current match
     let start = Math.max(0, anchor - LOOKBACK);
     // Don't run past the end — pull the window back so it stays `max` tall.
+    // (start is already ≥ 0 here: all.length > max, so all.length - max > 0.)
     if (start + max > all.length) start = all.length - max;
-    start = Math.max(0, start);
     return { rows: all.slice(start, start + max), dropped: start };
 }
 
@@ -334,9 +335,12 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const next = (firstQueued && !shownIds.has(firstQueued.id)) ? firstQueued : null;
     // Pool-phase only: surface the next pool on this court + its roster so
     // spectators know what's coming after the current pool finishes here.
-    // Bracket phase has no pools so this is null.
+    // Bracket phase has no pools so this is null. Gated to the "mixed" format —
+    // the only one with MULTIPLE pools. Swiss matches also live in poolMatches
+    // and poolNameOf would treat "Swiss-R1-2" as a pool, so without this gate a
+    // Swiss board would flood the strip with the whole next round's roster.
     const currentPoolName = !promoted.isBracket ? poolNameOf(promoted.match.id) : "";
-    const nextPool = (!promoted.isBracket && currentPoolName)
+    const nextPool = (!promoted.isBracket && currentPoolName && promoted.competition?.format === "mixed")
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
     // rowScale (--msb-scale) is VERTICAL: fewer rows get more room so glyphs grow
@@ -557,10 +561,10 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // admin scorer's compKind override (admin_pools.jsx): without it the rep
     // bout would render as an empty 5-person team grid since its score lives at
     // the match top level, not in subResults.
-    const isSupplementaryBout = /-(?:DH|TB)-\d+$/.test((promoted && promoted.match && promoted.match.id) || "");
+    const supplementaryBout = isSupplementaryBout(promoted && promoted.match && promoted.match.id);
     const isTeamComp = !!(promoted && promoted.competition &&
         (promoted.competition.kind === "team" || (promoted.competition.teamSize || 0) > 0));
-    const isTeamMatch = isTeamComp && !isSupplementaryBout;
+    const isTeamMatch = isTeamComp && !supplementaryBout;
     const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
 
     // mp-13y: fetch lineups for the running team match. useTeamLineups
@@ -632,7 +636,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // the sibling team encounters as individual rows). Show it as a single
         // scoreboard via TvWhiteBoard's individual branch (big Shiro/Aka names +
         // the rep bout's ippon slots).
-        if (isSupplementaryBout && isTeamComp) {
+        if (supplementaryBout && isTeamComp) {
             return <TvWhiteBoard
                 tournament={tournament} court={court} connected={connected}
                 promoted={promoted} isTeamMatch={false}

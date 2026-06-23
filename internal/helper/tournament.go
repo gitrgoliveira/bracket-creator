@@ -125,7 +125,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+					if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
 						player.Tag = meta[len(meta)-1]
 						meta = meta[:len(meta)-1]
 					}
@@ -143,7 +143,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+				if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
 					player.Tag = meta[len(meta)-1]
 					meta = meta[:len(meta)-1]
 				}
@@ -168,7 +168,10 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-func isParticipantTag(s string) bool {
+// IsParticipantTag reports whether s is a recognised participant provenance tag
+// (case-insensitive). Canonical enum — the single source of truth reused by the
+// API boundary validator so invalid tags can't reach persistence or the display.
+func IsParticipantTag(s string) bool {
 	switch strings.ToLower(s) {
 	case "manual", "registered", "transfer", "reserved":
 		return true

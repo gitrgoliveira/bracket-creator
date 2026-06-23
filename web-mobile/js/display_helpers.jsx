@@ -102,8 +102,8 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
         }));
     }
     out.sort((a, b) => {
-        const qa = a.queuePosition || 9999;
-        const qb = b.queuePosition || 9999;
+        const qa = Number(a.queuePosition) || 9999;
+        const qb = Number(b.queuePosition) || 9999;
         if (qa !== qb) return qa - qb;
         return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
     });
@@ -258,6 +258,13 @@ function poolNameOf(id) {
     return id.match(POOL_MATCH_ID_RE)?.[1] ?? "";
 }
 
+// isSupplementaryBout — true for a pool daihyosen ("…-DH-N") or tiebreaker
+// ("…-TB-N") rep bout (a single individual ippon-shobu even in a team comp).
+const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
+function isSupplementaryBout(id) {
+    return typeof id === "string" && SUPPLEMENTARY_BOUT_RE.test(id);
+}
+
 // phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
 // on this court so per-court and lobby surfaces can render "POOL A · 3 / 6" /
 // "FINAL · 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator
@@ -332,6 +339,7 @@ export {
     queueLabelCompact,
     phaseLabel,
     poolNameOf,
+    isSupplementaryBout,
     phaseProgressOnCourt,
     sideLabel,
     TermD,

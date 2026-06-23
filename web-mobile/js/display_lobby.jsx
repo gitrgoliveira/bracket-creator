@@ -329,12 +329,8 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     const firstSlot = courtSlots[ci] && courtSlots[ci][0];
                                     const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
                                     const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds, firstSlot.competition?.format) : '';
-                                    const progress = firstSlot ? phaseProgressOnCourt({
-                                        competition: firstSlot.competition,
-                                        isBracket: firstSlot.isBracket,
-                                        roundIndex: firstSlot.roundIndex,
-                                        match: firstSlot.match,
-                                    }, cc) : null;
+                                    // firstSlot already has { competition, isBracket, roundIndex, match }.
+                                    const progress = firstSlot ? phaseProgressOnCourt(firstSlot, cc) : null;
                                     const subtitle = [compName, phase, progress ? `${progress.done} / ${progress.total}` : null].filter(Boolean).join(' · ');
                                     return (
                                         <React.Fragment key={cc}>

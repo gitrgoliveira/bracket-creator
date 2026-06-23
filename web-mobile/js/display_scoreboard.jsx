@@ -72,18 +72,12 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             {/* Team name row — Shiro black (left), Aka red (right), no top score */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}>
-                        <TermD name="shiro">SHIRO</TermD>
-                        {promoted.match.sideB?.tag ? <span className="msb-tag" data-testid="tvw-shiro-tag">{promoted.match.sideB.tag}</span> : null}
-                    </div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}>
-                        {promoted.match.sideA?.tag ? <span className="msb-tag" data-testid="tvw-aka-tag">{promoted.match.sideA.tag}</span> : null}
-                        <TermD name="aka">AKA</TermD>
-                    </div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>
                 </div>
             </div>
@@ -283,39 +277,6 @@ function windowAroundCurrent(all, currentIdx, max) {
     return { rows: all.slice(start, start + max), dropped: start };
 }
 
-// nameFitForRows — the largest NAME-only scale (≤ 1) at which every visible
-// row's name fits its half of the row ALONGSIDE a full-size registration tag.
-// The tag stays at the row's name size (full prominence); only the name shrinks,
-// so names never truncate. Measured on the actual displayed string (sideLabel =
-// number prefix + zekken display name when enabled). `scale` is the current
-// --msb-scale (so the reserved tag width is computed at the real font size).
-function nameFitForRows(rows, zekken, scale) {
-    if (!rows || !rows.length) return 1;
-    const vw = (typeof window !== "undefined" && window.innerWidth) || 1920;
-    const vh = (typeof window !== "undefined" && window.innerHeight) || 1080;
-    // Board padding is 5vw each side; .msb--tv .msb-marks reserves a 22vw centre.
-    // 0.96 safety on the half-row; char-width factors are deliberately generous
-    // (the board font is wider than a naive estimate) so the fit is conservative
-    // and names don't spill into an ellipsis.
-    const perSidePx = Math.max(1, 0.96 * (0.90 * vw - 0.22 * vw) / 2);
-    const fontPx = 0.03 * vh * (scale || 1);            // name/tag nominal px
-    const tagChromePx = 2 * 0.01 * vw + 2 * 0.012 * vh; // .msb--tv .msb-tag margin + padding
-    const FLOOR = 0.3;                                   // below this, ellipsis is the last resort
-    const sideN = (side) => {
-        const nameLen = String(sideLabel(side, zekken) || "").length;
-        if (nameLen <= 0) return 1;
-        const tag = (side && typeof side === "object" && side.tag) || "";
-        const tagPx = tag ? tag.length * 0.70 * fontPx + tagChromePx : 0;
-        const nameBudgetPx = perSidePx - tagPx;
-        if (nameBudgetPx <= 0) return FLOOR;             // tag alone over budget
-        const nameNominalPx = nameLen * 0.66 * fontPx;
-        return Math.min(1, nameBudgetPx / nameNominalPx);
-    };
-    let minN = 1;
-    for (const m of rows) minN = Math.min(minN, sideN(m.sideB), sideN(m.sideA));
-    return Math.max(FLOOR, minN);
-}
-
 // TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
@@ -350,15 +311,10 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     const nextPool = (!promoted.isBracket && currentPoolName && promoted.competition?.format === "mixed")
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
-    // rowScale (--msb-scale) is VERTICAL: fewer rows get more room so glyphs grow
-    // to fill the screen (~7 rows ≈ 1×, a 4-match pool ≈ 1.75×, a single match ≈
-    // 2.4×). The registration tag is pinned to this size — it's as prominent as
-    // the name. nameScale (--msb-name-scale) is the HORIZONTAL fit applied to the
-    // NAME ONLY: when "name + full-size tag" is too wide for its half of the row,
-    // the name shrinks (never truncates) while the tag keeps full size. Measured
-    // on the actual displayed string (sideLabel = zekken display name + number).
+    // Text scale adapts to how much vertical room each row gets: fewer rows →
+    // bigger glyphs to fill the screen (~7 rows ≈ 1×, a 4-match pool ≈ 1.75×, a
+    // single match ≈ 2.4×); a packed group shrinks to a 0.85 floor.
     const rowScale = Math.min(2.4, Math.max(0.85, 7 / Math.max(1, rows.length)));
-    const nameScale = nameFitForRows(rows, zekken, rowScale);
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",
@@ -424,7 +380,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 IndividualScore inside each row sizes itself to fit the available
                 room. All rows render at the SAME size; the live row is signalled
                 only by a quiet bg tint (no spine, no transform, no pulse). */}
-            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, "--msb-name-scale": nameScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: "1vh", overflow: "hidden" }}>
+            <div data-testid="tvd-indiv-group" data-dropped={dropped} style={{ "--msb-scale": rowScale, flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-evenly", gap: "1vh", overflow: "hidden" }}>
                 {rows.map(m => {
                     const isNow = m.id === promoted.match.id || m.status === "running";
                     const isDone = !isNow && m.status === "completed";

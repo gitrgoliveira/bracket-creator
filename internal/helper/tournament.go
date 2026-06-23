@@ -125,8 +125,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
-						player.Tag = CanonicalParticipantTag(meta[len(meta)-1])
+					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+						player.Tag = meta[len(meta)-1]
 						meta = meta[:len(meta)-1]
 					}
 					if len(meta) > 0 {
@@ -143,8 +143,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && IsParticipantTag(meta[len(meta)-1]) {
-					player.Tag = CanonicalParticipantTag(meta[len(meta)-1])
+				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
+					player.Tag = meta[len(meta)-1]
 					meta = meta[:len(meta)-1]
 				}
 				if len(meta) > 0 {
@@ -168,22 +168,12 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-// IsParticipantTag reports whether s is a recognised participant provenance tag
-// (case-insensitive). Canonical enum — the single source of truth reused by the
-// API boundary validator so invalid tags can't reach persistence or the display.
-func IsParticipantTag(s string) bool {
+func isParticipantTag(s string) bool {
 	switch strings.ToLower(s) {
 	case "manual", "registered", "transfer", "reserved":
 		return true
 	}
 	return false
-}
-
-// CanonicalParticipantTag returns the canonical lower-case form of a tag. Tags
-// are validated case-insensitively, so store this form to avoid duplicate
-// buckets ("Registered" vs "registered") in tag filters and the display.
-func CanonicalParticipantTag(s string) string {
-	return strings.ToLower(s)
 }
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses

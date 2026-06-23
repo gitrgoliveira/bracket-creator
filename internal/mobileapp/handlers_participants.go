@@ -130,7 +130,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName: displayName,
 				Dojo:        dojo,
 				Metadata:    metadata,
-				Tag:         helper.CanonicalParticipantTag(tag),
+				Tag:         tag,
 			}
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
@@ -225,7 +225,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName:  displayName,
 				Dojo:         p.Dojo,
 				Metadata:     p.Metadata,
-				Tag:          helper.CanonicalParticipantTag(p.Tag),
+				Tag:          p.Tag,
 				PoolPosition: int64(i),
 				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})
@@ -369,7 +369,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				p.DisplayName = displayName
 				p.Dojo = dojo
 				p.Metadata = metadata
-				p.Tag = helper.CanonicalParticipantTag(req.Tag)
+				p.Tag = req.Tag
 				return nil
 			})
 			if err != nil {

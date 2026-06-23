@@ -122,11 +122,9 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
         <div className="match-detail-card__players">
           <div className={`match-detail-card__side ${bWin ? "match-detail-card__side--win" : ""}`}>
             <span className="match-detail-card__name match-detail-card__name--shiro">{bName}</span>
-            {match.sideB?.tag ? <span className="msb-tag" data-testid="card-shiro-tag">{match.sideB.tag}</span> : null}
           </div>
           <div className="match-detail-card__score"><span className="match-detail-card__vs">vs</span></div>
           <div className={`match-detail-card__side match-detail-card__side--right ${aWin ? "match-detail-card__side--win" : ""}`}>
-            {match.sideA?.tag ? <span className="msb-tag" data-testid="card-aka-tag">{match.sideA.tag}</span> : null}
             <span className="match-detail-card__name match-detail-card__name--aka">{aName}</span>
           </div>
         </div>
@@ -209,7 +207,6 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Shiro:</span>
           <span className="n">{withNumber(m.sideB)}</span>
-          {m.sideB?.tag ? <span className="msb-tag" data-testid="vsched-shiro-tag">{m.sideB.tag}</span> : null}
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {scoreStr ? (
@@ -222,7 +219,6 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>
           <span className="n">{withNumber(m.sideA)}</span>
-          {m.sideA?.tag ? <span className="msb-tag" data-testid="vsched-aka-tag">{m.sideA.tag}</span> : null}
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

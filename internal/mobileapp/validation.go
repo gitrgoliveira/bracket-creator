@@ -22,7 +22,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -284,15 +283,6 @@ func validatePlayerLengths(name, displayName, dojo, tag string, metadata []strin
 	}
 	if err := validateMaxLen("tag", tag, MaxLenPlayerMetadata); err != nil {
 		return err
-	}
-	// Tag is optional, but when present it must be a recognised provenance tag —
-	// it surfaces on the public display, so reject arbitrary values at the
-	// boundary rather than rendering them. Canonical enum lives in helper.
-	if tag != "" && !helper.IsParticipantTag(tag) {
-		return &ValidationError{
-			Field:   "tag",
-			Message: `must be one of "manual", "registered", "transfer", "reserved" (case-insensitive; stored lower-case)`,
-		}
 	}
 	if len(metadata) > MaxPlayerMetadataItems {
 		return &ValidationError{

@@ -109,27 +109,6 @@ describe('TvWhiteBoard', () => {
     expect(sb.props.subResults.length).toBe(2);
   });
 
-  it('renders the side registration tag in the SHIRO/AKA header when a side has one', () => {
-    // e.g. a pool DH rep bout where the sides are individuals with tags.
-    const p = teamPromoted();
-    p.match.sideA = { name: 'Aka P', tag: 'transfer' };
-    p.match.sideB = { name: 'Shiro P', tag: 'registered' };
-    const props = { ...base, promoted: p, isTeamMatch: true, subResults: p.match.subResults, teamSize: 5 };
-    const tree = TvWhiteBoard(props);
-    const shiroTag = findVnode(tree, n => n.props?.['data-testid'] === 'tvw-shiro-tag');
-    const akaTag = findVnode(tree, n => n.props?.['data-testid'] === 'tvw-aka-tag');
-    expect(JSON.stringify(shiroTag)).toContain('registered'); // sideB
-    expect(JSON.stringify(akaTag)).toContain('transfer');      // sideA
-  });
-
-  it('renders NO header tag when the sides have none', () => {
-    const p = teamPromoted(); // sideA/sideB without tag
-    const props = { ...base, promoted: p, isTeamMatch: true, subResults: p.match.subResults, teamSize: 5 };
-    const tree = TvWhiteBoard(props);
-    expect(findVnode(tree, n => n.props?.['data-testid'] === 'tvw-shiro-tag')).toBeNull();
-    expect(findVnode(tree, n => n.props?.['data-testid'] === 'tvw-aka-tag')).toBeNull();
-  });
-
   it('delegates an individual match to IndividualScore (no team bout grid)', () => {
     const p = {
       kind: 'running',
@@ -553,32 +532,6 @@ describe('TvIndividualBoard', () => {
     const strMany = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedMany }));
     // 10 rows → scale = clamp(0.85, 7/10, 2.4) = 0.85
     expect(strMany).toContain('"--msb-scale":0.85');
-  });
-
-  it('shrinks ONLY the name (--msb-name-scale < 1) when a long name + tag would overflow; tag still renders', () => {
-    // A long name beside a full-size registration tag overflows its half of the
-    // row — the NAME shrinks (never truncates) while the tag keeps full size.
-    const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
-      { id: 'Pool A-0', court: 'A', round: -1, status: 'running',
-        sideA: { name: 'Maximiliano Fernandez', tag: 'registered' },
-        sideB: { name: 'Aleksandr Voloshyn', tag: 'transfer' },
-        ipponsA: [], ipponsB: [] },
-    ] };
-    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
-    const str = JSON.stringify(TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted }));
-    const m = str.match(/"--msb-name-scale":([0-9.]+)/);
-    expect(m).toBeTruthy();
-    expect(Number(m[1])).toBeLessThan(1);
-    expect(str).toContain('registered'); // tag still present (full size)
-  });
-
-  it('keeps --msb-name-scale at 1 when names fit (short names, no tags)', () => {
-    const comp = { name: 'Ind', kind: 'individual', teamSize: 0, poolMatches: [
-      { id: 'Pool A-0', court: 'A', round: -1, status: 'running', sideA: { name: 'A' }, sideB: { name: 'B' }, ipponsA: [], ipponsB: [] },
-    ] };
-    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
-    const str = JSON.stringify(TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted }));
-    expect(str).toContain('"--msb-name-scale":1');
   });
 
   it('caps a LEAGUE board at 6 visible rows (windowed around the current match)', () => {

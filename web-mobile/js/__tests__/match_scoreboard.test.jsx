@@ -275,37 +275,6 @@ describe('match_scoreboard components', () => {
     expect(collectText(aka)).toBe('Suzuki');
   });
 
-  it('IndividualScore renders the registration tag badge next to a name when present', () => {
-    // sideB = Shiro, sideA = Aka. The tag (registered / manual / transfer) rides
-    // on the side object via buildPlayerMap and surfaces as a small badge.
-    const match = {
-      sideA: { name: 'Suzuki', tag: 'transfer' },
-      sideB: { name: 'Tanaka', tag: 'registered' },
-      ipponsA: [], ipponsB: [],
-    };
-    const tree = runtime.mount(IndividualScore, { match, showNames: true });
-    const shiroTag = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-tag');
-    const akaTag = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-tag');
-    expect(shiroTag).toBeTruthy();
-    expect(collectText(shiroTag)).toBe('registered');
-    expect(akaTag).toBeTruthy();
-    expect(collectText(akaTag)).toBe('transfer');
-  });
-
-  it('IndividualScore renders NO tag badge when the side has no tag', () => {
-    const match = { sideA: { name: 'Suzuki' }, sideB: { name: 'Tanaka' }, ipponsA: [], ipponsB: [] };
-    const tree = runtime.mount(IndividualScore, { match, showNames: true });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-tag')).toBeFalsy();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-tag')).toBeFalsy();
-  });
-
-  it('IndividualScore omits the tag badge in card mode (showNames=false)', () => {
-    const match = { sideA: { name: 'Suzuki', tag: 'transfer' }, sideB: { name: 'Tanaka', tag: 'manual' }, ipponsA: [], ipponsB: [] };
-    const tree = runtime.mount(IndividualScore, { match, showNames: false });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-tag')).toBeFalsy();
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-tag')).toBeFalsy();
-  });
-
   it('TeamScoreboard renders the IV/PW summary + one row per LINEUP POSITION (padding unplayed bouts)', () => {
     // mp-1oy3: a running encounter with 2 of 5 scored must still show all 5
     // position rows (the 3 still-to-come bouts pad after the scored ones), not

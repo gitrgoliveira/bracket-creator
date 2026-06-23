@@ -586,17 +586,6 @@ func TestValidatePlayerLengths(t *testing.T) {
 			wantField: "tag",
 		},
 		{
-			name:       "valid enum tag: ok",
-			playerName: "Alice",
-			tag:        "registered",
-		},
-		{
-			name:       "invalid enum tag rejected",
-			playerName: "Alice",
-			tag:        "vip",
-			wantField:  "tag",
-		},
-		{
 			name:      "metadata > 16 entries",
 			metadata:  make([]string, 17),
 			wantField: "metadata",

@@ -5639,7 +5639,7 @@ button.pool-match-row {
 
 .alert--success {
   background: var(--ok-soft);
-  border-color: var(--ok-border);
+  border-color: #86efac; /* green-300: alert border is stronger than the hairline ok-border token */
   color: var(--ok-strong);
 }
 

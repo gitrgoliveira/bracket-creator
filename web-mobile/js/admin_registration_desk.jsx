@@ -195,10 +195,8 @@ function RdPlayerTag({ comp, player, size }) {
   // a "not assigned yet" placeholder.
   if (tag.kind === "pending") return null;
   const cls = `rd-tag rd-tag--${tag.kind}${size === "lg" ? " rd-tag--lg" : ""}`;
-  const label = tag.kind === "team" ? "Team" : "Tag";
   return (
     <span className={cls}>
-      <span className="rd-tag__label">{label}</span>
       <span className="rd-tag__value">{tag.value}</span>
     </span>
   );
@@ -806,7 +804,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Registration desk</h1>
-            <div className="page-head__sub">Check competitors in across every competition and hand them their player tag.</div>
+            <div className="page-head__sub">Check competitors in across every competition and hand them their number.</div>
           </div>
         </div>
 
@@ -889,7 +887,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                       {handoff.tags.filter((t) => t.kind !== "pending").map((t, i) => (
                         <div key={i} className="rd-handoff__tag">
                           {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
-                          <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__label">{t.kind === "team" ? "Team" : "Tag"}</span><span className="rd-tag__value">{t.value}</span></span>
+                          <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__value">{t.value}</span></span>
                         </div>
                       ))}
                     </div>

@@ -1,6 +1,10 @@
 // Pools section of a competition: standings tables with rank-override inputs
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
+// Canonical pool-id parser shared with the display surfaces (single source of
+// truth — ./pool_ids.jsx is a leaf module with no import chain).
+import { poolNameOf as poolNameFromMatchId, isSupplementaryBout } from './pool_ids.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -48,21 +52,9 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   return { action: "noop" };
 }
 
-// Regex that strips the trailing match-index segment from a pool-match id to
-// recover the pool name. Backend formats: "PoolName-N", "PoolName-DH-N",
-// "PoolName-TB-N". A plain split('-')[0] breaks on hyphenated pool names
-// (e.g. "Pool A-East-0" → "Pool A", not "Pool A-East"). This regex captures
-// everything before the trailing numeric/DH/TB suffix; ids without a
-// recognisable suffix degrade to "" (no pool name inferable).
-const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
-
-// Extract the pool name from a pool-match id using POOL_MATCH_ID_RE.
-// Returns "" when the id is falsy or has no recognisable suffix.
-// Single source of truth so all callers stay in sync if the backend
-// id format evolves.
-function poolNameFromMatchId(id) {
-  return (id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
-}
+// poolNameFromMatchId is imported above from ./pool_ids.jsx (the shared
+// pool-id parser; "PoolName-N" / "PoolName-DH-N" / "PoolName-TB-N" → pool name,
+// hyphenated names preserved, unrecognised ids → "").
 
 // Filter a flat poolMatches array down to entries belonging to a single pool.
 // Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
@@ -119,7 +111,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   // to the individual editor (one bout), not the 5-person team sheet. This
   // mirrors the same override in viewer.jsx compMatches; without it, scoring a
   // team pool-DH from the Pools tab opens the wrong (team) scorer.
-  const isSupplementary = /-(?:DH|TB)-\d+$/.test(m.id || "");
+  const isSupplementary = isSupplementaryBout(m.id);
   return {
     ...m,
     sideA: toPlayer(m.sideA),

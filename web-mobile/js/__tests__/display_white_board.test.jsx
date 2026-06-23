@@ -109,6 +109,27 @@ describe('TvWhiteBoard', () => {
     expect(sb.props.subResults.length).toBe(2);
   });
 
+  it('renders the side registration tag in the SHIRO/AKA header when a side has one', () => {
+    // e.g. a pool DH rep bout where the sides are individuals with tags.
+    const p = teamPromoted();
+    p.match.sideA = { name: 'Aka P', tag: 'transfer' };
+    p.match.sideB = { name: 'Shiro P', tag: 'registered' };
+    const props = { ...base, promoted: p, isTeamMatch: true, subResults: p.match.subResults, teamSize: 5 };
+    const tree = TvWhiteBoard(props);
+    const shiroTag = findVnode(tree, n => n.props?.['data-testid'] === 'tvw-shiro-tag');
+    const akaTag = findVnode(tree, n => n.props?.['data-testid'] === 'tvw-aka-tag');
+    expect(JSON.stringify(shiroTag)).toContain('registered'); // sideB
+    expect(JSON.stringify(akaTag)).toContain('transfer');      // sideA
+  });
+
+  it('renders NO header tag when the sides have none', () => {
+    const p = teamPromoted(); // sideA/sideB without tag
+    const props = { ...base, promoted: p, isTeamMatch: true, subResults: p.match.subResults, teamSize: 5 };
+    const tree = TvWhiteBoard(props);
+    expect(findVnode(tree, n => n.props?.['data-testid'] === 'tvw-shiro-tag')).toBeNull();
+    expect(findVnode(tree, n => n.props?.['data-testid'] === 'tvw-aka-tag')).toBeNull();
+  });
+
   it('delegates an individual match to IndividualScore (no team bout grid)', () => {
     const p = {
       kind: 'running',

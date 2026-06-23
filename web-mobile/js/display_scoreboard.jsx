@@ -72,12 +72,18 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             {/* Team name row — Shiro black (left), Aka red (right), no top score */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}>
+                        <TermD name="shiro">SHIRO</TermD>
+                        {promoted.match.sideB?.tag ? <span className="msb-tag" data-testid="tvw-shiro-tag">{promoted.match.sideB.tag}</span> : null}
+                    </div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}>
+                        {promoted.match.sideA?.tag ? <span className="msb-tag" data-testid="tvw-aka-tag">{promoted.match.sideA.tag}</span> : null}
+                        <TermD name="aka">AKA</TermD>
+                    </div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>
                 </div>
             </div>

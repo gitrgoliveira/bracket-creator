@@ -301,18 +301,18 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // Shiro, before Aka) so both badges sit toward the centre score.
   const shiroTag = (match.sideB && typeof match.sideB === "object" && match.sideB.tag) || "";
   const akaTag = (match.sideA && typeof match.sideA === "object" && match.sideA.tag) || "";
+  // Tags are SIBLINGS of the name span (not children) so the name-size badge is
+  // never clipped by the name's overflow:hidden ellipsis — the name ellipsizes
+  // independently while the tag always shows in full. Tag sits on the inner side
+  // of each name (after Shiro, before Aka) so both badges face the centre score.
   return (
     <div className={"msb msb-individual" + (variant === "tv" ? " msb--tv" : "")} data-testid="individual-score">
       <div className="msb-row">
-        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>
-          {showNames ? shiroDisplay : ""}
-          {showNames && shiroTag ? <span className="msb-tag" data-testid="indiv-shiro-tag">{shiroTag}</span> : null}
-        </span>
+        <span className="msb-name" data-testid={showNames ? "indiv-shiro-name" : undefined}>{showNames ? shiroDisplay : ""}</span>
+        {showNames && shiroTag ? <span className="msb-tag" data-testid="indiv-shiro-tag">{shiroTag}</span> : null}
         {centreMarks(sub)}
-        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>
-          {showNames && akaTag ? <span className="msb-tag" data-testid="indiv-aka-tag">{akaTag}</span> : null}
-          {showNames ? akaDisplay : ""}
-        </span>
+        {showNames && akaTag ? <span className="msb-tag" data-testid="indiv-aka-tag">{akaTag}</span> : null}
+        <span className="msb-name msb-name--aka" data-testid={showNames ? "indiv-aka-name" : undefined}>{showNames ? akaDisplay : ""}</span>
       </div>
     </div>
   );
@@ -345,8 +345,23 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
-  const currentIdx = regular.findIndex(s => !isScored(s));
-  const rowState = (i) => (i < currentIdx || currentIdx === -1) ? "done" : (i === currentIdx ? "now" : "queued");
+  // Render one row PER LINEUP POSITION (teamSize), padding past the recorded
+  // subResults so a running encounter shows all bouts — completed, the live one,
+  // and the still-to-come positions — not just the scored ones. Kachinuki can
+  // exceed teamSize, so never shrink below regular.length.
+  const rowCount = Math.max(regular.length, teamSize || 0);
+  const scoredAt = (i) => i < regular.length && isScored(regular[i]);
+  // currentIdx = first not-yet-scored position. Only highlight a "now" bout once
+  // the encounter is under way (≥1 scored bout); an up-next board stays all-queued.
+  let currentIdx = -1;
+  if (regular.some(isScored)) {
+    for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { currentIdx = i; break; } }
+  }
+  const allScored = regular.length > 0 && regular.every(isScored);
+  const rowState = (i) => {
+    if (currentIdx === -1) return allScored ? "done" : "queued"; // completed → done; up-next → queued
+    return i < currentIdx ? "done" : (i === currentIdx ? "now" : "queued");
+  };
 
   return (
     <div className={"msb msb-team" + (tv ? " msb--tv" : "")} data-testid="team-scoreboard">
@@ -367,19 +382,14 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
         <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>
       </div>
 
-      {/* per-bout rows */}
-      {regular.map((sub, i) => (
-        <BoutSubRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB}
+      {/* One row per lineup position (teamSize), padding past the recorded
+          subResults so a running encounter shows the still-to-come bouts too —
+          not just the scored ones (a partially-scored match used to render only
+          its scored rows). A padding row has no sub: BoutSubRow shows the pinned
+          lineup name when present, else the bout number (mp-13y #4/#6). */}
+      {Array.from({ length: rowCount }, (_, i) => (
+        <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
           teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} />
-      ))}
-
-      {/* No bouts recorded yet (lineups not submitted / up-next): show the
-          teamSize numbered/roster rows so the board reads as a real scoreboard
-          rather than a lone IV/PW summary (mp-13y #4/#6). BoutSubRow shows the
-          pinned player name when a lineup exists, else the bout number. */}
-      {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
-        <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state="queued" matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is

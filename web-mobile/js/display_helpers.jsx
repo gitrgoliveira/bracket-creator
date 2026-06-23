@@ -3,6 +3,7 @@
 // LobbyDisplay, and StreamingOverlay. No module-level side-effects.
 
 import { withNumber } from './match_scoreboard.jsx';
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph — presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
@@ -244,26 +245,9 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     return m.round || "";
 }
 
-// Strip the trailing match-index segment from a pool-match id to recover the
-// pool name. Backend formats: "PoolName-N", "PoolName-DH-N" (daihyosen),
-// "PoolName-TB-N" (tiebreaker). The non-greedy capture leaves hyphenated pool
-// names intact ("Pool A-East-0" → "Pool A-East"). Mirror of POOL_MATCH_ID_RE /
-// poolNameFromMatchId in admin_pools.jsx — keep the two in sync.
-const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
-
-// poolNameOf — derive the pool name from a pool-match id (incl. DH/TB
-// supplementary bouts). Returns "" when the id isn't pool-shaped.
-function poolNameOf(id) {
-    if (typeof id !== "string") return "";
-    return id.match(POOL_MATCH_ID_RE)?.[1] ?? "";
-}
-
-// isSupplementaryBout — true for a pool daihyosen ("…-DH-N") or tiebreaker
-// ("…-TB-N") rep bout (a single individual ippon-shobu even in a team comp).
-const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
-function isSupplementaryBout(id) {
-    return typeof id === "string" && SUPPLEMENTARY_BOUT_RE.test(id);
-}
+// poolNameOf + isSupplementaryBout are imported from the shared ./pool_ids.jsx
+// leaf module (single source of truth, also used by admin_pools.jsx) and
+// re-exported below for this module's consumers and tests.
 
 // phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
 // on this court so per-court and lobby surfaces can render "POOL A · 3 / 6" /

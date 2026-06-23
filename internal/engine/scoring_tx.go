@@ -970,7 +970,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	winIppons := make([]string, winningCount)
 	for i := range winIppons {
-		winIppons[i] = "M"
+		winIppons[i] = "○"
 	}
 	result := &state.MatchResult{
 		ID:             matchID,

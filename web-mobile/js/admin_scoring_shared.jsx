@@ -130,8 +130,8 @@ function applyFusenshoToggle(prev, side) {
     return { ...prev, fusensho: "", _preFusensho: undefined };
   }
   const snap = prev._preFusensho || { aPts: prev.aPts, bPts: prev.bPts, aFouls: prev.aFouls, bFouls: prev.bFouls };
-  if (side === "a") return { aPts: ["M", "M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
-  return { aPts: [], bPts: ["M", "M"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
+  if (side === "a") return { aPts: ["○", "○"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a", _preFusensho: snap };
+  return { aPts: [], bPts: ["○", "○"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
 }
 
 // applyFoulIncrement — pure helper modelling a single `+` press on a

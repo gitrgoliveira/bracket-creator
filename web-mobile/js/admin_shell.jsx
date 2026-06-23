@@ -327,7 +327,7 @@ function AllWinnersModal({ comps, onClose }) {
   );
 }
 
-function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
+function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompetition, onEditTournament, onAnnounce, onOpenSchedule, onOpenScoreEditor, onOpenImport, onOpenShiaijo, onOpenRegistration, onStartAll, onStartCompetition, onLogout, onViewerMode, onUpdate, showToast, authConfig }) {
   const t = tournament;
   const comps = t.competitions || [];
   const [exportPdfOpen, setExportPdfOpen] = useStateA(false);
@@ -467,6 +467,12 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
+          {onOpenRegistration && (
+            <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenRegistration}>
+              <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="clipboard-check" size={18} />Registration desk →</div>
+              <div className="card__sub">Check competitors in across every competition and hand them their player tag.</div>
+            </button>
+          )}
           {scheduleEnabled && (
             <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenSchedule}>
               <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="calendar" size={18} />Tournament schedule →</div>

@@ -8147,3 +8147,816 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     opacity: 1 !important;
   }
 }
+
+/* ===========================================================================
+   Registration desk (mp-25bk) — cross-competition check-in surface.
+   Prefix: rd-. Reuses the .workspace shell, .badge, .tag-badge, .input, .select,
+   .btn, .empty, .spinner vocabulary. "Checked-in = green" matches the existing
+   seeding panel (.seed-row.is-checked-in); navy --accent is reserved for the
+   active rail selection and the search focus, per DESIGN.md Principle 3.
+   Component-local check-in greens mirror the literals already used by
+   .seed-row.is-checked-in (an established carve-out for this exact concept).
+   =========================================================================== */
+
+.rd-workspace {
+  align-items: start;
+}
+
+/* --- Rail: competition selector ----------------------------------------- */
+.rd-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 8px;
+  position: sticky;
+  top: 70px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+}
+
+.rd-rail__divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 4px;
+}
+
+.rd-rail__item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.rd-rail__item:hover {
+  background: var(--line-2);
+}
+
+.rd-rail__item.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.rd-rail__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-rail__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rd-rail__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+  line-height: 1.25;
+}
+
+.rd-rail__item.is-active .rd-rail__name {
+  color: var(--accent);
+}
+
+.rd-rail__sub {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.rd-rail__bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+
+.rd-rail__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 300ms var(--ease-out);
+}
+
+.rd-rail__bar-fill.is-done {
+  background: #16a34a;
+}
+
+.rd-rail__count {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.rd-rail__count strong {
+  color: var(--ink-1);
+  font-weight: 700;
+}
+
+/* --- Main column -------------------------------------------------------- */
+.rd-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.rd-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Search is the visual anchor — largest control on the surface. */
+.rd-search {
+  position: relative;
+  flex: 1 1 320px;
+  display: flex;
+  align-items: center;
+}
+
+.rd-search__icon {
+  position: absolute;
+  left: 14px;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.rd-search__input {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 13px 40px 13px 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink-1);
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
+}
+
+.rd-search__input::placeholder {
+  color: var(--ink-4);
+  font-weight: 400;
+}
+
+.rd-search__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.rd-search__clear {
+  position: absolute;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: var(--line-2);
+  color: var(--ink-2);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.rd-search__clear:hover {
+  background: var(--line);
+  color: var(--ink-1);
+}
+
+.rd-headline {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.rd-headline__metric {
+  font-size: 20px;
+  color: var(--ink-2);
+}
+
+.rd-headline__metric strong {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.rd-headline__noun {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.rd-walkup-btn {
+  flex-shrink: 0;
+}
+
+/* --- Toolbar (filters) -------------------------------------------------- */
+.rd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rd-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.rd-filter .select {
+  padding: 6px 26px 6px 9px;
+  font-size: 12.5px;
+  width: auto;
+}
+
+.rd-toggle {
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.rd-toggle:hover {
+  border-color: var(--ink-4);
+}
+
+.rd-toggle.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rd-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-toolbar__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* --- Hand-over callout: the moment after a check-in --------------------- */
+.rd-handoff {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  animation: rd-handoff-in 200ms var(--ease-out);
+}
+
+@keyframes rd-handoff-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rd-handoff__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: #15803d;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.rd-handoff__close:hover {
+  background: #dcfce7;
+}
+
+.rd-handoff__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #166534;
+}
+
+.rd-handoff__lead strong {
+  font-weight: 700;
+}
+
+.rd-handoff__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rd-handoff__tag {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rd-handoff__comp {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* --- Player tag pill (the thing handed over) ---------------------------- */
+.rd-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.rd-tag__label {
+  font-family: var(--font);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.rd-tag__value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.rd-tag--number {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.rd-tag--team {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font);
+}
+
+.rd-tag--team .rd-tag__value {
+  font-family: var(--font);
+}
+
+.rd-tag--pending {
+  /* White (not --line-2) so the muted --ink-4 text clears WCAG AA (4.72:1);
+     the dashed border + italic still read it as an empty/pending slot. */
+  background: var(--surface);
+  color: var(--ink-4);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  font-style: italic;
+  border: 1px dashed var(--ink-4);
+}
+
+.rd-tag--lg {
+  padding: 7px 14px;
+}
+
+.rd-tag--lg .rd-tag__value {
+  font-size: 20px;
+}
+
+/* --- Roster rows -------------------------------------------------------- */
+.rd-roster {
+  display: flex;
+  flex-direction: column;
+}
+
+.rd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--line-2);
+  transition: background 120ms var(--ease-out);
+}
+
+.rd-row:hover {
+  background: var(--line-2);
+}
+
+.rd-row--last {
+  border-bottom-color: transparent;
+}
+
+.rd-row.is-checked {
+  background: #f0fdf4;
+  border-color: #dcfce7;
+}
+
+.rd-row.is-checked:hover {
+  background: #e7fbec;
+}
+
+.rd-row.is-partial {
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+}
+
+/* The check toggle — the primary action. Generous hit area (≥44px coarse). */
+.rd-check {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.rd-check__box {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 2px solid var(--ink-4);
+  background: var(--surface);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.rd-check:hover .rd-check__box {
+  border-color: #16a34a;
+}
+
+.rd-row.is-checked .rd-check__box {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.rd-row.is-partial .rd-check__box {
+  background: var(--warn-strong);
+  border-color: var(--warn-strong);
+}
+
+.rd-check:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-check:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.rd-row__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rd-row__name-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.rd-row__name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.rd-row__zekken {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  background: var(--line-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.rd-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-wrap: wrap;
+}
+
+.rd-row__dojo {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.rd-row__seed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rd-row__right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rd-row__handover {
+  flex-shrink: 0;
+}
+
+/* Inline edit (pencil): quiet until the row is hovered/focused, so it never
+   competes with the check toggle or player tag. */
+.rd-row__edit {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  color: var(--ink-4);
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms var(--ease-out), background 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.rd-row:hover .rd-row__edit,
+.rd-row__edit:focus-visible {
+  opacity: 1;
+}
+
+.rd-row__edit:hover {
+  background: var(--line-2);
+  color: var(--ink-1);
+}
+
+.rd-row__edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-row__edit:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+/* Touch devices have no hover — keep the pencil visible so it's reachable. */
+@media (pointer: coarse) {
+  .rd-row__edit {
+    opacity: 1;
+  }
+}
+
+.rd-edit__note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Other-competition chips */
+.rd-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.rd-chips__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-4);
+}
+
+.rd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms var(--ease-out), background 120ms var(--ease-out);
+}
+
+.rd-chip:hover:not(:disabled) {
+  border-color: #16a34a;
+}
+
+.rd-chip__mark {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #16a34a;
+}
+
+.rd-chip.is-checked {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+  cursor: default;
+}
+
+.rd-chip.is-withdrawn {
+  opacity: 0.5;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
+.rd-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- Group-by-dojo ------------------------------------------------------ */
+.rd-group {
+  margin-bottom: 10px;
+}
+
+.rd-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 6px;
+  position: sticky;
+  top: 60px;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.rd-group__name {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+
+.rd-group__count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-4);
+  background: var(--line-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.rd-group__bulk {
+  margin-left: auto;
+}
+
+/* --- Walk-up inline form ------------------------------------------------ */
+.rd-walkup {
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-soft);
+  border-radius: var(--r);
+  padding: 14px 16px;
+}
+
+.rd-walkup__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rd-walkup__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rd-walkup__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.rd-walkup .field__opt {
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.rd-walkup__actions {
+  margin-top: 12px;
+}
+
+/* --- Empty / no-match states ------------------------------------------- */
+.rd-empty {
+  margin-top: 8px;
+}
+
+.rd-empty__sub {
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 420px;
+  margin: 4px auto 14px;
+  line-height: 1.5;
+}
+
+.rd-empty--done .icon {
+  color: #16a34a;
+  opacity: 1;
+}
+
+/* --- Responsive --------------------------------------------------------- */
+@media (max-width: 860px) {
+  .rd-workspace {
+    grid-template-columns: 1fr;
+  }
+  .rd-rail {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scroll-snap-type: x proximity;
+  }
+  .rd-rail__item {
+    width: 210px;
+    min-width: 210px;
+    max-width: 210px;
+    flex: 0 0 210px;
+    scroll-snap-align: start;
+  }
+  .rd-rail__divider {
+    width: 1px;
+    height: auto;
+    margin: 4px 2px;
+    flex: 0 0 1px;
+  }
+}
+
+@media (max-width: 560px) {
+  .rd-row {
+    flex-wrap: wrap;
+  }
+  .rd-row__handover {
+    width: 100%;
+    padding-left: 48px;
+  }
+  .rd-headline {
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-handoff {
+    animation: none;
+  }
+  .rd-rail__bar-fill,
+  .rd-row,
+  .rd-check__box,
+  .rd-toggle,
+  .rd-chip,
+  .rd-search__input {
+    transition: none;
+  }
+}

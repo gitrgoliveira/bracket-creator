@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -283,6 +284,15 @@ func validatePlayerLengths(name, displayName, dojo, source string, metadata []st
 	}
 	if err := validateMaxLen("source", source, MaxLenPlayerMetadata); err != nil {
 		return err
+	}
+	// A non-empty registration source must be a recognised value (case-insensitive).
+	// The CSV loader only recognises these tokens, so an unexpected value would
+	// shift into Metadata on reload — reject it at the write boundary instead.
+	if source != "" && !helper.IsRegistrationSource(source) {
+		return &ValidationError{
+			Field:   "source",
+			Message: `must be one of "manual", "registered", "transfer" (case-insensitive)`,
+		}
 	}
 	if len(metadata) > MaxPlayerMetadataItems {
 		return &ValidationError{

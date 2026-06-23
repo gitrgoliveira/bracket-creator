@@ -125,8 +125,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
-						player.Source = strings.ToLower(meta[len(meta)-1])
+					if len(meta) > 0 && IsRegistrationSource(meta[len(meta)-1]) {
+						player.Source = CanonicalRegistrationSource(meta[len(meta)-1])
 						meta = meta[:len(meta)-1]
 					}
 					if len(meta) > 0 {
@@ -143,8 +143,8 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && isRegistrationSource(meta[len(meta)-1]) {
-					player.Source = strings.ToLower(meta[len(meta)-1])
+				if len(meta) > 0 && IsRegistrationSource(meta[len(meta)-1]) {
+					player.Source = CanonicalRegistrationSource(meta[len(meta)-1])
 					meta = meta[:len(meta)-1]
 				}
 				if len(meta) > 0 {
@@ -168,12 +168,24 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-func isRegistrationSource(s string) bool {
-	switch strings.ToLower(s) {
+// IsRegistrationSource reports whether s is a recognised participant
+// registration source (case-insensitive): manual / registered / transfer.
+// Exported so the API boundary validator can reject unknown values before they
+// are persisted — the CSV loader only recognises these tokens, so an unexpected
+// value would otherwise shift into Metadata on reload.
+func IsRegistrationSource(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "manual", "registered", "transfer":
 		return true
 	}
 	return false
+}
+
+// CanonicalRegistrationSource returns the canonical stored form of a
+// registration source: trimmed + lower-case. Keeps filter buckets from
+// splitting on whitespace/casing ("Manual" vs "manual").
+func CanonicalRegistrationSource(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses

@@ -586,6 +586,22 @@ func TestValidatePlayerLengths(t *testing.T) {
 			wantField: "source",
 		},
 		{
+			name:       "valid registration source: ok",
+			playerName: "Alice",
+			source:     "registered",
+		},
+		{
+			name:       "valid source any case: ok (normalized elsewhere)",
+			playerName: "Alice",
+			source:     "Manual",
+		},
+		{
+			name:       "unknown registration source rejected",
+			playerName: "Alice",
+			source:     "vip",
+			wantField:  "source",
+		},
+		{
 			name:      "metadata > 16 entries",
 			metadata:  make([]string, 17),
 			wantField: "metadata",

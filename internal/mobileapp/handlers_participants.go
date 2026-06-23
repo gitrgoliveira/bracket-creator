@@ -104,7 +104,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Default to "manual" so rows added via this UI carry the same
 			// provenance marker as rows the operator added by hand to the
 			// paste-box import — keeps source-filter buckets coherent.
-			source := req.Source
+			source := helper.CanonicalRegistrationSource(req.Source)
 			if source == "" {
 				source = "manual"
 			}
@@ -369,7 +369,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				p.DisplayName = displayName
 				p.Dojo = dojo
 				p.Metadata = metadata
-				p.Source = req.Source
+				p.Source = helper.CanonicalRegistrationSource(req.Source)
 				return nil
 			})
 			if err != nil {

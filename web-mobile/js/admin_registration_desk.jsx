@@ -299,13 +299,21 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
     ? (presence === "all" ? `Undo check-in for ${player.name}` : `Check in ${player.name} for all their competitions`)
     : (checked ? `Undo check-in for ${player.name}` : `Check in ${player.name}`);
 
+  // In "all" mode a person checked into SOME-but-not-all of their competitions
+  // is a partial/indeterminate checkbox: it shows a checkmark visually, so it
+  // must report aria-checked="mixed" (not "false") or a screen reader would
+  // announce it as unchecked. comp mode is a plain boolean.
+  const ariaChecked = mode === "all"
+    ? (presence === "all" ? "true" : presence === "partial" ? "mixed" : "false")
+    : checked;
+
   return (
     <div className={`rd-row ${stateClass}${isLast ? " rd-row--last" : ""}`}>
       <button
         type="button"
         className="rd-check"
         role="checkbox"
-        aria-checked={mode === "all" ? presence === "all" : checked}
+        aria-checked={ariaChecked}
         aria-label={checkLabel}
         disabled={busy}
         onClick={onPrimary}

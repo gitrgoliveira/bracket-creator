@@ -348,6 +348,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
 			}
+			comp.Players[i].Source = helper.CanonicalRegistrationSource(p.Source)
 		}
 
 		// Reject non-canonical Date format. See validateDateDMY in
@@ -628,6 +629,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 					return
 				}
+				comp.Players[i].Source = helper.CanonicalRegistrationSource(p.Source)
 			}
 		}
 

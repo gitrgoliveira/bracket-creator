@@ -610,8 +610,12 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 			record = []string{id, p.Name, p.Dojo}
 		}
 		record = append(record, p.Metadata...)
-		if p.Source != "" {
-			record = append(record, p.Source)
+		// Canonicalize (trim + lower-case) at the write chokepoint so participants.csv
+		// is always normalized regardless of which handler built the Player — keeps
+		// the loader from shifting a stray-cased value into Metadata and avoids
+		// split filter buckets.
+		if src := helper.CanonicalRegistrationSource(p.Source); src != "" {
+			record = append(record, src)
 		}
 		if p.CheckedIn {
 			record = append(record, "checked_in")

@@ -225,7 +225,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName:  displayName,
 				Dojo:         p.Dojo,
 				Metadata:     p.Metadata,
-				Source:       p.Source,
+				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
 				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})

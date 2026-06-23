@@ -2272,7 +2272,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/ScheduleEntry'
 
-  /api/viewer/court/{court}/live:
+  /api/viewer/court/{court}/current:
     get:
       tags: [viewer]
       summary: Get current and upcoming matches for a court

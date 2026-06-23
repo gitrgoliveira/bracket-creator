@@ -11,7 +11,7 @@ import (
 
 // RegisterDisplayHandlers wires the public, no-auth display surfaces used by
 // non-browser streaming integrations (vMix, OBS plugins, scoreboards). The
-// only route today is GET /api/viewer/court/:court/live — a one-shot polled
+// only route today is GET /api/viewer/court/:court/current — a one-shot polled
 // view of the currently-running match on a court. Browser clients should
 // continue to use SSE (/api/events); the polled surface exists for clients
 // that cannot subscribe.
@@ -22,7 +22,7 @@ import (
 // for a single consumer would be premature. If a second polled surface
 // lands later we can hoist a DisplayStore interface then.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
-	r.GET("/court/:court/live", func(c *gin.Context) {
+	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; never let an
 		// upstream cache them. The router-level CORS already exposes
 		// Access-Control-Allow-Origin, but the contract pins it here too
@@ -72,7 +72,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				if m.Status != state.MatchStatusRunning {
 					continue
 				}
-				// Found the live match — build the live payload.
+				// Found the current match — build the current payload.
 				// LoadParticipantsOpt is the canonical read so we
 				// pick up DisplayName/Dojo even on legacy competitions
 				// that predate the HasParticipantIDs flag.
@@ -97,7 +97,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 
 				c.JSON(http.StatusOK, gin.H{
 					"court":  court,
-					"status": "live",
+					"status": "current",
 					"competition": gin.H{
 						"id":   comp.ID,
 						"name": comp.Name,
@@ -126,7 +126,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 
 // buildSide turns a participant name (which is what MatchResult.SideA/SideB
 // carries — see state/models.go) into the per-side payload defined by the
-// court-live contract. When the participants list cannot resolve the name
+// court-current contract. When the participants list cannot resolve the name
 // we fall back to a name-only side so the overlay can still render
 // "Player vs Player" rather than blanking out.
 func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H {
@@ -158,8 +158,8 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 // Pool match IDs are formatted "PoolName-Idx" by engine/pools.go; we strip
 // the suffix and return the pool name verbatim. Bracket matches will land
 // in a later slice — for now we return the raw ID as a fallback so the
-// field is never empty for a live match (the contract documents the field
-// is always present on live payloads).
+// field is never empty for a current match (the contract documents the field
+// is always present on current payloads).
 func phaseFromMatchID(id string) string {
 	if i := strings.LastIndex(id, "-"); i > 0 {
 		return id[:i]

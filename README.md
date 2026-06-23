@@ -324,7 +324,7 @@ The mobile app exposes several court-scoped URLs for running a multi-court event
 | `/display?court=A` | Spectator screen / TV | Single-court display: current match, upcoming queue, recent results. |
 | `/display?court=all` | Lobby / overview | 4-card grid showing all courts at once. |
 | `/display?court=A&overlay=true` | OBS / streaming | Transparent variant suitable for chroma-keying into a broadcast overlay. |
-| `/api/viewer/court/:court/live` | Public JSON | Read-only snapshot of one court's current state. No auth. |
+| `/api/viewer/court/:court/current` | Public JSON | Read-only snapshot of one court's current state. No auth. |
 
 ### Data format
 

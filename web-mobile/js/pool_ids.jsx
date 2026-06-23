@@ -1,8 +1,9 @@
 // pool_ids.jsx — canonical parser for pool-match ids. LEAF module with NO
-// imports, so it can be shared by both display_helpers.jsx (ESM) and
-// admin_pools.jsx (script-tagged, window-global) without pulling an import
-// chain into either — single source of truth for the pool-id parse rule used
-// across the display and admin surfaces.
+// imports, so both display_helpers.jsx and admin_pools.jsx can import it
+// without pulling a transitive import chain into either — admin_pools.jsx
+// otherwise relies on window globals rather than ESM imports, so a leaf with
+// no dependencies keeps its module graph trivial. Single source of truth for
+// the pool-id parse rule used across the display and admin surfaces.
 //
 // Backend id formats: "PoolName-N", "PoolName-DH-N" (daihyosen), "PoolName-TB-N"
 // (tiebreaker). The non-greedy capture leaves hyphenated pool names intact

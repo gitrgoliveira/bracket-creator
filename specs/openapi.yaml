@@ -1408,7 +1408,7 @@ paths:
                 source:
                   type: string
                   enum: [manual, registered, transfer]
-                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field.
+                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field. The legacy value `reserved` is also accepted and normalized to `manual`.
       responses:
         '200':
           description: |

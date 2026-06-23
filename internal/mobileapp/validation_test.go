@@ -596,6 +596,11 @@ func TestValidatePlayerLengths(t *testing.T) {
 			source:     "Manual",
 		},
 		{
+			name:       "legacy 'reserved' accepted (aliased to manual)",
+			playerName: "Alice",
+			source:     "reserved",
+		},
+		{
 			name:       "unknown registration source rejected",
 			playerName: "Alice",
 			source:     "vip",

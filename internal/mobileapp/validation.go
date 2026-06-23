@@ -285,13 +285,16 @@ func validatePlayerLengths(name, displayName, dojo, source string, metadata []st
 	if err := validateMaxLen("source", source, MaxLenPlayerMetadata); err != nil {
 		return err
 	}
-	// A non-empty registration source must be a recognised value (case-insensitive).
-	// The CSV loader only recognises these tokens, so an unexpected value would
-	// shift into Metadata on reload — reject it at the write boundary instead.
-	if source != "" && !helper.IsRegistrationSource(source) {
+	// A non-empty registration source must be a recognised value. Validate the
+	// CANONICAL form (CanonicalRegistrationSource trims, lower-cases, and aliases
+	// the legacy "reserved" → "manual") so every endpoint accepts the same set
+	// uniformly — including legacy inputs — while still rejecting truly unknown
+	// values (the CSV loader only recognises these tokens, so an unexpected value
+	// would shift into Metadata on reload).
+	if source != "" && !helper.IsRegistrationSource(helper.CanonicalRegistrationSource(source)) {
 		return &ValidationError{
 			Field:   "source",
-			Message: `must be one of "manual", "registered", "transfer" (case-insensitive)`,
+			Message: `must be one of "manual", "registered", "transfer" (case-insensitive; legacy "reserved" accepted as "manual")`,
 		}
 	}
 	if len(metadata) > MaxPlayerMetadataItems {

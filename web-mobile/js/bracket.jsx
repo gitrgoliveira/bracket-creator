@@ -784,6 +784,9 @@ function matchStateCell(m, ipponsB, ipponsA) {
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
 window.roundLabel = roundLabel;
+// Exposed so the bracket winner-picker panel can label a selected match with
+// the SAME number ("M1") and round the tree shows on its cards/columns.
+window.buildDisplayModel = buildDisplayModel;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
 window.matchScoreStr = matchScoreStr;

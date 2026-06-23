@@ -137,18 +137,45 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 
 }
 
-func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
-	var matchNum = 1
+// AssignMatchNumbers assigns sequential match numbers to all non-nil nodes in
+// eliminationMatchRounds, in the same iteration order as the Excel FillInMatches
+// output (earliest/widest round first, within-round left-to-right). Each non-nil
+// node's matchNum field is set in-place.
+//
+// This is the authoritative numbering for the printed Excel Tree sheet. The web
+// API has a SEPARATE implementation, engine.assignBracketMatchNumbers, which
+// operates on *state.Bracket (a different type) instead of []*Node — the two are
+// NOT a literally-shared function. They are kept equal-by-contract: skip the same
+// positions (a nil node here == a Hidden-or-both-sides-empty match there) and
+// iterate the same round order, so the Nth real match gets the same number on both
+// paths. That contract is verified by TestMatchNumberingParity_ExcelVsWeb in
+// internal/engine, which builds both numberings from identical entrant sets
+// (including bye-producing, non-power-of-two sizes) and asserts the sequences match
+// position-for-position. The printed Excel sheet is authoritative; if they ever
+// diverge, the web path must be corrected to match this one.
+func AssignMatchNumbers(eliminationMatchRounds [][]*Node) {
+	var matchNum int64 = 1
 	for _, round := range eliminationMatchRounds {
 		for _, match := range round {
 			if match == nil {
 				continue
 			}
-			match.matchNum = int64(matchNum)
-			if match.SheetName != "" {
-				handleExcelError("SetCellInt", f.SetCellInt(match.SheetName, match.LeafVal, int64(matchNum)))
-			}
+			match.matchNum = matchNum
 			matchNum++
+		}
+	}
+}
+
+func FillInMatches(f *excelize.File, eliminationMatchRounds [][]*Node) {
+	AssignMatchNumbers(eliminationMatchRounds)
+	for _, round := range eliminationMatchRounds {
+		for _, match := range round {
+			if match == nil {
+				continue
+			}
+			if match.SheetName != "" {
+				handleExcelError("SetCellInt", f.SetCellInt(match.SheetName, match.LeafVal, match.matchNum))
+			}
 		}
 	}
 }

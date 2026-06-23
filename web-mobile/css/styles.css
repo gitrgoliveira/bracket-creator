@@ -2000,6 +2000,43 @@ a:hover {
 }
 
 /* ---------- Running match panel (admin) ---------- */
+/* Bracket page layout: the tree and the winner-picker / scoring panel sit
+   side by side when there's room. The panel keeps a minimum width so the
+   reused inline scoring editor never squashes or clips; when the bracket and
+   that minimum can't both fit, the panel wraps to a full-width row BELOW the
+   bracket (flex line-break on basis 560 + 520 > available). */
+.bracket-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.bracket-layout__bracket {
+  /* grows to fill; min-width:0 lets it shrink so .bracket-canvas scrolls
+     (overflow-x:auto) instead of forcing page overflow. */
+  flex: 1 1 560px;
+  min-width: 0;
+}
+.bracket-layout__panel {
+  /* Grows to fill its flex line. When it wraps below the bracket (the common
+     case at desktop widths) it fills the whole row, so its card lines up edge-
+     to-edge with the bracket card above — no max-width cap that would leave a
+     ragged right edge. min-width keeps the inline editor from squashing when
+     it DOES sit beside the bracket. */
+  flex: 1 1 520px;
+  min-width: 500px;
+}
+/* Phones / small tablets: drop the minimum so the panel fills the single
+   column instead of overflowing; the editor's own coarse-pointer rules handle
+   compact sizing from here. */
+@media (max-width: 760px) {
+  .bracket-layout__panel {
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
 .running-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -2018,6 +2055,21 @@ a:hover {
   font-weight: 600;
   font-size: 16px;
 }
+/* Centred content column: the panel card fills the row (so it aligns with the
+   bracket card), but the reused editor / result card are capped here so they
+   read as a comfortable scoreboard width instead of stretching edge-to-edge. */
+.running-panel__inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Completed-match result view: the shared MatchDetailCard (same as the viewer)
+   followed by the confirmation-gated edit action. */
+.running-panel__result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 .running-panel__court {
   font-family: var(--font-mono);
@@ -2026,133 +2078,6 @@ a:hover {
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-
-.score-card {
-  display: grid;
-  grid-template-columns: 1fr 60px 1fr;
-  align-items: stretch;
-  gap: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-
-.score-side {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* Aka/Shiro side treatment (DESIGN.md §4): a thick coloured top bar gives
-     each side real colour area so the two read apart at a glance, not just a
-     faint tint. The bar colour is the side identity. */
-  border-top: 5px solid var(--line);
-  /* Mirrored head-to-head: content is vertically centred and the two sides
-     face the central "vs" — Shiro (left) leans right-toward-centre, Aka
-     (right) leans left-toward-centre. Matches the live scoreboard. */
-  justify-content: center;
-}
-
-.score-side--white {
-  background: var(--white-side);
-  /* framed white: dark cool bar + 45° hatch so "white" reads as a side */
-  border-top-color: var(--shiro-edge);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
-}
-
-/* Aka is on the right: align its content to the outer (right) edge so the
-   two sides mirror each other — Shiro left-aligned, Aka right-aligned.
-   Both sides are vertically centred by the justify-content:center above. */
-.score-side--red {
-  align-items: flex-end;
-  text-align: right;
-}
-.score-side--red .score-side__buttons,
-.score-side--red .score-side__points {
-  justify-content: flex-end;
-}
-
-.score-side--red {
-  background: var(--red-soft);
-  border-top-color: var(--red);
-}
-
-.score-side__lbl {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  font-weight: 800;
-  font-family: var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-/* filled identity chip — the obvious cue, present before any winner is chosen */
-.score-side--white .score-side__lbl {
-  background: #fff;
-  color: var(--shiro-edge);
-  border: 1.5px solid var(--shiro-edge);
-}
-.score-side--red .score-side__lbl {
-  background: var(--red);
-  color: #fff;
-}
-
-.score-side__name {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.score-side__dojo {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.score-side__points {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.score-pt {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.score-pt--filled {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
-
-.score-side--red .score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--empty {
-  color: var(--ink-4);
-}
-
-.score-side__buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .ipt-btn {
@@ -2168,180 +2093,6 @@ a:hover {
 
 .ipt-btn:hover {
   border-color: var(--ink-4);
-}
-
-.score-vs {
-  display: grid;
-  place-items: center;
-  background: white;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--ink-3);
-  font-family: var(--font-display);
-}
-
-/* ---------- Scoreboard editor (Proposal C) ----------
-   4 columns: [Shiro button rail | Shiro who | Aka who | Aka button rail].
-   The Aka/Shiro colour runs continuously edge-to-edge (no neutral gap); the
-   two competitors meet at the centre facing a floating "vs". Side name is
-   stated ONCE, in the centre identity chip (rails are unlabelled — their
-   colour + position already say which side). DESIGN.md §4 Aka/Shiro. */
-.sc-board {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto 1fr 1fr auto;
-  align-items: stretch;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-.sc-board__rail,
-.sc-board__who {
-  border-top: 5px solid var(--line);
-}
-/* side fills — shared by rail + who so colour is continuous */
-.sc-board__shiro {
-  background: var(--white-side);
-  border-top-color: var(--accent);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
-}
-.sc-board__aka {
-  background: var(--red-soft);
-  border-top-color: var(--red);
-}
-.sc-board__rail {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 14px;
-}
-.sc-board__btnrow {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 156px;
-}
-.sc-board__who {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-  padding: 18px;
-}
-.sc-board__who--shiro { align-items: flex-end; text-align: right; padding-right: 32px; }
-.sc-board__who--aka { align-items: flex-start; text-align: left; padding-left: 32px; }
-.sc-board__lbl {
-  display: inline-flex;
-  align-items: center;
-  font: 800 11px/1 var(--font-strong);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 4px 10px;
-  border-radius: 999px;
-}
-.sc-board__who--shiro .sc-board__lbl {
-  background: #fff;
-  color: var(--accent);
-  border: 1.5px solid var(--accent);
-}
-.sc-board__who--aka .sc-board__lbl {
-  background: var(--red);
-  color: #fff;
-}
-.sc-board__nm {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-.sc-board__tally { display: flex; gap: 6px; }
-/* the meeting line — a floating vs pill dead-centre */
-.sc-board__vs {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  font: 800 12px/1 var(--font-display);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-4);
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 6px 9px;
-  z-index: 2;
-}
-/* Portrait phones/tablets: the 4-column side-by-side doesn't fit, so each side
-   becomes its own horizontal band — name + tally on the inner side, the score
-   buttons on the same line to the outer side. Landscape (incl. landscape
-   phones) keeps the side-by-side Proposal C above. Orientation-based per the
-   operator's request. The two shiro/aka DOM nodes (rail + who) are re-placed
-   into a 2×2 grid: [who | rail] per row. */
-@media (max-width: 600px) {
-  /* Narrow screens (true phones, portrait or landscape): a side-by-side rail
-     competes with the name for horizontal space and overflows. So each side
-     becomes a single full-width block — identity chip + name + tally, then the
-     score buttons full-width beneath, wrapping as needed. One column = can't
-     overflow at any width, every button keeps its 44px touch target. Wider
-     tablets (incl. portrait ≥600px) keep the side-by-side Proposal C above. */
-  .sc-board {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-    grid-auto-flow: row;
-  }
-  /* re-order so each side's buttons sit directly under that side's name:
-     shiro who → shiro rail → aka who → aka rail */
-  .sc-board__who--shiro { order: 1; }
-  .sc-board__rail.sc-board__shiro { order: 2; }
-  .sc-board__who--aka { order: 3; }
-  .sc-board__rail.sc-board__aka { order: 4; }
-  .sc-board__who--shiro,
-  .sc-board__who--aka {
-    align-items: flex-start; text-align: left; padding: 14px 16px 8px;
-  }
-  /* rail no longer its own column — full width under the name, buttons left-aligned.
-     Its top border would double the divider, so drop it here. */
-  .sc-board__rail { border-top: none; padding: 0 16px 14px; justify-content: flex-start; }
-  .sc-board__btnrow { max-width: none; justify-content: flex-start; }
-  /* the floating centre "vs" is meaningless once stacked */
-  .sc-board__vs { display: none; }
-}
-
-.running-panel__actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-
-/* Mode tabs */
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--line-2);
-  border-radius: 10px;
-  margin-bottom: 16px;
-}
-
-.mode-tabs button {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-2);
-}
-
-.mode-tabs button.is-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ---------- Viewer (mobile) ---------- */
@@ -3310,8 +3061,11 @@ button.pool-match-row {
 
 .vlist-item__bar>div {
   height: 100%;
+  width: 100%;
   background: var(--accent);
-  transition: width 300ms;
+  transform-origin: left;
+  transform: scaleX(var(--bar-fill, 0));
+  transition: transform 300ms;
 }
 
 .vlist-item__pct {
@@ -3524,6 +3278,157 @@ button.pool-match-row {
   margin-top: 6px;
 }
 
+/* stat-box link variant — a button-reset that keeps the stat-box layout
+   but is clickable (e.g. "View podium →" in the completed stats strip). */
+.stat-box__link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.stat-box__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+/* Stat value at text scale: the default .stat-box .v is 22px display, sized
+   for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
+   read better one step down. Modifier instead of scattered inline font-size. */
+.stat-box .v--sm {
+  font-size: 16px;
+}
+
+/* Clickable action card (mp-a5d6): the overview's navigate-on-click cards
+   (Scores/Results, draw preview, export) need the same affordance as the
+   dashboard's .tcard so they read as interactive, not static. Mirrors
+   .tcard:hover for system consistency. */
+.card--action {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.card--action:hover {
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card--action:active {
+  transform: translateY(0);
+}
+
+.card--action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow), var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--action {
+    transition: none;
+  }
+  .card--action:hover {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .card--action:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Next-steps checklist (mp-a5d6) — status-aware overview for setup state.
+   Composes existing tokens; no new color values. */
+.comp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comp-step {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.comp-step:last-child {
+  border-bottom: none;
+}
+
+.comp-step__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.comp-step--done .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--active .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--todo .comp-step__icon {
+  color: var(--ink-3);
+}
+
+.comp-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comp-step__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.comp-step--done .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step--active .comp-step__label {
+  color: var(--ink);
+}
+
+.comp-step--todo .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step__detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.comp-step--active .comp-step__detail {
+  color: var(--ink-2);
+}
+
+.comp-step__cta {
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.comp-steps__hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+}
+
 /* Sidebar (admin tournament) */
 .workspace {
   display: grid;
@@ -3596,6 +3501,20 @@ button.pool-match-row {
   color: var(--ink-2);
   font-size: 15px;
   margin: 0 0 4px;
+}
+/* Inline recovery control inside an empty state (e.g. the court picker shown
+   for an unknown shiaijo). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.empty__action .input {
+  width: auto;
+  min-width: 130px;
 }
 .empty > div:not(.icon):not(.empty__cta-note) {
   font-size: 13px;
@@ -3828,9 +3747,8 @@ button.pool-match-row {
     min-height: 44px;
     padding: 8px 10px;
   }
-  /* Scoring buttons are the operator's most-tapped control — meet the 44px
-     touch target on tablets/phones (DESIGN.md §6). The portrait sc-board
-     button rail is sized (max-width ~100px) so two 44px buttons fit per row. */
+  /* Scoring buttons (sb-points-grid) are the operator's most-tapped control —
+     meet the 44px touch target on tablets/phones (DESIGN.md §6). */
   .ipt-btn {
     min-width: 44px;
     min-height: 44px;
@@ -5529,25 +5447,6 @@ button.pool-match-row {
   margin-left: 4px;
 }
 
-/* Aka ippon buttons in scoreboard */
-.ipt-btn--aka {
-  background: var(--red-soft);
-  border-color: var(--red);
-  color: var(--red);
-}
-
-.score-pt--aka.score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--shiro.score-pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
-}
-
 /* Team header color label */
 .team-header__color {
   display: inline-flex;
@@ -5665,7 +5564,7 @@ button.pool-match-row {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 500;
   pointer-events: none;
-  animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes toast-in {
@@ -6638,7 +6537,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms var(--ease-out);
 }
 .encho-row__label {
   display: flex;
@@ -6866,6 +6764,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Centered overtime pill — sits below the foul boxes in the individual scorer
+   (the EnchoControl renders its own .encho-row child, which this centers). */
+.encho-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Stacked decision place: a "Decision:" header, the judges'-decision (hantei)
+   affordance as the top row, then the withdrawal/forfeit controls as the
+   bottom row. Overrides the default inline-row .decision-controls layout. */
+.decision-controls--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.decision-controls--stacked .decision-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ？ icon that carries the glossary tooltip for a decision button. */
@@ -7745,9 +7667,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--red);
   border-radius: var(--r-sm);
-  border-left: 3px solid var(--red);
+  background: var(--red-soft);
 }
 .start-all__failed-name { font-weight: 600; color: var(--ink-1); }
 .start-all__failed-reason { font-size: 12px; color: var(--ink-3); }
@@ -8000,6 +7922,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
 }
 
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+   round ("Final"), so the operator knows which pool/round they'll be scoring.
+   Lighter than the .section-title above it — a secondary tier, not a peer. */
+.shiaijo-subgroup + .shiaijo-subgroup {
+  margin-top: 14px;
+}
+.shiaijo-subgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+.shiaijo-subgroup__title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
 /* Context panel (collapsible) */
 .shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 .shiaijo-context__toggle { padding: 12px 14px; }
@@ -8045,6 +7991,111 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 6px;
   font-size: 12px;
   color: var(--ink-2);
+}
+
+/* Page title doubles as the court switcher: the H1 shows a chevron and a
+   transparent native <select> overlays it (native picker + a11y, no duplicate
+   control). Only rendered when there is more than one court. */
+.shiaijo-title-select {
+  position: relative;
+  display: inline-block;
+}
+.shiaijo-title-select .page-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.shiaijo-title-select__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  line-height: 1;
+  transition: background 150ms ease, color 150ms ease;
+}
+.shiaijo-title-select:hover .shiaijo-title-select__chevron {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.shiaijo-title-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.shiaijo-title-select:focus-within .page-head__title {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Competition selector in page-head (AC3) — mirrors the Shiaijo title on the
+   right edge: the competition name gets the full display-title treatment (same
+   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
+   caption beneath that lines up with the title's own sub-caption on the left. */
+.shiaijo-officiating {
+  text-align: right;
+}
+/* Navy so the changeable competition reads distinct from the fixed court name,
+   tying it to the navy chevron chip while keeping the identical title scale. */
+.shiaijo-officiating__name {
+  color: var(--accent);
+}
+.shiaijo-officiating__sub {
+  text-align: right;
+}
+.shiaijo-title-select--right {
+  text-align: right;
+}
+
+/* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,
+   never red/danger or navy/running). It is an actionable control: clicking
+   switches the page-head competition selector to the competition that needs this
+   court, so the operator never has to hunt the dropdown. */
+.shiaijo-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.shiaijo-nudge:hover {
+  background: var(--warn-border);
+}
+.shiaijo-nudge:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 2px;
+}
+.shiaijo-nudge__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.shiaijo-nudge__text {
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shiaijo-nudge__cta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

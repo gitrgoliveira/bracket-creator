@@ -25,6 +25,17 @@ type Node struct {
 	Right   *Node
 }
 
+// MatchNum returns the sequential match number assigned to this node by
+// AssignMatchNumbers (0 if not yet assigned). Exported so cross-package callers —
+// notably the engine-vs-Excel numbering-parity test — can read the authoritative
+// printed-sheet number without reaching into the unexported field.
+func (n *Node) MatchNum() int64 {
+	if n == nil {
+		return 0
+	}
+	return n.matchNum
+}
+
 func CreateBalancedTree(leafValues []string) *Node {
 	mid := len(leafValues) / 2
 	node := &Node{}

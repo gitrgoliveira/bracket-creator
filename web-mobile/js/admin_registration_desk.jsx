@@ -7,8 +7,8 @@
 //     fuzzy-find  →  check in  →  hand over the player tag
 //
 // "Player tag" is the thing physically handed to the competitor: the assigned
-// competitor number for individuals (e.g. "K1"; "Not assigned yet" before the
-// draw), or the team name for team competitions. It is NOT the zekken (the
+// competitor number for individuals (e.g. "K1"; nothing is shown before the
+// draw assigns it), or the team name for team competitions. It is NOT the zekken (the
 // back name-tag, used only for identity/search) nor the provenance tag pill
 // (manual/registered/transfer).
 //
@@ -187,14 +187,14 @@ function RdPencilIcon() {
 
 // ---------------------------------------------------------------------------
 // Player-tag pill — the hand-over element. Loud for individuals' numbers and
-// team names; muted "Not assigned yet" before the draw.
+// team names; nothing before the draw assigns a number (no placeholder noise).
 // ---------------------------------------------------------------------------
 function RdPlayerTag({ comp, player, size }) {
   const tag = rdPlayerTag(comp, player);
+  // Before the draw there's no number to hand over — render nothing rather than
+  // a "not assigned yet" placeholder.
+  if (tag.kind === "pending") return null;
   const cls = `rd-tag rd-tag--${tag.kind}${size === "lg" ? " rd-tag--lg" : ""}`;
-  if (tag.kind === "pending") {
-    return <span className={cls} title="The competitor number is assigned when the draw runs">Not assigned yet</span>;
-  }
   const label = tag.kind === "team" ? "Team" : "Tag";
   return (
     <span className={cls}>
@@ -884,16 +884,16 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 <div className="rd-handoff" role="status" aria-live="polite">
                   <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
                   <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — hand over to <strong>{handoff.name}</strong></div>
-                  <div className="rd-handoff__tags">
-                    {handoff.tags.map((t, i) => (
-                      <div key={i} className="rd-handoff__tag">
-                        {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
-                        {t.kind === "pending"
-                          ? <span className="rd-tag rd-tag--pending rd-tag--lg">Not assigned yet</span>
-                          : <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__label">{t.kind === "team" ? "Team" : "Tag"}</span><span className="rd-tag__value">{t.value}</span></span>}
-                      </div>
-                    ))}
-                  </div>
+                  {handoff.tags.some((t) => t.kind !== "pending") && (
+                    <div className="rd-handoff__tags">
+                      {handoff.tags.filter((t) => t.kind !== "pending").map((t, i) => (
+                        <div key={i} className="rd-handoff__tag">
+                          {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
+                          <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__label">{t.kind === "team" ? "Team" : "Tag"}</span><span className="rd-tag__value">{t.value}</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

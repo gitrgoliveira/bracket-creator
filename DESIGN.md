@@ -395,7 +395,7 @@ Admin-only cross-competition check-in surface ([admin_registration_desk.jsx](web
 
 - `.rd-rail` / `.rd-rail__item` — competition selector with a per-competition check-in progress meter (`.rd-rail__bar-fill`, navy → `--ok` when complete). Collapses to a horizontal scroller under 860px.
 - `.rd-search` — the surface's visual anchor (16px, autofocused); Enter checks in the top fuzzy hit.
-- `.rd-row` — roster row: `.rd-check` toggle (role=checkbox, `--ok` when checked, `--warn-strong` when partial), identity block, and the **player tag** (`.rd-tag--{number,team,pending}`) — the number/team-name handed to the competitor.
+- `.rd-row` — roster row: `.rd-check` toggle (role=checkbox, `--ok` when checked, `--warn-strong` when partial), identity block, and the **player tag** (`.rd-tag--number` / `.rd-tag--team`) — the number/team-name handed to the competitor (nothing is shown before the draw assigns a number).
 - `.rd-handoff` — `--ok-soft` callout shown after a check-in, surfacing the tag large enough to read against a placard.
 - `.rd-chip` — a person's other-competition entries; checked chips use the `--ok` family.
 - `.rd-walkup` (inline add, setup-only) and the edit modal reuse the standard field/modal vocabulary.

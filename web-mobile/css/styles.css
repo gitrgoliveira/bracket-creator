@@ -8546,17 +8546,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-family: var(--font);
 }
 
-.rd-tag--pending {
-  /* White (not --line-2) so the muted --ink-4 text clears WCAG AA (4.72:1);
-     the dashed border + italic still read it as an empty/pending slot. */
-  background: var(--surface);
-  color: var(--ink-4);
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: 500;
-  font-style: italic;
-  border: 1px dashed var(--ink-4);
-}
 
 .rd-tag--lg {
   padding: 7px 14px;

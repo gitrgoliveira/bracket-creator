@@ -806,7 +806,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Registration desk</h1>
-            <div className="page-head__sub">Check competitors in across every competition and hand them their number.</div>
+            <div className="page-head__sub">Check competitors in as they arrive, across every competition.</div>
           </div>
         </div>
 

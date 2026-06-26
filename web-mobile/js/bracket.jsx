@@ -400,17 +400,27 @@ function buildDisplayModel(rounds) {
 // computeMetaTops lays out an (uneven) effective-round bracket. It walks the
 // feeder graph from the final: matches with no feeders ("seeded" entrants — real
 // players or bye recipients) are stacked top-to-bottom in depth-first encounter
-// order, and every parent is centred on the mean of its feeders. Returns a map
-// of matchId → absolute top (px). heights is matchId → measured card height.
-function computeMetaTops(columns, feedersById, heights) {
+// order, and every parent is centred so its OWN connector anchor sits at the mean
+// of its feeders' anchors. Returns a map of matchId → absolute top (px).
+//
+// `heights` is matchId → measured card height. `offsets` is matchId → anchor
+// distance from the card top (the y the SVG connectors join at: the sides-block
+// midline for match cards, the geometric centre for bye-slot cards). Centring on
+// the mean of feeder ANCHORS rather than geometric centres keeps the elbow on each
+// card's seam even when a tall, header-offset match card feeds a child alongside a
+// shorter bye-slot card — otherwise the asymmetric offset shifts the merge ~6px
+// off the seam (delta != 0). `offsets` defaults to h/2 for any id it omits, so a
+// caller that passes only heights gets the prior geometric-centre-of-mass layout.
+function computeMetaTops(columns, feedersById, heights, offsets = {}) {
   const GAP = 16;
   const DEFAULT_H = 110;
-  const centerOf = {};
+  const offsetOf = (id) => offsets[id] ?? (heights[id] || DEFAULT_H) / 2;
+  const anchorOf = {};
   const inProgress = new Set();
   let cursor = 0;
   const visit = (id) => {
-    if (centerOf[id] != null) return centerOf[id];
-    // Cycle guard (mirrors the DisplayRound!=0 guard in the Go BFS): centerOf is
+    if (anchorOf[id] != null) return anchorOf[id];
+    // Cycle guard (mirrors the DisplayRound!=0 guard in the Go BFS): anchorOf is
     // only set post-order for parents, so a cyclic feeders graph would recurse
     // forever. The engine only emits acyclic trees, but a corrupt/hand-edited
     // bracket.json must not crash the renderer — break the cycle and return 0.
@@ -419,17 +429,18 @@ function computeMetaTops(columns, feedersById, heights) {
     const fs = (feedersById[id] || []).filter(Boolean);
     const h = heights[id] || DEFAULT_H;
     if (fs.length === 0) {
-      const c = cursor + h / 2;
+      // Leaf: stacked in natural flow (top = cursor); its anchor is top + offset.
+      const a = cursor + offsetOf(id);
       cursor += h + GAP;
-      centerOf[id] = c;
+      anchorOf[id] = a;
       inProgress.delete(id);
-      return c;
+      return a;
     }
-    const cs = fs.map(visit);
-    const c = cs.reduce((a, b) => a + b, 0) / cs.length;
-    centerOf[id] = c;
+    const as = fs.map(visit);
+    const a = as.reduce((x, y) => x + y, 0) / as.length;
+    anchorOf[id] = a;
     inProgress.delete(id);
-    return c;
+    return a;
   };
   const rootId = columns[columns.length - 1]?.[0]?.id;
   if (rootId) visit(rootId);
@@ -437,15 +448,15 @@ function computeMetaTops(columns, feedersById, heights) {
   // final, so visit(rootId) already placed every match in `columns`. This loop
   // is a no-op for engine output and only fires on corrupt/hand-written metadata.
   columns.forEach((col) => col.forEach((m) => {
-    if (centerOf[m.id] == null) {
+    if (anchorOf[m.id] == null) {
       const h = heights[m.id] || DEFAULT_H;
-      centerOf[m.id] = cursor + h / 2;
+      anchorOf[m.id] = cursor + offsetOf(m.id);
       cursor += h + GAP;
     }
   }));
   const tops = {};
   columns.forEach((col) => col.forEach((m) => {
-    tops[m.id] = centerOf[m.id] - (heights[m.id] || DEFAULT_H) / 2;
+    tops[m.id] = anchorOf[m.id] - offsetOf(m.id);
   }));
   return tops;
 }
@@ -532,14 +543,29 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
       const tree = treeRef.current;
       if (!tree || !columns || columns.length === 0) return;
       const heights = {};
+      const offsets = {};
       for (const col of columns) {
         for (const m of col) {
           const el = refMap.current[m.id];
           if (!el) return;
-          heights[m.id] = el.getBoundingClientRect().height;
+          const rect = el.getBoundingClientRect();
+          heights[m.id] = rect.height;
+          // Anchor offset from the card top — the y the SVG connectors join at.
+          // Mirrors anchorY(): sides-block midline for match cards, geometric
+          // centre for bye-slot cards (no .bc-side). Passing this to computeMetaTops
+          // centres parents on feeder ANCHORS, not geometric centres, so the elbow
+          // lands on the seam even for a match-card + bye-slot feeder pair.
+          const sides = el.querySelectorAll(".bc-side");
+          if (sides.length >= 2) {
+            const f = sides[0].getBoundingClientRect();
+            const l = sides[sides.length - 1].getBoundingClientRect();
+            offsets[m.id] = (f.top + l.bottom) / 2 - rect.top;
+          } else {
+            offsets[m.id] = rect.height / 2;
+          }
         }
       }
-      const tops = computeMetaTops(columns, feedersById, heights);
+      const tops = computeMetaTops(columns, feedersById, heights, offsets);
       // Every column is absolutely positioned, so the flow height of each
       // round-matches container is 0 and the tree would collapse. Derive the
       // overall content height from the lowest card bottom and pin it on the

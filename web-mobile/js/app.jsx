@@ -542,19 +542,24 @@ function App() {
 
   useE(() => { load(); }, []);
 
-  // mp-9h1f: while the shiaijo operator console is active the SSE handler skips
-  // its per-event aggregate refetch (the console keeps itself live via its own
-  // court-scoped feed, so the operator's tablet stops re-downloading every court
-  // on every score). Catch the admin tournament state back up ONLY when LEAVING
-  // the console for another admin view — fire on a shiaijo→other transition, not
-  // on mount (which the unconditional load() above already covers) nor on
-  // non-shiaijo↔non-shiaijo navigation (which never skipped refetches).
-  const prevAdminKindRef = useR(adminView.kind);
+  // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
+  // view) the SSE handler skips its per-event aggregate refetch — the console
+  // keeps itself live via its own court-scoped feed, so the operator's tablet
+  // stops re-downloading every court on every score. Catch the aggregate back up
+  // whenever we LEAVE that console state, by ANY path: navigating to another
+  // admin view (adminView.kind change) OR switching out of admin mode entirely
+  // (logout, Public-viewer, popstate to a viewer route — all change `mode` while
+  // adminView.kind can stay "shiaijo"). Tracking the combined boolean and
+  // depending on both `mode` and `adminView.kind` closes the mode-change gap. It
+  // does not fire on mount (was===is on the first run) — the unconditional
+  // load() above covers initial load.
+  const wasAdminShiaijoRef = useR(mode === "admin" && adminView.kind === "shiaijo");
   useE(() => {
-    const leftShiaijo = prevAdminKindRef.current === "shiaijo" && adminView.kind !== "shiaijo";
-    prevAdminKindRef.current = adminView.kind;
-    if (mode === "admin" && leftShiaijo) load();
-  }, [adminView.kind]);
+    const isAdminShiaijo = mode === "admin" && adminView.kind === "shiaijo";
+    const leftConsole = wasAdminShiaijoRef.current && !isAdminShiaijo;
+    wasAdminShiaijoRef.current = isAdminShiaijo;
+    if (leftConsole) load();
+  }, [adminView.kind, mode]);
 
   useE(() => {
     window.API.fetchAnnouncements()

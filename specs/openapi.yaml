@@ -2304,6 +2304,58 @@ paths:
                     items:
                       $ref: '#/components/schemas/MatchResult'
 
+  /api/viewer/court/{court}/matches:
+    get:
+      tags: [viewer]
+      summary: Court-scoped match feed for the operator console
+      description: >
+        Returns the same per-competition payload as GET /api/viewer/competitions
+        (config + poolMatches + bracket), but ONLY for competitions that have at
+        least one real (both-sides-resolved) match — pool or non-preview bracket
+        — physically placed on the given court right now. Keyed on actual match
+        placement (not competition court config) so the feed stays correct after
+        an operator moves a match to another shiaijo. Per-competition match data
+        is full (not court-filtered) so client-side derivations like pool
+        "Match N of M" counts stay correct; the right-sizing is by competition
+        count (only comps on this court). Public, no auth.
+      parameters:
+        - in: path
+          name: court
+          required: true
+          schema:
+            type: string
+          description: Court label (e.g. "A").
+      responses:
+        '200':
+          description: Competitions with a match on the court, full match data each.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [court, competitions]
+                properties:
+                  court:
+                    type: string
+                  competitions:
+                    type: array
+                    items:
+                      type: object
+                      required: [config, poolMatches, bracket]
+                      properties:
+                        config:
+                          $ref: '#/components/schemas/Competition'
+                        poolMatches:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MatchResult'
+                        bracket:
+                          nullable: true
+                          $ref: '#/components/schemas/Bracket'
+        '404':
+          description: Unknown court.
+        '503':
+          description: No active tournament loaded.
+
 components:
 
   securitySchemes:

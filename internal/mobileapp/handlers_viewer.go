@@ -92,6 +92,62 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 	return store.LoadCompetition(compID)
 }
 
+// buildViewerCompetitionPayload assembles the public per-competition viewer
+// payload ({config, poolMatches, bracket}) shared by the aggregate
+// GET /competitions and the court-scoped GET /court/:court/matches. It applies
+// the identical participant/number merge, preview-bracket strip, queue-position
+// annotation, and audit-field redaction so every PUBLIC surface sees the same
+// non-sensitive data. Returns nil when the competition cannot be loaded.
+func buildViewerCompetitionPayload(store *state.Store, compID string) gin.H {
+	comp, _ := viewerLoadCompetition(store, compID)
+	if comp == nil {
+		return nil
+	}
+	// Only pass HasIDs=true hint; false means unset so auto-detect runs for
+	// competitions created before the flag existed AND for the narrow window
+	// where a deferred HasParticipantIDs flip fails after SaveParticipants
+	// succeeded (file has UUIDs but flag is still false on disk).
+	var hasIDsHint *bool
+	if comp.HasParticipantIDs {
+		t := true
+		hasIDsHint = &t
+	}
+	players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	comp.Players = players
+
+	// Global views like Scoring/Schedule need matches and brackets.
+	poolMatches, _ := store.LoadPoolMatches(compID)
+	bracket, _ := store.LoadBracket(compID)
+	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
+	// pools.csv read entirely when no prefix is configured (the common case).
+	if comp.NumberPrefix != "" {
+		pools, _ := store.LoadPools(compID)
+		mergePoolNumbersIntoPlayers(comp, pools)
+	}
+
+	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
+	// with assigned times. It MUST NOT leak into the public match-list payloads
+	// (Find-My-Matches / Watchlist / global schedule / TV / operator console),
+	// which treat every bracket match as a real, scheduled bout.
+	if bracket != nil && bracket.Preview {
+		bracket = nil
+	}
+
+	// FR-025, T036: derive per-court queue position at serve time.
+	annotateQueuePositions(poolMatches)
+	annotateBracketQueuePositions(bracket)
+
+	// Redact operator-only audit fields before this PUBLIC payload.
+	stripMatchesAudit(poolMatches)
+	stripBracketAudit(bracket)
+
+	return gin.H{
+		"config":      comp,
+		"poolMatches": poolMatches,
+		"bracket":     bracket,
+	}
+}
+
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
 	// P2 (mp-9afd): singleflight group for the two expensive viewer read
 	// endpoints. Created once per router setup and shared by all requests
@@ -138,65 +194,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			for i, id := range ids {
 				idx, compID := i, id
 				safeGo(&wg, &panicRef, func() {
-					comp, _ := viewerLoadCompetition(store, compID)
-					if comp == nil {
-						return
-					}
-					// Only pass HasIDs=true hint; false means unset so auto-detect
-					// runs for competitions created before the flag existed AND
-					// for the narrow window where a deferred HasParticipantIDs
-					// flip fails after SaveParticipants succeeded (file has UUIDs
-					// but flag is still false on disk). Pre-fix this site passed
-					// `&hasIDs` (non-nil false) which bypassed auto-detect and
-					// misparsed UUID-prefix rows as plain Name fields. Mirrors
-					// the detail-view pattern at line ~101 and the engine load
-					// pattern in StartCompetition.
-					var hasIDsHint *bool
-					if comp.HasParticipantIDs {
-						t := true
-						hasIDsHint = &t
-					}
-					players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
-					comp.Players = players
-
-					// Global views like Scoring/Schedule need matches and brackets
-					poolMatches, _ := store.LoadPoolMatches(compID)
-					bracket, _ := store.LoadBracket(compID)
-					// mp-13y: merge numberPrefix-derived numbers from pools.csv.
-					// Skip the pools.csv read entirely when no prefix is
-					// configured — the common case, and the list endpoint
-					// otherwise loads pools for every competition on every hit.
-					if comp.NumberPrefix != "" {
-						pools, _ := store.LoadPools(compID)
-						mergePoolNumbersIntoPlayers(comp, pools)
-					}
-
-					// mp-9dz: a preview bracket on a mixed source carries pool-
-					// origin placeholders ("Pool A-1st") with scheduled times
-					// assigned by assignBracketMatchSlots. It MUST NOT leak into
-					// the aggregate viewer payload that feeds Find-My-Matches /
-					// Watchlist / global schedule / TV displays — those treat
-					// every bracket match as a real, scheduled bout. Strip it
-					// here so only the per-competition detail endpoint (which
-					// powers the Bracket — preview tab) sees it.
-					if bracket != nil && bracket.Preview {
-						bracket = nil
-					}
-
-					// FR-025, T036: derive per-court queue position at serve time
-					// so viewers see "Next up: 3" without persisting a value that
-					// would go stale the moment any match transitions.
-					annotateQueuePositions(poolMatches)
-					annotateBracketQueuePositions(bracket)
-
-					// Redact operator-only audit fields before this PUBLIC payload.
-					stripMatchesAudit(poolMatches)
-					stripBracketAudit(bracket)
-
-					results[idx] = gin.H{
-						"config":      comp,
-						"poolMatches": poolMatches,
-						"bracket":     bracket,
+					// Shared per-comp builder (also used by the court-scoped
+					// /court/:court/matches feed). A nil payload (comp failed to
+					// load) leaves results[idx] as a nil `any` so the collect
+					// loop below skips it — assigning a nil gin.H directly would
+					// box into a non-nil interface and slip past that filter.
+					if payload := buildViewerCompetitionPayload(store, compID); payload != nil {
+						results[idx] = payload
 					}
 				})
 			}

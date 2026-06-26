@@ -306,3 +306,217 @@ func TestPhaseFromMatchID_WithDash(t *testing.T) {
 	assert.Equal(t, "Pool A", phaseFromMatchID("Pool A-0"))
 	assert.Equal(t, "R1", phaseFromMatchID("R1-2"))
 }
+
+// --- Court → matches feed (operator-console data source) ---
+
+// courtMatchesResponse mirrors GET /api/viewer/court/:court/matches. Each entry
+// is the same {config, poolMatches, bracket} per-competition payload the
+// aggregate GET /competitions returns, scoped to comps with a match on the court.
+type courtMatchesResponse struct {
+	Court        string `json:"court"`
+	Competitions []struct {
+		Config struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"config"`
+		PoolMatches []struct {
+			ID    string `json:"id"`
+			Court string `json:"court"`
+			SideA string `json:"sideA"`
+			SideB string `json:"sideB"`
+		} `json:"poolMatches"`
+		Bracket *struct {
+			Rounds [][]struct {
+				Court string `json:"court"`
+			} `json:"rounds"`
+			Preview bool `json:"preview"`
+		} `json:"bracket"`
+	} `json:"competitions"`
+	Error string `json:"error,omitempty"`
+}
+
+func getCourtMatches(t *testing.T, r http.Handler, court string) (*httptest.ResponseRecorder, courtMatchesResponse) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/"+court+"/matches", nil)
+	r.ServeHTTP(w, req)
+	var resp courtMatchesResponse
+	if w.Body.Len() > 0 {
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+			"response body must be valid JSON: %q", w.Body.String())
+	}
+	return w, resp
+}
+
+func compIDs(resp courtMatchesResponse) []string {
+	out := make([]string, 0, len(resp.Competitions))
+	for _, c := range resp.Competitions {
+		out = append(out, c.Config.ID)
+	}
+	return out
+}
+
+// TestCourtMatches_ListsCompsWithRealMatchOnCourt — a comp with a real pool
+// match on the court appears (with its full per-comp payload); a comp whose
+// match is on another court does not.
+func TestCourtMatches_ListsCompsWithRealMatchOnCourt(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A", "B"},
+	}))
+
+	onA := state.Competition{ID: "on-a", Name: "Comp On A", Status: state.CompStatusPools, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&onA))
+	require.NoError(t, store.SavePoolMatches("on-a", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	onB := state.Competition{ID: "on-b", Name: "Comp On B", Status: state.CompStatusPools, Courts: []string{"B"}}
+	require.NoError(t, store.SaveCompetition(&onB))
+	require.NoError(t, store.SavePoolMatches("on-b", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P3", SideB: "P4", Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	w, resp := getCourtMatches(t, r, "A")
+	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
+	require.Equal(t, []string{"on-a"}, compIDs(resp), "only the comp with a match on A should appear")
+	assert.Equal(t, "Comp On A", resp.Competitions[0].Config.Name)
+	assert.Equal(t, "pools", resp.Competitions[0].Config.Status)
+	require.Len(t, resp.Competitions[0].PoolMatches, 1, "the comp's match data must be included for the queue")
+	assert.Equal(t, "A", resp.Competitions[0].PoolMatches[0].Court)
+}
+
+// TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered — the comp's payload
+// includes ALL its matches (both courts), not just the requested court, so
+// client-side derivations like pool "Match N of M" counts stay correct.
+func TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A", "B"},
+	}))
+
+	comp := state.Competition{ID: "spread", Name: "Spread", Status: state.CompStatusPools, Courts: []string{"A", "B"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SavePoolMatches("spread", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"},
+		{ID: "PoolA-1", SideA: "P1", SideB: "P3", Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	_, resp := getCourtMatches(t, r, "A")
+	require.Equal(t, []string{"spread"}, compIDs(resp))
+	require.Len(t, resp.Competitions[0].PoolMatches, 2,
+		"full comp match data (both courts) must be returned so pool counts stay correct")
+}
+
+// TestCourtMatches_FollowsMovedMatchNotConfig — the load-bearing case: a comp
+// configured for court A whose match was MOVED to court B appears under B
+// (actual placement), not A (config).
+func TestCourtMatches_FollowsMovedMatchNotConfig(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A", "B"},
+	}))
+
+	comp := state.Competition{ID: "moved", Name: "Moved Comp", Status: state.CompStatusPools, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SavePoolMatches("moved", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	_, onA := getCourtMatches(t, r, "A")
+	assert.Empty(t, onA.Competitions, "config-court A must NOT list the comp once its match moved to B")
+
+	_, onB := getCourtMatches(t, r, "B")
+	assert.Equal(t, []string{"moved"}, compIDs(onB), "actual-court B must list the comp whose match was moved there")
+}
+
+// TestCourtMatches_IncludesBracketMatch — a comp whose only match on the court
+// is a (non-preview) bracket match appears, with its bracket payload.
+func TestCourtMatches_IncludesBracketMatch(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	comp := state.Competition{ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "r0-m0", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"}},
+		},
+	}))
+
+	w, resp := getCourtMatches(t, r, "A")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, []string{"ko"}, compIDs(resp))
+	require.NotNil(t, resp.Competitions[0].Bracket, "bracket payload must be present")
+	require.Len(t, resp.Competitions[0].Bracket.Rounds, 1)
+}
+
+// TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup — comps whose only
+// court match is an unresolved placeholder, a preview bracket, or that are still
+// in setup, do NOT appear.
+func TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+
+	ph := state.Competition{ID: "ph", Name: "Placeholder", Status: state.CompStatusPlayoffs, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&ph))
+	require.NoError(t, store.SaveBracket("ph", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "r0-m0", SideA: "Winner of r1-m0", SideB: "Pool A-1st", Status: state.MatchStatusScheduled, Court: "A"}},
+		},
+	}))
+
+	pv := state.Competition{ID: "pv", Name: "Preview", Status: state.CompStatusPools, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&pv))
+	require.NoError(t, store.SaveBracket("pv", &state.Bracket{
+		Preview: true,
+		Rounds: [][]state.BracketMatch{
+			{{ID: "r0-m0", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"}},
+		},
+	}))
+
+	su := state.Competition{ID: "su", Name: "Setup", Status: state.CompStatusSetup, Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&su))
+	require.NoError(t, store.SavePoolMatches("su", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideB: "P2", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	w, resp := getCourtMatches(t, r, "A")
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, resp.Competitions,
+		"placeholder-only, preview-bracket, and setup comps must all be excluded; got %v", compIDs(resp))
+}
+
+// TestCourtMatches_UnknownCourtAndNoTournament — 404 for an unknown court, 503
+// when no tournament is loaded (same contract as /court/:court/current).
+func TestCourtMatches_UnknownCourtAndNoTournament(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	w503, resp503 := getCourtMatches(t, r, "A")
+	require.Equal(t, http.StatusServiceUnavailable, w503.Code)
+	assert.Equal(t, "no_active_tournament", resp503.Error)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A", "B"},
+	}))
+
+	w404, resp404 := getCourtMatches(t, r, "Z")
+	require.Equal(t, http.StatusNotFound, w404.Code)
+	assert.Equal(t, "court_not_found", resp404.Error)
+	assert.Equal(t, "Z", resp404.Court)
+}

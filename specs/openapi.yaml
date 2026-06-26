@@ -1336,7 +1336,7 @@ paths:
                 players:
                   type: array
                   items:
-                    $ref: '#/components/schemas/Participant'
+                    $ref: '#/components/schemas/ParticipantInput'
       responses:
         '200':
           description: Participants successfully updated.
@@ -2785,8 +2785,8 @@ components:
         source:
           type: string
           maxLength: 200
-          enum: [manual, registered, transfer, reserved]
-          description: Registration source / provenance (renamed from `tag`; stored lower-case). The legacy value `reserved` is accepted on input and normalized to `manual`; responses always emit `manual`.
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). Responses always emit one of these canonical values. The legacy value `reserved` is accepted only on the write endpoints (normalized to `manual`) and is never emitted here.
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
@@ -2818,8 +2818,36 @@ components:
         source:
           type: string
           maxLength: 200
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). Responses always emit one of these canonical values. The legacy value `reserved` is accepted only on input (see `ParticipantInput`, normalized to `manual`) and is never emitted here.
+
+    ParticipantInput:
+      type: object
+      description: Request-body variant of `Participant`. Identical to the response shape except `source` additionally accepts the legacy `reserved` alias, which is normalized to `manual` on write.
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 100
+        displayName:
+          type: string
+          maxLength: 50
+        dojo:
+          type: string
+          maxLength: 100
+        metadata:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 200
+        source:
+          type: string
+          maxLength: 200
           enum: [manual, registered, transfer, reserved]
-          description: Registration source / provenance (renamed from `tag`; stored lower-case). The legacy value `reserved` is accepted on input and normalized to `manual`; responses always emit `manual`.
+          description: Registration source / provenance (renamed from `tag`; case-insensitive, stored lower-case). The legacy value `reserved` is accepted and normalized to `manual` on write.
 
     SeedAssignment:
       type: object

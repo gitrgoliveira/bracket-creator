@@ -116,4 +116,41 @@ describe('computeMetaTops', () => {
     // Final is centred between Alice/Bob and Carol's SF.
     expect(centre('m-r3-0')).toBeCloseTo((centre('m-r1-0') + centre('m-r2-1')) / 2, 5);
   });
+
+  // mp-ydk7: connectors anchor at each card's sides-block midline, which sits
+  // BELOW the geometric centre for a match card (the meta-header offset) but AT
+  // the centre for a bye-slot card (no .bc-side). When a parent is fed by one
+  // match card + one bye-slot, centring it on feeder GEOMETRIC CENTRES leaves its
+  // seam ~6px off the feeder-anchor midpoint (the elbow misses the seam). Passing
+  // per-card `offsets` must centre each parent so its OWN anchor equals the mean
+  // of its feeders' anchors → delta 0 for every parent, including the asymmetric
+  // match+bye case. Guards the regression the centre-of-mass layout shipped on
+  // unbalanced (mp-5ng7) brackets.
+  it('zeroes feeder-vs-child delta under asymmetric match/bye anchor offsets', () => {
+    const model = buildDisplayModel(fivePlayerRounds());
+    const MATCH_H = 114, BYE_H = 44;
+    // Match cards: sides-midline 63px from top (12px header + ~half the sides).
+    // Bye-slot cards: centred, so offset = height / 2.
+    const MATCH_OFF = 63, BYE_OFF = BYE_H / 2;
+    const isBye = (id) => id.startsWith('bye-');
+    const heights = {}, offsets = {};
+    for (const col of model.columns) {
+      for (const m of col) {
+        heights[m.id] = isBye(m.id) ? BYE_H : MATCH_H;
+        offsets[m.id] = isBye(m.id) ? BYE_OFF : MATCH_OFF;
+      }
+    }
+    const tops = computeMetaTops(model.columns, model.feedersById, heights, offsets);
+    const anchor = (id) => tops[id] + offsets[id]; // the y the SVG connectors join at
+    // For every parent: its anchor (seam) == mean of its feeders' anchors → delta 0.
+    for (const [childId, feeders] of Object.entries(model.feedersById)) {
+      const fs = feeders.filter(Boolean);
+      if (!fs.length) continue;
+      const mean = fs.reduce((s, fid) => s + anchor(fid), 0) / fs.length;
+      expect(anchor(childId)).toBeCloseTo(mean, 5);
+    }
+    // Sanity: the case under test really is asymmetric — Carol's SF mixes a bye
+    // (centre-anchored) with a match feeder (seam-anchored, larger offset).
+    expect(offsets['bye-m-r2-1-0']).not.toBe(offsets['m-r1-3']);
+  });
 });

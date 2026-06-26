@@ -433,25 +433,32 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 		}
 	}
 
-	seen := make(map[string]struct{}, len(pids))
+	// Deduplicate by resolved participant index so that semantically equivalent
+	// pids (same normalized name|dojo with different whitespace/case) don't count
+	// the same participant twice. NotFound pids are deduped by raw string because
+	// there is no index to compare against.
+	seenIdx := make(map[int]struct{}, len(pids))
+	seenNotFound := make(map[string]struct{})
 	result := BulkCheckInResult{NotFound: []string{}}
 	for _, pid := range pids {
 		if pid == "" {
 			continue
 		}
-		if _, dup := seen[pid]; dup {
-			continue
-		}
-		seen[pid] = struct{}{}
-
 		idx, ok := byID[pid]
 		if !ok {
 			idx, ok = byKey[pidPairKey(pid)]
 		}
 		if !ok {
-			result.NotFound = append(result.NotFound, pid)
+			if _, dup := seenNotFound[pid]; !dup {
+				result.NotFound = append(result.NotFound, pid)
+				seenNotFound[pid] = struct{}{}
+			}
 			continue
 		}
+		if _, dup := seenIdx[idx]; dup {
+			continue
+		}
+		seenIdx[idx] = struct{}{}
 		if players[idx].CheckedIn {
 			result.AlreadyCheckedIn++
 		} else {

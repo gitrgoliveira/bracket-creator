@@ -416,22 +416,22 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
       <div className="rd-walkup__grid">
         <label className="field">
           <span className="field__label">{isTeam ? "Team name" : "Name"}</span>
-          <input ref={nameRef} className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={isTeam ? "Tora A" : "Akira Tanaka"} />
+          <input ref={nameRef} className="input" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder={isTeam ? "Tora A" : "Akira Tanaka"} />
         </label>
         <label className="field">
           <span className="field__label">Dojo</span>
-          <input className="input" value={dojo} onChange={(e) => setDojo(e.target.value)} placeholder={isTeam ? "Tora Dojo London" : "Gyokusen"} />
+          <input className="input" maxLength={100} value={dojo} onChange={(e) => setDojo(e.target.value)} placeholder={isTeam ? "Tora Dojo London" : "Gyokusen"} />
         </label>
         {!isTeam && comp.withZekkenName && (
           <label className="field">
             <span className="field__label">Zekken</span>
-            <input className="input" value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
+            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
           </label>
         )}
         {!isTeam && (
           <label className="field">
             <span className="field__label">Dan grade <span className="field__opt">(optional)</span></span>
-            <input className="input" value={dan} onChange={(e) => setDan(e.target.value)} placeholder="3 dan" />
+            <input className="input" maxLength={20} value={dan} onChange={(e) => setDan(e.target.value)} placeholder="3 dan" />
           </label>
         )}
       </div>
@@ -489,22 +489,22 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       <div className="rd-walkup__grid">
         <label className="field">
           <span className="field__label">{isTeam ? "Team name" : "Name"}</span>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <input className="input" maxLength={100} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </label>
         <label className="field">
           <span className="field__label">Dojo</span>
-          <input className="input" value={dojo} onChange={(e) => setDojo(e.target.value)} />
+          <input className="input" maxLength={100} value={dojo} onChange={(e) => setDojo(e.target.value)} />
         </label>
         {!isTeam && comp.withZekkenName && (
           <label className="field">
             <span className="field__label">Zekken</span>
-            <input className="input" value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
+            <input className="input" maxLength={40} value={zekken} onChange={(e) => setZekken(e.target.value)} placeholder="TANAKA" />
           </label>
         )}
         {!isTeam && (
           <label className="field">
             <span className="field__label">Dan grade <span className="field__opt">(optional)</span></span>
-            <input className="input" value={dan} onChange={(e) => setDan(e.target.value)} placeholder="3 dan" />
+            <input className="input" maxLength={20} value={dan} onChange={(e) => setDan(e.target.value)} placeholder="3 dan" />
           </label>
         )}
       </div>

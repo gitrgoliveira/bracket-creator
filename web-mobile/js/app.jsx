@@ -371,6 +371,12 @@ function App() {
   }, []);
   const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
   const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
+  // Mirror adminView into a ref so the long-lived SSE handler (deps
+  // [viewerCompId, mode]) can read the CURRENT admin view without being
+  // recreated on every navigation. Used to skip the per-event aggregate
+  // refetch while the shiaijo operator console is active (mp-9h1f).
+  const adminViewRef = useR(adminView);
+  useE(() => { adminViewRef.current = adminView; }, [adminView]);
   const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
@@ -536,6 +542,16 @@ function App() {
 
   useE(() => { load(); }, []);
 
+  // mp-9h1f: while the shiaijo operator console is active the SSE handler skips
+  // its per-event aggregate refetch (the console keeps itself live via its own
+  // court-scoped feed, so the operator's tablet stops re-downloading every court
+  // on every score). Catch the admin tournament state back up when the operator
+  // navigates to any OTHER admin view, so dashboards / competition pages never
+  // render stale after a stint on the console.
+  useE(() => {
+    if (mode === "admin" && adminView.kind !== "shiaijo") load();
+  }, [adminView.kind]);
+
   useE(() => {
     window.API.fetchAnnouncements()
       .then(list => {
@@ -628,6 +644,19 @@ function App() {
         return id;
     };
 
+    // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
+    // console is the active admin view, skip it: the console sources its
+    // cross-competition court view from its own GET /viewer/court/:court/matches
+    // feed and refreshes itself, so re-pulling the whole-tournament aggregate
+    // here would re-download every other court on the operator's tablet on every
+    // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active
+    // admin view is read from the ref so this closure need not be recreated on
+    // navigation. Every other mode/view loads exactly as before.
+    const maybeLoad = () => {
+        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
+        load();
+    };
+
     const unsub = window.API.subscribeToEvents((event) => {
         // P1/P4 (mp-9afd): two jitter windows.
         //   detailJitter — tight (0–500ms) for per-competition detail fetches
@@ -694,7 +723,7 @@ function App() {
             }
             // competitor_status_updated is a list-level event (eligibility
             // badges on the lobby): always refresh the full list.
-            jitteredTimeout(load, listJitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -706,7 +735,7 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                jitteredTimeout(load, listJitter);
+                jitteredTimeout(maybeLoad, listJitter);
             } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
@@ -732,7 +761,7 @@ function App() {
             // Display mode is excluded because it already fires load() in the
             // `mode === "display"` block earlier in this same event handler.
             if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
-                jitteredTimeout(load, listJitter);
+                jitteredTimeout(maybeLoad, listJitter);
             }
         } else if (event.type === "schedule_updated") {
             // Court/time move: no competitionId in payload, so refresh the
@@ -740,7 +769,7 @@ function App() {
             if (viewerCompId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, listJitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
             // Draw generated/discarded: refresh the selected competition's
             // details (new pools/bracket data or cleared state) and the
@@ -748,7 +777,7 @@ function App() {
             if (viewerCompId === event.data?.competitionId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, listJitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13 — FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound
@@ -763,7 +792,7 @@ function App() {
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh — covers display mode, home-
             // screen viewers, and per-comp viewers alike.
-            jitteredTimeout(load, listJitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need
             // the updated player list. Refetch the selected competition when the
@@ -772,7 +801,7 @@ function App() {
             if (viewerCompId === event.data?.competitionId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, listJitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
             // A team lineup was saved or deleted by an operator. The lineup
             // data is not part of the competition object, so patchCompetitionData

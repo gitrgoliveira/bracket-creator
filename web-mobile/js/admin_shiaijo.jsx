@@ -101,6 +101,53 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return () => { mountedRef.current = false; };
     }, []);
 
+    // mp-9h1f: the operator console is court-first AND cross-competition (the
+    // running bout stays across comps per AC7, the switch nudge watches OTHER
+    // comps on the court per AC6, Submit+Next advances within the submitted
+    // comp). It therefore sources every competition with a match on THIS court
+    // from the dedicated court feed (GET /viewer/court/:court/matches) rather
+    // than the whole-tournament aggregate. app.jsx skips its per-event aggregate
+    // refetch while this view is active (so the operator's tablet stops
+    // re-downloading all courts on every score); this page keeps itself live via
+    // its own court-scoped SSE subscription. Until the first fetch resolves it
+    // falls back to the prop aggregate so the queue is never momentarily blank.
+    const [courtComps, setCourtComps] = useStateSh(null);
+    useEffectSh(() => {
+        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
+        let cancelled = false;
+        const timers = new Set();
+        const refresh = () => {
+            window.API.fetchCourtMatches(court)
+                .then(comps => { if (!cancelled && mountedRef.current) setCourtComps(comps); })
+                .catch(err => console.error("Failed to fetch court matches", err));
+        };
+        refresh();
+        let unsub = () => {};
+        if (typeof window.API.subscribeToEvents === "function") {
+            // The feed is court-scoped server-side, so any match/schedule/comp
+            // transition may change this court's queue. Refetch (jittered to
+            // avoid a thundering herd when many operators share the venue LAN).
+            const REFRESH_EVENTS = new Set([
+                "match_updated", "schedule_updated", "competition_started",
+                "competition_completed", "draw_generated", "draw_discarded",
+                "swiss_round_generated", "competitor_status_updated", "participants_updated",
+            ]);
+            const off = window.API.subscribeToEvents((event) => {
+                if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
+                const id = setTimeout(() => { timers.delete(id); if (!cancelled) refresh(); }, 200 + Math.random() * 400);
+                timers.add(id);
+            });
+            unsub = () => { if (typeof off === "function") off(); };
+        }
+        return () => { cancelled = true; timers.forEach(clearTimeout); unsub(); };
+    }, [court]);
+
+    // Court-scoped competitions: the live feed once loaded, else the prop
+    // aggregate as a transient fallback. All competition/match derivations below
+    // read from this so the page operates only on THIS court's competitions.
+    const courtCompetitions = courtComps || tournament.competitions || [];
+    const courtScopedTournament = { ...tournament, competitions: courtCompetitions };
+
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
     // guards the in-flight announce request.
@@ -138,9 +185,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Same condition as courtKnown below.
     const allMatches = useMemoSh(
         () => (tournament.courts || []).includes(court)
-            ? window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court)
+            ? window.filterMatchesByCourt(window.tournamentMatches({ competitions: courtCompetitions }).filter(hasBothSides), court)
             : [],
-        [tournament, court]
+        [courtCompetitions, tournament.courts, court]
     );
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
@@ -157,12 +204,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         for (const m of allMatches) {
             if (!seen.has(m.compId)) {
                 seen.add(m.compId);
-                const comp = (tournament.competitions || []).find(c => c.id === m.compId);
+                const comp = courtCompetitions.find(c => c.id === m.compId);
                 out.push({ id: m.compId, name: m.compName || (comp && comp.name) || m.compId });
             }
         }
         return out;
-    }, [allMatches, tournament]);
+    }, [allMatches, courtCompetitions]);
 
     // Effective selected competition — default logic runs when selectedCompId is
     // null or no longer present (e.g. a comp was removed). Priority: running
@@ -754,7 +801,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {contextMatch && (
                                 <ShiaijoContext
-                                    match={contextMatch} tournament={tournament}
+                                    match={contextMatch} tournament={courtScopedTournament}
                                     court={court} nextPoolName={nextPoolName} tweaks={tweaks}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />

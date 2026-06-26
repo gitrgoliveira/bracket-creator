@@ -467,7 +467,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
     setBusy(true);
     try {
       const metadata = window.buildPlayerMetadata(isTeam ? "" : dan.trim(), player.metadata);
-      const payload = { name: n, dojo: d, displayName: !isTeam && comp.withZekkenName ? zekken.trim() : "", tag: player.tag || "" };
+      const payload = { name: n, dojo: d, displayName: !isTeam && comp.withZekkenName ? zekken.trim() : "", source: player.source || "" };
       if (metadata !== undefined) payload.metadata = metadata;
       const updated = await window.API.replaceParticipant(comp.id, rdPid(player), payload, password, admin);
       onSaved(comp, updated);

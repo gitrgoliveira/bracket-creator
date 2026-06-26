@@ -13,7 +13,8 @@
 // "Swiss-R1". Call sites that must distinguish a real pool from Swiss/other
 // phases should gate on the competition format or a "Pool " prefix, not on a
 // truthy poolNameOf() result alone (see findNextPoolOnCourt's "mixed" gate).
-// Internal — not exported; callers go through poolNameOf()/isSupplementaryBout().
+// This regex constant is intentionally module-private — callers use the
+// exported poolNameOf() wrapper below, never the raw pattern.
 const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
 
 // poolNameOf — derive the pool name from a pool-match id (incl. DH/TB
@@ -23,10 +24,12 @@ export function poolNameOf(id) {
     return id.match(POOL_MATCH_ID_RE)?.[1] ?? "";
 }
 
+// This regex constant is intentionally module-private — callers use the
+// exported isSupplementaryBout() wrapper below, never the raw pattern.
+const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
+
 // isSupplementaryBout — true for a pool daihyosen ("…-DH-N") or tiebreaker
 // ("…-TB-N") rep bout (a single individual ippon-shobu even in a team comp).
-// Internal — not exported; callers go through isSupplementaryBout().
-const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
 export function isSupplementaryBout(id) {
     return typeof id === "string" && SUPPLEMENTARY_BOUT_RE.test(id);
 }

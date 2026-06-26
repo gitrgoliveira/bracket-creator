@@ -312,12 +312,14 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
     // Text scale adapts to how much vertical room each row gets: fewer rows →
-    // bigger glyphs to fill the screen (~9 rows ≈ 1×, a 4-match pool ≈ 2.25×, a
+    // bigger glyphs to fill the screen (~7 rows ≈ 1×, a 4-match pool ≈ 1.75×, a
     // single bracket match ≈ 2.0×); a packed group shrinks to a 0.85 floor.
-    // Bracket is capped at 2.0 (vs 2.4 for pools/league) to prevent long names
-    // from being truncated when ippon slots scale up at high values.
+    // Bracket is capped at 2.0 (vs 2.4 for pools/league): a lone bracket bout
+    // would otherwise scale to 2.4 and the wide ippon slots push the player
+    // names into truncation. Pools stay at the 7-row reference so a 4-match
+    // pool board keeps names intact rather than over-scaling them.
     const maxScale = promoted.isBracket ? 2.0 : 2.4;
-    const rowScale = Math.min(maxScale, Math.max(0.85, 9 / Math.max(1, rows.length)));
+    const rowScale = Math.min(maxScale, Math.max(0.85, 7 / Math.max(1, rows.length)));
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
             position: "fixed", inset: 0, background: "#ffffff", color: "#111",

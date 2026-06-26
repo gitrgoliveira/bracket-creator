@@ -520,7 +520,7 @@ describe('TvIndividualBoard', () => {
     ] };
     const promotedFew = { competition: fewRows, match: fewRows.poolMatches[0], isBracket: false };
     const strFew = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedFew }));
-    // 1 row → scale = clamp(0.85, 9/1, 2.4) = 2.4
+    // 1 row → scale = clamp(0.85, 7/1, 2.4) = 2.4
     expect(strFew).toContain('"--msb-scale":2.4');
 
     // Build a full pool with many matches so the row count grows.
@@ -533,8 +533,8 @@ describe('TvIndividualBoard', () => {
     ] };
     const promotedMany = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
     const strMany = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedMany }));
-    // 10 rows → scale = clamp(0.85, 9/10, 2.4) = 0.9
-    expect(strMany).toContain('"--msb-scale":0.9');
+    // 10 rows → scale = clamp(0.85, 7/10, 2.4) = 0.85
+    expect(strMany).toContain('"--msb-scale":0.85');
   });
 
   it('caps a LEAGUE board at 6 visible rows (windowed around the current match)', () => {

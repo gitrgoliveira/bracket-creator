@@ -227,7 +227,7 @@ function RdRail({ comps, allStats, selected, onSelect }) {
         </div>
         <div className="rd-rail__sub">{sub}</div>
         <div className="rd-rail__bar" role="presentation">
-          <div className={`rd-rail__bar-fill${done ? " is-done" : ""}`} style={{ width: `${pct}%` }} />
+          <div className={`rd-rail__bar-fill${done ? " is-done" : ""}`} style={{ transform: `scaleX(${pct / 100})` }} />
         </div>
         <div className="rd-rail__count">
           <strong>{present}</strong> / {total} checked in

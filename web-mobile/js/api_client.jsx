@@ -1149,7 +1149,7 @@ const API = {
         return res.json();
     },
     async addParticipant(compID, payload, password, adminPassword) {
-        const res = await fetch(`/api/competitions/${compID}/participants`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)

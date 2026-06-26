@@ -8261,9 +8261,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .rd-rail__bar-fill {
   height: 100%;
+  width: 100%;
   border-radius: 999px;
   background: var(--accent);
-  transition: width 300ms var(--ease-out);
+  transform-origin: left;
+  transition: transform 300ms var(--ease-out);
 }
 
 .rd-rail__bar-fill.is-done {
@@ -8737,10 +8739,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   opacity: 0;
 }
 
-/* Touch devices have no hover — keep the pencil visible so it's reachable. */
+/* Touch devices have no hover — keep the pencil visible so it's reachable.
+   Also bump the check toggle to the DESIGN.md ≥44px coarse-pointer minimum. */
 @media (pointer: coarse) {
   .rd-row__edit {
     opacity: 1;
+  }
+  .rd-check {
+    width: 44px;
+    height: 44px;
   }
 }
 

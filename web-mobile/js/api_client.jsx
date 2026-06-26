@@ -1137,7 +1137,7 @@ const API = {
     // participant ids that must match the persisted id column exactly. Returns { checkedIn, alreadyCheckedIn,
     // notFound }. Used by the Registration desk's "check in a whole dojo" action.
     async bulkCheckIn(compID, participantIds, password) {
-        const res = await fetch(`/api/competitions/${compID}/participants/checkin-bulk`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify({ participantIds })

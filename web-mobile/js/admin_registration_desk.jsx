@@ -393,13 +393,15 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
       if (!isTeam && comp.withZekkenName && zekken.trim()) payload.displayName = zekken.trim();
       const added = await window.API.addParticipant(comp.id, payload, password, admin);
       // Check them in straight away — they're standing at the desk.
+      let checkInOk = false;
       try {
         await window.API.toggleCheckIn(comp.id, rdPid(added), true, password);
         added.checkedIn = true;
+        checkInOk = true;
       } catch (err) {
         showToast(`${n} added but check-in failed: ${err.message}`, "error");
       }
-      onAdded(comp, added);
+      onAdded(comp, added, checkInOk);
     } catch (err) {
       showToast(err.message, "error");
     } finally {
@@ -668,12 +670,14 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     const pending = recs.filter((rec) => rdPresence(rec.entries) !== "all");
     if (!pending.length) return;
     setBusy(true);
+    inFlightRef.current += 1;
     try {
       const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
       const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
       if (failed) showToast(`${failed} check-in(s) failed — reloading`, "error");
       await refresh();
     } finally {
+      inFlightRef.current -= 1;
       if (mountedRef.current) setBusy(false);
     }
   };
@@ -718,7 +722,6 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         const anyEntry = rec.entries.some(({ player }) => matchesFilters(player));
         if (!anyEntry) return;
         const presence = rdPresence(rec.entries);
-        if (uncheckedOnly && presence === "all") return;
         const hay = rdHaystack(rec.name, rec.dojo, rec.entries);
         const score = rdQueryScore(queryNorm, hay);
         if (score == null) return;
@@ -789,9 +792,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     searchRef.current && searchRef.current.focus();
   };
 
-  const onAdded = async (comp, added) => {
+  const onAdded = async (comp, added, checkInOk) => {
     setWalkUpOpen(false);
-    announceHandoff(added.name, [{ compName: comp.name, ...rdPlayerTag(comp, added) }]);
+    if (checkInOk) announceHandoff(added.name, [{ compName: comp.name, ...rdPlayerTag(comp, added) }]);
     await refresh();
   };
 
@@ -881,22 +884,25 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 {busy && <span className="rd-toolbar__busy"><span className="spinner" aria-hidden="true" /> Saving…</span>}
               </div>
 
-              {handoff && (
-                <div className="rd-handoff" role="status" aria-live="polite">
-                  <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
-                  <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — <strong>{handoff.name}</strong></div>
-                  {handoff.tags.some((t) => t.kind !== "pending") && (
-                    <div className="rd-handoff__tags">
-                      {handoff.tags.filter((t) => t.kind !== "pending").map((t, i) => (
-                        <div key={i} className="rd-handoff__tag">
-                          {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
-                          <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__value">{t.value}</span></span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              {handoff && (() => {
+                const visibleTags = handoff.tags.filter((t) => t.kind !== "pending");
+                return (
+                  <div className="rd-handoff" role="status" aria-live="polite">
+                    <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
+                    <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — <strong>{handoff.name}</strong></div>
+                    {visibleTags.length > 0 && (
+                      <div className="rd-handoff__tags">
+                        {visibleTags.map((t, i) => (
+                          <div key={i} className="rd-handoff__tag">
+                            {handoff.tags.length > 1 && <span className="rd-handoff__comp">{t.compName}</span>}
+                            <span className={`rd-tag rd-tag--${t.kind} rd-tag--lg`}><span className="rd-tag__value">{t.value}</span></span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {walkUpOpen && selectedComp && (
                 <RdWalkUp
@@ -928,7 +934,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                     } : {});
                   }
                 }}
-                onToggleChip={(compId, pid, val) => toggleOne(compId, pid, val)}
+                onToggleChip={toggleOne}
                 onEdit={(row) => setEditTarget({ comp: row.comp, player: row.player })}
                 onBulkDojo={(dojo, theseRows) => {
                   if (selected === "all") {

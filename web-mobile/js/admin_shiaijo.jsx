@@ -146,7 +146,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // aggregate as a transient fallback. All competition/match derivations below
     // read from this so the page operates only on THIS court's competitions.
     const courtCompetitions = courtComps || tournament.competitions || [];
-    const courtScopedTournament = { ...tournament, competitions: courtCompetitions };
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
@@ -801,7 +800,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {contextMatch && (
                                 <ShiaijoContext
-                                    match={contextMatch} tournament={courtScopedTournament}
+                                    match={contextMatch} competitions={courtCompetitions}
                                     court={court} nextPoolName={nextPoolName} tweaks={tweaks}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />
@@ -1033,8 +1032,8 @@ function MatchSides({ m, large }) {
 //   • pool phase  → live standings + results for the current pool (the shared
 //     read-only window.PoolsViewer), plus which pool is next on this court.
 //   • bracket phase → a bracket fragment with the current match highlighted.
-function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, onToggle }) {
-    const comp = (tournament.competitions || []).find((c) => c.id === match.compId);
+function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
+    const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
     const isLeagueComp = match.compFormat === "league";

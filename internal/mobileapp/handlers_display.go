@@ -24,33 +24,11 @@ import (
 // lands later we can hoist a DisplayStore interface then.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/court/:court/current", func(c *gin.Context) {
-		// Streaming clients poll this on a 1-2s cadence; never let an
-		// upstream cache them. The router-level CORS already exposes
-		// Access-Control-Allow-Origin, but the contract pins it here too
-		// so the polled-surface guarantee survives router refactors.
-		c.Header("Cache-Control", "no-store")
-		c.Header("Access-Control-Allow-Origin", "*")
-
-		court := strings.ToUpper(strings.TrimSpace(c.Param("court")))
-
-		tour, err := store.LoadTournament()
-		if err != nil || tour == nil {
-			// 503 distinguishes "tournament not loaded yet" from a
-			// genuine 4xx — clients can retry without reporting it as
-			// an error to the operator.
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no_active_tournament"})
-			return
-		}
-
-		validCourt := false
-		for _, ct := range tour.Courts {
-			if strings.EqualFold(ct, court) {
-				validCourt = true
-				break
-			}
-		}
-		if !validCourt {
-			c.JSON(http.StatusNotFound, gin.H{"error": "court_not_found", "court": court})
+		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
+		// no-store + CORS headers so the polled-surface guarantee survives
+		// router refactors, normalises the :court param, and writes the 503/404.
+		court, ok := resolveCourt(c, store)
+		if !ok {
 			return
 		}
 
@@ -141,46 +119,18 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// "Match N of M" pool counts stay correct; the right-sizing is by
 	// competition COUNT (only comps on this court, not the whole tournament).
 	r.GET("/court/:court/matches", func(c *gin.Context) {
-		c.Header("Cache-Control", "no-store")
-		c.Header("Access-Control-Allow-Origin", "*")
-
-		court := strings.ToUpper(strings.TrimSpace(c.Param("court")))
-
-		tour, err := store.LoadTournament()
-		if err != nil || tour == nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no_active_tournament"})
-			return
-		}
-
-		validCourt := false
-		for _, ct := range tour.Courts {
-			if strings.EqualFold(ct, court) {
-				validCourt = true
-				break
-			}
-		}
-		if !validCourt {
-			c.JSON(http.StatusNotFound, gin.H{"error": "court_not_found", "court": court})
+		court, ok := resolveCourt(c, store)
+		if !ok {
 			return
 		}
 
 		ids, _ := store.ListCompetitions()
 		comps := make([]gin.H, 0, len(ids))
 		for _, compID := range ids {
-			comp, _ := store.LoadCompetition(compID)
-			if comp == nil {
-				continue
-			}
-			// A setup competition exposes no public matches (parity with
-			// compMatches in viewer_utils.jsx, which returns [] for setup),
-			// so it never appears on the court feed.
-			if comp.Status == state.CompStatusSetup {
-				continue
-			}
-			if !competitionHasMatchOnCourt(store, compID, court) {
-				continue
-			}
-			if payload := buildViewerCompetitionPayload(store, compID); payload != nil {
+			// The court filter does the setup-skip and "real match on this
+			// court" gating inside the single per-comp load (no separate
+			// presence pre-check that would re-read poolMatches/bracket).
+			if payload := buildViewerCompetitionPayload(store, compID, court); payload != nil {
 				comps = append(comps, payload)
 			}
 		}
@@ -217,20 +167,48 @@ func courtMatchSidesReal(a, b string) bool {
 	return true
 }
 
-// competitionHasMatchOnCourt reports whether the competition has at least one
-// real match (pool or non-preview bracket) physically placed on the given
-// court. A preview bracket (mixed-comp placeholder structure) is skipped — it
-// is read-only and never played, mirroring the aggregate viewer's preview
-// strip in handlers_viewer.go.
-func competitionHasMatchOnCourt(store *state.Store, compID, court string) bool {
-	poolMatches, _ := store.LoadPoolMatches(compID)
+// resolveCourt is the shared preamble for the court-scoped display surfaces. It
+// pins the no-store + CORS headers (streaming clients poll on a 1-2s cadence and
+// must never be cached), normalises the :court param, validates it against the
+// active tournament, and writes the error response on failure. Returns
+// (court, true) on success; (\"\", false) after writing a 503 (no tournament) or
+// 404 (unknown court), in which case the handler must return immediately.
+func resolveCourt(c *gin.Context, store *state.Store) (string, bool) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	court := strings.ToUpper(strings.TrimSpace(c.Param("court")))
+
+	tour, err := store.LoadTournament()
+	if err != nil || tour == nil {
+		// 503 distinguishes "tournament not loaded yet" from a genuine 4xx —
+		// clients can retry without reporting it as an error to the operator.
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no_active_tournament"})
+		return "", false
+	}
+
+	for _, ct := range tour.Courts {
+		if strings.EqualFold(ct, court) {
+			return court, true
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "court_not_found", "court": court})
+	return "", false
+}
+
+// matchesPresentOnCourt reports whether the given (already-loaded) pool matches
+// or non-preview bracket contain at least one real match (both sides resolved,
+// see courtMatchSidesReal) physically placed on the court. A preview bracket
+// (mixed-comp placeholder structure) is skipped — it is read-only and never
+// played, mirroring the aggregate viewer's preview strip. Pure (no store reads)
+// so buildViewerCompetitionPayload can gate the court feed off the same
+// poolMatches/bracket it already loaded, without a second read.
+func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Bracket, court string) bool {
 	for _, m := range poolMatches {
 		if strings.EqualFold(m.Court, court) && courtMatchSidesReal(m.SideA, m.SideB) {
 			return true
 		}
 	}
-
-	bracket, _ := store.LoadBracket(compID)
 	if bracket != nil && !bracket.Preview {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {

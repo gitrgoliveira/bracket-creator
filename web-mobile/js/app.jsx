@@ -545,11 +545,15 @@ function App() {
   // mp-9h1f: while the shiaijo operator console is active the SSE handler skips
   // its per-event aggregate refetch (the console keeps itself live via its own
   // court-scoped feed, so the operator's tablet stops re-downloading every court
-  // on every score). Catch the admin tournament state back up when the operator
-  // navigates to any OTHER admin view, so dashboards / competition pages never
-  // render stale after a stint on the console.
+  // on every score). Catch the admin tournament state back up ONLY when LEAVING
+  // the console for another admin view — fire on a shiaijo→other transition, not
+  // on mount (which the unconditional load() above already covers) nor on
+  // non-shiaijo↔non-shiaijo navigation (which never skipped refetches).
+  const prevAdminKindRef = useR(adminView.kind);
   useE(() => {
-    if (mode === "admin" && adminView.kind !== "shiaijo") load();
+    const leftShiaijo = prevAdminKindRef.current === "shiaijo" && adminView.kind !== "shiaijo";
+    prevAdminKindRef.current = adminView.kind;
+    if (mode === "admin" && leftShiaijo) load();
   }, [adminView.kind]);
 
   useE(() => {
@@ -670,7 +674,7 @@ function App() {
         const detailJitter = Math.random() * 500;
         const listJitter = Math.random() * 2000;
         if (event.type === "tournament_updated") {
-            if (!authPromptRef.current) jitteredTimeout(load, listJitter);
+            if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
             // POST /api/tournament/reset. Any logged-in admin's

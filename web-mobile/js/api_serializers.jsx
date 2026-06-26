@@ -73,6 +73,11 @@ function toBackendMatchResult(patch, match) {
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
+    // mp-62vr: rep-player names for a team daihyosen/tiebreaker rep bout. Only
+    // forward non-empty values — the engine preserves a prior pick on empty
+    // (backfillMatchIdentity), so omitting an unset side never wipes it.
+    if (patch.repPlayerA) result.repPlayerA = patch.repPlayerA;
+    if (patch.repPlayerB) result.repPlayerB = patch.repPlayerB;
     // FR-033: encho metadata round-trips so the (E) suffix persists. The
     // backend in Slice 1 (T039) accepts the field passively — Slice 3 wires
     // the decision/kiken/fusenpai semantics, but we already keep the

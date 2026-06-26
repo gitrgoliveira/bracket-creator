@@ -228,6 +228,15 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
 		return err
 	}
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// cap them like the match sides to keep the appended pool-matches.csv
+	// columns bounded.
+	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("repPlayerB", r.RepPlayerB, MaxLenMatchSide); err != nil {
+		return err
+	}
 	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {
 		return err
 	}
@@ -387,6 +396,15 @@ func (r *ScoreRequest) Validate() error {
 		return err
 	}
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
+		return err
+	}
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// cap them like the match sides to keep the appended pool-matches.csv
+	// columns bounded.
+	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("repPlayerB", r.RepPlayerB, MaxLenMatchSide); err != nil {
 		return err
 	}
 	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {

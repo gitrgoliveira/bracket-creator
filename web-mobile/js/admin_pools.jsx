@@ -112,6 +112,23 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   // mirrors the same override in viewer.jsx compMatches; without it, scoring a
   // team pool-DH from the Pools tab opens the wrong (team) scorer.
   const isSupplementary = isSupplementaryBout(m.id);
+  // mp-62vr: for a team pool/league daihyosen/tiebreaker rep bout the SideA/SideB
+  // are TEAM names; the operator must pick which player each team fields. Attach
+  // each team's roster so ScoreEditorModal can render the two rep-player
+  // dropdowns. comp.players entries ARE the teams (member names live in
+  // team.metadata via AdminLineupHelpers.rosterFor); config may nest players.
+  const isTeamComp = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+  const repIsTeam = isSupplementary && isTeamComp;
+  let repRosterA = [];
+  let repRosterB = [];
+  if (repIsTeam) {
+    const teams = (comp && comp.config && comp.config.players) || (comp && comp.players) || [];
+    const nameOf = (s) => (typeof s === "string" ? s : (s && s.name) || "");
+    const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
+    const rosterFor = (window.AdminLineupHelpers && window.AdminLineupHelpers.rosterFor) || (() => []);
+    repRosterA = rosterFor(teamByName(nameOf(m.sideA))) || [];
+    repRosterB = rosterFor(teamByName(nameOf(m.sideB))) || [];
+  }
   return {
     ...m,
     sideA: toPlayer(m.sideA),
@@ -123,6 +140,10 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
+    // Rep-bout dropdown inputs (empty/false for non-supplementary matches).
+    repIsTeam,
+    repRosterA,
+    repRosterB,
   };
 }
 

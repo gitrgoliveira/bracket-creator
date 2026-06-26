@@ -33,6 +33,14 @@ function emptyStateHeadline(allCompleted, noMatches) {
 function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
     const shiroTeam = sideLabel(promoted.match.sideB, zekken);
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
+    // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
+    // the actual fighters are the rep players the operator records. When set,
+    // show the rep player as the headline name with the team as a sub-label.
+    // Shiro = sideB → repPlayerB; Aka = sideA → repPlayerA. Empty for every
+    // non-supplementary match, so this is a no-op for regular team/individual
+    // boards.
+    const repShiro = (promoted.match.repPlayerB || "").trim();
+    const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
     const sfx = (window.decisionSuffix && window.decisionSuffix(promoted.match)) || "";
     // Header subtitle: competition name + phase, joined only when both exist
@@ -73,12 +81,14 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || shiroTeam}</div>
+                    {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || akaTeam}</div>
+                    {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>}
                 </div>
             </div>
 

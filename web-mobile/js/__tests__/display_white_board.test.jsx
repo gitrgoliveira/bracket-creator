@@ -127,6 +127,46 @@ describe('TvWhiteBoard', () => {
     expect(findVnode(TvWhiteBoard(props), n => n.type === TeamScoreboard)).toBeNull();
   });
 
+  it('shows the daihyosen rep player headline + team sub-label when rep names are set (mp-62vr)', () => {
+    // A pool DH rep bout: SideA/SideB are TEAM names; repPlayerA/repPlayerB are
+    // the fighters the operator recorded. Shiro = sideB → repPlayerB, Aka =
+    // sideA → repPlayerA.
+    const p = {
+      kind: 'running',
+      match: { id: 'Pool A-DH-0', round: -1,
+        sideA: { name: 'Kyoto Dojo' }, sideB: { name: 'Tokyo Dojo' },
+        repPlayerA: 'Sato Ren', repPlayerB: 'Yamada Taro',
+        ipponsA: ['M'], ipponsB: [], subResults: [] },
+      competition: { id: 'cT', name: 'Team Cup', kind: 'team', teamSize: 5 }, isBracket: false,
+    };
+    const props = { ...base, promoted: p, isTeamMatch: false, subResults: [], teamSize: 0 };
+    const str = render(props);
+    // Rep players are the headline; team names appear as the sub-labels.
+    expect(str).toContain('Sato Ren');
+    expect(str).toContain('Yamada Taro');
+    expect(str).toContain('rep-shiro-team');
+    expect(str).toContain('rep-aka-team');
+    expect(str).toContain('Tokyo Dojo');
+    expect(str).toContain('Kyoto Dojo');
+  });
+
+  it('falls back to team-name-only headline when rep names are NOT set', () => {
+    const p = {
+      kind: 'running',
+      match: { id: 'Pool A-DH-0', round: -1,
+        sideA: { name: 'Kyoto Dojo' }, sideB: { name: 'Tokyo Dojo' },
+        ipponsA: ['M'], ipponsB: [], subResults: [] },
+      competition: { id: 'cT', name: 'Team Cup', kind: 'team', teamSize: 5 }, isBracket: false,
+    };
+    const props = { ...base, promoted: p, isTeamMatch: false, subResults: [], teamSize: 0 };
+    const str = render(props);
+    expect(str).toContain('Tokyo Dojo');
+    expect(str).toContain('Kyoto Dojo');
+    // No rep sub-label rows when rep names are absent.
+    expect(str).not.toContain('rep-shiro-team');
+    expect(str).not.toContain('rep-aka-team');
+  });
+
   it('passes showDH to TeamScoreboard when a DH sub exists', () => {
     const p = teamPromoted();
     p.match.subResults = [

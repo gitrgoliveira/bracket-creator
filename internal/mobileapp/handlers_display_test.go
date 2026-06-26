@@ -38,14 +38,16 @@ type courtLiveResponse struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"competition,omitempty"`
-	Phase    string         `json:"phase,omitempty"`
-	SideA    *courtLiveSide `json:"sideA,omitempty"`
-	SideB    *courtLiveSide `json:"sideB,omitempty"`
-	IpponsA  []string       `json:"ipponsA,omitempty"`
-	IpponsB  []string       `json:"ipponsB,omitempty"`
-	HansokuA int            `json:"hansokuA,omitempty"`
-	HansokuB int            `json:"hansokuB,omitempty"`
-	Error    string         `json:"error,omitempty"`
+	Phase      string         `json:"phase,omitempty"`
+	SideA      *courtLiveSide `json:"sideA,omitempty"`
+	SideB      *courtLiveSide `json:"sideB,omitempty"`
+	IpponsA    []string       `json:"ipponsA,omitempty"`
+	IpponsB    []string       `json:"ipponsB,omitempty"`
+	HansokuA   int            `json:"hansokuA,omitempty"`
+	HansokuB   int            `json:"hansokuB,omitempty"`
+	RepPlayerA string         `json:"repPlayerA,omitempty"`
+	RepPlayerB string         `json:"repPlayerB,omitempty"`
+	Error      string         `json:"error,omitempty"`
 }
 
 // TestCourtLiveReturnsLivePayload — T052
@@ -105,6 +107,56 @@ func TestCourtLiveReturnsLivePayload(t *testing.T) {
 	require.NotNil(t, resp.SideB, "sideB must be present on live payload")
 	assert.Equal(t, "Takeshi Yamada", resp.SideA.Name)
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
+}
+
+// TestCourtLiveSurfacesRepPlayersForDaihyosen — mp-62vr.
+// A pool daihyosen bout carries TEAM names in sideA/sideB; the representative
+// fighter for each side lives in repPlayerA/repPlayerB. The polled OBS/vMix
+// endpoint must forward those names or the overlay can't show who is fighting.
+func TestCourtLiveSurfacesRepPlayersForDaihyosen(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name:     "Test Tournament",
+		Password: "secret",
+		Courts:   []string{"A"},
+	}))
+
+	comp := state.Competition{
+		ID:     "team-pool",
+		Name:   "Team — Pool",
+		Status: state.CompStatusPools,
+		Courts: []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SavePoolMatches("team-pool", []state.MatchResult{
+		{
+			ID:         "Pool A-DH-0",
+			SideA:      "Nakano Kendo Club",
+			SideB:      "Setagaya Dojo",
+			Status:     state.MatchStatusRunning,
+			Court:      "A",
+			IpponsA:    []string{"M"},
+			RepPlayerA: "Takeshi Yamada",
+			RepPlayerB: "Ichiro Tanaka",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"expected 200 for live DH match; got %d body=%q", w.Code, w.Body.String())
+
+	var resp courtLiveResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp),
+		"response body must be valid JSON: %q", w.Body.String())
+	assert.Equal(t, "live", resp.Status)
+	assert.Equal(t, "Takeshi Yamada", resp.RepPlayerA,
+		"rep-player A must be forwarded for a pool daihyosen bout")
+	assert.Equal(t, "Ichiro Tanaka", resp.RepPlayerB,
+		"rep-player B must be forwarded for a pool daihyosen bout")
 }
 
 // TestCourtLiveReturnsIdleWhenNoLive — T053

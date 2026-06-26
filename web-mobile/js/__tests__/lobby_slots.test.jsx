@@ -189,8 +189,10 @@ function makeScheduledSlot() {
 
 // ── LOBBY_COLORS — no amber on next row ──────────────────────────────────────
 describe('LOBBY_COLORS — amber removed from next row (mp-ulh9)', () => {
-    it('nextBg does not use the amber hex #fef3c7', () => {
-        expect(LOBBY_COLORS.nextBg).not.toContain('#fef3c7');
+    it('the NEXT row background (schedBg) does not use the amber hex #fef3c7', () => {
+        // NEXT shares the quiet queue background; its only distinct cue is the border.
+        expect(LOBBY_COLORS.nextBg).toBeUndefined();
+        expect(LOBBY_COLORS.schedBg).not.toContain('#fef3c7');
     });
 
     it('nextBorder does not use the amber-derived rgba(180,83,9', () => {

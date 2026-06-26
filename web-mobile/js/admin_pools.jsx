@@ -3,7 +3,7 @@
 
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth — ./pool_ids.jsx is a leaf module with no import chain).
-import { poolNameOf as poolNameFromMatchId, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
@@ -52,12 +52,12 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   return { action: "noop" };
 }
 
-// poolNameFromMatchId is imported above from ./pool_ids.jsx (the shared
+// poolNameOf is imported above from ./pool_ids.jsx (the shared
 // pool-id parser; "PoolName-N" / "PoolName-DH-N" / "PoolName-TB-N" → pool name,
 // hyphenated names preserved, unrecognised ids → "").
 
 // Filter a flat poolMatches array down to entries belonging to a single pool.
-// Uses poolNameFromMatchId (./pool_ids.jsx) so DH/TB suffix variants are handled correctly.
+// Uses poolNameOf (./pool_ids.jsx) so DH/TB suffix variants are handled correctly.
 //
 // pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
 // score data. poolMatches (state.MatchResult) has the full data including the
@@ -66,7 +66,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function poolMatchesForPool(poolMatches, poolName) {
-  return (poolMatches || []).filter(m => poolNameFromMatchId(m.id) === poolName);
+  return (poolMatches || []).filter(m => poolNameOf(m.id) === poolName);
 }
 
 // Enrich a pool-match object with the comp-* metadata that
@@ -97,7 +97,7 @@ function poolMatchesForPool(poolMatches, poolName) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
-  const derivedPoolName = poolNameOverride || poolNameFromMatchId(m.id);
+  const derivedPoolName = poolNameOverride || poolNameOf(m.id);
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
   const toPlayer = (side) => {
     if (side && typeof side === "object") return side;
@@ -463,7 +463,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const poolMatchesMap = useMemoA(() => {
     const map = new Map();
     for (const m of (poolMatches || [])) {
-      const name = poolNameFromMatchId(m.id);
+      const name = poolNameOf(m.id);
       if (!name) continue;
       const bucket = map.get(name);
       if (bucket) { bucket.push(m); } else { map.set(name, [m]); }

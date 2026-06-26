@@ -28,8 +28,8 @@ const LOBBY_COLORS = {
     // NOW row: navy accent — emphasis is on the live match.
     nowBg:      'var(--accent-soft, #e7eaf3)',
     nowBorder:  'var(--accent, #1d3557)',
-    // NEXT row: quiet neutral — visible but clearly subordinate to NOW.
-    nextBg:     'rgba(0,0,0,0.02)',
+    // NEXT row: quiet neutral — visible but clearly subordinate to NOW. It
+    // shares the queue background (schedBg); a distinct border is its only cue.
     nextBorder: 'rgba(0,0,0,0.10)',
     schedBg:    'rgba(0,0,0,0.02)',
 };
@@ -119,7 +119,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         cellBg = LOBBY_COLORS.nowBg;
         cellBorder = LOBBY_COLORS.nowBorder;
     } else if (rowKind === 'next') {
-        cellBg = LOBBY_COLORS.nextBg;
+        // cellBg stays schedBg — the border alone distinguishes NEXT from queue.
         cellBorder = LOBBY_COLORS.nextBorder;
     }
 

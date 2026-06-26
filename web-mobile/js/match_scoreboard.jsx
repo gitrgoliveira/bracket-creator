@@ -133,7 +133,7 @@ function ipponLetters(arr) {
 // outer edge is the left), aka fills right→left (its outer edge is the right),
 // so for aka we reverse the visual cell order. The testid stays on the logical
 // outer cell (letters[0]) regardless of which side renders it.
-const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)" };
+const WAZA_NAMES = { M: "Men (head)", K: "Kote (wrist)", D: "Do (body)", T: "Tsuki (throat)", H: "Hansoku (penalty)", S: "Sune (shin)", "○": "Default win" };
 
 function slotCells(letters, side, testid) {
   const cells = [0, 1].map(i => {
@@ -149,9 +149,11 @@ function slotCells(letters, side, testid) {
 
 // centreMarks — the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
-// from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less
-// decision (hantei, fusensho, kiken) the winning side is otherwise invisible,
-// so we mark it with ○ (FIK hantei-win symbol) in the winner's first slot.
+// from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
+// the winning side is otherwise invisible, so we mark the winner's first slot:
+// "Ht" when decided by hantei, else ○ for a non-hantei ippon-less win (see
+// the winMark line below). Modern fusensho/kiken carry ["○","○"] ippons
+// and render through the normal slot path, so they never reach this fallback.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
   const lettersB = ipponLetters(sub.ipponsB); // shiro / left

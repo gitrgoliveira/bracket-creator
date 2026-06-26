@@ -356,7 +356,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
         <span className="league-matrix__legend-item league-matrix__legend-item--win">win</span>
         <span className="league-matrix__legend-item league-matrix__legend-item--loss">loss</span>
         <span className="league-matrix__legend-item league-matrix__legend-item--draw">draw</span>
-        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H) · X = scoreless draw</span>
+        <span style={{ color: "var(--ink-3)", fontSize: 11 }}>letters = ippons (M/K/D/T/H/S, ○ = default win) · X = scoreless draw</span>
         <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{onMatchClick ? "Tap a cell to view match details" : "Row player's result vs column player"}</span>
       </div>
     </div>

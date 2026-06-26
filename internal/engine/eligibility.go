@@ -421,7 +421,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	}
 	winIppons := make([]string, winningCount)
 	for i := range winIppons {
-		winIppons[i] = "○"
+		winIppons[i] = defaultWinIppon
 	}
 	result := &state.MatchResult{
 		ID:             matchID,

@@ -281,11 +281,13 @@ describe('findNextPoolOnCourt', () => {
     const res = findNextPoolOnCourt(comp, 'Pool A', 'A');
     expect(res).not.toBeNull();
     expect(res.name).toBe('Pool B');
-    // Each name carries its STARTING colour (first bout, scheduled order):
-    // B-0 Philippe(sideA→aka) vs Dave(sideB→shiro); B-1 …Frank(sideB→shiro).
+    // Each name carries its STARTING colour (first bout, scheduled order).
+    // Order is Shiro-first within each match to match the left-dark/right-red
+    // convention on the match board:
+    // B-0 Dave(sideB→shiro) then Philippe(sideA→aka); B-1 …Frank(sideB→shiro).
     expect(res.players).toEqual([
-      { name: 'Philippe', side: 'aka' },
       { name: 'Dave', side: 'shiro' },
+      { name: 'Philippe', side: 'aka' },
       { name: 'Frank', side: 'shiro' },
     ]);
   });
@@ -295,7 +297,8 @@ describe('findNextPoolOnCourt', () => {
   it('colours the roster by NUMERIC match order in an untimed pool (not lexicographic id)', () => {
     // No scheduledAt / queuePosition. Lexicographic id sort puts "Pool B-10"
     // before "Pool B-2", which would mis-attribute the starting colour. The
-    // numeric tiebreak keeps B-2 first → "Early" is seen first as Aka.
+    // numeric tiebreak keeps B-2 first → "EarlyShiro" is seen first as Shiro
+    // (sideB-first ordering so Shiro appears before Aka within each match).
     const c = { poolMatches: [
       { id: 'Pool A-0',  court: 'A', sideA: 'X',    sideB: 'Y',          status: 'running' },
       { id: 'Pool B-10', court: 'A', sideA: 'Late', sideB: 'LateShiro',  status: 'scheduled' },
@@ -303,7 +306,7 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
-    expect(res.players[0]).toEqual({ name: 'Early', side: 'aka' });
+    expect(res.players[0]).toEqual({ name: 'EarlyShiro', side: 'shiro' });
   });
   it('ignores pools on other courts', () => {
     const c2 = { poolMatches: [
@@ -343,8 +346,8 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
     expect(res.players).toEqual([
-      { name: 'K1 Ryu', side: 'aka' },
       { name: 'K2 Sho', side: 'shiro' },
+      { name: 'K1 Ryu', side: 'aka' },
     ]);
   });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
@@ -356,8 +359,8 @@ describe('findNextPoolOnCourt', () => {
     const res = findNextPoolOnCourt(team, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
     expect(res.players).toEqual([
-      { name: 'Team Gamma', side: 'aka' },
       { name: 'Team Delta', side: 'shiro' },
+      { name: 'Team Gamma', side: 'aka' },
       { name: 'Team Epsilon', side: 'shiro' },
     ]);
   });
@@ -517,7 +520,7 @@ describe('TvIndividualBoard', () => {
     ] };
     const promotedFew = { competition: fewRows, match: fewRows.poolMatches[0], isBracket: false };
     const strFew = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedFew }));
-    // 1 row → scale = clamp(0.85, 7/1, 2.4) = 2.4
+    // 1 row → scale = clamp(0.85, 9/1, 2.4) = 2.4
     expect(strFew).toContain('"--msb-scale":2.4');
 
     // Build a full pool with many matches so the row count grows.
@@ -530,8 +533,8 @@ describe('TvIndividualBoard', () => {
     ] };
     const promotedMany = { competition: many, match: many.poolMatches[many.poolMatches.length - 1], isBracket: false };
     const strMany = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedMany }));
-    // 10 rows → scale = clamp(0.85, 7/10, 2.4) = 0.85
-    expect(strMany).toContain('"--msb-scale":0.85');
+    // 10 rows → scale = clamp(0.85, 9/10, 2.4) = 0.9
+    expect(strMany).toContain('"--msb-scale":0.9');
   });
 
   it('caps a LEAGUE board at 6 visible rows (windowed around the current match)', () => {

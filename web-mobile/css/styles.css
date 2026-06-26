@@ -6016,13 +6016,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }
 .msb--tv .msb-name { font-size: calc(3vh * var(--msb-scale, 1)); }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
-.msb--tv .msb-slot { min-width: calc(5vh * var(--msb-scale, 1)); height: calc(5.6vh * var(--msb-scale, 1)); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
+.msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
 .msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
 /* Centre dash between the Shiro and Aka ippon slots. Rendered as an explicit
    span so Preact null-children don't accidentally keep the cell non-empty.
    Hidden on non-TV surfaces; visible only in .msb--tv context. */
 .msb-sep { display: none; }
-.msb--tv .msb-sep { display: inline; color: #9ca3af; }
+.msb--tv .msb-sep { display: inline; color: var(--ink-2, #3a414e); font-weight: 700; }
 .msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }

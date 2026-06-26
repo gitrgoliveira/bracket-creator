@@ -1123,7 +1123,7 @@ const API = {
     },
     async toggleCheckIn(compID, pid, checkedIn, password) {
         const method = checkedIn ? 'PUT' : 'DELETE';
-        const res = await fetch(`/api/competitions/${compID}/participants/${pid}/checkin`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {
             method,
             headers: { 'X-Tournament-Password': password }
         });
@@ -1161,7 +1161,7 @@ const API = {
         return res.json();
     },
     async replaceParticipant(compID, pid, payload, password, adminPassword) {
-        const res = await fetch(`/api/competitions/${compID}/participants/${pid}`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)

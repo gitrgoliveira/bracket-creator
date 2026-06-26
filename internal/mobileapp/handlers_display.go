@@ -89,7 +89,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// case).
 				if comp.NumberPrefix != "" {
 					pools, _ := store.LoadPools(compID)
-					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
+					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
 				}
 
 				sideA := buildSide(m.SideA, players, comp.WithZekkenName)

@@ -321,8 +321,12 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   const dhSub = renderDH ? (subResults || []).find(s => s.position === -1) : null;
   const tv = variant === "tv";
   // The current bout = first unscored regular bout (navy "now" highlight via
-  // var(--accent-soft) — the running signal). Already-scored bouts are "done";
-  // later ones "queued". A completed match → all done.
+  // var(--accent-soft) — the running signal), but only while the match is
+  // RUNNING (see rowState below). Already-scored bouts are "done"; unscored
+  // bouts are "queued". On a non-running board (completed or up-next) nothing
+  // is "now": a completed match that left padded/unplayed positions unscored
+  // (e.g. a quick-score synthesising fewer subResults than teamSize) keeps
+  // those rows "queued", not "done".
   const isScored = (s) => {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;

@@ -1407,8 +1407,8 @@ paths:
                     type: string
                 source:
                   type: string
-                  enum: [manual, registered, transfer]
-                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field. The legacy value `reserved` is also accepted and normalized to `manual`.
+                  enum: [manual, registered, transfer, reserved]
+                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field. The legacy value `reserved` is accepted and normalized to `manual` on write; responses always emit `manual`.
       responses:
         '200':
           description: |
@@ -2785,8 +2785,8 @@ components:
         source:
           type: string
           maxLength: 200
-          enum: [manual, registered, transfer]
-          description: Registration source / provenance (renamed from `tag`; stored lower-case).
+          enum: [manual, registered, transfer, reserved]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). The legacy value `reserved` is accepted on input and normalized to `manual`; responses always emit `manual`.
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
@@ -2818,8 +2818,8 @@ components:
         source:
           type: string
           maxLength: 200
-          enum: [manual, registered, transfer]
-          description: Registration source / provenance (renamed from `tag`; stored lower-case).
+          enum: [manual, registered, transfer, reserved]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). The legacy value `reserved` is accepted on input and normalized to `manual`; responses always emit `manual`.
 
     SeedAssignment:
       type: object

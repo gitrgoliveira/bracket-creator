@@ -559,9 +559,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const refresh = useCallbackRD(async () => {
     try {
       const fresh = await window.API.fetchCompetitions();
+      onUpdate({ ...tRef.current, competitions: fresh });
       if (!mountedRef.current) return;
       setComps(fresh);
-      onUpdate({ ...tRef.current, competitions: fresh });
     } catch (e) {
       console.warn("Registration desk refresh failed", e);
     }

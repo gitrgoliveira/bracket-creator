@@ -53,7 +53,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 
 ## 3. Design tokens
 
-All tokens are defined in [styles.css#L3-L33](web-mobile/css/styles.css#L3). Reference them via `var(--name)` — never hardcode hex or px scales. The file is ~5,000 lines on purpose; search before adding, but file growth is not a budget.
+All tokens are defined in the `:root` block in [styles.css](web-mobile/css/styles.css). Reference them via `var(--name)` — never hardcode hex or px scales. The file is ~5,000 lines on purpose; search before adding, but file growth is not a budget.
 
 ### Color
 

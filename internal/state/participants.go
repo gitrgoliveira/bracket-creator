@@ -368,11 +368,12 @@ func pidPairKey(pid string) string {
 // resolveParticipantIndex finds the index of the participant addressed by pid.
 // It matches a stable UUID first; failing that — legacy participants.csv files
 // loaded without a UUID column have empty IDs (loadParticipantsNoLock mints
-// none, and saveParticipantsNoLock never backfills) — it falls back to matching
-// the composite "name|dojo" key the client sends for ID-less rows. The fallback
-// is restricted to ID-less rows (UUID rows are only addressable by their id) and
-// the (name, dojo) pair is unique per roster, so resolution is unambiguous.
-// Returns -1 when no participant matches.
+// none; the first write via saveParticipantsNoLock migrates those rows to UUIDs
+// because marshalParticipantsCSV backfills empty IDs) — it falls back to
+// matching the composite "name|dojo" key the client sends for ID-less rows. The
+// fallback is restricted to ID-less rows (UUID rows are only addressable by
+// their id) and the (name, dojo) pair is unique per roster, so resolution is
+// unambiguous. Returns -1 when no participant matches.
 func resolveParticipantIndex(players []domain.Player, pid string) int {
 	if pid == "" {
 		return -1

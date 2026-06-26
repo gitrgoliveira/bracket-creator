@@ -354,15 +354,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // doesn't jump when the list is searched/sorted. Rendered as provisional
   // (muted, dotted) since the final numbers may differ after the draw.
   const provisionalNumberById = useMemoA(() => {
-    // Null-prototype object: keys are user-controlled (p.id ?? p.name), so a
-    // participant named "__proto__" or "constructor" against a plain `{}` map
+    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
+    // a participant named "__proto__" or "constructor" against a plain `{}` map
     // could pollute the prototype chain or return inherited values on lookup.
     // `Object.create(null)` removes both risks and keeps the `map[key]` /
     // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
     const map = Object.create(null);
     if (c.numberPrefix) {
       (c.players || []).forEach((p, i) => {
-        map[p.id ?? p.name] = `${c.numberPrefix}${i + 1}`;
+        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
       });
     }
     return map;
@@ -370,7 +370,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
-    players.forEach(p => { map.set(p.id ?? p.name, participantSearchTarget(p)); });
+    players.forEach(p => { map.set(window.checkinPid(p), participantSearchTarget(p)); });
     return map;
   }, [players]);
   const visiblePlayers = useMemoA(() => {
@@ -378,14 +378,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     let out = players;
     if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
-    if (q) out = out.filter(p => playerSearchTargets.get(p.id ?? p.name)?.includes(q));
+    if (q) out = out.filter(p => playerSearchTargets.get(window.checkinPid(p))?.includes(q));
     return out;
   }, [players, sourceFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
     visiblePlayers.forEach((p) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id ?? p.name); }
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(window.checkinPid(p)); }
     });
     return first;
   }, [visiblePlayers]);
@@ -564,7 +564,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
     const oldName = replaceTarget.name;
-    const targetId = replaceTarget.id;
+    const targetPid = window.checkinPid(replaceTarget);
     const targetSource = replaceTarget.source || "";
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
@@ -583,7 +583,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", source: targetSource };
       if (metadata !== undefined) payload.metadata = metadata;
-      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password, admin);
+      const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password, admin);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
       showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
@@ -951,7 +951,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 const reorderDisabled = !!sourceFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
                 return (
                   <div
-                    key={p.id ?? p.name}
+                    key={window.checkinPid(p)}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
                     onDragStart={() => { if (reorderDisabled) return; dragIdxRef.current = i; }}
@@ -989,8 +989,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
                             <span className="num-prefix">{p.number}</span>
-                          ) : provisionalNumberById[p.id ?? p.name] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number — the final competitor number is assigned when the draw runs">{provisionalNumberById[p.id ?? p.name]}</span>
+                          ) : provisionalNumberById[window.checkinPid(p)] ? (
+                            <span className="num-prefix num-prefix--provisional" title="Provisional number — the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>
@@ -998,7 +998,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {c.checkInEnabled && dojoFirstRowSet.has(p.id ?? p.name) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                        {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}

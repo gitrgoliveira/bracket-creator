@@ -236,9 +236,13 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
     // left at round 0 by the engine). Derive the pool name from the id so we
     // never render a bare "-1" or "0" — covers regular, daihyosen and tiebreaker
-    // bouts alike via poolNameOf.
-    const fromId = poolNameOf(m.id);
-    if (fromId) return fromId;
+    // bouts alike via poolNameOf. Guard on !isBracket: poolNameOf matches any
+    // "*-<digits>" shape, so a bracket id like "m-r1-0" would otherwise yield a
+    // bogus "m-r1" pool-like label when window.roundLabel is unavailable.
+    if (!isBracket) {
+        const fromId = poolNameOf(m.id);
+        if (fromId) return fromId;
+    }
     // Render a numeric round explicitly so a 0-based round index (round === 0)
     // is not swallowed by the falsy-`||` fallback into an empty label.
     if (typeof m.round === "number") return String(m.round);

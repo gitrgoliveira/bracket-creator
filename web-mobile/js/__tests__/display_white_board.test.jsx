@@ -865,4 +865,18 @@ describe('phaseLabel — league suppresses the round-robin round number', () => 
     expect(phaseLabel({ id: 'Pool A-DH-0', round: 0 }, false, undefined, undefined, 'mixed')).toBe('Pool A');
     expect(phaseLabel({ id: 'Pool A-TB-0', round: 0 }, false, undefined, undefined, 'mixed')).toBe('Pool A');
   });
+
+  it('does NOT derive a pool-like label from a bracket id when roundLabel is unavailable', () => {
+    // poolNameOf matches any "*-<digits>" shape, so a bracket id "m-r1-0" would
+    // wrongly yield "m-r1". The !isBracket guard prevents that — a bracket match
+    // with no roundLabel falls through to the numeric round (or "").
+    const saved = window.roundLabel;
+    window.roundLabel = undefined; // simulate roundLabel not loaded
+    try {
+      expect(phaseLabel({ id: 'm-r1-0', round: 0 }, true, 0, 3, 'playoffs')).toBe('0');
+      expect(phaseLabel({ id: 'm-r1-0' }, true, 0, 3, 'playoffs')).toBe('');
+    } finally {
+      window.roundLabel = saved;
+    }
+  });
 });

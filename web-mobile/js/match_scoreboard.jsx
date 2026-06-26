@@ -150,8 +150,10 @@ function slotCells(letters, side, testid) {
 // centreMarks — the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
 // from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less
-// decision (hantei, fusensho, kiken) the winning side is otherwise invisible,
-// so we mark it with ○ (FIK hantei-win symbol) in the winner's first slot.
+// decision (hantei, or legacy records predating the ○ default-win change)
+// the winning side is otherwise invisible, so we mark it with ○ (FIK
+// hantei-win symbol) in the winner's first slot. Modern fusensho/kiken
+// carry ["○","○"] ippons and render through the normal slot path.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
   const lettersB = ipponLetters(sub.ipponsB); // shiro / left

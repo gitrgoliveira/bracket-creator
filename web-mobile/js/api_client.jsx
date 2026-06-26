@@ -1134,7 +1134,7 @@ const API = {
         return res.json();
     },
     // Bulk check-in for one competition. participantIds is an array of stable
-    // participant ids (UUID or name). Returns { checkedIn, alreadyCheckedIn,
+    // participant ids that must match the persisted id column exactly. Returns { checkedIn, alreadyCheckedIn,
     // notFound }. Used by the Registration desk's "check in a whole dojo" action.
     async bulkCheckIn(compID, participantIds, password) {
         const res = await fetch(`/api/competitions/${compID}/participants/checkin-bulk`, {

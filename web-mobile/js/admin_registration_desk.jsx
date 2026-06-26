@@ -50,8 +50,9 @@ function rdPersonKey(p) {
   return `${rdNorm(p.name)}|${rdNorm(p.dojo)}`;
 }
 
-// Stable per-competition participant id used by the check-in endpoints, mirroring
-// the rest of the admin code: prefer the UUID, fall back to the name.
+// Client-side key for check-in calls. Prefers the UUID; falls back to the name
+// only for legacy non-UUID rows where the persisted id column IS the name.
+// The server always matches by the id column — it never resolves by name.
 function rdPid(p) {
   return p.id ?? p.name;
 }

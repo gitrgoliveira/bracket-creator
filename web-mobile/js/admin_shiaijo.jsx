@@ -105,7 +105,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // running bout stays across comps per AC7, the switch nudge watches OTHER
     // comps on the court per AC6, Submit+Next advances within the submitted
     // comp). It therefore sources every competition with a match on THIS court
-    // from the dedicated court feed (GET /viewer/court/:court/matches) rather
+    // from the dedicated court feed (GET /api/viewer/court/:court/matches) rather
     // than the whole-tournament aggregate. app.jsx skips its per-event aggregate
     // refetch while this view is active (so the operator's tablet stops
     // re-downloading all courts on every score); this page keeps itself live via

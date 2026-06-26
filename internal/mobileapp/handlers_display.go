@@ -10,12 +10,16 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// RegisterDisplayHandlers wires the public, no-auth display surfaces used by
-// non-browser streaming integrations (vMix, OBS plugins, scoreboards). The
-// only route today is GET /api/viewer/court/:court/current — a one-shot polled
-// view of the currently-running match on a court. Browser clients should
-// continue to use SSE (/api/events); the polled surface exists for clients
-// that cannot subscribe.
+// RegisterDisplayHandlers wires the public, no-auth court-scoped surfaces:
+//   - GET /api/viewer/court/:court/current — a one-shot polled view of the
+//     currently-running match on a court, for non-browser streaming
+//     integrations (vMix, OBS plugins, scoreboards).
+//   - GET /api/viewer/court/:court/matches — the operator console's court feed:
+//     every competition with a real match physically placed on the court, each
+//     with its full {config, poolMatches, bracket} payload.
+//
+// Browser clients otherwise use SSE (/api/events); these polled surfaces exist
+// for clients that cannot subscribe (and to right-size the operator console).
 //
 // Per NFR-002 the handler depends on the *state.Store concrete type (the
 // same boundary handlers_viewer.go uses); there is no snug-fit interface
@@ -171,7 +175,7 @@ func courtMatchSidesReal(a, b string) bool {
 // pins the no-store + CORS headers (streaming clients poll on a 1-2s cadence and
 // must never be cached), normalises the :court param, validates it against the
 // active tournament, and writes the error response on failure. Returns
-// (court, true) on success; (\"\", false) after writing a 503 (no tournament) or
+// (court, true) on success; ("", false) after writing a 503 (no tournament) or
 // 404 (unknown court), in which case the handler must return immediately.
 func resolveCourt(c *gin.Context, store *state.Store) (string, bool) {
 	c.Header("Cache-Control", "no-store")

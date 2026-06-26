@@ -26,8 +26,8 @@
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
 // normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
-// aggregate GET /viewer/competitions or the court-scoped GET
-// /viewer/court/:court/matches into the flattened, normalized competition shape
+// aggregate GET /api/viewer/competitions or the court-scoped GET
+// /api/viewer/court/:court/matches into the flattened, normalized competition shape
 // the UI consumes (config fields hoisted, players + matches normalized). Shared
 // so both endpoints stay in lockstep.
 function normalizeViewerCompItem(item) {

@@ -650,7 +650,7 @@ function App() {
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
-    // cross-competition court view from its own GET /viewer/court/:court/matches
+    // cross-competition court view from its own GET /api/viewer/court/:court/matches
     // feed and refreshes itself, so re-pulling the whole-tournament aggregate
     // here would re-download every other court on the operator's tablet on every
     // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active

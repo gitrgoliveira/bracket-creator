@@ -13,12 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// courtCurrentSide mirrors the per-side payload defined in
-// contracts/api-viewer-court-current.md. Kept local to the test file
-// because the production response type does not exist yet — the Red
-// state for T052/T053/T055 is that the route is not registered, so
-// the JSON body assertions on this struct will fail because Gin's
-// default no-route returns plain text.
+// courtCurrentSide mirrors the per-side payload the
+// GET /api/viewer/court/:court/current handler builds via buildSide (see
+// handlers_display.go; documented in specs/openapi.yaml). Kept local to the
+// test file because the handler assembles the JSON inline — there is no
+// exported production response type to assert against.
 type courtCurrentSide struct {
 	PlayerID    string `json:"playerId"`
 	Name        string `json:"name"`

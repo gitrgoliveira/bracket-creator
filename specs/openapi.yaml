@@ -2275,8 +2275,12 @@ paths:
   /api/viewer/court/{court}/current:
     get:
       tags: [viewer]
-      summary: Get current and upcoming matches for a court
-      description: Court display feed. Returns the in-progress match and a queue of upcoming matches for the given court.
+      summary: Get the current running match on a court
+      description: >
+        One-shot polled view for non-browser streaming integrations (vMix, OBS,
+        scoreboards). Returns the single currently-running match on the court in
+        an overlay-friendly shape, or status "idle" when nothing is running.
+        Public, no auth; sent with Cache-Control no-store.
       parameters:
         - in: path
           name: court
@@ -2286,23 +2290,49 @@ paths:
           description: Court label (e.g. "A").
       responses:
         '200':
-          description: Court state.
+          description: >
+            The running match (status "current") or status "idle". The match
+            fields are present only on the "current" branch.
           content:
             application/json:
               schema:
                 type: object
-                required: [court, current, upcoming]
+                required: [court, status]
                 properties:
                   court:
                     type: string
-                  current:
-                    nullable: true
-                    allOf:
-                      - $ref: '#/components/schemas/MatchResult'
-                  upcoming:
+                  status:
+                    type: string
+                    enum: [current, idle]
+                  competition:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                  phase:
+                    type: string
+                    description: Pool name or round label derived from the match ID.
+                  sideA:
+                    $ref: '#/components/schemas/CourtMatchSide'
+                  sideB:
+                    $ref: '#/components/schemas/CourtMatchSide'
+                  ipponsA:
                     type: array
-                    items:
-                      $ref: '#/components/schemas/MatchResult'
+                    items: { type: string }
+                  ipponsB:
+                    type: array
+                    items: { type: string }
+                  hansokuA: { type: integer }
+                  hansokuB: { type: integer }
+                  repPlayerA:
+                    type: string
+                    description: Representative fighter for a pool daihyosen bout (team names in sideA/sideB); empty otherwise.
+                  repPlayerB:
+                    type: string
+        '404':
+          description: Unknown court.
+        '503':
+          description: No active tournament loaded.
 
   /api/viewer/court/{court}/matches:
     get:
@@ -3120,6 +3150,26 @@ components:
             can restore hantei state and bout-level detail on re-open.
           items:
             $ref: '#/components/schemas/SubMatchResult'
+
+    CourtMatchSide:
+      type: object
+      description: >
+        Per-side overlay payload for GET /api/viewer/court/{court}/current,
+        assembled by buildSide. `name` is the canonical participant/team name;
+        `displayName` is the zekken when withZekkenName is set, else equals name.
+      properties:
+        playerId:
+          type: string
+          description: Participant UUID, or empty when the name could not be resolved.
+        name:
+          type: string
+        displayName:
+          type: string
+        dojo:
+          type: string
+        number:
+          type: string
+          description: numberPrefix-derived competitor number (e.g. "A1"), when configured.
 
     Bracket:
       type: object

@@ -43,7 +43,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     // The shared scoreboard below carries the score (IV/PW summary for teams,
     // ippon slots for individuals), so the team-name row centre is just "vs"
     // (+ any decision suffix).
-    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "#374151" }}>{sfx}</span> : null}</div>;
+    const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs{sfx ? <span style={{ marginLeft: "1vw", color: "var(--ink-2)" }}>{sfx}</span> : null}</div>;
 
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{

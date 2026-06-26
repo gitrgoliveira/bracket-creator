@@ -59,14 +59,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName string   `json:"displayName"`
 				Dojo        string   `json:"dojo"`
 				Metadata    []string `json:"metadata"`
-				Tag         string   `json:"tag"`
+				Source      string   `json:"source"`
 			} `json:"players"`
 			Name        string   `json:"name"`
 			DisplayName string   `json:"displayName"`
 			Dojo        string   `json:"dojo"`
 			Metadata    []string `json:"metadata"`
 			DanGrade    string   `json:"danGrade"`
-			Tag         string   `json:"tag"`
+			Source      string   `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -103,10 +103,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Default to "manual" so rows added via this UI carry the same
 			// provenance marker as rows the operator added by hand to the
-			// paste-box import — keeps tag-filter buckets coherent.
-			tag := req.Tag
-			if tag == "" {
-				tag = "manual"
+			// paste-box import — keeps source-filter buckets coherent.
+			source := helper.CanonicalRegistrationSource(req.Source)
+			if source == "" {
+				source = "manual"
 			}
 
 			// Strip displayName for non-zekken competitions. Otherwise
@@ -120,7 +120,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				displayName = ""
 			}
 
-			if err := validatePlayerLengths(name, displayName, dojo, tag, metadata); err != nil {
+			if err := validatePlayerLengths(name, displayName, dojo, source, metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -130,7 +130,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName: displayName,
 				Dojo:        dojo,
 				Metadata:    metadata,
-				Tag:         tag,
+				Source:      source,
 			}
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
@@ -168,7 +168,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// first offender (matches the all-or-nothing semantics
 		// SaveParticipants already enforces on write).
 		for i, p := range req.Players {
-			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
 			}
@@ -225,7 +225,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				DisplayName:  displayName,
 				Dojo:         p.Dojo,
 				Metadata:     p.Metadata,
-				Tag:          p.Tag,
+				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
 				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})
@@ -285,7 +285,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			Dojo        string   `json:"dojo"`
 			Metadata    []string `json:"metadata"`
 			DanGrade    string   `json:"danGrade"`
-			Tag         string   `json:"tag"`
+			Source      string   `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -349,7 +349,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				displayName = ""
 			}
 
-			if err := validatePlayerLengths(name, displayName, dojo, req.Tag, metadata); err != nil {
+			if err := validatePlayerLengths(name, displayName, dojo, req.Source, metadata); err != nil {
 				httpStatus = http.StatusBadRequest
 				httpMsg = err.Error()
 				return err
@@ -369,7 +369,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				p.DisplayName = displayName
 				p.Dojo = dojo
 				p.Metadata = metadata
-				p.Tag = req.Tag
+				p.Source = helper.CanonicalRegistrationSource(req.Source)
 				return nil
 			})
 			if err != nil {

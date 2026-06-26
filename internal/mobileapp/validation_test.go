@@ -560,7 +560,7 @@ func TestValidatePlayerLengths(t *testing.T) {
 		playerName  string
 		displayName string
 		dojo        string
-		tag         string
+		source      string
 		metadata    []string
 		wantField   string
 	}{
@@ -581,9 +581,30 @@ func TestValidatePlayerLengths(t *testing.T) {
 			wantField: "dojo",
 		},
 		{
-			name:      "tag over 200 chars",
-			tag:       strings.Repeat("t", 201),
-			wantField: "tag",
+			name:      "source over 200 chars",
+			source:    strings.Repeat("t", 201),
+			wantField: "source",
+		},
+		{
+			name:       "valid registration source: ok",
+			playerName: "Alice",
+			source:     "registered",
+		},
+		{
+			name:       "valid source any case: ok (normalized elsewhere)",
+			playerName: "Alice",
+			source:     "Manual",
+		},
+		{
+			name:       "legacy 'reserved' accepted (aliased to manual)",
+			playerName: "Alice",
+			source:     "reserved",
+		},
+		{
+			name:       "unknown registration source rejected",
+			playerName: "Alice",
+			source:     "vip",
+			wantField:  "source",
 		},
 		{
 			name:      "metadata > 16 entries",
@@ -598,7 +619,7 @@ func TestValidatePlayerLengths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePlayerLengths(tt.playerName, tt.displayName, tt.dojo, tt.tag, tt.metadata)
+			err := validatePlayerLengths(tt.playerName, tt.displayName, tt.dojo, tt.source, tt.metadata)
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return

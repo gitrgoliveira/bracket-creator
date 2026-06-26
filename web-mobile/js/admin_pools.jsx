@@ -1,6 +1,10 @@
 // Pools section of a competition: standings tables with rank-override inputs
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
+// Canonical pool-id parser shared with the display surfaces (single source of
+// truth — ./pool_ids.jsx is a leaf module with no import chain).
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
@@ -48,24 +52,12 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
   return { action: "noop" };
 }
 
-// Regex that strips the trailing match-index segment from a pool-match id to
-// recover the pool name. Backend formats: "PoolName-N", "PoolName-DH-N",
-// "PoolName-TB-N". A plain split('-')[0] breaks on hyphenated pool names
-// (e.g. "Pool A-East-0" → "Pool A", not "Pool A-East"). This regex captures
-// everything before the trailing numeric/DH/TB suffix; ids without a
-// recognisable suffix degrade to "" (no pool name inferable).
-const POOL_MATCH_ID_RE = /^(.*?)-(?:DH-|TB-)?\d+$/;
-
-// Extract the pool name from a pool-match id using POOL_MATCH_ID_RE.
-// Returns "" when the id is falsy or has no recognisable suffix.
-// Single source of truth so all callers stay in sync if the backend
-// id format evolves.
-function poolNameFromMatchId(id) {
-  return (id || "").match(POOL_MATCH_ID_RE)?.[1] ?? "";
-}
+// poolNameOf is imported above from ./pool_ids.jsx (the shared
+// pool-id parser; "PoolName-N" / "PoolName-DH-N" / "PoolName-TB-N" → pool name,
+// hyphenated names preserved, unrecognised ids → "").
 
 // Filter a flat poolMatches array down to entries belonging to a single pool.
-// Uses POOL_MATCH_ID_RE so DH/TB suffix variants are handled correctly.
+// Uses poolNameOf (./pool_ids.jsx) so DH/TB suffix variants are handled correctly.
 //
 // pool.matches (helper.Match) carries only sideA/sideB — no id, status, or
 // score data. poolMatches (state.MatchResult) has the full data including the
@@ -74,7 +66,7 @@ function poolNameFromMatchId(id) {
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function poolMatchesForPool(poolMatches, poolName) {
-  return (poolMatches || []).filter(m => poolNameFromMatchId(m.id) === poolName);
+  return (poolMatches || []).filter(m => poolNameOf(m.id) === poolName);
 }
 
 // Enrich a pool-match object with the comp-* metadata that
@@ -105,7 +97,7 @@ function poolMatchesForPool(poolMatches, poolName) {
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
-  const derivedPoolName = poolNameOverride || poolNameFromMatchId(m.id);
+  const derivedPoolName = poolNameOverride || poolNameOf(m.id);
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
   const toPlayer = (side) => {
     if (side && typeof side === "object") return side;
@@ -119,7 +111,24 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   // to the individual editor (one bout), not the 5-person team sheet. This
   // mirrors the same override in viewer.jsx compMatches; without it, scoring a
   // team pool-DH from the Pools tab opens the wrong (team) scorer.
-  const isSupplementary = /-(?:DH|TB)-\d+$/.test(m.id || "");
+  const isSupplementary = isSupplementaryBout(m.id);
+  // mp-62vr: for a team pool/league daihyosen/tiebreaker rep bout the SideA/SideB
+  // are TEAM names; the operator must pick which player each team fields. Attach
+  // each team's roster so ScoreEditorModal can render the two rep-player
+  // dropdowns. comp.players entries ARE the teams (member names live in
+  // team.metadata via AdminLineupHelpers.rosterFor); config may nest players.
+  const isTeamComp = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+  const repIsTeam = isSupplementary && isTeamComp;
+  let repRosterA = [];
+  let repRosterB = [];
+  if (repIsTeam) {
+    const teams = (comp && comp.config && comp.config.players) || (comp && comp.players) || [];
+    const nameOf = (s) => (typeof s === "string" ? s : (s && s.name) || "");
+    const teamByName = (nm) => teams.find(t => ((t.name || t.Name) === nm));
+    const rosterFor = (window.AdminLineupHelpers && window.AdminLineupHelpers.rosterFor) || (() => []);
+    repRosterA = rosterFor(teamByName(nameOf(m.sideA))) || [];
+    repRosterB = rosterFor(teamByName(nameOf(m.sideB))) || [];
+  }
   return {
     ...m,
     sideA: toPlayer(m.sideA),
@@ -131,6 +140,10 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
+    // Rep-bout dropdown inputs (empty/false for non-supplementary matches).
+    repIsTeam,
+    repRosterA,
+    repRosterB,
   };
 }
 
@@ -450,7 +463,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const poolMatchesMap = useMemoA(() => {
     const map = new Map();
     for (const m of (poolMatches || [])) {
-      const name = poolNameFromMatchId(m.id);
+      const name = poolNameOf(m.id);
       if (!name) continue;
       const bucket = map.get(name);
       if (bucket) { bucket.push(m); } else { map.set(name, [m]); }

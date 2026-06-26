@@ -268,7 +268,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		// without this, the import path could persist values the API
 		// would reject.
 		for i, p := range players {
-			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				res.Error = fmt.Sprintf("participants[%d]: %s", i, err.Error())
 				return res
 			}

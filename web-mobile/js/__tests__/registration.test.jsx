@@ -129,7 +129,7 @@ describe('RegistrationForm', () => {
         return Promise.resolve({
           status: 200,
           ok: true,
-          json: () => Promise.resolve({ id: 'p1', name: 'Alice', dojo: 'Dojo', tag: 'registered' }),
+          json: () => Promise.resolve({ id: 'p1', name: 'Alice', dojo: 'Dojo', source: 'registered' }),
         });
       });
 
@@ -206,7 +206,7 @@ describe('RegistrationForm', () => {
         return Promise.resolve({
           status: 200,
           ok: true,
-          json: () => Promise.resolve({ id: 'p1', name: 'Alice', dojo: 'Dojo', tag: 'registered' }),
+          json: () => Promise.resolve({ id: 'p1', name: 'Alice', dojo: 'Dojo', source: 'registered' }),
         });
       });
 

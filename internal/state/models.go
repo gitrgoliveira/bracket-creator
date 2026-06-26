@@ -633,6 +633,17 @@ type MatchResult struct {
 	// column (rec index 19, the 20th column, after the original 19) and the
 	// bracket.json field keep older files fully compatible.
 	CorrectionReason string `json:"correctionReason,omitempty" yaml:"correction_reason,omitempty"`
+	// RepPlayerA / RepPlayerB name the individual competitor each TEAM fields
+	// for a pool/league daihyosen or tiebreaker rep bout ("Pool X-DH-N" /
+	// "Pool X-TB-N"). For those bouts SideA/SideB hold the TEAM names (the
+	// standings entries are teams), so the actual fighters can't be recovered
+	// from the sides alone. The operator records them in the rep-bout scorer
+	// (picked from each team's roster) and the per-court display shows the rep
+	// player above the team name. Empty for every non-supplementary match.
+	// Append-only CSV columns (rec index 20/21, after CorrectionReason at 19)
+	// keep older pool-matches.csv files fully compatible. (mp-62vr)
+	RepPlayerA string `json:"repPlayerA,omitempty" yaml:"rep_player_a,omitempty"`
+	RepPlayerB string `json:"repPlayerB,omitempty" yaml:"rep_player_b,omitempty"`
 	// Rev is a client-monotonic revision counter carried on "running"-status
 	// autosave writes. The server uses it (scoped to RevSession) to drop stale
 	// in-flight writes that arrive out of order after a reconnect flush

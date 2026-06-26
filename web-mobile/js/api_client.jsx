@@ -1123,7 +1123,7 @@ const API = {
     },
     async toggleCheckIn(compID, pid, checkedIn, password) {
         const method = checkedIn ? 'PUT' : 'DELETE';
-        const res = await fetch(`/api/competitions/${compID}/participants/${pid}/checkin`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {
             method,
             headers: { 'X-Tournament-Password': password }
         });
@@ -1133,8 +1133,23 @@ const API = {
         }
         return res.json();
     },
+    // Bulk check-in for one competition. participantIds is an array of stable
+    // participant ids that must match the persisted id column exactly. Returns { checkedIn, alreadyCheckedIn,
+    // notFound }. Used by the Registration desk's "check in a whole dojo" action.
+    async bulkCheckIn(compID, participantIds, password) {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ participantIds })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Failed to check in participants');
+        }
+        return res.json();
+    },
     async addParticipant(compID, payload, password, adminPassword) {
-        const res = await fetch(`/api/competitions/${compID}/participants`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)
@@ -1146,7 +1161,7 @@ const API = {
         return res.json();
     },
     async replaceParticipant(compID, pid, payload, password, adminPassword) {
-        const res = await fetch(`/api/competitions/${compID}/participants/${pid}`, {
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
             body: JSON.stringify(payload)

@@ -119,20 +119,20 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
+  const np = parsed.map(({ name, displayName, dojo, danGrade, source, checkedIn: parsedCheckedIn }) => {
     const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
       // Preserve existing check-in state; CSV token takes precedence if explicitly set.
       const checkedIn = parsedCheckedIn || existing.checkedIn || false;
-      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null, checkedIn };
+      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null, checkedIn };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, tag, seed: null, checkedIn: parsedCheckedIn || false };
+    return { id, name, displayName, dojo, danGrade, source, seed: null, checkedIn: parsedCheckedIn || false };
   });
   return { np, added, updatedCount };
 }
@@ -336,7 +336,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     reader.readAsText(file);
   };
 
-  const [tagFilter, setTagFilter] = useStateA(null);
+  const [sourceFilter, setSourceFilter] = useStateA(null);
   const [searchQuery, setSearchQuery] = useStateA("");
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
@@ -367,7 +367,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     }
     return map;
   }, [c.players, c.numberPrefix]);
-  const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
+  const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
     players.forEach(p => { map.set(p.id ?? p.name, participantSearchTarget(p)); });
@@ -376,11 +376,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const visiblePlayers = useMemoA(() => {
     const q = trimmedSearch.toLowerCase();
     let out = players;
-    if (tagFilter) out = out.filter(p => p.tag === tagFilter);
+    if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
     if (q) out = out.filter(p => playerSearchTargets.get(p.id ?? p.name)?.includes(q));
     return out;
-  }, [players, tagFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
+  }, [players, sourceFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
@@ -565,7 +565,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // even if replaceTarget has changed by the time the response arrives.
     const oldName = replaceTarget.name;
     const targetId = replaceTarget.id;
-    const targetTag = replaceTarget.tag || "";
+    const targetSource = replaceTarget.source || "";
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setReplaceLoading(true);
@@ -581,7 +581,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // ALWAYS send "" — otherwise stale "A. SMITH" from the replaced slot
       // would carry over and corrupt the 3-column CSV row.
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
-      const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
+      const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", source: targetSource };
       if (metadata !== undefined) payload.metadata = metadata;
       const updated = await window.API.replaceParticipant(c.id, targetId, payload, password, admin);
       if (!mountedRef.current) return;
@@ -849,11 +849,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               <button type="button" className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
             </div>
           )}
-          {allTags.length > 0 && (
+          {allSources.length > 0 && (
             <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button type="button" aria-pressed={!tagFilter} className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
-              {allTags.map(t => (
-                <button type="button" key={t} aria-pressed={tagFilter === t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+              <button type="button" aria-pressed={!sourceFilter} className={`radio-pill ${!sourceFilter ? "is-active" : ""}`} onClick={() => setSourceFilter(null)}>All</button>
+              {allSources.map(t => (
+                <button type="button" key={t} aria-pressed={sourceFilter === t} className={`radio-pill ${sourceFilter === t ? "is-active" : ""}`} onClick={() => setSourceFilter(sourceFilter === t ? null : t)}>{t}</button>
               ))}
             </div>
           )}
@@ -928,18 +928,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <EmptyState icon="🌱" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
           ) : (
             <div className="seed-list">
-              {/* When a tag filter is active, reorder controls would operate on */}
+              {/* When a source filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(tagFilter || showOnlyUnchecked || trimmedSearch) && (
+              {(sourceFilter || showOnlyUnchecked || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
                   {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
-              {visiblePlayers.length === 0 && (trimmedSearch || tagFilter || showOnlyUnchecked) && (
+              {visiblePlayers.length === 0 && (trimmedSearch || sourceFilter || showOnlyUnchecked) && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
-                  {(tagFilter || showOnlyUnchecked)
+                  {(sourceFilter || showOnlyUnchecked)
                     ? "No participants match current filters."
                     : `No match for "${trimmedSearch}".`}
                 </div>
@@ -948,7 +948,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 const i = players.indexOf(p);
                 // draw-ready lock: reordering (and all seed mutations) disabled until the draw is discarded.
                 // Filter-active check is kept separate so both reasons can coexist.
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
+                const reorderDisabled = !!sourceFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
                 return (
                   <div
                     key={p.id ?? p.name}
@@ -994,7 +994,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           ) : null}
                           {p.name}
                         </div>
-                        {p.tag && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.tag}</span>}
+                        {p.source && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.source}</span>}
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}

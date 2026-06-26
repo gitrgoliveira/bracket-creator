@@ -381,6 +381,15 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 19 {
 			m.CorrectionReason = rec[19]
 		}
+		// Rep-player columns (appended after CorrectionReason) — the individual
+		// fighters each team fields for a pool/league daihyosen/tiebreaker rep
+		// bout. Absent in files written before mp-62vr → stay empty.
+		if len(rec) > 20 {
+			m.RepPlayerA = rec[20]
+		}
+		if len(rec) > 21 {
+			m.RepPlayerB = rec[21]
+		}
 
 		results = append(results, m)
 	}
@@ -417,7 +426,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB"}); err != nil {
 		return err
 	}
 
@@ -456,6 +465,8 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.SideBID,
 			r.WinnerID,
 			r.CorrectionReason,
+			r.RepPlayerA,
+			r.RepPlayerB,
 		}); err != nil {
 			return err
 		}

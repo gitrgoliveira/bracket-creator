@@ -188,7 +188,19 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 // (the side with more ippons is the winner). `stored` is the on-disk record
 // (with the generation-time ids); `result` is the incoming score. Purely
 // additive — never touches name-based scoring/standings logic.
+//
+// It also preserves the daihyosen/tiebreaker rep-player names (mp-62vr) the
+// same preserve-on-empty way: once the operator records which player each team
+// fielded, a later score write that omits them (e.g. a correction that only
+// re-sends the ippons) must not wipe them. An explicit value in `result`
+// always wins, so the operator can still change the rep player.
 func backfillMatchIdentity(result, stored *state.MatchResult) {
+	if result.RepPlayerA == "" {
+		result.RepPlayerA = stored.RepPlayerA
+	}
+	if result.RepPlayerB == "" {
+		result.RepPlayerB = stored.RepPlayerB
+	}
 	if result.SideAID == "" {
 		result.SideAID = stored.SideAID
 	}

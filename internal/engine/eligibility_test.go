@@ -174,6 +174,35 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 	})
 }
 
+// TestRecordDecision_DefaultWinIpponMarkers pins that a default-win
+// decision auto-fills the winner's ippon slots with the FIK maru "○"
+// marker, not a waza letter: no technique was struck, so "M" (Men)
+// would misrepresent the scoreline (mp-lybf).
+func TestRecordDecision_DefaultWinIpponMarkers(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "default-win-marker"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	// decisionBy "shiro" → Bob (shiro/SideB) is the no-show, so Alice
+	// (aka/SideA) is the survivor and her IpponsA carries the fill.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "fusensho", "shiro", "no-show", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsA)
+	assert.Empty(t, result.IpponsB)
+}
+
 // TestRecordDecision_ConcurrentKiken verifies CHK047/T105: when two
 // operators on different courts simultaneously try to kiken the same
 // player, the second call returns *AlreadyIneligibleError (HTTP 409

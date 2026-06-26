@@ -349,7 +349,8 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
 // and persists the result via RecordMatchResultWithIneligibility. The
 // canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
-// translate decisionBy → which side loses/forfeits the auto-filled X-0 scoreline.
+// translate decisionBy → which side loses/forfeits: winner gets ○○ (regulation)
+// or ○ (encho), loser gets nothing.
 //
 // When the match already has a kiken/fusenpai decision recorded (the
 // "undo" path, T103/CHK024) the engine enforces the
@@ -421,7 +422,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	}
 	winIppons := make([]string, winningCount)
 	for i := range winIppons {
-		winIppons[i] = "M"
+		winIppons[i] = defaultWinIppon
 	}
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -434,7 +435,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		Status:         state.MatchStatusCompleted,
 	}
 	// shiro=SideB (White, left), aka=SideA (Red, right). The losing
-	// side ends with 0 ippons; the surviving side gets the X auto-fill
+	// side ends with 0 ippons; the surviving side gets the ○ default-win fill
 	// and becomes Winner.
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons

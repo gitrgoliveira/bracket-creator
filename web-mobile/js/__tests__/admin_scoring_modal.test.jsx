@@ -849,7 +849,7 @@ describe('applyFusenshoToggle', () => {
     const prev = { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" };
     const next = applyFusenshoToggle(prev, "a");
     expect(next).toEqual({
-      aPts: ['M', 'M'],
+      aPts: ['○', '○'],
       bPts: [],
       aFouls: 0,
       bFouls: 0,
@@ -863,7 +863,7 @@ describe('applyFusenshoToggle', () => {
     const next = applyFusenshoToggle(prev, "b");
     expect(next).toEqual({
       aPts: [],
-      bPts: ['M', 'M'],
+      bPts: ['○', '○'],
       aFouls: 0,
       bFouls: 0,
       fusensho: "b",
@@ -899,7 +899,7 @@ describe('applyFusenshoToggle', () => {
     const afterSwitch = applyFusenshoToggle(afterA, "b");
     expect(afterSwitch.fusensho).toBe("b");
     expect(afterSwitch.aPts).toEqual([]);
-    expect(afterSwitch.bPts).toEqual(['M', 'M']);
+    expect(afterSwitch.bPts).toEqual(['○', '○']);
     // Snapshot stays anchored to the genuine pre-fusensho state.
     expect(afterSwitch._preFusensho).toEqual({ aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 });
 
@@ -916,7 +916,7 @@ describe('applyFusenshoToggle', () => {
 
   it('fresh-match round-trip: zeros → toggle → untoggle returns to zeros', () => {
     const afterOn = applyFusenshoToggle(clean(), "a");
-    expect(afterOn.aPts).toEqual(['M', 'M']);
+    expect(afterOn.aPts).toEqual(['○', '○']);
     expect(afterOn._preFusensho).toEqual({ aPts: [], bPts: [], aFouls: 0, bFouls: 0 });
     const afterOff = applyFusenshoToggle(afterOn, "a");
     expect(afterOff).toEqual({
@@ -934,10 +934,10 @@ describe('applyFusenshoToggle', () => {
     // from the backend payload and lights up the button, but does NOT
     // round-trip the snapshot. Untoggling in that state must not crash;
     // it falls through to clearing the flag and leaving the score alone.
-    const prev = { aPts: ['M', 'M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
+    const prev = { aPts: ['○', '○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
     const next = applyFusenshoToggle(prev, "a");
     expect(next).toEqual({
-      aPts: ['M', 'M'],
+      aPts: ['○', '○'],
       bPts: [],
       aFouls: 0,
       bFouls: 0,

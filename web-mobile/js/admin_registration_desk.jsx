@@ -50,11 +50,16 @@ function rdPersonKey(p) {
   return `${rdNorm(p.name)}|${rdNorm(p.dojo)}`;
 }
 
-// Client-side key for check-in calls. Prefers the UUID; falls back to the name
-// only for legacy non-UUID rows where the persisted id column IS the name.
-// The server always matches by the id column — it never resolves by name.
+// Client-side identifier for check-in / edit calls (and for local row keys and
+// optimistic-update matching, which must use the same value symmetrically).
+// Prefers the stable UUID; for legacy UUID-less rows it falls back to the
+// composite "name|dojo" key the server resolves on (resolveParticipantIndex in
+// internal/state/participants.go) — the (name, dojo) pair, not name alone, is
+// the uniqueness invariant. Kept inline (not via window.checkinPid) so the
+// standalone unit tests work under vitest, where window helpers are absent;
+// keep it identical to checkinPid in data.jsx.
 function rdPid(p) {
-  return p.id ?? p.name;
+  return p.id ?? `${p.name}|${p.dojo ?? ""}`;
 }
 
 // Subsequence score for one token against a normalized haystack. Returns null

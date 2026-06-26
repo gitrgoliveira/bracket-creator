@@ -345,6 +345,56 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	return comp.WithZekkenName, nil
 }
 
+// participantPairKey is the (normalizedName, normalizedDojo) identity key used
+// to resolve a participant when no stable UUID is available. It mirrors the
+// Tier-1 dedup key (NormalizeParticipantName on both halves joined by "|"), so
+// the pair is unique across a roster by construction — name alone is NOT unique
+// (same name at a different dojo is allowed). Keep in sync with checkInKey in
+// handlers_participants.go and checkinPid in web-mobile/js/data.jsx.
+func participantPairKey(name, dojo string) string {
+	return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
+}
+
+// pidPairKey derives the (normalizedName, normalizedDojo) key from a composite
+// "name|dojo" pid sent by the client for legacy UUID-less rows. The raw pid is
+// split on the FIRST "|" and each half normalized separately — splitting before
+// normalizing trims whitespace around the delimiter, which normalizing the whole
+// string would not. A pid with no "|" resolves as a name with an empty dojo.
+func pidPairKey(pid string) string {
+	name, dojo, _ := strings.Cut(pid, "|")
+	return participantPairKey(name, dojo)
+}
+
+// resolveParticipantIndex finds the index of the participant addressed by pid.
+// It matches a stable UUID first; failing that — legacy participants.csv files
+// loaded without a UUID column have empty IDs (loadParticipantsNoLock mints
+// none; the first write via saveParticipantsNoLock migrates those rows to UUIDs
+// because marshalParticipantsCSV backfills empty IDs) — it falls back to
+// matching the composite "name|dojo" key the client sends for ID-less rows. The
+// fallback is restricted to ID-less rows (UUID rows are only addressable by
+// their id) and the (name, dojo) pair is unique per roster, so resolution is
+// unambiguous. Returns -1 when no participant matches.
+func resolveParticipantIndex(players []domain.Player, pid string) int {
+	if pid == "" {
+		return -1
+	}
+	for i := range players {
+		if players[i].ID != "" && players[i].ID == pid {
+			return i
+		}
+	}
+	want := pidPairKey(pid)
+	for i := range players {
+		if players[i].ID != "" {
+			continue
+		}
+		if participantPairKey(players[i].Name, players[i].Dojo) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // BulkCheckInResult carries the outcome of a BulkCheckIn call.
 type BulkCheckInResult struct {
 	CheckedIn        int      `json:"checkedIn"`
@@ -371,29 +421,44 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 		return BulkCheckInResult{}, err
 	}
 
-	byPID := make(map[string]int, len(players))
+	// Two lookup maps so resolution matches resolveParticipantIndex: UUID rows
+	// by their stable id, legacy UUID-less rows by their (name, dojo) pair key.
+	byID := make(map[string]int, len(players))
+	byKey := make(map[string]int, len(players))
 	for i := range players {
 		if players[i].ID != "" {
-			byPID[players[i].ID] = i
+			byID[players[i].ID] = i
+		} else {
+			byKey[participantPairKey(players[i].Name, players[i].Dojo)] = i
 		}
 	}
 
-	seen := make(map[string]struct{}, len(pids))
+	// Deduplicate by resolved participant index so that semantically equivalent
+	// pids (same normalized name|dojo with different whitespace/case) don't count
+	// the same participant twice. NotFound pids are deduped by raw string because
+	// there is no index to compare against.
+	seenIdx := make(map[int]struct{}, len(pids))
+	seenNotFound := make(map[string]struct{})
 	result := BulkCheckInResult{NotFound: []string{}}
 	for _, pid := range pids {
 		if pid == "" {
 			continue
 		}
-		if _, dup := seen[pid]; dup {
-			continue
-		}
-		seen[pid] = struct{}{}
-
-		idx, ok := byPID[pid]
+		idx, ok := byID[pid]
 		if !ok {
-			result.NotFound = append(result.NotFound, pid)
+			idx, ok = byKey[pidPairKey(pid)]
+		}
+		if !ok {
+			if _, dup := seenNotFound[pid]; !dup {
+				result.NotFound = append(result.NotFound, pid)
+				seenNotFound[pid] = struct{}{}
+			}
 			continue
 		}
+		if _, dup := seenIdx[idx]; dup {
+			continue
+		}
+		seenIdx[idx] = struct{}{}
 		if players[idx].CheckedIn {
 			result.AlreadyCheckedIn++
 		} else {
@@ -433,14 +498,9 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	foundIdx := -1
-	for i := range players {
-		if players[i].ID == pid {
-			foundIdx = i
-			break
-		}
-	}
-
+	// Resolve by stable UUID, falling back to the composite "name|dojo" key for
+	// legacy UUID-less rosters (see resolveParticipantIndex).
+	foundIdx := resolveParticipantIndex(players, pid)
 	if foundIdx == -1 {
 		return nil, ErrParticipantNotFound
 	}

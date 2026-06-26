@@ -389,13 +389,25 @@ function arraysEqual(a, b) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+// checkinPid builds the server-bound participant identifier for the check-in,
+// uncheck, bulk check-in, and edit endpoints. Modern rows carry a stable UUID;
+// legacy UUID-less rosters (a participants.csv never re-saved through the app)
+// have no id, so we fall back to the composite "name|dojo" key the server
+// resolves on (pidPairKey / resolveParticipantIndex in
+// internal/state/participants.go). The dojo is included because (name, dojo) —
+// not name alone — is the uniqueness invariant: the same name at a different
+// dojo is two distinct people. Keep in sync with the Go resolver.
+function checkinPid(p) {
+  return p.id ?? `${p.name}|${p.dojo ?? ""}`;
+}
+
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName
+  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid
 };
 
 if (typeof window !== 'undefined') {
@@ -415,4 +427,5 @@ if (typeof window !== 'undefined') {
   window.addMinutes = addMinutes;
   window.diffMinutes = diffMinutes;
   window.arraysEqual = arraysEqual;
+  window.checkinPid = checkinPid;
 }

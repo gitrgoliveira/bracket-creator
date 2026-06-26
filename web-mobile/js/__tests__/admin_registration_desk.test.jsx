@@ -36,9 +36,14 @@ describe('rdPersonKey', () => {
 });
 
 describe('rdPid', () => {
-  it('prefers the UUID, falls back to the name', () => {
-    expect(rdPid({ id: 'uuid-1', name: 'A' })).toBe('uuid-1');
-    expect(rdPid({ name: 'A' })).toBe('A');
+  it('prefers the UUID', () => {
+    expect(rdPid({ id: 'uuid-1', name: 'A', dojo: 'D' })).toBe('uuid-1');
+  });
+  it('falls back to the composite name|dojo key for legacy UUID-less rows', () => {
+    expect(rdPid({ name: 'A', dojo: 'D' })).toBe('A|D');
+  });
+  it('emits an empty dojo segment when dojo is missing', () => {
+    expect(rdPid({ name: 'A' })).toBe('A|');
   });
 });
 

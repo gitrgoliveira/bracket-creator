@@ -57,6 +57,11 @@ func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 	assert.Equal(t, "Bob", matches[0].Winner)
 	assert.Equal(t, "kiken", matches[0].Decision)
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
+	// The default-win ippon slots carry the FIK maru "○" marker, not a
+	// waza letter — no technique was struck (mp-lybf). Bob (shiro/SideB)
+	// is the survivor, so the fill lands on IpponsB.
+	assert.Equal(t, []string{"○", "○"}, matches[0].IpponsB)
+	assert.Empty(t, matches[0].IpponsA)
 
 	// Verify ineligibility landed on disk.
 	statuses, err := store.LoadCompetitorStatus(compID)

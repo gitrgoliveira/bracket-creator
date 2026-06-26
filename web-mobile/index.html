@@ -143,6 +143,10 @@
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
          admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->
     <script type="module" src="/dist/admin_shiaijo.js?v=5"></script>
+    <!-- admin_registration_desk.js exports AdminRegistrationDeskPage to window.
+         Must load before admin.js which reads window.AdminRegistrationDeskPage
+         in its "registrationDesk" view branch (mp-25bk). -->
+    <script type="module" src="/dist/admin_registration_desk.js?v=5"></script>
     <script type="module" src="/dist/admin.js?v=5"></script>
     <script type="module" src="/dist/app.js?v=5"></script>
 </body>

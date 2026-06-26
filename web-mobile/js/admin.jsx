@@ -536,6 +536,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         onAnnounce={() => setAnnounceOpen(true)}
         onOpenSchedule={() => setView({ kind: "schedule" })}
         onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
+        onOpenRegistration={() => setView({ kind: "registrationDesk" })}
         onOpenImport={() => setView({ kind: "import" })}
         onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
@@ -627,6 +628,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast={showToast}
       tweaks={tweaks}
       onSwitchCourt={(court) => setView({ kind: "shiaijo", court })}
+    />;
+  }
+
+  if (view.kind === "registrationDesk") {
+    return <window.AdminRegistrationDeskPage
+      tournament={t}
+      onBack={() => setView({ kind: "dashboard" })}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      onUpdate={onUpdate}
+      password={password}
+      showToast={showToast}
     />;
   }
 

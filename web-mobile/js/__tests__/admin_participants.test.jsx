@@ -5,9 +5,9 @@ import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget } from 
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
 // optional fields for brevity — mintParticipantIds doesn't read them
 // other than passing them through.
-const parsed = (...names) => names.map(n => ({ name: n, dojo: 'Dojo', danGrade: null, tag: null }));
+const parsed = (...names) => names.map(n => ({ name: n, dojo: 'Dojo', danGrade: null, source: null }));
 
-const existing = (id, name, seed = null) => ({ id, name, displayName: null, dojo: 'Dojo', danGrade: null, tag: null, seed });
+const existing = (id, name, seed = null) => ({ id, name, displayName: null, dojo: 'Dojo', danGrade: null, source: null, seed });
 
 describe('mintParticipantIds', () => {
   describe('Copilot finding: order-dependent ID collision', () => {
@@ -162,8 +162,8 @@ describe('mintParticipantIds', () => {
       expect(np.find(p => p.name === 'Bob').id).toBe('c1-p1');
     });
 
-    it('preserves passed-through fields (displayName, dojo, danGrade, tag)', () => {
-      const row = { name: 'Alice', displayName: 'A.', dojo: 'TestDojo', danGrade: '3 Dan', tag: 'registered' };
+    it('preserves passed-through fields (displayName, dojo, danGrade, source)', () => {
+      const row = { name: 'Alice', displayName: 'A.', dojo: 'TestDojo', danGrade: '3 Dan', source: 'registered' };
       const { np } = mintParticipantIds('c1', [], [row]);
       expect(np[0]).toMatchObject({
         id: 'c1-p1',
@@ -171,7 +171,7 @@ describe('mintParticipantIds', () => {
         displayName: 'A.',
         dojo: 'TestDojo',
         danGrade: '3 Dan',
-        tag: 'registered',
+        source: 'registered',
         seed: null,
       });
     });

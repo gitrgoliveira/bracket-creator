@@ -182,8 +182,9 @@ function centreMarks(sub, matchSideA, matchSideB) {
         {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
-        {isDraw ? <span data-testid="sub-row-draw">X</span> : null}
-        {sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span> : null}
+        {isDraw ? <span data-testid="sub-row-draw">X</span>
+          : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
+          : <span className="msb-sep" aria-hidden="true">–</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
         {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
@@ -308,7 +309,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
 // TeamScoreboard — §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB }) {
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
@@ -319,8 +320,13 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   const renderDH = !!showDH && tied;
   const dhSub = renderDH ? (subResults || []).find(s => s.position === -1) : null;
   const tv = variant === "tv";
-  // The current bout = first unscored regular bout (amber highlight). Already-
-  // scored bouts are "done"; later ones "queued". A completed match → all done.
+  // The current bout = first unscored regular bout (navy "now" highlight via
+  // var(--accent-soft) — the running signal), but only while the match is
+  // RUNNING (see rowState below). Already-scored bouts are "done"; unscored
+  // bouts are "queued". On a non-running board (completed or up-next) nothing
+  // is "now": a completed match that left padded/unplayed positions unscored
+  // (e.g. a quick-score synthesising fewer subResults than teamSize) keeps
+  // those rows "queued", not "done".
   const isScored = (s) => {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
@@ -332,8 +338,25 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       !!s.winner || (typeof s.decision === "string" && s.decision !== "") ||
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
-  const currentIdx = regular.findIndex(s => !isScored(s));
-  const rowState = (i) => (i < currentIdx || currentIdx === -1) ? "done" : (i === currentIdx ? "now" : "queued");
+  // Render one row PER LINEUP POSITION (teamSize), padding past the recorded
+  // subResults so a running encounter shows all bouts — completed, the live one,
+  // and the still-to-come positions — not just the scored ones. Kachinuki can
+  // exceed teamSize, so never shrink below regular.length.
+  const rowCount = Math.max(regular.length, teamSize || 0);
+  const scoredAt = (i) => i < regular.length && isScored(regular[i]);
+  // Per-row state: a scored bout is "done"; the first unscored bout is "now"
+  // ONLY when the match is RUNNING (so a 0–0 running board highlights bout 1);
+  // every other unscored bout is "queued". Gating "now" on isRunning means a
+  // completed match — including a quick-score that synthesised fewer
+  // subResults than teamSize — never lights up a padded blank row, and an
+  // up-next board stays all-queued.
+  let firstUnscored = -1;
+  for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { firstUnscored = i; break; } }
+  const rowState = (i) => {
+    if (scoredAt(i)) return "done";
+    if (isRunning && i === firstUnscored) return "now";
+    return "queued";
+  };
 
   return (
     <div className={"msb msb-team" + (tv ? " msb--tv" : "")} data-testid="team-scoreboard">
@@ -354,19 +377,14 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
         <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>
       </div>
 
-      {/* per-bout rows */}
-      {regular.map((sub, i) => (
-        <BoutSubRow key={i} sub={sub} index={i} lineupA={lineupA} lineupB={lineupB}
+      {/* One row per lineup position (teamSize), padding past the recorded
+          subResults so a running encounter shows the still-to-come bouts too —
+          not just the scored ones (a partially-scored match used to render only
+          its scored rows). A padding row has no sub: BoutSubRow shows the pinned
+          lineup name when present, else the bout number (mp-13y #4/#6). */}
+      {Array.from({ length: rowCount }, (_, i) => (
+        <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
           teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} />
-      ))}
-
-      {/* No bouts recorded yet (lineups not submitted / up-next): show the
-          teamSize numbered/roster rows so the board reads as a real scoreboard
-          rather than a lone IV/PW summary (mp-13y #4/#6). BoutSubRow shows the
-          pinned player name when a lineup exists, else the bout number. */}
-      {regular.length === 0 && teamSize > 0 && Array.from({ length: teamSize }, (_, i) => (
-        <BoutSubRow key={"ph" + i} sub={{}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state="queued" matchSideA={matchSideA} matchSideB={matchSideB} />
       ))}
 
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
@@ -381,7 +399,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           {dhSub
             ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
                 index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state="now" matchSideA={matchSideA} matchSideB={matchSideB} />
+                teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>
       )}

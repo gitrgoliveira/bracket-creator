@@ -316,7 +316,15 @@ const SAMPLE_TOURNAMENTS = [
   })(),
 ];
 
-const PARTICIPANT_TAGS = new Set(["manual", "registered", "transfer"]);
+const REGISTRATION_SOURCES = new Set(["manual", "registered", "transfer"]);
+
+// canonicalRegistrationSource mirrors Go's helper.CanonicalRegistrationSource:
+// trim + lower-case, and alias the legacy "reserved" token to "manual" so an
+// older CSV row round-trips consistently with the backend.
+function canonicalRegistrationSource(s) {
+  const c = (s || "").trim().toLowerCase();
+  return c === "reserved" ? "manual" : c;
+}
 
 // normalizeParticipantName applies the shared normalization used by the
 // duplicate-detection system (Tier-1 dedup key and Tier-2 near-dup signals).
@@ -344,7 +352,7 @@ function parseParticipantLines(lines, withZekken) {
   return lines.map((line) => {
     const parts = line.split(",").map((s) => s.trim());
     const name = parts[0] || "";
-    let displayName = "", dojo = "", danGrade = "", tag = "";
+    let displayName = "", dojo = "", danGrade = "", source = "";
     let checkedIn = false;
 
     // Detect trailing checked_in column — mirrors Go's column-based check (len > 2).
@@ -354,10 +362,12 @@ function parseParticipantLines(lines, withZekken) {
       parts.pop();
     }
 
-    // Detect trailing tag column (must be a known tag string, not a number)
-    const last = parts[parts.length - 1]?.toLowerCase();
-    if (PARTICIPANT_TAGS.has(last)) {
-      tag = last;
+    // Detect trailing source column (must be a known registration source string, not a number).
+    // Canonicalize first so the legacy "reserved" alias is recognized (→ "manual"),
+    // mirroring the Go parser.
+    const canonLast = canonicalRegistrationSource(parts[parts.length - 1]);
+    if (REGISTRATION_SOURCES.has(canonLast)) {
+      source = canonLast;
       parts.pop();
     }
 
@@ -369,7 +379,7 @@ function parseParticipantLines(lines, withZekken) {
       dojo = parts[1] || "";
       danGrade = parts[2] || "";
     }
-    return { name, displayName, dojo, danGrade, tag, checkedIn };
+    return { name, displayName, dojo, danGrade, source, checkedIn };
   });
 }
 

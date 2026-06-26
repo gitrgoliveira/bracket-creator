@@ -1,7 +1,8 @@
 // display_lobby.jsx — lobby / schedule TV (LobbyDisplay).
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, countCourtMatches, sideLabel, phaseLabel } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
+import { IndividualScore } from './match_scoreboard.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -24,14 +25,13 @@ const LOBBY_COLORS = {
     inkMuted:   'rgba(0,0,0,0.35)',
     line:       'rgba(0,0,0,0.10)',
     lineStrong: 'rgba(0,0,0,0.20)',
-    nowBg:      'rgba(0,0,0,0.04)',
-    nowBorder:  'rgba(0,0,0,0.14)',
-    nextBg:     '#fef3c7',
-    nextBorder: 'rgba(180,83,9,0.30)',
-    nextAccent: '#b45309',
+    // NOW row: navy accent — emphasis is on the live match.
+    nowBg:      'var(--accent-soft, #e7eaf3)',
+    nowBorder:  'var(--accent, #1d3557)',
+    // NEXT row: quiet neutral — visible but clearly subordinate to NOW. It
+    // shares the queue background (schedBg); a distinct border is its only cue.
+    nextBorder: 'rgba(0,0,0,0.10)',
     schedBg:    'rgba(0,0,0,0.02)',
-    akaSoft:    '#c0392b',
-    akaVivid:   '#b91c1c',
 };
 
 // Row descriptor array — drives both the row-label column and the
@@ -119,32 +119,13 @@ function LobbyMatchCell({ slot, rowKind }) {
         cellBg = LOBBY_COLORS.nowBg;
         cellBorder = LOBBY_COLORS.nowBorder;
     } else if (rowKind === 'next') {
-        cellBg = LOBBY_COLORS.nextBg;
+        // cellBg stays schedBg — the border alone distinguishes NEXT from queue.
         cellBorder = LOBBY_COLORS.nextBorder;
     }
 
-    const phase = phaseLabel(match, isBracket, roundIndex, totalRounds);
+    const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
-
-    // Score column: running → actual scores; upnext/scheduled → "vs"
-    let vsContent;
-    if (kind === 'running') {
-        const shiroScore = (match.ipponsB || []).filter(x => x && x !== '•').join('') || '0';
-        const akaScore   = (match.ipponsA || []).filter(x => x && x !== '•').join('') || '0';
-        const sfx = window.decisionSuffix ? window.decisionSuffix(match) : '';
-        vsContent = (
-            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 700, fontSize: 14, color: LOBBY_COLORS.ink }}>
-                {shiroScore}
-                <span style={{ opacity: 0.45 }}> - </span>
-                <span style={{ color: LOBBY_COLORS.akaVivid }}>{akaScore}</span>
-                {sfx ? <span style={{ marginLeft: 4, fontSize: 11, opacity: 0.85 }}>{sfx}</span> : null}
-            </span>
-        );
-    } else {
-        vsContent = (
-            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontWeight: 500, fontSize: 14, color: LOBBY_COLORS.inkMuted }}>vs</span>
-        );
-    }
+    const sfx = (kind === 'running' && window.decisionSuffix) ? window.decisionSuffix(match) : '';
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -155,24 +136,19 @@ function LobbyMatchCell({ slot, rowKind }) {
                 border: `1px solid ${cellBorder}`,
             }}>
                 {compMeta && (
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em' }}>
-                        {compMeta}
+                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</span>
+                        {sfx && <span style={{ flexShrink: 0, fontWeight: 700, color: LOBBY_COLORS.ink }}>{sfx}</span>}
                     </div>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 16, fontWeight: 600 }}>
-                    {/* Shiro — white text, left side */}
-                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {sideLabel(match.sideB, zekken)}
-                    </div>
-                    {/* Score / vs */}
-                    <div style={{ flexShrink: 0, minWidth: 64, textAlign: 'center' }}>
-                        {vsContent}
-                    </div>
-                    {/* Aka — pink/red text, right side */}
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'right', color: LOBBY_COLORS.akaSoft, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {sideLabel(match.sideA, zekken)}
-                    </div>
-                </div>
+                {/* One matchup = one IndividualScore row (same component the
+                    per-court board and viewer card use). Owns names, ippon
+                    slots, hansoku ▲ on the offending side, hantei / decision
+                    marks — attribution is positional, not color-only. For
+                    scheduled rows the match has no ippons, so the slots
+                    render empty (next to each name) which reads as "upcoming"
+                    consistently with the running case's progression. */}
+                <IndividualScore match={match} showNames withZekkenName={zekken} />
             </div>
         </td>
     );
@@ -230,6 +206,14 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // outside JSX so each cell renderer receives a plain object.
     const courtSlots = visible.map(cc => buildCourtSlots(competitions, cc));
 
+    // Trim queue rows: always show Now (slot 0) and Next (slot 1) as anchors;
+    // only include deeper rows (#3–#6) when at least one visible court has a
+    // non-null slot at that index. This avoids a table half-filled with "—"
+    // placeholders when the queue is short.
+    const visibleRows = LOBBY_ROWS.filter(row =>
+        row.slot < 2 || courtSlots.some(slots => slots[row.slot] != null)
+    );
+
     // Page label: "Shiaijo A–B · 1 / 2" or just "Shiaijo A" for single.
     const pageCourtLabel = visible.length === 2
         ? `Shiaijo ${visible[0]}–${visible[1]}`
@@ -254,7 +238,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: '0.1em' }}>
+                <div style={{ fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
                     {tournament?.name || ''}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -342,10 +326,12 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                     // Derive subtitle from the already-built courtSlots so
                                     // the header and the table body always agree on which
                                     // match is "current" (same auto-promote logic, no rescan).
-                                    const cts = countCourtMatches(competitions, cc);
-                                    const remaining = cts.running + cts.scheduled;
                                     const firstSlot = courtSlots[ci] && courtSlots[ci][0];
                                     const compName = firstSlot ? (firstSlot.competition?.name || '') : '';
+                                    const phase = firstSlot ? phaseLabel(firstSlot.match, firstSlot.isBracket, firstSlot.roundIndex, firstSlot.totalRounds, firstSlot.competition?.format) : '';
+                                    // firstSlot already has { competition, isBracket, roundIndex, match }.
+                                    const progress = firstSlot ? phaseProgressOnCourt(firstSlot, cc) : null;
+                                    const subtitle = [compName, phase, progress ? `${progress.done} / ${progress.total}` : null].filter(Boolean).join(' · ');
                                     return (
                                         <React.Fragment key={cc}>
                                             <th scope="col" style={{
@@ -357,9 +343,9 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                 background: LOBBY_COLORS.bg,
                                             }}>
                                                 Shiaijo {cc}
-                                                {compName && (
-                                                    <div style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
-                                                        {compName}{remaining > 0 ? ` · ${remaining} match${remaining === 1 ? '' : 'es'}` : ''}
+                                                {subtitle && (
+                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                        {subtitle}
                                                     </div>
                                                 )}
                                             </th>
@@ -373,7 +359,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {LOBBY_ROWS.map((row) => {
+                            {visibleRows.map((row) => {
                                 const rowKind = row.slot === 0 ? 'now' : row.slot === 1 ? 'next' : 'queue';
                                 return (
                                     <tr key={row.label}>
@@ -411,7 +397,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             <div style={{
                 padding: '10px 36px',
                 display: 'flex', justifyContent: 'center',
-                fontSize: 10, color: LOBBY_COLORS.inkMuted,
+                fontSize: '1.6vh', color: LOBBY_COLORS.inkMuted,
                 letterSpacing: '0.06em',
                 borderTop: `1px solid ${LOBBY_COLORS.line}`,
             }}>
@@ -442,4 +428,4 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     );
 }
 
-export { LobbyDisplay, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS };
+export { LobbyDisplay, LobbyMatchCell, LOBBY_COLORS, buildCourtSlots, LOBBY_PAGE_SIZE, LOBBY_CYCLE_MS, LOBBY_ROWS };

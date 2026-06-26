@@ -131,7 +131,7 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			DisplayName: displayName,
 			Dojo:        dojo,
 			Metadata:    metadata,
-			Tag:         "registered",
+			Source:      "registered",
 		}
 
 		addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)

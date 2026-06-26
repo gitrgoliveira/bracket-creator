@@ -3,6 +3,7 @@
 // LobbyDisplay, and StreamingOverlay. No module-level side-effects.
 
 import { withNumber } from './match_scoreboard.jsx';
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph — presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
@@ -102,8 +103,8 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
         }));
     }
     out.sort((a, b) => {
-        const qa = a.queuePosition || 9999;
-        const qb = b.queuePosition || 9999;
+        const qa = Number(a.queuePosition) || 9999;
+        const qb = Number(b.queuePosition) || 9999;
         if (qa !== qb) return qa - qb;
         return (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99");
     });
@@ -219,20 +220,28 @@ function queueLabelCompact(m) {
 }
 
 // Compute a phase label for either a pool or a bracket match.
-function phaseLabel(m, isBracket, roundIndex, totalRounds) {
+//
+// `format` (optional) is the competition format. A league is a single
+// round-robin table, so the per-match round-robin round number is noise to a
+// spectator — and it varies per match across the feed (4, 5, 6, 0…), reading
+// like a bug. Suppress it; the completed/total counter carries the progress.
+function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
+    if (format === "league") return "";
     if (m.phaseName) return m.phaseName;
     if (m.poolName) return m.poolName;
     if (isBracket && typeof roundIndex === "number" && window.roundLabel) {
         return window.roundLabel(roundIndex, totalRounds);
     }
-    // Pool matches reach the display feed with round === -1 (a sentinel, not a
-    // real round) and no poolName, but their id is shaped "<PoolName>-<index>".
-    // Derive the pool name from the id rather than rendering the bare "-1".
-    if (typeof m.round === "number" && m.round < 0) {
-        const id = typeof m.id === "string" ? m.id : "";
-        const cut = id.lastIndexOf("-");
-        if (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) return id.slice(0, cut);
-        return "";
+    // Pool matches reach the feed with a pool-shaped id "<PoolName>-<index>"
+    // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
+    // left at round 0 by the engine). Derive the pool name from the id so we
+    // never render a bare "-1" or "0" — covers regular, daihyosen and tiebreaker
+    // bouts alike via poolNameOf. Guard on !isBracket: poolNameOf matches any
+    // "*-<digits>" shape, so a bracket id like "m-r1-0" would otherwise yield a
+    // bogus "m-r1" pool-like label when window.roundLabel is unavailable.
+    if (!isBracket) {
+        const fromId = poolNameOf(m.id);
+        if (fromId) return fromId;
     }
     // Render a numeric round explicitly so a 0-based round index (round === 0)
     // is not swallowed by the falsy-`||` fallback into an empty label.
@@ -240,12 +249,37 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds) {
     return m.round || "";
 }
 
-// poolNameOf — derive the pool name from a pool-match id shaped "<Pool>-<idx>"
-// (e.g. "Pool A-0" → "Pool A"). Returns "" when the id isn't pool-shaped.
-function poolNameOf(id) {
-    if (typeof id !== "string") return "";
-    const cut = id.lastIndexOf("-");
-    return (cut > 0 && /^\d+$/.test(id.slice(cut + 1))) ? id.slice(0, cut) : "";
+// poolNameOf + isSupplementaryBout are imported from the shared ./pool_ids.jsx
+// leaf module (single source of truth, also used by admin_pools.jsx) and
+// re-exported below for this module's consumers and tests.
+
+// phaseProgressOnCourt — count completed vs total matches of the CURRENT phase
+// on this court so per-court and lobby surfaces can render "POOL A · 3 / 6" /
+// "FINAL · 0 / 1" / "LEAGUE · 12 / 45". Per-court is the right denominator
+// because the board is per-court; the spectator wants to know how far into the
+// phase this court is, not the venue overall. Returns null when there's no
+// group to count (e.g. promoted / promoted.competition missing).
+function phaseProgressOnCourt(promoted, court) {
+    if (!promoted) return null;
+    const comp = promoted.competition;
+    if (!comp) return null;
+    let group;
+    if (promoted.isBracket) {
+        const rounds = (comp.bracket && comp.bracket.rounds) || [];
+        const round = rounds[promoted.roundIndex] || [];
+        // Exclude unresolved placeholders ("Winner of rX-mY" / "Pool X-1st") so
+        // the denominator matches the runnable matches the board actually shows
+        // (the feed filters them via bracketSidesReady too).
+        group = round.filter(m => (m.court || "") === court && bracketSidesReady(m));
+    } else {
+        const poolName = poolNameOf(promoted.match && promoted.match.id);
+        if (!poolName) return null;
+        group = (comp.poolMatches || []).filter(m =>
+            poolNameOf(m.id) === poolName && (m.court || "") === court);
+    }
+    if (!group.length) return null;
+    const done = group.filter(m => m.status === "completed").length;
+    return { done, total: group.length };
 }
 
 // StreamingQR — minimal canvas QR code for the streaming overlay and TV
@@ -293,6 +327,8 @@ export {
     queueLabelCompact,
     phaseLabel,
     poolNameOf,
+    isSupplementaryBout,
+    phaseProgressOnCourt,
     sideLabel,
     TermD,
     StreamingQR,

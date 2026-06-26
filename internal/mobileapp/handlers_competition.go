@@ -344,10 +344,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// saveCompetitionWithPlayers — same length caps as the
 		// PUT roster-PUT branch and POST /participants.
 		for i, p := range comp.Players {
-			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
 			}
+			comp.Players[i].Source = helper.CanonicalRegistrationSource(p.Source)
 		}
 
 		// Reject non-canonical Date format. See validateDateDMY in
@@ -624,10 +625,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// handlers_participants.go.
 		if comp.Players != nil {
 			for i, p := range comp.Players {
-				if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+				if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 					return
 				}
+				comp.Players[i].Source = helper.CanonicalRegistrationSource(p.Source)
 			}
 		}
 

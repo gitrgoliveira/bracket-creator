@@ -278,8 +278,8 @@ describe('API Utils', () => {
       const map = buildPlayerMap(comp);
       // The map carries the full competitor identity (incl. displayName/number)
       // so bracket sides resolved by name show zekken + number as players qualify.
-      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', tag: '', danGrade: '' });
-      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', tag: '', danGrade: '' });
+      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
     });
 
     it('carries displayName and number into the map (qualifier identity in bracket)', () => {
@@ -358,7 +358,7 @@ describe('API Utils', () => {
         dojo: 'Dojo A',
         seed: 2,
         number: '',
-        tag: '',
+        source: '',
         danGrade: '',
         metadata: [],
       });

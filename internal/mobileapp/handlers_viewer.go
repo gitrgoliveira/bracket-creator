@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -22,8 +23,25 @@ import (
 // TV/overlay/viewer surfaces can't render them (mp-13y). No-op when
 // numberPrefix is empty or either slice is empty. Match by id first
 // (HasParticipantIDs case), fall back to name.
-func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool) {
-	if numberPrefix == "" || len(pools) == 0 || len(players) == 0 {
+//
+// For playoffs-only competitions (format == "playoffs") the engine assigns
+// numbers in-memory but has no pools.csv to persist them. In that case assign
+// numbers sequentially (1-N in participant order), matching generatePlayoffs.
+func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
+	if numberPrefix == "" || len(players) == 0 {
+		return
+	}
+	if len(pools) == 0 {
+		if format != state.CompFormatPlayoffs {
+			return
+		}
+		// Playoffs-only: numbers were assigned in memory by generatePlayoffs
+		// but never written to disk. Re-derive them from participant order.
+		for i := range players {
+			if players[i].Number == "" {
+				players[i].Number = fmt.Sprintf("%s%d", numberPrefix, i+1)
+			}
+		}
 		return
 	}
 	byID := make(map[string]string)
@@ -60,7 +78,7 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools)
+	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.Format)
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the

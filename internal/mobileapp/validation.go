@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -227,6 +228,15 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
 		return err
 	}
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// cap them like the match sides to keep the appended pool-matches.csv
+	// columns bounded.
+	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("repPlayerB", r.RepPlayerB, MaxLenMatchSide); err != nil {
+		return err
+	}
 	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {
 		return err
 	}
@@ -271,7 +281,7 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 // Metadata slice is also count-capped — 16 entries is generous given
 // the current schema (Dan, Grade, optional flags) but rejects abusive
 // payloads that would inflate participants.csv into the megabytes.
-func validatePlayerLengths(name, displayName, dojo, tag string, metadata []string) error {
+func validatePlayerLengths(name, displayName, dojo, source string, metadata []string) error {
 	if err := validateMaxLen("name", name, MaxLenPlayerName); err != nil {
 		return err
 	}
@@ -281,8 +291,20 @@ func validatePlayerLengths(name, displayName, dojo, tag string, metadata []strin
 	if err := validateMaxLen("dojo", dojo, MaxLenPlayerDojo); err != nil {
 		return err
 	}
-	if err := validateMaxLen("tag", tag, MaxLenPlayerMetadata); err != nil {
+	if err := validateMaxLen("source", source, MaxLenPlayerMetadata); err != nil {
 		return err
+	}
+	// A non-empty registration source must be a recognised value. Validate the
+	// CANONICAL form (CanonicalRegistrationSource trims, lower-cases, and aliases
+	// the legacy "reserved" → "manual") so every endpoint accepts the same set
+	// uniformly — including legacy inputs — while still rejecting truly unknown
+	// values (the CSV loader only recognises these tokens, so an unexpected value
+	// would shift into Metadata on reload).
+	if source != "" && !helper.IsRegistrationSource(helper.CanonicalRegistrationSource(source)) {
+		return &ValidationError{
+			Field:   "source",
+			Message: `must be one of "manual", "registered", "transfer" (case-insensitive; legacy "reserved" accepted as "manual")`,
+		}
 	}
 	if len(metadata) > MaxPlayerMetadataItems {
 		return &ValidationError{
@@ -374,6 +396,15 @@ func (r *ScoreRequest) Validate() error {
 		return err
 	}
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
+		return err
+	}
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// cap them like the match sides to keep the appended pool-matches.csv
+	// columns bounded.
+	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
+		return err
+	}
+	if err := validateMaxLen("repPlayerB", r.RepPlayerB, MaxLenMatchSide); err != nil {
 		return err
 	}
 	if err := validateMaxLen("scheduledAt", r.ScheduledAt, MaxLenMatchScheduledAt); err != nil {

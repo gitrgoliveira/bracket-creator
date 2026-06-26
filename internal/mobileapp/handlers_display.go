@@ -89,7 +89,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// case).
 				if comp.NumberPrefix != "" {
 					pools, _ := store.LoadPools(compID)
-					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
+					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
 				}
 
 				sideA := buildSide(m.SideA, players, comp.WithZekkenName)
@@ -109,6 +109,11 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					"ipponsB":  m.IpponsB,
 					"hansokuA": m.HansokuA,
 					"hansokuB": m.HansokuB,
+					// Pool daihyosen/tiebreaker rep bouts carry team names in
+					// sideA/sideB; the representative fighter for each side lives
+					// here. Empty for every regular match (mp-62vr).
+					"repPlayerA": m.RepPlayerA,
+					"repPlayerB": m.RepPlayerB,
 				})
 				return
 			}

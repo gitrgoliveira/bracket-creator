@@ -97,6 +97,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // gates the ReasonPrompt overlay; correctionReason carries the confirmed string.
   const [correctionReason, setCorrectionReason] = useStateA("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateA(false);
+  // mp-62vr: for a team daihyosen/tiebreaker rep bout the sides are TEAM names;
+  // the operator picks which player each team fields from its roster. repPlayerA
+  // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
+  const [repPlayerA, setRepPlayerA] = useStateA(m.repPlayerA || "");
+  const [repPlayerB, setRepPlayerB] = useStateA(m.repPlayerB || "");
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
   // AdminScoreEditor unmounts), gate the setState. handleDismiss
@@ -189,18 +194,23 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // marker rather than preserving it on the server.
   const hanteiClear = initialDecidedByHantei ? { decidedByHantei: false } : {};
 
+  // mp-62vr: carry the rep-player names on every write for a team rep bout so
+  // the per-court display can show who fought. backfillMatchIdentity preserves
+  // them on empty server-side, so an unset dropdown won't wipe a prior pick.
+  const repBlock = m.repIsTeam ? { repPlayerA, repPlayerB } : {};
+
   const buildPatch = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
-    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear };
+    if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };
     if (targetStatus === "running") return {
       status: "running", winner: null,
       ipponsA: aPts.filter(x => x !== "•"), ipponsB: bPts.filter(x => x !== "•"),
       hansokuA: aFouls, hansokuB: bFouls,
       score: { type: "ippon", winnerPts: aTotal, loserPts: bTotal, ippons: aPts, fouls, live: true, corrected: isComplete },
-      ...enchoBlock(), ...hanteiClear,
+      ...enchoBlock(), ...hanteiClear, ...repBlock,
     };
     const correctionBlock = isComplete && correctionReason ? { correctionReason } : {};
-    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
+    if (isDrawToggled) return { winner: null, ipponsA: [], ipponsB: [], hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
     // ippon. Hansoku Hs are already physically present in the pts arrays
     // (folded in by applyFoulIncrement at the 2-foul boundary), so no
     // additional H fold is needed here.
@@ -209,10 +219,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const aFinal = aLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const bFinal = bLetters.slice(0, MAX_IPPONS_PER_SIDE);
     const winnerSide = aFinal.length > bFinal.length ? "a" : bFinal.length > aFinal.length ? "b" : null;
-    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
+    if (!winnerSide) return { winner: null, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "hikiwake", winnerPts: 0, loserPts: 0, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
     const winner = winnerSide === "a" ? m.sideA : m.sideB;
     const ippons = winnerSide === "a" ? aFinal : bFinal;
-    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock };
+    return { winner, ipponsA: aFinal, ipponsB: bFinal, hansokuA: aFouls, hansokuB: bFouls, status: "completed", score: { type: "ippon", winnerPts: ippons.length, loserPts: (winnerSide === "a" ? bFinal : aFinal).length, ippons, fouls, corrected: isComplete }, ...enchoBlock(), ...hanteiClear, ...correctionBlock, ...repBlock };
   };
   // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
   // running-status so the debounce callback never reads a stale closure.
@@ -439,6 +449,42 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         </div>
 
         <div className="editor-modal__body">
+          {/* mp-62vr: rep-player pickers for a team daihyosen/tiebreaker rep
+              bout. The sides are TEAM names; the operator records which player
+              each team fields, picked from that team's roster. Shiro = sideB,
+              Aka = sideA, matching the scoreboard's colour assignment. */}
+          {m.repIsTeam && (
+            <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2, #3a414e)" }}>
+                <span>Shiro rep · {m.sideB?.name || ""}</span>
+                <select
+                  data-testid="rep-shiro-select"
+                  className="input"
+                  value={repPlayerB}
+                  disabled={submitting}
+                  onChange={(e) => setRepPlayerB(e.target.value)}
+                  style={{ padding: "6px 8px", fontSize: 14 }}
+                >
+                  <option value="">— Select player —</option>
+                  {(m.repRosterB || []).map(nm => <option key={nm} value={nm}>{nm}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--red, #b91c1c)" }}>
+                <span>Aka rep · {m.sideA?.name || ""}</span>
+                <select
+                  data-testid="rep-aka-select"
+                  className="input"
+                  value={repPlayerA}
+                  disabled={submitting}
+                  onChange={(e) => setRepPlayerA(e.target.value)}
+                  style={{ padding: "6px 8px", fontSize: 14 }}
+                >
+                  <option value="">— Select player —</option>
+                  {(m.repRosterA || []).map(nm => <option key={nm} value={nm}>{nm}</option>)}
+                </select>
+              </label>
+            </div>
+          )}
           <div className="scoring-board">
               {/* Score slots + point buttons */}
               <div className="sb-match">

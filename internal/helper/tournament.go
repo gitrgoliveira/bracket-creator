@@ -125,9 +125,13 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-						player.Tag = meta[len(meta)-1]
-						meta = meta[:len(meta)-1]
+					// Canonicalize first so the legacy "reserved" alias is detected as a
+					// source (→ "manual") instead of being left in Metadata.
+					if len(meta) > 0 {
+						if src := CanonicalRegistrationSource(meta[len(meta)-1]); IsRegistrationSource(src) {
+							player.Source = src
+							meta = meta[:len(meta)-1]
+						}
 					}
 					if len(meta) > 0 {
 						player.Metadata = meta
@@ -143,9 +147,13 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-					player.Tag = meta[len(meta)-1]
-					meta = meta[:len(meta)-1]
+				// Canonicalize first so the legacy "reserved" alias is detected as a
+				// source (→ "manual") instead of being left in Metadata.
+				if len(meta) > 0 {
+					if src := CanonicalRegistrationSource(meta[len(meta)-1]); IsRegistrationSource(src) {
+						player.Source = src
+						meta = meta[:len(meta)-1]
+					}
 				}
 				if len(meta) > 0 {
 					player.Metadata = meta
@@ -168,12 +176,31 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-func isParticipantTag(s string) bool {
-	switch strings.ToLower(s) {
-	case "manual", "registered", "transfer", "reserved":
+// IsRegistrationSource reports whether s is a recognised participant
+// registration source (case-insensitive): manual / registered / transfer.
+// Exported so the API boundary validator can reject unknown values before they
+// are persisted — the CSV loader only recognises these tokens, so an unexpected
+// value would otherwise shift into Metadata on reload.
+func IsRegistrationSource(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "manual", "registered", "transfer":
 		return true
 	}
 	return false
+}
+
+// CanonicalRegistrationSource returns the canonical stored form of a
+// registration source: trimmed + lower-case. Keeps filter buckets from
+// splitting on whitespace/casing ("Manual" vs "manual"). The legacy "reserved"
+// token (an unused value in the old participant-tag enum) is aliased to
+// "manual" so any hand-edited/older CSV row reloads as a recognised source
+// instead of silently shifting into Metadata.
+func CanonicalRegistrationSource(s string) string {
+	c := strings.ToLower(strings.TrimSpace(s))
+	if c == "reserved" {
+		return "manual"
+	}
+	return c
 }
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses

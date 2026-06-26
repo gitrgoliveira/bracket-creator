@@ -1423,3 +1423,32 @@ func TestBackfillMatchIdentity(t *testing.T) {
 		})
 	}
 }
+
+// TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
+// on-empty rule (mp-62vr): a score write that omits the rep players must NOT
+// wipe a previously-recorded pick, but an explicit value always overrides.
+func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
+	t.Run("empty result preserves stored rep players", func(t *testing.T) {
+		result := state.MatchResult{} // a re-score that only re-sends the ippons
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Sato Ren", result.RepPlayerA, "preserved on empty")
+		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "preserved on empty")
+	})
+
+	t.Run("explicit rep players override stored", func(t *testing.T) {
+		result := state.MatchResult{RepPlayerA: "Ito Kenji", RepPlayerB: "Mori Aki"}
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Ito Kenji", result.RepPlayerA, "operator change wins")
+		assert.Equal(t, "Mori Aki", result.RepPlayerB, "operator change wins")
+	})
+
+	t.Run("one side set, other preserved", func(t *testing.T) {
+		result := state.MatchResult{RepPlayerA: "Ito Kenji"} // only Aka changed
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
+		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
+	})
+}

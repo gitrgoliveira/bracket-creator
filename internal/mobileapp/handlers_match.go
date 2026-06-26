@@ -302,6 +302,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				continue
 			}
 
+			// mp-62vr: rep-player names belong only on a pool daihyosen/tiebreaker
+			// rep bout. Strip them from regular matches so a crafted bulk payload
+			// can't persist stale rep metadata (mirrors the single-score path).
+			if !engine.IsPoolDaihyosenMatchID(results[i].ID) && !engine.IsTiebreakerMatchID(results[i].ID) {
+				results[i].RepPlayerA = ""
+				results[i].RepPlayerB = ""
+			}
+
 			// mp-ic5b: the correction-reason gate and the write run under the
 			// same per-comp lock so the status read is race-free against a
 			// concurrent PUT /score. Per-result transactions preserve the
@@ -837,6 +845,16 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		resultSource, ok := enforceSelfRunPolicy(c, tl, verifier, &req)
 		if !ok {
 			return
+		}
+
+		// mp-62vr: rep-player names are meaningful only on a pool
+		// daihyosen/tiebreaker rep bout (the frontend gates the dropdowns on
+		// the same id shape via repIsTeam). Strip them from any regular match
+		// so a crafted authenticated payload can't persist stale rep metadata
+		// onto a normal pool/bracket result.
+		if !engine.IsPoolDaihyosenMatchID(mid) && !engine.IsTiebreakerMatchID(mid) {
+			req.RepPlayerA = ""
+			req.RepPlayerB = ""
 		}
 
 		result := req.AsMatchResult()

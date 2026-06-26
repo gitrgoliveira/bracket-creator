@@ -275,7 +275,10 @@ describe('match_scoreboard components', () => {
     expect(collectText(aka)).toBe('Suzuki');
   });
 
-  it('TeamScoreboard renders the IV/PW summary + one row per regular bout', () => {
+  it('TeamScoreboard renders the IV/PW summary + one row per LINEUP POSITION (padding unplayed bouts)', () => {
+    // mp-1oy3: a running encounter with 2 of 5 scored must still show all 5
+    // position rows (the 3 still-to-come bouts pad after the scored ones), not
+    // just the 2 scored rows.
     const subResults = [
       { position: 1, ipponsB: ['M'], ipponsA: [] },
       { position: 2, ipponsB: [], ipponsA: ['D'] },
@@ -284,8 +287,46 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'team-summary')).toBeTruthy();
     const text = collectText(tree);
     expect(text).toContain('IV'); expect(text).toContain('PW');
-    expect(boutRows(tree).length).toBe(2);
+    expect(boutRows(tree).length).toBe(5); // 2 scored + 3 padded positions
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'dh-banner')).toBeNull();
+  });
+
+  it('TeamScoreboard highlights the first unplayed bout as "now" across the padded positions when RUNNING (mp-1oy3)', () => {
+    // 2 scored + 3 padded on a RUNNING match → done, done, now (first to-come), queued, queued.
+    const subResults = [
+      { position: 1, ipponsB: ['M'], ipponsA: [] },
+      { position: 2, ipponsB: [], ipponsA: ['D'] },
+    ];
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
+    expect(boutRows(tree).map(r => r.state)).toEqual(['done', 'done', 'now', 'queued', 'queued']);
+  });
+
+  it('TeamScoreboard does NOT light a padded row "now" on a COMPLETED match with fewer subResults than teamSize (quick-score)', () => {
+    // A quick-score can synthesise fewer subResults than teamSize; with the match
+    // NOT running, the padded positions must stay "queued", never "now".
+    const subResults = [
+      { position: 1, ipponsB: ['M'], ipponsA: [] },
+      { position: 2, ipponsB: [], ipponsA: ['D'] },
+      { position: 3, ipponsB: ['K'], ipponsA: [] },
+    ];
+    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false /* not running */ });
+    const states = boutRows(tree).map(r => r.state);
+    expect(states).toEqual(['done', 'done', 'done', 'queued', 'queued']);
+    expect(states).not.toContain('now');
+  });
+
+  it('TeamScoreboard leaves an up-next board (no scored bouts) all queued — no "now"', () => {
+    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false });
+    const states = boutRows(tree).map(r => r.state);
+    expect(states.length).toBe(5);
+    expect(states.every(s => s === 'queued')).toBe(true);
+  });
+
+  it('TeamScoreboard highlights bout 1 as "now" for a RUNNING 0-0 encounter (isRunning)', () => {
+    // A running team match with no bouts scored yet must still mark the first
+    // bout live, so it doesn't look identical to an up-next board.
+    const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false, isRunning: true });
+    expect(boutRows(tree).map(r => r.state)).toEqual(['now', 'queued', 'queued', 'queued', 'queued']);
   });
 
   it('TeamScoreboard renders the DAIHYOSEN banner + rep-bout row when showDH AND the match is tied', () => {

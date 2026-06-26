@@ -136,7 +136,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
           individual → ippon-letter slots. */}
       {isTeam
         ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} showDH={showDH} variant="card" shiroName={bName} akaName={aName}
+            teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")} />
         : (isDone || isRunning) && <IndividualScore match={match} variant="card" />}

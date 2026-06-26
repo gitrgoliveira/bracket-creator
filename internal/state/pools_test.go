@@ -103,6 +103,63 @@ func TestPoolMatches_LegacyFileWithoutIDs(t *testing.T) {
 	assert.Empty(t, results[0].SideBID)
 }
 
+// TestPoolMatches_RepPlayersRoundTrip verifies the appended RepPlayerA/RepPlayerB
+// columns (mp-62vr) survive a save→load cycle. These name the individual fighter
+// each TEAM fields for a pool/league daihyosen rep bout (SideA/SideB hold the
+// team names).
+func TestPoolMatches_RepPlayersRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	matches := []MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Kyoto Dojo", SideB: "Tokyo Dojo",
+			RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro", Status: MatchStatusScheduled},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Kyoto Dojo", results[0].SideA, "side stays the team name")
+	assert.Equal(t, "Tokyo Dojo", results[0].SideB)
+	assert.Equal(t, "Sato Ren", results[0].RepPlayerA)
+	assert.Equal(t, "Yamada Taro", results[0].RepPlayerB)
+}
+
+// TestPoolMatches_LegacyFileWithoutRepPlayers verifies a pool-matches.csv
+// written before the rep-player columns existed (≤20 columns) still loads,
+// leaving RepPlayerA/RepPlayerB empty (mp-62vr backward-compat).
+func TestPoolMatches_LegacyFileWithoutRepPlayers(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Legacy"}))
+
+	// 20-column row (through CorrectionReason), no RepPlayerA/RepPlayerB.
+	legacy := "PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource,Round,SideAID,SideBID,WinnerID,CorrectionReason\n" +
+		"Pool A,DH-0,Kyoto Dojo,Tokyo Dojo,,,,0,0,,scheduled,A,,09:00,,-1,,,,\n"
+	require.NoError(t, os.WriteFile(store.compPath(compID, "pool-matches.csv"), []byte(legacy), 0600))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Kyoto Dojo", results[0].SideA)
+	assert.Empty(t, results[0].RepPlayerA, "legacy row has no rep-player column → empty")
+	assert.Empty(t, results[0].RepPlayerB)
+}
+
 // TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
 // pools.csv survives a save→load cycle so pool.players carry .ID for the
 // league matrix.

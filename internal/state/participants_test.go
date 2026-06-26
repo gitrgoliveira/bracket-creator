@@ -11,6 +11,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSaveParticipants_CanonicalizesSource pins that marshalParticipantsCSV
+// normalizes Source (trim + lower-case) on write regardless of the casing the
+// caller supplied — so participants.csv never carries "Manual"/" registered "
+// variants that would split filter buckets or get mis-parsed on reload.
+func TestSaveParticipants_CanonicalizesSource(t *testing.T) {
+	dir, err := os.MkdirTemp("", "participants-canon-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "comp-canon"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A", Source: "Manual"},
+		{Name: "Bob", Dojo: "Dojo B", Source: "  Registered "},
+		{Name: "Carol", Dojo: "Dojo C", Source: "vip"}, // unknown → dropped, not round-tripped
+	}))
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 3)
+	assert.Equal(t, "manual", loaded[0].Source, "Source must be lower-cased on write")
+	assert.Equal(t, "registered", loaded[1].Source, "Source must be trimmed + lower-cased on write")
+	assert.Empty(t, loaded[2].Source, "unknown Source must NOT be persisted")
+	assert.Empty(t, loaded[2].Metadata, "unknown Source must NOT round-trip into Metadata")
+}
+
 func TestParticipants(t *testing.T) {
 	dir, err := os.MkdirTemp("", "participants-test-*")
 	require.NoError(t, err)
@@ -30,7 +57,7 @@ func TestParticipants(t *testing.T) {
 
 	// 2. Save participants
 	playersToSave := []domain.Player{
-		{Name: "Alice", Dojo: "Dojo A", Tag: "manual"},
+		{Name: "Alice", Dojo: "Dojo A", Source: "manual"},
 		{Name: "Bob", Dojo: "Dojo B"},
 	}
 	err = store.SaveParticipants(compID, playersToSave)
@@ -44,13 +71,13 @@ func TestParticipants(t *testing.T) {
 	assert.Equal(t, "Alice", loadedPlayers[0].Name)
 	assert.Equal(t, "ALICE", loadedPlayers[0].DisplayName)
 	assert.Equal(t, "Dojo A", loadedPlayers[0].Dojo)
-	assert.Equal(t, "manual", loadedPlayers[0].Tag)
+	assert.Equal(t, "manual", loadedPlayers[0].Source)
 
 	assert.NotEmpty(t, loadedPlayers[1].ID) // UUID generated
 	assert.Equal(t, "Bob", loadedPlayers[1].Name)
 	assert.Equal(t, "BOB", loadedPlayers[1].DisplayName)
 	assert.Equal(t, "Dojo B", loadedPlayers[1].Dojo)
-	assert.Empty(t, loadedPlayers[1].Tag)
+	assert.Empty(t, loadedPlayers[1].Source)
 
 	// 4. Save and load participants with existing IDs
 	playersToSaveWithID := []domain.Player{
@@ -271,7 +298,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 
 	players := []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A", Metadata: []string{"2d"}},
-		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Tag: "registered"},
+		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Source: "registered"},
 		{Name: "Carol", Dojo: "Dojo C"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
@@ -287,7 +314,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	require.Len(t, loaded, 3)
 	assert.Equal(t, []string{"2d"}, loaded[0].Metadata, "Alice's danGrade must round-trip")
 	assert.Equal(t, []string{"3d"}, loaded[1].Metadata, "Bob's danGrade must round-trip")
-	assert.Equal(t, "registered", loaded[1].Tag, "Bob's tag must round-trip alongside danGrade")
+	assert.Equal(t, "registered", loaded[1].Source, "Bob's source must round-trip alongside danGrade")
 	assert.Empty(t, loaded[2].Metadata, "Carol with no metadata must stay empty")
 }
 
@@ -392,7 +419,7 @@ func TestUpdateParticipant(t *testing.T) {
 }
 
 func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
-	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,tag][,checked_in]".
+	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,source][,checked_in]".
 	// A 3-part UUID row "uuid,Alice,checked_in" must NOT be misclassified: "checked_in" is the Dojo.
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -599,27 +626,27 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name+dojo must be rejected")
 }
 
-// TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-
+// TestZekkenWithSourceDoesNotCorruptCSV pins the marshalParticipantsCSV column-
 // layout fix: a zekken competition where DisplayName equals SanitizeName(Name)
-// AND Tag is non-empty (e.g. the "manual" default applied by the single-add
-// endpoint) used to produce a 4-field row [id, Name, Dojo, Tag] that
+// AND Source is non-empty (e.g. the "manual" default applied by the single-add
+// endpoint) used to produce a 4-field row [id, Name, Dojo, Source] that
 // CreatePlayersFromRecords(_, true) misparsed as
-// (Name, DisplayName=Dojo, Dojo=Tag) — silently corrupting the row.
+// (Name, DisplayName=Dojo, Dojo=Source) — silently corrupting the row.
 // The writer now always emits the DisplayName column for zekken comps.
-func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
+func TestZekkenWithSourceDoesNotCorruptCSV(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
-	compID := "zekken-tag"
+	compID := "zekken-source"
 	require.NoError(t, store.SaveCompetition(&Competition{
-		ID: compID, Name: "Zekken Tag", WithZekkenName: true,
+		ID: compID, Name: "Zekken Source", WithZekkenName: true,
 	}))
 
 	// DisplayName left blank — SaveParticipants must still write the
 	// DisplayName column for zekken comps so the row is round-trip safe.
-	// Tag="manual" mirrors what the single-add endpoint defaults to.
+	// Source="manual" mirrors what the single-add endpoint defaults to.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Akira Tanaka", Dojo: "Gyokusen", Tag: "manual"},
+		{Name: "Akira Tanaka", Dojo: "Gyokusen", Source: "manual"},
 	}))
 
 	loaded, err := store.LoadParticipants(compID, true)
@@ -627,7 +654,7 @@ func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
 	assert.Equal(t, "Gyokusen", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
-	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
+	assert.Equal(t, "manual", loaded[0].Source, "Source must NOT shift into Dojo (regression)")
 	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
 }
 

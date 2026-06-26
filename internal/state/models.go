@@ -571,7 +571,7 @@ type MatchResult struct {
 	// share a name. Never persisted (json/CSV omit) — it only carries the
 	// side decision from the handler to the id-resolution step.
 	WinnerSide     string           `json:"-" yaml:"-"`
-	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H, or ○ (FIK default-win marker)
+	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`
 	HansokuB       int              `json:"hansokuB"`

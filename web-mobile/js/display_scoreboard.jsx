@@ -405,20 +405,20 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 team competitions). Tells the spectator what's coming after
                 the current pool finishes here. */}
             {nextPool && (
-                <div data-testid="tvd-next-pool" style={{ display: "flex", alignItems: "baseline", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
-                    <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
-                    <span style={{ fontSize: "2.4vh", color: "#111", fontWeight: 700, flexShrink: 0 }}>{nextPool.name}</span>
-                    <span style={{ fontSize: "2.4vh", color: "var(--ink-3)", flexShrink: 0 }}>·</span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: "2.2vh", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {nextPool.players.map((p, i) => (
-                            <React.Fragment key={p.name}>
-                                {i > 0 && <span style={{ color: "var(--ink-3)" }}> · </span>}
-                                {/* Starting colour: Aka (red) if they're sideA in
-                                    their first bout, Shiro (dark) if sideB. */}
-                                <span style={{ color: p.side === "aka" ? "var(--red, #b91c1c)" : "#111", fontWeight: 600 }}>{p.name}</span>
-                            </React.Fragment>
+                <div data-testid="tvd-next-pool" style={{ borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
+                    {/* Row 1: label + pool name */}
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "1.5vw", marginBottom: "0.8vh" }}>
+                        <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
+                        <span style={{ fontSize: "2.6vh", color: "#111", fontWeight: 700 }}>{nextPool.name}</span>
+                    </div>
+                    {/* Row 2: roster with starting-colour coding, wrappable */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4vh 1.2vw" }}>
+                        {nextPool.players.map((p) => (
+                            /* Starting colour: Aka (red) if they're sideA in
+                               their first bout, Shiro (dark) if sideB. */
+                            <span key={p.name} style={{ fontSize: "3vh", fontWeight: 700, color: p.side === "aka" ? "var(--red, #b91c1c)" : "#111" }}>{p.name}</span>
                         ))}
-                    </span>
+                    </div>
                 </div>
             )}
 

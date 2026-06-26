@@ -182,8 +182,9 @@ function centreMarks(sub, matchSideA, matchSideB) {
         {winShiro ? slotCells([winMark, ""], "shiro", "sub-win-b") : slotCells(lettersB, "shiro")}
       </span>
       <span className="msb-vs">
-        {isDraw ? <span data-testid="sub-row-draw">X</span> : null}
-        {sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span> : null}
+        {isDraw ? <span data-testid="sub-row-draw">X</span>
+          : sub.decidedByHantei && !hasWinSide ? <span className="msb-ht" data-testid="sub-row-hantei">Ht</span>
+          : <span className="msb-sep" aria-hidden="true">–</span>}
       </span>
       <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
         {winAka ? slotCells([winMark, ""], "aka", "sub-win-a") : slotCells(lettersA, "aka")}
@@ -394,7 +395,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           {dhSub
             ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
                 index={regular.length} lineupA={lineupA} lineupB={lineupB}
-                teamSize={teamSize} isDH={true} state="now" matchSideA={matchSideA} matchSideB={matchSideB} />
+                teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
             : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>}
         </>
       )}

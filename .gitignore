@@ -115,3 +115,5 @@ mp-*/
 .antigravitycli
 .gemini/worktrees/
 .github/skills
+
+*.pdf

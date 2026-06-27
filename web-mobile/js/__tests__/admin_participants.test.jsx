@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget } from '../admin_participants.jsx';
+import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows } from '../admin_participants.jsx';
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
@@ -277,5 +277,105 @@ describe('participantSearchTarget', () => {
   it('does not match a query that is not a substring of any field', () => {
     const target = participantSearchTarget(p('Alice', null, 'Tokyo'));
     expect(target.includes('bob')).toBe(false);
+  });
+});
+
+describe('generateRosterText', () => {
+  describe('withZekkenName=false', () => {
+    it('formats as Name, Dojo', () => {
+      const players = [{ name: 'Alice Smith', dojo: 'Gyokusen', danGrade: null, displayName: null }];
+      expect(generateRosterText(players, false)).toBe('Alice Smith, Gyokusen');
+    });
+
+    it('appends dan grade when present', () => {
+      const players = [{ name: 'Alice Smith', dojo: 'Gyokusen', danGrade: '3', displayName: null }];
+      expect(generateRosterText(players, false)).toBe('Alice Smith, Gyokusen, 3');
+    });
+  });
+
+  describe('withZekkenName=true — existing players with displayName', () => {
+    it('formats as Name, Zekken, Dojo when displayName is set', () => {
+      const players = [{ name: 'Alice Smith', displayName: 'SMITH', dojo: 'Gyokusen', danGrade: null }];
+      expect(generateRosterText(players, true)).toBe('Alice Smith, SMITH, Gyokusen');
+    });
+
+    it('appends dan grade when present', () => {
+      const players = [{ name: 'Alice Smith', displayName: 'SMITH', dojo: 'Gyokusen', danGrade: '3' }];
+      expect(generateRosterText(players, true)).toBe('Alice Smith, SMITH, Gyokusen, 3');
+    });
+  });
+
+  describe('withZekkenName=true — sample players without displayName', () => {
+    it('falls back to derived zekken so line has three columns (not two)', () => {
+      // makePlayer does not set displayName; without a fallback the line is
+      // "Name, Dojo" which parseParticipantLines(withZekken=true) misreads as
+      // zekken=Dojo, dojo="" — silently corrupting the saved roster.
+      const players = [{ name: 'Alice Smith', displayName: undefined, dojo: 'Gyokusen', danGrade: null }];
+      const line = generateRosterText(players, true);
+      const parts = line.split(',').map(s => s.trim());
+      expect(parts).toHaveLength(3);
+      expect(parts[0]).toBe('Alice Smith');
+      expect(parts[2]).toBe('Gyokusen');
+    });
+
+    it('derived zekken is non-empty', () => {
+      const players = [{ name: 'Alice Smith', displayName: '', dojo: 'Gyokusen', danGrade: null }];
+      const line = generateRosterText(players, true);
+      const parts = line.split(',').map(s => s.trim());
+      expect(parts[1]).not.toBe('');
+    });
+  });
+});
+
+describe('validateRosterRows', () => {
+  const row = (name, dojo, displayName = '') => ({ name, dojo, displayName });
+
+  it('returns no problems for a valid non-zekken roster', () => {
+    const parsed = [row('Alice Smith', 'Gyokusen'), row('Bob Jones', 'Tora')];
+    expect(validateRosterRows(parsed, false)).toEqual([]);
+  });
+
+  it('returns no problems for a valid zekken roster (three columns)', () => {
+    const parsed = [row('Alice Smith', 'Gyokusen', 'SMITH')];
+    expect(validateRosterRows(parsed, true)).toEqual([]);
+  });
+
+  it('flags a zekken-comp row whose dojo is empty (the two-column misparse)', () => {
+    // "Alice Smith, Gyokusen" in a zekken comp parses as
+    // {name:"Alice Smith", displayName:"Gyokusen", dojo:""}.
+    const parsed = [{ name: 'Alice Smith', displayName: 'Gyokusen', dojo: '' }];
+    const problems = validateRosterRows(parsed, true);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].name).toBe('Alice Smith');
+    expect(problems[0].reason).toMatch(/dojo/i);
+    expect(problems[0].reason).toMatch(/zekken/i);
+  });
+
+  it('flags an empty dojo in a non-zekken comp without the zekken hint', () => {
+    const parsed = [row('Alice Smith', '')];
+    const problems = validateRosterRows(parsed, false);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].reason).toBe('missing dojo');
+  });
+
+  it('flags a missing name and reports its index', () => {
+    const parsed = [row('Alice Smith', 'Gyokusen'), row('', 'Tora')];
+    const problems = validateRosterRows(parsed, false);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].index).toBe(1);
+    expect(problems[0].reason).toBe('missing name');
+  });
+
+  it('treats whitespace-only fields as empty', () => {
+    const parsed = [row('   ', 'Tora'), row('Bob', '   ')];
+    const problems = validateRosterRows(parsed, false);
+    expect(problems).toHaveLength(2);
+    expect(problems[0].reason).toBe('missing name');
+    expect(problems[1].reason).toBe('missing dojo');
+  });
+
+  it('handles null/empty input defensively', () => {
+    expect(validateRosterRows(null, true)).toEqual([]);
+    expect(validateRosterRows([], false)).toEqual([]);
   });
 });

@@ -1825,8 +1825,11 @@ func TestParticipantHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(path)
 
-	// POST /api/competitions/:id/participants
-	req, _ = http.NewRequest("POST", "/api/competitions/c1/participants", bytes.NewBufferString(`{"players": [{"name": "P1"}]}`))
+	// POST /api/competitions/:id/participants — dojo is required (matches the
+	// single-add path and the documented CSV schema), so the smoke payload
+	// supplies one. A blank dojo is rejected with 400; see
+	// TestBatchPostBlankDojo_400.
+	req, _ = http.NewRequest("POST", "/api/competitions/c1/participants", bytes.NewBufferString(`{"players": [{"name": "P1", "dojo": "Dojo A"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)

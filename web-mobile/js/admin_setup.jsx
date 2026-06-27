@@ -685,8 +685,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // Auto-stack the default start time after the previous competition on the
   // same day. We take the latest-STARTING same-day competition and add its
   // estimated duration (≈0 until it has a roster) floored at MIN_STACK_BLOCK_MIN,
-  // so back-to-back creates lay out sequentially. Skipped once the operator
-  // edits the field; re-runs when the selected day changes.
+  // so back-to-back creates lay out sequentially. Behaviour:
+  //  - Recomputes when the operator switches days BEFORE editing the start
+  //    time (each day has its own predecessor).
+  //  - Once the operator types a start time, startTimeEditedRef latches and
+  //    this effect short-circuits — a deliberate manual choice survives
+  //    subsequent day changes rather than being silently overwritten.
   useEffectA(() => {
     if (startTimeEditedRef.current) return;
     const sameDay = (tournament.competitions || []).filter((cc) => cc.date === date && cc.startTime);

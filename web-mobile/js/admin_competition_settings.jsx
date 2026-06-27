@@ -360,7 +360,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // before, just over a longer window).
   const update = (k, v) => {
     editedFieldsRef.current.add(k);
-    setLocal({ ...local, [k]: v });
+    // Functional updater so back-to-back edits (e.g. fast successive
+    // toggles / paste-driven multi-field updates) don't clobber each other
+    // by spreading a stale closure-captured `local`. Mirrors the sync
+    // effect above which also uses the prev form.
+    setLocal((prev) => ({ ...prev, [k]: v }));
     setIsDirty(true);
     // Clear a stale inline error once the user edits again.
     if (saveErr) setSaveErr(null);
@@ -371,7 +375,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // separate name only to avoid churning the ~20 JSX call sites.
   const updateNow = (k, v) => {
     editedFieldsRef.current.add(k);
-    setLocal({ ...local, [k]: v });
+    setLocal((prev) => ({ ...prev, [k]: v }));
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
   };
@@ -391,7 +395,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const updateNumber = (k, raw, min = 1) => {
     const { value } = decideNumericUpdate(raw, min);
     editedFieldsRef.current.add(k);
-    setLocal({ ...local, [k]: value });
+    setLocal((prev) => ({ ...prev, [k]: value }));
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
   };

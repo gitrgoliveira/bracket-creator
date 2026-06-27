@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -39,7 +40,11 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// Scan competitions in listing order; the first running match on
 		// this court wins. Two running matches on the same court would
 		// already be a tournament-data error (one court runs one match
-		// at a time per R8) and we surface whichever appears first.
+		// at a time per R8) and we surface whichever appears first. Within a
+		// competition we check pool matches then the bracket — the same order
+		// state.RunningMatchOnCourt uses — so a running KNOCKOUT bout is just
+		// as "current" as a pool bout (mp-9h1f follow-up: the prior code
+		// scanned only poolMatches, so a running elimination match read as idle).
 		ids, _ := store.ListCompetitions()
 		for _, compID := range ids {
 			comp, _ := store.LoadCompetition(compID)
@@ -49,56 +54,41 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 
 			poolMatches, _ := store.LoadPoolMatches(compID)
 			for _, m := range poolMatches {
-				if !strings.EqualFold(m.Court, court) {
+				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
 					continue
 				}
-				if m.Status != state.MatchStatusRunning {
-					continue
-				}
-				// Found the current match — build the current payload.
-				// LoadParticipantsOpt is the canonical read so we
-				// pick up DisplayName/Dojo even on legacy competitions
-				// that predate the HasParticipantIDs flag.
-				var hasIDsHint *bool
-				if comp.HasParticipantIDs {
-					t := true
-					hasIDsHint = &t
-				}
-				players, _ := store.LoadParticipantsOpt(compID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
-				// mp-13y: merge numberPrefix-derived numbers from pools.csv
-				// directly onto the slice so buildSide can include "number"
-				// in the polled OBS/vMix overlay payload. Skip the pools.csv
-				// read entirely when no prefix is configured (the common
-				// case).
-				if comp.NumberPrefix != "" {
-					pools, _ := store.LoadPools(compID)
-					mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
-				}
-
-				sideA := buildSide(m.SideA, players, comp.WithZekkenName)
-				sideB := buildSide(m.SideB, players, comp.WithZekkenName)
-
-				c.JSON(http.StatusOK, gin.H{
-					"court":  court,
-					"status": "current",
-					"competition": gin.H{
-						"id":   comp.ID,
-						"name": comp.Name,
-					},
-					"phase":    phaseFromMatchID(m.ID),
-					"sideA":    sideA,
-					"sideB":    sideB,
-					"ipponsA":  m.IpponsA,
-					"ipponsB":  m.IpponsB,
-					"hansokuA": m.HansokuA,
-					"hansokuB": m.HansokuB,
-					// Pool daihyosen/tiebreaker rep bouts carry team names in
-					// sideA/sideB; the representative fighter for each side lives
-					// here. Empty for every regular match (mp-62vr).
-					"repPlayerA": m.RepPlayerA,
-					"repPlayerB": m.RepPlayerB,
-				})
+				players := currentMatchPlayers(store, comp)
+				// Pool daihyosen/tiebreaker rep bouts carry team names in
+				// sideA/sideB; the representative fighter for each side lives in
+				// RepPlayerA/B. Empty for every regular match (mp-62vr).
+				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
+					m.SideA, m.SideB, m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
+					phaseFromMatchID(m.ID), m.RepPlayerA, m.RepPlayerB))
 				return
+			}
+
+			// Bracket/knockout: a running elimination bout persists its running
+			// score as the formatted ScoreA/ScoreB string (engine.formatScore),
+			// not the ippon arrays a pool MatchResult carries — parseScore turns
+			// it back into the {ippons, hansoku} shape the contract returns.
+			// Elimination matches have no representative-bout fighters.
+			bracket, _ := store.LoadBracket(compID)
+			if bracket == nil {
+				continue
+			}
+			for _, round := range bracket.Rounds {
+				for _, bm := range round {
+					if !strings.EqualFold(bm.Court, court) || bm.Status != state.MatchStatusRunning {
+						continue
+					}
+					players := currentMatchPlayers(store, comp)
+					ipponsA, hansokuA := parseScore(bm.ScoreA)
+					ipponsB, hansokuB := parseScore(bm.ScoreB)
+					c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
+						bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
+						phaseFromMatchID(bm.ID), "", ""))
+					return
+				}
 			}
 		}
 
@@ -223,6 +213,80 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 		}
 	}
 	return false
+}
+
+// currentMatchPlayers loads the participant slice used to enrich a court's
+// current-match payload (DisplayName/Dojo/number). LoadParticipantsOpt is the
+// canonical read so we pick up DisplayName/Dojo even on legacy competitions
+// that predate the HasParticipantIDs flag. mp-13y: when a numberPrefix is
+// configured, merge the pools.csv-derived numbers onto the slice so buildSide
+// can include "number" in the polled OBS/vMix overlay payload; the pools.csv
+// read is skipped entirely otherwise (the common case).
+func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
+	var hasIDsHint *bool
+	if comp.HasParticipantIDs {
+		t := true
+		hasIDsHint = &t
+	}
+	players, _ := store.LoadParticipantsOpt(comp.ID, comp.WithZekkenName, state.LoadParticipantsOpts{WithSeeds: false, HasIDs: hasIDsHint})
+	if comp.NumberPrefix != "" {
+		pools, _ := store.LoadPools(comp.ID)
+		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
+	}
+	return players
+}
+
+// currentMatchPayload builds the GET /court/:court/current "current" body shared
+// by the pool and bracket branches. repA/repB are the representative-bout
+// fighters for a pool daihyosen (empty for regular and bracket matches).
+func currentMatchPayload(court string, comp *state.Competition, players []domain.Player,
+	sideAName, sideBName string, ipponsA, ipponsB []string, hansokuA, hansokuB int,
+	phase, repA, repB string) gin.H {
+	return gin.H{
+		"court":  court,
+		"status": "current",
+		"competition": gin.H{
+			"id":   comp.ID,
+			"name": comp.Name,
+		},
+		"phase":      phase,
+		"sideA":      buildSide(sideAName, players, comp.WithZekkenName),
+		"sideB":      buildSide(sideBName, players, comp.WithZekkenName),
+		"ipponsA":    ipponsA,
+		"ipponsB":    ipponsB,
+		"hansokuA":   hansokuA,
+		"hansokuB":   hansokuB,
+		"repPlayerA": repA,
+		"repPlayerB": repB,
+	}
+}
+
+// parseScore is the inverse of engine.formatScore (internal/engine/scoring.go):
+// "MK (H1)" → (["M","K"], 1), "MK" → (["M","K"], 0), "(H1)" → (nil, 1). Ippon
+// letters are single runes (M/K/D/T/H/S or the ○ default-win marker), so
+// splitting the non-hansoku remainder on runes recovers the slice. Used to fill
+// the ippon/hansoku fields for a RUNNING bracket match, which persists its
+// running score as the formatted ScoreA/ScoreB string rather than the ippon
+// arrays a pool MatchResult carries.
+func parseScore(s string) ([]string, int) {
+	s = strings.TrimSpace(s)
+	hansoku := 0
+	if i := strings.LastIndex(s, "(H"); i >= 0 {
+		if j := strings.Index(s[i:], ")"); j >= 0 {
+			if n, err := strconv.Atoi(s[i+2 : i+j]); err == nil {
+				hansoku = n
+			}
+			s = strings.TrimSpace(s[:i])
+		}
+	}
+	var ippons []string
+	for _, r := range s {
+		if r == ' ' {
+			continue
+		}
+		ippons = append(ippons, string(r))
+	}
+	return ippons, hansoku
 }
 
 // buildSide turns a participant name (which is what MatchResult.SideA/SideB

@@ -108,6 +108,84 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
 }
 
+// TestCourtCurrentReturnsRunningBracketMatch — mp-9h1f follow-up. A running
+// KNOCKOUT (bracket) bout must surface as the court's current match; the prior
+// handler scanned only poolMatches, so an elimination bout read as idle. The
+// bracket persists its running score as the formatted ScoreA/ScoreB string, so
+// the handler parses it back into ippon/hansoku via parseScore.
+func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveParticipants("ko", []domain.Player{
+		{Name: "Aoi Mori", DisplayName: "Aoi Mori", Dojo: "North"},
+		{Name: "Ken Sato", DisplayName: "Ken Sato", Dojo: "South"},
+	}))
+	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{
+				ID:     "m-r1-0",
+				SideA:  "Aoi Mori",
+				SideB:  "Ken Sato",
+				Status: state.MatchStatusRunning,
+				Court:  "A",
+				ScoreA: "MK (H1)", // two ippons + one hansoku
+				ScoreB: "D",       // one ippon
+			},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), "body=%q", w.Body.String())
+	assert.Equal(t, "current", resp.Status, "running bracket match must be 'current', not idle")
+	require.NotNil(t, resp.Competition)
+	assert.Equal(t, "ko", resp.Competition.ID)
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Aoi Mori", resp.SideA.Name)
+	assert.Equal(t, "Ken Sato", resp.SideB.Name)
+	// ScoreA/ScoreB parsed back to ippon arrays + hansoku counts.
+	assert.Equal(t, []string{"M", "K"}, resp.IpponsA)
+	assert.Equal(t, 1, resp.HansokuA)
+	assert.Equal(t, []string{"D"}, resp.IpponsB)
+	assert.Equal(t, 0, resp.HansokuB)
+}
+
+// TestParseScore covers the inverse of engine.formatScore used by the bracket
+// branch of the current-match handler.
+func TestParseScore(t *testing.T) {
+	tests := []struct {
+		in      string
+		ippons  []string
+		hansoku int
+	}{
+		{"", nil, 0},
+		{"MK", []string{"M", "K"}, 0},
+		{"MK (H1)", []string{"M", "K"}, 1},
+		{"(H2)", nil, 2},
+		{"D (H1)", []string{"D"}, 1},
+		{"  M K  ", []string{"M", "K"}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			ippons, hansoku := parseScore(tc.in)
+			assert.Equal(t, tc.ippons, ippons)
+			assert.Equal(t, tc.hansoku, hansoku)
+		})
+	}
+}
+
 // TestCourtCurrentSurfacesRepPlayersForDaihyosen — mp-62vr.
 // A pool daihyosen bout carries TEAM names in sideA/sideB; the representative
 // fighter for each side lives in repPlayerA/repPlayerB. The polled OBS/vMix

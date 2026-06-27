@@ -569,14 +569,23 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     expect(src).toContain('function AdminSettings');
   });
 
-  it('saveLater takes no snapshot argument', () => {
-    // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`
-    // Post-fix: `const saveLater = () => { ... saveNow(); }`
-    // The argument-less form proves the timer reads refs at fire time
-    // instead of capturing a snapshot.
-    const m = src.match(/const saveLater = \(([^)]*)\) =>/);
-    expect(m, 'expected `const saveLater = (...) =>` declaration').not.toBeNull();
-    expect(m[1].trim()).toBe('');
+  it('uses manual save — no debounced autosave timer (mp-3xn6)', () => {
+    // Competition Settings was converted from debounced autosave to explicit
+    // "Save changes" (matching the Tournament Edit-details page). The old
+    // `saveLater` debounce must be gone, and saveNow must be reachable from an
+    // explicit Save button rather than fired from the edit handlers.
+    expect(src).not.toContain('saveLater');
+    expect(src).not.toContain('debounceRef');
+    // An explicit Save control wired to saveNow.
+    expect(src).toMatch(/onClick=\{saveNow\}/);
+    // The edit handlers must NOT auto-persist: no save call inside update/
+    // updateNow/updateNumber bodies.
+    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+      const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
+      const m = src.match(re);
+      expect(m, `expected \`const ${handler} = (...) => { ... };\``).not.toBeNull();
+      expect(m[2], `${handler} must not save automatically`).not.toContain('saveNow(');
+    }
   });
 
   it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {

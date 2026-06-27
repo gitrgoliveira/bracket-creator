@@ -338,7 +338,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     (compMeta?.players?.length ? compMeta.players : null)
     || (compMeta?.config?.players)
     || [];
-  const rosterForSide = (side) => {
+  // lineup is this side's already-assigned positions; mergeRosterWithAssigned
+  // folds any operator-added substitute (a "+ Add …" free name not in
+  // team.metadata) back into the autocomplete so it reappears for the team's
+  // other positions instead of vanishing after a single entry.
+  const rosterForSide = (side, lineup) => {
     if (!window.AdminLineupHelpers?.rosterFor) return [];
     const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
     const teamObj = allPlayers.find(p => {
@@ -346,7 +350,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const pname = p?.name || p?.Name || "";
       return pid === sideKey || pname === sideKey;
     });
-    return window.AdminLineupHelpers.rosterFor(teamObj || null);
+    const base = window.AdminLineupHelpers.rosterFor(teamObj || null);
+    return window.AdminLineupHelpers.mergeRosterWithAssigned
+      ? window.AdminLineupHelpers.mergeRosterWithAssigned(base, lineup)
+      : base;
   };
   const teamIdForSide = (side) => {
     const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
@@ -850,8 +857,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const lineupPosKey = posKey5 || posKeyN;
             const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
             const teamIdA = teamIdForSide(m.sideA); // AKA = right
-            const rosterB = rosterForSide(m.sideB);
-            const rosterA = rosterForSide(m.sideA);
+            const rosterB = rosterForSide(m.sideB, lineupB);
+            const rosterA = rosterForSide(m.sideA, lineupA);
             const pickPlayer = (teamId, lineup) => (value) => {
               const prev = (lineup?.positions || {})[lineupPosKey] || "";
               // A mid-match substitution (changing or clearing an already-recorded

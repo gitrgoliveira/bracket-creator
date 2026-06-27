@@ -63,6 +63,31 @@ function rosterFor(team) {
   return [];
 }
 
+// mergeRosterWithAssigned unions a team's base roster (its registered members,
+// from team.metadata via rosterFor) with any names already assigned in the
+// team's lineup. An operator who enters a substitute via the picker's "+ Add …"
+// row stores a free name that is NOT in team.metadata; without this union that
+// name would never reappear in the autocomplete for the team's OTHER positions.
+// Base (registered) names come first in their original order; extra assigned
+// names follow in first-seen order. De-duplication is case-insensitive; blank /
+// whitespace assignments are ignored. The base array is never mutated.
+function mergeRosterWithAssigned(baseRoster, lineup) {
+  const base = Array.isArray(baseRoster) ? baseRoster : [];
+  const positions = lineup && lineup.positions ? lineup.positions : null;
+  if (!positions) return base;
+  const seen = new Set(base.map(n => String(n).trim().toLowerCase()));
+  const extras = [];
+  for (const raw of Object.values(positions)) {
+    const name = String(raw == null ? "" : raw).trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extras.push(name);
+  }
+  return extras.length ? [...base, ...extras] : base;
+}
+
 // Resolve the team's stable ID. Backend uses player.id (UUID assigned
 // at first persist); pre-persist teams may not have one yet — fall back
 // to name as a best-effort key.
@@ -340,7 +365,7 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, teamIdOf, canRevise };
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf, canRevise };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };

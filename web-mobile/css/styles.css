@@ -4996,12 +4996,16 @@ button.pool-match-row {
   padding: 4px 6px;
   flex-wrap: nowrap;
 }
+/* An unfilled lineup slot is a "fill this" caution, not an error — and the
+   two sides are already Aka (red) / Shiro per the colour system, so a red
+   outline here reads as "both sides are Aka". Use the amber --warn family
+   (DESIGN.md Principle 3: amber = attention, never error/running, never red). */
 .team-bouts-scroll .lineup-name--empty .pmf__bar {
-  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  border-color: var(--warn-border);
 }
 .team-bouts-scroll .lineup-name--empty .pmf__input::placeholder {
-  color: var(--danger);
-  opacity: 0.75;
+  color: var(--warn);
+  opacity: 0.85;
 }
 .team-bouts-scroll .lineup-name__clear {
   border: none;

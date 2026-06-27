@@ -163,11 +163,20 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Per-player length caps — defense-in-depth against unbounded
-		// participants.csv inflation. Reject the whole batch on the
-		// first offender (matches the all-or-nothing semantics
-		// SaveParticipants already enforces on write).
+		// Required-field + length validation. Name and dojo must be non-blank
+		// (after trimming) — mirrors the single-add path above. Without this the
+		// batch path silently accepts a misformatted roster row (e.g. a
+		// two-column "Name, Dojo" line in a zekken competition, which the SPA
+		// parser maps to {displayName: dojo, dojo: ""}), persisting a competitor
+		// with no dojo while the UI reports success. Length caps are
+		// defense-in-depth against unbounded participants.csv inflation. Reject
+		// the whole batch on the first offender (matches the all-or-nothing
+		// semantics SaveParticipants already enforces on write).
 		for i, p := range req.Players {
+			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
 			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return

@@ -380,6 +380,60 @@ func TestBatchPostDuplicateNameDojo_409(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "same name at different dojos must be accepted in a batch")
 }
 
+// TestBatchPostBlankDojo_400 covers the batch (players array) POST path: a row
+// with a blank dojo must be rejected with 400, mirroring the single-add path
+// (which already returns "dojo must not be blank"). Without this, a misformatted
+// roster paste — e.g. a two-column "Name, Dojo" line in a zekken competition,
+// which parseParticipantLines maps to {displayName: dojo, dojo: ""} — would be
+// silently accepted, persisting a competitor with no dojo while the UI reports
+// success. (invalid-submission acceptance bug)
+func TestBatchPostBlankDojo_400(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-blank-dojo"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Blank Dojo Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// A blank dojo on any row must reject the whole batch with 400.
+	blank, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Bob Jones", "dojo": ""},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(blank))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a blank dojo must return 400")
+
+	// A whitespace-only dojo is equally invalid (trimmed to empty).
+	ws, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Carol White", "dojo": "   "},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(ws))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a whitespace-only dojo must return 400")
+
+	// A blank name is likewise rejected.
+	blankName, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "  ", "dojo": "Wakaba"},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(blankName))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a blank name must return 400")
+
+	// Nothing should have been persisted by any of the rejected batches.
+	players := mustLoad(t, store, compID)
+	assert.Empty(t, players, "no participants should be saved when a batch is rejected")
+}
+
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
 // with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
 // row, not a 3-column row that carries the old slot's stale SanitizeName value.

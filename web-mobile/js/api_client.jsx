@@ -896,6 +896,20 @@ const API = {
         }
         return res.json();
     },
+    // Court (shiaijo) clashes between this competition and every other one
+    // (same day, shared court, overlapping time windows). Returns a possibly
+    // empty array of ClashWarning objects. Non-blocking — surfaced as a warning.
+    async getScheduleClashes(compID, password, signal) {
+        const res = await fetch(`/api/competitions/${compID}/schedule/clashes`, {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to check schedule clashes");
+        }
+        return res.json();
+    },
     async moveMatchCourt(compID, matchID, court, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
             method: 'PUT',

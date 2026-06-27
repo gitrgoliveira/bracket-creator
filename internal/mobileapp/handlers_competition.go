@@ -341,9 +341,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// POST /competitions can land with an embedded roster via
-		// saveCompetitionWithPlayers — same length caps as the
-		// PUT roster-PUT branch and POST /participants.
+		// saveCompetitionWithPlayers — same required-field and length
+		// caps as the roster-PUT branch and POST /participants.
 		for i, p := range comp.Players {
+			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
 			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
@@ -566,6 +570,30 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, estimate)
 	})
 
+	// GET /competitions/:id/schedule/clashes — court (shiaijo) scheduling
+	// conflicts between this competition and every other one (same day, shared
+	// court, overlapping time windows). Read-only, main-password gated. Returns
+	// a (possibly empty) ClashWarning array; 404 for an unknown competition.
+	// Non-blocking by design: the SPA surfaces these as a warning after a
+	// settings save / create, it does not reject the save. (mp-4a52)
+	r.GET("/competitions/:id/schedule/clashes", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		clashes, err := eng.DetectClashesForCompetition(id)
+		if err != nil {
+			var notFound *engine.NotFoundError
+			if errors.As(err, &notFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, clashes)
+	})
+
 	r.PUT("/competitions/:id", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -625,6 +653,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// handlers_participants.go.
 		if comp.Players != nil {
 			for i, p := range comp.Players {
+				if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+					return
+				}
 				if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 					return

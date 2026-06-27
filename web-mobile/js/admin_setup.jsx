@@ -43,6 +43,22 @@ function deriveCompetitionName(rawName, kind, gender) {
   return "Individual";
 }
 
+// pickStackPredecessor returns the latest-STARTING same-day competition that the
+// new competition's default start time should stack after — or null when there
+// is no usable predecessor (the caller keeps the 09:00 default).
+//
+// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
+// just truthy ones: the backend only length-caps StartTime (no format
+// validation), so a legacy/imported competition could carry a malformed value.
+// Including such an entry could make it the `latest` and make the caller's
+// addMinutes() emit "NaN:NaN". Comparison is numeric (minutes-since-midnight)
+// so an un-zero-padded "9:00" doesn't lex-sort after "10:00".
+function pickStackPredecessor(competitions, date) {
+  const sameDay = (competitions || []).filter((cc) => cc.date === date && timeToMinutes(cc.startTime) !== null);
+  if (sameDay.length === 0) return null;
+  return sameDay.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
+}
+
 // Pure submit-time validation for AdminCreateCompetition's pool-format
 // fields. Returns { ok, error } so the caller (create) can route the
 // error string through setError without duplicating the per-field
@@ -93,6 +109,7 @@ function validateSwissSettings(format, swissRounds) {
 // dirty-tracking snapshot here can't drift from the shape BrandingManager emits
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
+import { timeToMinutes } from './admin_schedule_utils.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
@@ -635,7 +652,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   );
 }
 
-function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode }) {
+// Minimum gap (minutes) stacked after the previous competition when defaulting
+// a new competition's start time. Before a competition has a roster its
+// schedule estimate is ~0, so this floor keeps successive competitions visibly
+// stacked; once a roster exists the real estimate takes over if it is larger.
+const MIN_STACK_BLOCK_MIN = 30;
+
+function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
   const [kind, setKind] = useStateA("individual");
   const [gender, setGender] = useStateA("M"); // for individual: M/F/X
@@ -654,6 +677,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // matches the example in spec.md US13. Only used when format=swiss.
   const [swissRounds, setSwissRounds] = useStateA(4);
   const [startTime, setStartTime] = useStateA("09:00");
+  // Once the operator types a start time, stop auto-stacking it (see the
+  // effect below) so we never clobber a deliberate choice.
+  const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
   const [numberPrefix, setNumberPrefix] = useStateA("");
@@ -672,6 +698,33 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     prevCourtsRef.current = tournament.courts;
   }, [tournament.courts]);
   const [error, setError] = useStateA("");
+
+  // Auto-stack the default start time after the previous competition on the
+  // same day. We take the latest-STARTING same-day competition and add its
+  // estimated duration (≈0 until it has a roster) floored at MIN_STACK_BLOCK_MIN,
+  // so back-to-back creates lay out sequentially. Behaviour:
+  //  - Recomputes when the operator switches days BEFORE editing the start
+  //    time (each day has its own predecessor).
+  //  - Once the operator types a start time, startTimeEditedRef latches and
+  //    this effect short-circuits — a deliberate manual choice survives
+  //    subsequent day changes rather than being silently overwritten.
+  useEffectA(() => {
+    if (startTimeEditedRef.current) return;
+    // latest.startTime is guaranteed parseable (pickStackPredecessor filters on
+    // timeToMinutes !== null), so addMinutes() below never emits "NaN:NaN".
+    const latest = pickStackPredecessor(tournament.competitions, date);
+    if (!latest) return; // no usable predecessor → keep the 09:00 default
+    const controller = new AbortController();
+    const applyStacked = (durMin) => {
+      if (controller.signal.aborted || startTimeEditedRef.current) return;
+      const block = Math.max(Math.round(durMin || 0), MIN_STACK_BLOCK_MIN);
+      setStartTime(window.addMinutes(latest.startTime, block));
+    };
+    window.API.estimateCompetitionSchedule(latest.id, password, controller.signal)
+      .then((est) => applyStacked(est?.totalDurationMinutes))
+      .catch(() => { if (!controller.signal.aborted) applyStacked(0); });
+    return () => { controller.abort(); };
+  }, [date, tournament.competitions, password]);
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
@@ -837,7 +890,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
             <div className="field">
               <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
             </div>
           </div>
 
@@ -1223,4 +1276,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor };

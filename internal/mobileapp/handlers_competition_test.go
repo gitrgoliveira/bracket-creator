@@ -617,6 +617,59 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 	})
 
+	// Tri-review finding: an embedded roster on POST /competitions and the
+	// roster-PUT branch of PUT /competitions/:id only ran validatePlayerLengths
+	// (max-length) — never the blank-name/dojo guard that POST /participants
+	// has. A two-column "Name, Dojo" paste in a zekken competition maps to
+	// {displayName: dojo, dojo: ""}, so a blank dojo persisted a corrupted
+	// competitor while the UI reported success. Both paths now share
+	// validatePlayerRequired and must reject the blank field with 400.
+	t.Run("Embedded Roster Rejects Blank Name Or Dojo With 400", func(t *testing.T) {
+		blankCases := []struct {
+			label   string
+			player  domain.Player
+			wantMsg string
+		}{
+			{"blank dojo", domain.Player{Name: "Alice", Dojo: "   "}, "dojo must not be blank"},
+			{"blank name", domain.Player{Name: "  ", Dojo: "Dojo A"}, "name must not be blank"},
+		}
+		for _, bc := range blankCases {
+			// POST /competitions with an embedded roster.
+			comp := state.Competition{
+				ID:      "blank-roster-post",
+				Name:    "Blank Roster POST",
+				Players: []domain.Player{bc.player},
+			}
+			body, _ := json.Marshal(comp)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equalf(t, http.StatusBadRequest, w.Code,
+				"POST embedded roster with %s must return 400 (got %d: %s)", bc.label, w.Code, w.Body.String())
+			assert.Containsf(t, w.Body.String(), bc.wantMsg, "POST %s error message", bc.label)
+			stored, _ := store.LoadCompetition("blank-roster-post")
+			assert.Nilf(t, stored, "POST with %s must not persist", bc.label)
+
+			// PUT /competitions/:id roster branch (Players != nil).
+			seed := state.Competition{ID: "blank-roster-put", Name: "Blank Roster PUT", Status: state.CompStatusSetup}
+			require.NoError(t, store.SaveCompetition(&seed))
+			update := state.Competition{
+				ID:      "blank-roster-put",
+				Name:    "Blank Roster PUT",
+				Players: []domain.Player{bc.player},
+			}
+			body, _ = json.Marshal(update)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/blank-roster-put", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equalf(t, http.StatusBadRequest, w.Code,
+				"PUT roster with %s must return 400 (got %d: %s)", bc.label, w.Code, w.Body.String())
+			assert.Containsf(t, w.Body.String(), bc.wantMsg, "PUT %s error message", bc.label)
+		}
+	})
+
 	// Path-traversal guard. ValidateCompetitionID was only called at 2 of
 	// the 14 :id handler sites pre-fix; the requireValidCompID helper now
 	// gates every site. A compID like "../../../etc/passwd" would

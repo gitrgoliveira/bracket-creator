@@ -35,7 +35,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const [deleting, setDeleting] = useStateA(false);
   const [invalidating, setInvalidating] = useStateA(false);
   const [local, setLocal] = useStateA({ ...c });
-  const debounceRef = useRefA(null);
+  // Manual-save model (mp-3xn6): edits only persist when the operator clicks
+  // "Save changes", matching the Tournament Edit-details page. isDirty drives
+  // the unsaved indicator + the Save button's enabled state; saving disables
+  // the button and shows "Saving…" during the in-flight PUT.
+  const [isDirty, setIsDirty] = useStateA(false);
+  const [saving, setSaving] = useStateA(false);
+  // Court-clash warnings surfaced after a save (mp-4a52). Non-blocking: the
+  // save already committed; when present we stay on the page to show them
+  // instead of returning to the dashboard.
+  const [clashWarnings, setClashWarnings] = useStateA(null);
 
   // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
   // display it inline near the duration inputs. Re-fetches whenever the
@@ -62,8 +71,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     });
     return () => controller.abort();
   // Re-fetch when the server-confirmed competition config changes. We depend
-  // on `c` fields (not `local`) so we re-fetch after a successful debounced
-  // save, not on every keystroke. This also fires on mount and on any
+  // on `c` fields (not `local`) so we re-fetch after a successful save lands
+  // in `c`, not on every unsaved edit. This also fires on mount and on any
   // SSE-driven competition_updated / schedule_updated refresh.
   //
   // Tournament ceremony/timing fields are included so the estimate refreshes
@@ -82,9 +91,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
-  // Refs for the async saveNow timer to read fresh state at fire time
-  // (NOT closure-captured at saveLater() call time). Same shape as
-  // admin.jsx's tRef/onUpdateRef pattern from round-11.
+  // Refs so saveNow reads fresh state at click time (NOT closure-captured
+  // when the handler was defined). Same shape as admin.jsx's tRef/onUpdateRef
+  // pattern from round-11.
   const cRef = useRefA(c);
   useEffectA(() => { cRef.current = c; }, [c]);
   const localRef = useRefA(local);
@@ -97,14 +106,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   //  (b) saveNow's payload builder — overlay user-edited values onto a
   //      FRESH snapshot of `c` (cRef.current), so the PUT body reflects
   //      concurrent server-side changes to fields the user isn't editing
-  //      rather than stale values captured at keystroke time.
+  //      rather than stale values captured when the edit was made.
   //
-  // Without this set, the prior debounce-gate approach (`if
-  // (debounceRef.current) return prev`) had a 400ms window where a
-  // concurrent admin's settings change would land in `c` but be dropped
-  // by the sync effect AND overwritten by saveNow's stale captured
-  // snapshot — net effect: one-field edits silently revert
-  // simultaneous edits to other fields. Caught by Copilot round-15.
+  // Without this set, a concurrent admin's settings change that lands in `c`
+  // between the user's edit and their Save click would be dropped by the sync
+  // effect AND overwritten by saveNow — net effect: saving one field silently
+  // reverts simultaneous edits to other fields. Caught by Copilot round-15.
   const editedFieldsRef = useRefA(new Set());
 
   // Sync server-driven changes into local state (SSE → AdminApp → c prop).
@@ -131,14 +138,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
-    // overlaid with the user's currently-edited fields. Pre-fix this
-    // function took a captured `next` arg from saveLater, which held a
-    // snapshot from the moment of the keystroke — so any SSE updates
-    // that landed during the 400ms debounce were ignored at save time,
-    // and the PUT body silently reverted concurrent admin changes to
-    // unrelated fields. Reading from refs at fire time (not closure
-    // capture) absorbs those concurrent changes naturally. Caught by
-    // Copilot round-15.
+    // overlaid with the user's currently-edited fields. Reading from refs at
+    // click time (not values captured when the handler was defined) means any
+    // SSE updates that landed since the user's last edit are absorbed, instead
+    // of the PUT silently reverting concurrent admin changes to unrelated
+    // fields. Caught by Copilot round-15.
     const latestC = cRef.current;
     const localSnap = localRef.current;
     const effective = { ...latestC };
@@ -153,10 +157,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // Skip validation for empty date — the backend's validateDateDMY
     // accepts "" as "Date TBA" and competitions created via the import
     // path can land here with an empty Date. Without this skip, the
-    // user would be unable to change ANY unrelated setting on a
-    // date-less competition (round-robin toggle, pool size, etc.) — the
-    // first debounced saveLater fires saveNow, which rejects with
-    // "Invalid date" even though the user hasn't touched the date.
+    // user would be unable to save ANY unrelated setting on a date-less
+    // competition (round-robin toggle, pool size, etc.) — saveNow would
+    // reject with "Invalid date" even though the user hasn't touched the date.
     let dateNorm = "";
     if (effective.date && effective.date.trim() !== "") {
       const { norm, error: dateError } = validateAndNormalizeDate(effective.date);
@@ -177,10 +180,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // Cross-file guard symmetry with the tournament edit/create paths
     // (admin_setup.jsx AdminEditTournament:80, app.jsx CreateTournament:410)
     // and with handlers_competition.go PUT (which now returns 400 on
-    // empty-after-trim Name). Without this client-side guard, every
-    // saveLater-debounced keystroke that lands on an empty Name fires a
-    // wasted PUT roundtrip and only surfaces the error in the inline
-    // .catch handler 400ms later. Keep the failure inline + immediate
+    // empty-after-trim Name). Without this client-side guard, clicking Save
+    // with an empty Name fires a wasted PUT roundtrip and only surfaces the
+    // error via the inline .catch handler. Keep the failure inline + immediate
     // like the date validation above.
     if (!trimmedName) {
       setSaveErr("Competition name is required.");
@@ -230,10 +232,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     //
     // safeInt for the numeric fields: decideNumericUpdate stores NaN in
     // local state when the user clears a number input (so the render
-    // layer can show "" instead of "0"). If the user clears poolSize
-    // and THEN edits a non-numeric field, the new field's saveLater
-    // fires saveNow with the cleared poolSize still in the edited
-    // overlay. JSON.stringify({n: NaN}) produces '{"n":null}' — Go binds
+    // layer can show "" instead of "0"). If the user clears poolSize and then
+    // clicks Save, the cleared poolSize is still NaN in the edited overlay.
+    // JSON.stringify({n: NaN}) produces '{"n":null}' — Go binds
     // JSON null to int as 0 — backend transform writes 0 to disk,
     // clobbering the prior good value. Falling back to `latestC.<field>`
     // when the effective value isn't a usable positive integer preserves
@@ -294,76 +295,107 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
     };
-    // Capture the snapshot of edited fields we're about to persist. On
-    // success we clear ONLY those fields from the edited set — preserving
-    // any fields the user touched DURING the in-flight save (those need
-    // to round-trip through a subsequent save).
-    const persistingFields = new Set(editedFieldsRef.current);
+    // Snapshot the VALUE of each edited field we're about to persist (not just
+    // the field name). On success we clear a field only if its current staged
+    // value still equals what we sent — so a field RE-EDITED during the
+    // in-flight save (its value now differs) stays in the edited set and rolls
+    // into the next save. A name-only Set couldn't distinguish the original
+    // edit from a concurrent re-edit and would drop the user's latest change.
+    // localRef.current is written synchronously by the edit handlers, so it
+    // reflects any re-edit that landed while the PUT was in flight.
+    const persistingValues = {};
+    editedFieldsRef.current.forEach(k => { persistingValues[k] = localRef.current[k]; });
+    setSaving(true);
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;
-      // Drop the fields we just persisted from the edited set so the
-      // sync effect can absorb the server-confirmed values on the next
-      // SSE round-trip. Fields edited DURING the in-flight save stay in
-      // the set and roll into the next saveLater.
-      persistingFields.forEach(k => editedFieldsRef.current.delete(k));
+      // Drop only the persisted fields whose staged value is unchanged, so the
+      // sync effect can absorb the server-confirmed values on the next SSE
+      // round-trip. Fields re-edited DURING the in-flight save (value differs)
+      // stay in the set and roll into the next save.
+      Object.keys(persistingValues).forEach(k => {
+        if (localRef.current[k] === persistingValues[k]) editedFieldsRef.current.delete(k);
+      });
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);
+      setSaving(false);
+      // Only clear the dirty flag if no fields were edited DURING the
+      // in-flight save. Those linger in editedFieldsRef and still need a save.
+      const stillDirty = editedFieldsRef.current.size > 0;
+      setIsDirty(stillDirty);
+      // On a clean save (nothing left pending), check whether the change put
+      // this competition on a court (shiaijo) at the same time as another. The
+      // save has already committed — this is a non-blocking warning. If clashes
+      // exist we surface them and STAY on the page; otherwise we return to the
+      // dashboard. A clash-check failure must not strand the operator, so it
+      // falls through to the normal saved-and-return path.
+      if (!stillDirty) {
+        window.API.getScheduleClashes(c.id, password)
+          .then((clashes) => {
+            if (!mountedRef.current) return;
+            if (Array.isArray(clashes) && clashes.length > 0) {
+              setClashWarnings(clashes);
+              showToast(`Saved — ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
+            } else {
+              setClashWarnings(null);
+              showToast("Competition settings saved");
+              // Don't navigate away if the operator started a NEW edit during
+              // the clash round-trip — that would silently discard it. Stay on
+              // the page so the pending change can be saved.
+              if (onBack && editedFieldsRef.current.size === 0) onBack();
+            }
+          })
+          .catch(() => {
+            if (!mountedRef.current) return;
+            showToast("Competition settings saved");
+            if (onBack && editedFieldsRef.current.size === 0) onBack();
+          });
+      }
     }).catch((e) => {
       if (!mountedRef.current) return;
-      // Keep edited fields in the set — the user can retry. The next
-      // saveLater will pick them up via the same edited-overlay path.
-      // updateCompetition already surfaced the error via showToast;
-      // mirror it inline next to the input so the user sees the cause
-      // next to the field they were editing without a duplicate toast.
+      setSaving(false);
+      // Keep edited fields in the set and stay dirty — the user can retry.
+      // updateCompetition already surfaced the error via showToast; mirror it
+      // inline next to the Save button so the cause is visible without a
+      // duplicate toast.
       setSaveErr(e?.message || "Save failed");
     });
   };
 
-  // saveLater takes NO snapshot arg — pre-fix it captured `next` at
-  // call time, which became stale if SSE updated `c` during the 400ms
-  // debounce. saveNow now reads cRef.current + localRef.current at
-  // fire time, so the captured-snapshot bug is gone.
-  const saveLater = () => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      debounceRef.current = null;
-      saveNow();
-    }, 400);
-  };
-
-  // Cancel any pending debounced save on unmount so the timer can't fire
-  // saveNow() (and trigger state updates / API calls) after teardown.
-  useEffectA(() => () => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-  }, []);
-
+  // Manual-save model: edit handlers stage the change into `local` and mark
+  // the field edited, but DO NOT persist — the operator commits all pending
+  // edits explicitly via "Save changes". editedFieldsRef is still marked so
+  // the sync effect preserves the user's in-progress edit if an SSE-driven
+  // `c` update lands before they click Save (same concurrent-edit guard as
+  // before, just over a longer window).
   const update = (k, v) => {
     editedFieldsRef.current.add(k);
-    const next = { ...local, [k]: v };
-    setLocal(next);
-    saveLater();
-  };
-
-  const updateNow = (k, v) => {
-    editedFieldsRef.current.add(k);
-    const next = { ...local, [k]: v };
-    setLocal(next);
-    // localRef syncs via useEffect; for immediate-save handlers we need
-    // saveNow to see the just-set value. Update the ref synchronously
-    // so saveNow's read happens before React's batched state flush.
-    localRef.current = next;
-    saveNow();
+    // Functional updater so back-to-back edits (e.g. fast successive
+    // toggles / paste-driven multi-field updates) don't clobber each other
+    // by spreading a stale closure-captured `local`. We also write the
+    // result to localRef synchronously: saveNow reads localRef.current when
+    // the operator clicks Save, and the useEffect that syncs localRef from
+    // `local` is async — a rapid edit-then-click could otherwise land before
+    // the effect runs and the latest edit would be missing from the PUT.
+    setLocal((prev) => {
+      const next = { ...prev, [k]: v };
+      localRef.current = next;
+      return next;
+    });
+    setIsDirty(true);
+    // Clear a stale inline error once the user edits again.
+    if (saveErr) setSaveErr(null);
+    // Clear the post-save clash banner: its "saved" wording and clash list go
+    // stale the moment new unsaved edits are staged (the edit may even resolve
+    // the clash). Re-checked on the next save.
+    if (clashWarnings) setClashWarnings(null);
   };
 
   // Number-input variant of `update`. Stores NaN in local state for empty
   // input so the render side can keep the display empty (see
   // decideNumericUpdate's contract). Marks the field as edited so the
   // sync effect preserves the user's in-progress clear / typed value
-  // even if SSE pushes a c-update during the 400ms debounce window.
+  // even if SSE pushes a c-update before they click Save.
   //
   // safeInt in saveNow's finalNext allowlist bridges the gap: an invalid
   // value (NaN / 1.5 / -1) falls back to latestC.<field>, so the PUT is
@@ -374,14 +406,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const updateNumber = (k, raw, min = 1) => {
     const { value } = decideNumericUpdate(raw, min);
     editedFieldsRef.current.add(k);
-    const next = { ...local, [k]: value };
-    setLocal(next);
-    saveLater();
+    setLocal((prev) => {
+      const next = { ...prev, [k]: value };
+      localRef.current = next;
+      return next;
+    });
+    setIsDirty(true);
+    if (saveErr) setSaveErr(null);
+    if (clashWarnings) setClashWarnings(null);
   };
 
   const toggleCourt = (cc) => {
-    const nextCourts = local.courts.includes(cc) ? local.courts.filter((x) => x !== cc) : [...local.courts, cc].sort();
-    if (nextCourts.length) updateNow("courts", nextCourts);
+    // Compute from localRef.current (kept authoritative by update) rather than
+    // the render-closure `local.courts`: rapid toggles fired before React
+    // commits a re-render would otherwise both read the same stale snapshot and
+    // drop a toggle.
+    const cur = localRef.current.courts || [];
+    const nextCourts = cur.includes(cc) ? cur.filter((x) => x !== cc) : [...cur, cc].sort();
+    if (nextCourts.length) update("courts", nextCourts);
   };
 
   // draw-ready lock: output-affecting fields — those that reach the Excel
@@ -396,18 +438,41 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     <div className="card">
       <div className="card__head">
         <div className="card__title">Competition settings</div>
-        <div style={{
-          fontSize: 12.5,
-          padding: "4px 8px",
-          borderRadius: 4,
-          background: saveErr ? "var(--red-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
-          color: saveErr ? "var(--red)" : "var(--accent)",
-          fontWeight: 600,
-          transition: "all 300ms"
-        }}>
-          {saveErr ? `⚠ ${saveErr}` : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            fontSize: 12.5,
+            padding: "4px 8px",
+            borderRadius: 4,
+            background: saveErr ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: saveErr ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
+            fontWeight: 600,
+            transition: "all 300ms"
+          }}>
+            {saveErr ? `⚠ ${saveErr}` : saving ? "Saving…" : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
+          </div>
+          <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
+            {saving ? "Saving…" : "Save changes"}
+          </button>
         </div>
       </div>
+      {clashWarnings && clashWarnings.length > 0 && (
+        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            ⚠ Court clash — this competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
+          </div>
+          <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
+            {clashWarnings.map((w, i) => (
+              <li key={i}>
+                <strong>{w.otherCompName}</strong> — shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+            The change was saved. Two competitions can't run on the same court at the same time — adjust the start time or assigned courts here or on the other competition.
+          </div>
+          <button type="button" className="btn btn--sm" onClick={() => { setClashWarnings(null); if (onBack) onBack(); }}>Dismiss & return to dashboard</button>
+        </div>
+      )}
       <div className="row">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
@@ -466,7 +531,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* admin_scoring_modal.jsx is built from the same constant, so */}
           {/* this input can't allow a value the scoring UI doesn't render. */}
           {/* Render NaN as "" so clearing the input stays empty instead of */}
-          {/* collapsing to "0"; updateNumber gates the debounced save so a */}
+          {/* collapsing to "0"; saveNow's safeInt guard means a */}
           {/* cleared/invalid value never lands on the backend as 0. */}
           {/* draw-ready lock: teamSize is output-affecting. */}
           <input
@@ -514,8 +579,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <label className="field__label">Pool size is a</label>
             {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
           <div className="row">
@@ -599,7 +664,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       {/* mp-zoh Phase 4: inline schedule estimate. Shown below duration inputs */}
       {/* so the operator can immediately see the impact of duration changes */}
-      {/* after the debounced save lands. Re-fetches from the server on every */}
+      {/* after the save lands. Re-fetches from the server on every */}
       {/* c-prop update (SSE schedule_updated / competition_updated). */}
       {(compEstimate || compEstimateLoading || compEstimateErr) && (
         <div style={{ padding: "10px 12px", borderRadius: 6, background: "var(--accent-soft, #f0f9ff)", border: "1px solid var(--accent, #3b82f6)", marginTop: 4 }}>
@@ -648,17 +713,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {/* draw-ready lock: roundRobin is output-affecting. */}
-        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
+        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => updateNow("naginata", e.target.checked)} /> Naginata competition</label>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} /> Naginata competition</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => updateNow("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
+          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
@@ -671,25 +736,35 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               <button
                 className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leagueTiebreakTopN", 3)}
+                onClick={() => update("leagueTiebreakTopN", 3)}
               >Top 3</button>
               <button
                 className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leagueTiebreakTopN", 4)}
+                onClick={() => update("leagueTiebreakTopN", 4)}
               >Top 4</button>
             </div>
             <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => updateNow("leagueTwoThirdPlaces", e.target.checked)} />
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
             <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze — no 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>
           </div>
         </div>
       )}
+      {/* Repeat Save at the foot of the long settings form so the operator
+          doesn't have to scroll back to the header after editing. Same handler
+          and disabled rules as the header button. */}
+      <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+        {saveErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ {saveErr}</span>}
+        {!saveErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+        <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "playoffs") && (
           <div>

@@ -568,6 +568,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onCreate={async (c) => {
         try {
           const created = await addCompetition(c);
+          // Non-blocking court-clash check: warn if the new competition lands
+          // on a shiaijo already in use at the same time. The create still
+          // proceeds; the operator can adjust its start time / courts after.
+          try {
+            const clashes = await window.API.getScheduleClashes(created.id, password);
+            if (Array.isArray(clashes) && clashes.length > 0) {
+              const names = clashes.map((w) => w.otherCompName).join(", ");
+              showToast(`Heads up: court clash with ${names} — adjust start time or courts in Settings`, "error");
+            }
+          } catch { /* clash check is best-effort; never block creation */ }
           setView({ kind: "competition", id: created.id, section: "participants" });
         } catch {
           // error already alerted inside addCompetition
@@ -575,6 +585,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
+      password={password}
     />;
   }
 
@@ -702,6 +713,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
+      onCreateCompetition={() => setView({ kind: "createComp" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
       onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
       onMoveCourt={moveMatchCourt}

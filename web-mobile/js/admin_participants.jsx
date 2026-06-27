@@ -156,7 +156,62 @@ function levenshtein(a, b) {
   return prev[n];
 }
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
+function generateRosterText(playersList, withZekkenName) {
+  return (playersList || []).map((p) => {
+    if (withZekkenName) {
+      // Fall back to uppercase last name ONLY when displayName is absent
+      // (null/undefined) — `??` not `||`, so an intentional empty zekken
+      // (displayName: "") is preserved verbatim. Without that, a saved
+      // empty-zekken row would re-render with a synthetic last-name, making
+      // the rosterDirty diff flip true on every reload. The fallback covers
+      // the sample roster from makePlayer (which never sets displayName);
+      // without it, the line would have only two columns and
+      // parseParticipantLines(withZekken=true) would misread dojo into the
+      // zekken slot and leave dojo blank. Tokenise on whitespace and filter
+      // empties so a trailing-space name like "Alice " still derives "ALICE".
+      const tokens = (p.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const fallback = tokens.length ? tokens[tokens.length - 1].toUpperCase() : "";
+      const zekken = p.displayName ?? fallback;
+      const base = `${p.name ?? ""}, ${zekken}, ${p.dojo ?? ""}`;
+      return p.danGrade ? `${base}, ${p.danGrade}` : base;
+    }
+    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
+    return p.danGrade ? `${base}, ${p.danGrade}` : base;
+  }).join("\n");
+}
+
+// validateRosterRows checks parsed roster rows for the required columns
+// before they are sent to the server. Name and dojo are mandatory for every
+// competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
+// are. In a zekken competition the expected three-column format is
+// Name, Zekken, Dojo — a two-column "Name, Dojo" paste is misparsed into
+// {displayName: dojo, dojo: ""}, so an empty dojo on a zekken competition is
+// the tell-tale of that misparse rather than a missing zekken value, and the
+// reason text surfaces the expected format as a hint.
+// Returns an array of { index, name, reason } for each offending row (empty
+// when the roster is valid). The stored `name` is the TRIMMED value (not the
+// raw input), so whitespace-only names render as the falsy "line N" branch in
+// the apply() toast rather than a literal "   " label.
+function validateRosterRows(parsed, withZekkenName) {
+  const problems = [];
+  (parsed || []).forEach((p, i) => {
+    const name = (p.name || "").trim();
+    const dojo = (p.dojo || "").trim();
+    if (!name) {
+      problems.push({ index: i, name, reason: "missing name" });
+      return;
+    }
+    if (!dojo) {
+      const reason = withZekkenName
+        ? "missing dojo (zekken competitions use Name, Zekken, Dojo)"
+        : "missing dojo";
+      problems.push({ index: i, name, reason });
+    }
+  });
+  return problems;
+}
+
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -177,14 +232,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
-  const [text, setText] = useStateA(() => (c.players || []).map((p) => {
-    if (c.withZekkenName && p.displayName) {
-      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
-      return p.danGrade ? `${base}, ${p.danGrade}` : base;
-    }
-    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
-    return p.danGrade ? `${base}, ${p.danGrade}` : base;
-  }).join("\n"));
+  // Initialise from the SAME generator that rosterDirty diffs against
+  // (generateRosterText), not the old inline 3-col-only-when-displayName
+  // logic. Otherwise a zekken competition whose players lack a displayName
+  // starts with "Name, Dojo" while rosterDirty computes "Name, LASTNAME,
+  // Dojo" → a false "Unsaved changes" flash on mount before the
+  // c.players/withZekkenName effect re-syncs text.
+  const [text, setText] = useStateA(() => generateRosterText(c.players || [], c.withZekkenName));
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
@@ -198,14 +252,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const textFocusRef = useRefA(false);
 
-  const generateText = (playersList) => (playersList || []).map((p) => {
-    if (c.withZekkenName && p.displayName) {
-      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
-      return p.danGrade ? `${base}, ${p.danGrade}` : base;
-    }
-    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
-    return p.danGrade ? `${base}, ${p.danGrade}` : base;
-  }).join("\n");
+  const generateText = (playersList) => generateRosterText(playersList, c.withZekkenName);
 
   // Fill the roster textarea with a generated sample roster of `count`
   // competitors. This lives in the Participants view (not the create form)
@@ -340,6 +387,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [searchQuery, setSearchQuery] = useStateA("");
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
+  // Unsaved-roster detection: the textarea has edits not yet committed via
+  // "Apply changes". Compare against the saved roster's canonical rendering,
+  // ignoring blank-line / trailing-whitespace noise so re-typing the same
+  // roster doesn't read as dirty. Mirrors the Settings unsaved indicator.
+  const rosterDirty = useMemoA(() => {
+    const norm = (s) => s.split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+    return norm(text) !== norm(generateText(c.players || []));
+  }, [text, c.players, c.withZekkenName]);
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
@@ -616,6 +671,19 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
 
+      // Reject rows missing a required column before sending. Catches a
+      // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
+      // competition, parsed as {displayName: dojo, dojo: ""}) up front with an
+      // actionable message, instead of relying on the server 400 round-trip.
+      const rowProblems = validateRosterRows(parsed, withZekken);
+      if (rowProblems.length > 0) {
+        const first = rowProblems[0];
+        const label = first.name ? `"${first.name}"` : `line ${first.index + 1}`;
+        const more = rowProblems.length > 1 ? ` (and ${rowProblems.length - 1} more)` : "";
+        showToast(`Cannot save: ${label} ${first.reason}${more}`, "error");
+        return;
+      }
+
       // Tier-1: Duplicate detection — reject on perfect (normalizedName,
       // normalizedDojo) collision.  Uses name+dojo so two people from
       // different clubs with the same name are allowed.
@@ -685,7 +753,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
       showToast(msg);
       setImportSummary(null);
-      setNearDupPending(Array.isArray(warnings) && warnings.length > 0 ? { pairs: warnings } : null);
+      const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
+      setNearDupPending(hasWarnings ? { pairs: warnings } : null);
+      // Return to the dashboard after a clean apply so the operator lands back
+      // on the competition list. When the save surfaced near-duplicate warnings,
+      // stay put so they can review the banner before navigating away.
+      if (!hasWarnings && onBack) onBack();
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -757,15 +830,25 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div className="card__title" style={{ marginBottom: 2 }}>
-              {players.length >= 2 ? "Roster ready" : "Add your roster to begin"}
+              {players.length >= 2 ? "Roster ready — next: generate the draw" : "Add your roster to begin"}
             </div>
             <div className="card__sub">
               {players.length >= 2
-                ? `${players.length} ${c.kind === "team" ? "teams" : "participants"} added. Assign seeds (optional), then use “Generate draw” in the header to build the bracket.`
+                ? `${players.length} ${c.kind === "team" ? "teams" : "participants"} added. Optionally assign seeds, then continue to Overview to generate the draw.`
                 : `Add at least 2 ${c.kind === "team" ? "teams" : "participants"}, then you can generate the draw.`}
             </div>
           </div>
-          <button type="button" className="btn" onClick={() => onSection("overview")}>View setup steps →</button>
+          {/* When the roster is ready the next action is generating the draw,
+              which lives on the Overview page. Make that a primary CTA so the
+              next step is obvious; before the roster is ready, keep a low-key
+              link to the full setup checklist. */}
+          <button
+            type="button"
+            className={players.length >= 2 ? "btn btn--primary" : "btn"}
+            onClick={() => onSection("overview")}
+          >
+            {players.length >= 2 ? "Continue to draw setup →" : "View setup steps →"}
+          </button>
         </div>
       )}
       <div className="row" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
@@ -1048,7 +1131,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
@@ -1151,6 +1235,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             );
           })()}
+          {/* Repeat Apply at the bottom so the operator doesn't have to scroll
+              back up after pasting/reviewing a long roster. Same handler and
+              disabled rules as the top button. */}
+          {lines.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -1165,4 +1258,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows };

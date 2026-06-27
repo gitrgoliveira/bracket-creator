@@ -550,7 +550,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 //   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
 //   2. saveNow builds an `effective` object by overlaying `localRef.current`
 //      values onto `cRef.current` for each field in `editedFieldsRef`.
-//   3. update / updateNow / updateNumber call `editedFieldsRef.current.add(k)`
+//   3. update / updateNumber call `editedFieldsRef.current.add(k)`
 //      before scheduling the save.
 //
 // Behavioral tests for the full lifecycle are blocked by vitest.setup's
@@ -569,14 +569,23 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     expect(src).toContain('function AdminSettings');
   });
 
-  it('saveLater takes no snapshot argument', () => {
-    // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`
-    // Post-fix: `const saveLater = () => { ... saveNow(); }`
-    // The argument-less form proves the timer reads refs at fire time
-    // instead of capturing a snapshot.
-    const m = src.match(/const saveLater = \(([^)]*)\) =>/);
-    expect(m, 'expected `const saveLater = (...) =>` declaration').not.toBeNull();
-    expect(m[1].trim()).toBe('');
+  it('uses manual save — no debounced autosave timer (mp-3xn6)', () => {
+    // Competition Settings was converted from debounced autosave to explicit
+    // "Save changes" (matching the Tournament Edit-details page). The old
+    // `saveLater` debounce must be gone, and saveNow must be reachable from an
+    // explicit Save button rather than fired from the edit handlers.
+    expect(src).not.toContain('saveLater');
+    expect(src).not.toContain('debounceRef');
+    // An explicit Save control wired to saveNow.
+    expect(src).toMatch(/onClick=\{saveNow\}/);
+    // The edit handlers must NOT auto-persist: no save call inside update/
+    // updateNumber bodies.
+    for (const handler of ['update', 'updateNumber']) {
+      const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
+      const m = src.match(re);
+      expect(m, `expected \`const ${handler} = (...) => { ... };\``).not.toBeNull();
+      expect(m[2], `${handler} must not save automatically`).not.toContain('saveNow(');
+    }
   });
 
   it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {
@@ -590,11 +599,25 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     expect(body).toContain('editedFieldsRef.current.forEach');
   });
 
+  it('clears a persisted field only if its staged value is unchanged (re-edit race)', () => {
+    // Copilot finding (PR #320): a name-only Set snapshot couldn't tell an
+    // in-flight-persisted field from one RE-EDITED during the save, so the
+    // unconditional `persistingFields.forEach(delete)` would drop the user's
+    // latest change and let the SSE sync effect overwrite it. The fix snapshots
+    // VALUES and clears conditionally on value equality. These tokens are unique
+    // to saveNow, so file-level assertions are robust without carving the body.
+    expect(src).toContain('persistingValues');
+    // The fragile name-only Set snapshot must be gone.
+    expect(src).not.toContain('new Set(editedFieldsRef.current)');
+    // Conditional clear: only delete when the staged value still matches.
+    expect(src).toMatch(/if\s*\(localRef\.current\[k\]\s*===\s*persistingValues\[k\]\)\s*editedFieldsRef\.current\.delete\(k\)/);
+  });
+
   it('user-edit handlers mark fields via editedFieldsRef.add', () => {
     // Each handler that mutates `local` must mark the edited field
     // BEFORE scheduling the save, so the sync effect preserves it
     // when SSE arrives during the debounce window.
-    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+    for (const handler of ['update', 'updateNumber']) {
       const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
       const m = src.match(re);
       expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();
@@ -602,7 +625,37 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
         m[2],
         `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
       ).toContain('editedFieldsRef.current.add');
+      // Copilot finding (PR #320 round 4): saveNow reads localRef.current at
+      // click time. The useEffect that syncs localRef from `local` is async,
+      // so a rapid edit-then-Save click can land before the effect runs and
+      // miss the latest edit. Each handler must therefore write localRef.current
+      // synchronously inside the setLocal updater.
+      expect(
+        m[2],
+        `${handler} must write localRef.current = next inside its setLocal updater so saveNow sees the latest staged value even when the operator clicks Save immediately after editing`
+      ).toContain('localRef.current = next');
+      // Copilot finding (PR #320 round 4): the post-save clash banner says the
+      // change "was saved" — it goes stale the moment new edits are staged (the
+      // edit may even resolve the clash). Each staging handler must clear it.
+      expect(
+        m[2],
+        `${handler} must clear clashWarnings on edit so the stale "saved" clash banner isn't shown while the form is dirty`
+      ).toContain('setClashWarnings(null)');
     }
+  });
+
+  it('toggleCourt computes from localRef.current.courts, not the stale render closure', () => {
+    // Copilot finding (PR #320 round 4): deriving nextCourts from the render-
+    // closure `local.courts` drops a toggle when the operator clicks faster than
+    // React commits. localRef.current is kept authoritative by update().
+    const m = src.match(/const toggleCourt = \(cc\) => \{([\s\S]*?)\n {2}\};/);
+    expect(m, 'expected `const toggleCourt = (cc) => { ... };` block').not.toBeNull();
+    const body = m[1];
+    expect(body).toContain('localRef.current.courts');
+    // The stale-closure compute patterns must be gone (match on CODE, not the
+    // comment that quotes `local.courts` for explanation).
+    expect(body).not.toMatch(/local\.courts\.(includes|filter)/);
+    expect(body).not.toMatch(/\[\.\.\.local\.courts/);
   });
 
   it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {

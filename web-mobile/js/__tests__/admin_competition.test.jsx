@@ -611,6 +611,15 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
         m[2],
         `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
       ).toContain('editedFieldsRef.current.add');
+      // Copilot finding (PR #320 round 4): saveNow reads localRef.current at
+      // click time. The useEffect that syncs localRef from `local` is async,
+      // so a rapid edit-then-Save click can land before the effect runs and
+      // miss the latest edit. Each handler must therefore write localRef.current
+      // synchronously inside the setLocal updater.
+      expect(
+        m[2],
+        `${handler} must write localRef.current = next inside its setLocal updater so saveNow sees the latest staged value even when the operator clicks Save immediately after editing`
+      ).toContain('localRef.current = next');
     }
   });
 

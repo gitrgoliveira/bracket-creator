@@ -362,9 +362,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     editedFieldsRef.current.add(k);
     // Functional updater so back-to-back edits (e.g. fast successive
     // toggles / paste-driven multi-field updates) don't clobber each other
-    // by spreading a stale closure-captured `local`. Mirrors the sync
-    // effect above which also uses the prev form.
-    setLocal((prev) => ({ ...prev, [k]: v }));
+    // by spreading a stale closure-captured `local`. We also write the
+    // result to localRef synchronously: saveNow reads localRef.current when
+    // the operator clicks Save, and the useEffect that syncs localRef from
+    // `local` is async — a rapid edit-then-click could otherwise land before
+    // the effect runs and the latest edit would be missing from the PUT.
+    setLocal((prev) => {
+      const next = { ...prev, [k]: v };
+      localRef.current = next;
+      return next;
+    });
     setIsDirty(true);
     // Clear a stale inline error once the user edits again.
     if (saveErr) setSaveErr(null);
@@ -375,7 +382,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // separate name only to avoid churning the ~20 JSX call sites.
   const updateNow = (k, v) => {
     editedFieldsRef.current.add(k);
-    setLocal((prev) => ({ ...prev, [k]: v }));
+    setLocal((prev) => {
+      const next = { ...prev, [k]: v };
+      localRef.current = next;
+      return next;
+    });
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
   };
@@ -395,7 +406,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const updateNumber = (k, raw, min = 1) => {
     const { value } = decideNumericUpdate(raw, min);
     editedFieldsRef.current.add(k);
-    setLocal((prev) => ({ ...prev, [k]: value }));
+    setLocal((prev) => {
+      const next = { ...prev, [k]: value };
+      localRef.current = next;
+      return next;
+    });
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
   };

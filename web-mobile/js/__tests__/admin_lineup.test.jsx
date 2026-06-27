@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { canRevise, rosterFor, teamIdOf, positionsForSize } from '../admin_lineup.jsx';
+import { canRevise, rosterFor, mergeRosterWithAssigned, teamIdOf, positionsForSize } from '../admin_lineup.jsx';
 
 // admin_lineup.jsx ships three module-private helpers that gate the
 // "Revise lineup" flow and normalize the team-shape variants that the
@@ -188,6 +188,70 @@ describe('rosterFor', () => {
   it('returns [] when metadata is not an array (defensive)', () => {
     expect(rosterFor({ metadata: 'not an array' })).toEqual([]);
     expect(rosterFor({ Metadata: { 0: 'wrong shape' } })).toEqual([]);
+  });
+});
+
+describe('mergeRosterWithAssigned', () => {
+  // An operator entering a substitute via the picker's "+ Add …" row stores a
+  // free name that is NOT in team.metadata. Without folding the lineup's
+  // already-assigned names back into the roster, that substitute vanishes from
+  // the autocomplete for the team's other positions.
+
+  it('returns the base roster unchanged when no lineup is given', () => {
+    const base = ['Tanaka', 'Sato'];
+    expect(mergeRosterWithAssigned(base, null)).toEqual(['Tanaka', 'Sato']);
+    expect(mergeRosterWithAssigned(base, undefined)).toEqual(['Tanaka', 'Sato']);
+    expect(mergeRosterWithAssigned(base, {})).toEqual(['Tanaka', 'Sato']);
+  });
+
+  it('appends an added substitute not present in the base roster', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Tanaka', jiho: 'Newcomer' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Newcomer']);
+  });
+
+  it('keeps base names first, then extras in first-seen order', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Zeta', taisho: 'Alpha' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Zeta', 'Alpha']);
+  });
+
+  it('de-duplicates case-insensitively against base and other extras', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { p1: 'tanaka', p2: 'Newcomer', p3: 'NEWCOMER' } };
+    // "tanaka" collides with base "Tanaka"; second "NEWCOMER" collides with the
+    // first "Newcomer" — both dropped.
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Newcomer']);
+  });
+
+  it('ignores blank / whitespace-only assignments', () => {
+    const base = ['Tanaka'];
+    const lineup = { positions: { p1: '', p2: '   ', p3: 'Sub' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sub']);
+  });
+
+  it('trims surrounding whitespace on added names', () => {
+    const base = [];
+    const lineup = { positions: { p1: '  Padded  ' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Padded']);
+  });
+
+  it('tolerates a non-array base roster', () => {
+    const lineup = { positions: { p1: 'Solo' } };
+    expect(mergeRosterWithAssigned(null, lineup)).toEqual(['Solo']);
+    expect(mergeRosterWithAssigned(undefined, lineup)).toEqual(['Solo']);
+  });
+
+  it('does not mutate the base roster array', () => {
+    const base = ['Tanaka'];
+    mergeRosterWithAssigned(base, { positions: { p1: 'Sub' } });
+    expect(base).toEqual(['Tanaka']);
+  });
+
+  it('returns the same base array reference when there are no extras (no needless copy)', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Tanaka', jiho: 'Sato' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toBe(base);
   });
 });
 

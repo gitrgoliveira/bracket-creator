@@ -101,6 +101,55 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return () => { mountedRef.current = false; };
     }, []);
 
+    // mp-9h1f: the operator console is court-first AND cross-competition (the
+    // running bout stays across comps per AC7, the switch nudge watches OTHER
+    // comps on the court per AC6, Submit+Next advances within the submitted
+    // comp). It therefore sources every competition with a match on THIS court
+    // from the dedicated court feed (GET /api/viewer/court/:court/matches) rather
+    // than the whole-tournament aggregate. app.jsx skips its per-event aggregate
+    // refetch while this view is active (so the operator's tablet stops
+    // re-downloading all courts on every score); this page instead subscribes to
+    // the tournament-wide /api/events SSE stream, filters to the event TYPES that
+    // can change a court's queue (see REFRESH_EVENTS below), and refetches its
+    // court feed on those — the scoping to one court happens server-side in the
+    // feed, not in the subscription. Until the first fetch resolves it falls back
+    // to the prop aggregate so the queue is never momentarily blank.
+    const [courtComps, setCourtComps] = useStateSh(null);
+    useEffectSh(() => {
+        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
+        let cancelled = false;
+        const timers = new Set();
+        const refresh = () => {
+            window.API.fetchCourtMatches(court)
+                .then(comps => { if (!cancelled && mountedRef.current) setCourtComps(comps); })
+                .catch(err => console.error("Failed to fetch court matches", err));
+        };
+        refresh();
+        let unsub = () => {};
+        if (typeof window.API.subscribeToEvents === "function") {
+            // The feed is court-scoped server-side, so any match/schedule/comp
+            // transition may change this court's queue. Refetch (jittered to
+            // avoid a thundering herd when many operators share the venue LAN).
+            const REFRESH_EVENTS = new Set([
+                "match_updated", "schedule_updated", "competition_started",
+                "competition_completed", "draw_generated", "draw_discarded",
+                "swiss_round_generated", "competitor_status_updated", "participants_updated",
+            ]);
+            const off = window.API.subscribeToEvents((event) => {
+                if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
+                const id = setTimeout(() => { timers.delete(id); if (!cancelled) refresh(); }, 200 + Math.random() * 400);
+                timers.add(id);
+            });
+            unsub = () => { if (typeof off === "function") off(); };
+        }
+        return () => { cancelled = true; timers.forEach(clearTimeout); unsub(); };
+    }, [court]);
+
+    // Court-scoped competitions: the live feed once loaded, else the prop
+    // aggregate as a transient fallback. All competition/match derivations below
+    // read from this so the page operates only on THIS court's competitions.
+    const courtCompetitions = courtComps || tournament.competitions || [];
+
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
     // guards the in-flight announce request.
@@ -138,9 +187,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Same condition as courtKnown below.
     const allMatches = useMemoSh(
         () => (tournament.courts || []).includes(court)
-            ? window.filterMatchesByCourt(window.tournamentMatches(tournament).filter(hasBothSides), court)
+            ? window.filterMatchesByCourt(window.tournamentMatches({ competitions: courtCompetitions }).filter(hasBothSides), court)
             : [],
-        [tournament, court]
+        [courtCompetitions, tournament.courts, court]
     );
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
@@ -157,12 +206,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         for (const m of allMatches) {
             if (!seen.has(m.compId)) {
                 seen.add(m.compId);
-                const comp = (tournament.competitions || []).find(c => c.id === m.compId);
+                const comp = courtCompetitions.find(c => c.id === m.compId);
                 out.push({ id: m.compId, name: m.compName || (comp && comp.name) || m.compId });
             }
         }
         return out;
-    }, [allMatches, tournament]);
+    }, [allMatches, courtCompetitions]);
 
     // Effective selected competition — default logic runs when selectedCompId is
     // null or no longer present (e.g. a comp was removed). Priority: running
@@ -754,7 +803,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {contextMatch && (
                                 <ShiaijoContext
-                                    match={contextMatch} tournament={tournament}
+                                    match={contextMatch} competitions={courtCompetitions}
                                     court={court} nextPoolName={nextPoolName} tweaks={tweaks}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />
@@ -787,23 +836,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 </div>
             )}
 
-            {/* Pre-start lineup entry for a team match. Opens the team scoresheet
-                as a modal: the per-position name pickers persist via putMatchLineup
-                independent of scoring, so the operator can set the lineup and close
-                without starting — or hit "Start match" from inside. */}
-            {lineupMatch && (
-                <ScoreEditorModal
+            {/* Pre-start lineup entry for a team match. Opens the dedicated
+                per-match lineup panel: the per-position name pickers persist
+                via putMatchLineup independent of scoring, so the operator can
+                set the lineup and close without starting. */}
+            {lineupMatch && window.MatchLineupPanel && (
+                <window.MatchLineupPanel
                     key={`lineup:${matchKey(lineupMatch)}`}
-                    variant="modal"
                     match={lineupMatch}
-                    canClose={true}
-                    onClose={() => setLineupMatch(null)}
-                    onSubmit={async (patch) => {
-                        try { await onEditScore(lineupMatch.compId, lineupMatch.id, patch, lineupMatch); }
-                        catch (_e) { /* surfaced via toast */ }
-                        if (mountedRef.current) setLineupMatch(null);
-                    }}
+                    tournament={{ competitions: courtCompetitions }}
                     password={password}
+                    showToast={typeof showToast === "function" ? showToast : undefined}
+                    onClose={() => setLineupMatch(null)}
                 />
             )}
         </div>
@@ -879,7 +923,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
@@ -907,8 +951,6 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
                         : ""}
                 </span>
                 <span className="shiaijo-qrow__state">
-                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
-                    {scoreCell.kind === "ippon" && scoreCell.ippon}
                     {isComplete && <span className="shiaijo-qrow__final">Final</span>}
                 </span>
             </div>
@@ -923,6 +965,17 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
                     <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</span>
                 </div>
             </div>
+            {/* Completed result on its own centred line BELOW the names — the
+                canonical "marks in the centre" position, but stacked so the
+                (often long) names keep the full-width line and never crowd. The
+                ippon string is shiro—aka, matching the Shiro-left/Aka-right
+                names above. */}
+            {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team") && (
+                <div className="shiaijo-qrow__result">
+                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {scoreCell.kind === "ippon" && scoreCell.ippon}
+                </div>
+            )}
             {showActions && (
                 <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
                     {onMoveCourt && courts.length > 1 && (
@@ -986,8 +1039,8 @@ function MatchSides({ m, large }) {
 //   • pool phase  → live standings + results for the current pool (the shared
 //     read-only window.PoolsViewer), plus which pool is next on this court.
 //   • bracket phase → a bracket fragment with the current match highlighted.
-function ShiaijoContext({ match, tournament, court, nextPoolName, tweaks, open, onToggle }) {
-    const comp = (tournament.competitions || []).find((c) => c.id === match.compId);
+function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
+    const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
     const isLeagueComp = match.compFormat === "league";

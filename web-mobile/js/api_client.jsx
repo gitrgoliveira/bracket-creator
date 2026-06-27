@@ -25,6 +25,21 @@
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
 
+// normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
+// aggregate GET /api/viewer/competitions or the court-scoped GET
+// /api/viewer/court/:court/matches into the flattened, normalized competition shape
+// the UI consumes (config fields hoisted, players + matches normalized). Shared
+// so both endpoints stay in lockstep.
+function normalizeViewerCompItem(item) {
+    const c = item.config || item;
+    return normalizeCompetitionDetail({
+        ...c,
+        poolMatches: item.poolMatches,
+        bracket: item.bracket,
+        players: (c.players || []).map(normalizePlayer),
+    });
+}
+
 // ---------------------------------------------------------------------------
 // C2: Monotonic per-match revision counter
 // ---------------------------------------------------------------------------
@@ -436,17 +451,25 @@ const API = {
         }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;
-        return comps.map(item => {
-            const c = item.config || item;
-            const norm = {
-                ...c,
-                poolMatches: item.poolMatches,
-                bracket: item.bracket,
-                players: (c.players || []).map(normalizePlayer),
-            };
-            // Run normalization on the matches as well
-            return normalizeCompetitionDetail(norm);
-        });
+        return comps.map(normalizeViewerCompItem);
+    },
+
+    // fetchCourtMatches returns the court-scoped match feed: only the
+    // competitions that have a real match physically on `court` right now, each
+    // with its full {config, poolMatches, bracket} payload (same per-comp shape
+    // as fetchCompetitions). The operator console sources its cross-competition
+    // court view from this instead of the whole-tournament aggregate. Returns a
+    // normalized competitions array so callers can run tournamentMatches() over
+    // { competitions } exactly as they do for the aggregate.
+    async fetchCourtMatches(court) {
+        const res = await fetch(`/api/viewer/court/${encodeURIComponent(court)}/matches`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to fetch court matches (Status ${res.status})`);
+        }
+        const data = await res.json();
+        const comps = Array.isArray(data.competitions) ? data.competitions : [];
+        return comps.map(normalizeViewerCompItem);
     },
     async fetchCompetitionDetails(id) {
         const res = await fetch(`/api/viewer/competitions/${id}`);

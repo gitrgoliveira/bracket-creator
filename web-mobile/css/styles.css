@@ -4986,24 +4986,28 @@ button.pool-match-row {
 
 /* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
    but sized for the narrow bout row; the dropdown floats above sibling rows. */
-.team-bouts-scroll .lineup-name {
+.lineup-name {
   min-width: 0;
   flex: 1 1 auto;
   margin-bottom: 0;
 }
-.team-bouts-scroll .lineup-name__bar {
+.lineup-name__bar {
   min-height: 36px;
   padding: 4px 6px;
   flex-wrap: nowrap;
 }
-.team-bouts-scroll .lineup-name--empty .pmf__bar {
-  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+/* An unfilled lineup slot is a "fill this" caution, not an error — and the
+   two sides are already Aka (red) / Shiro per the colour system, so a red
+   outline here reads as "both sides are Aka". Use the amber --warn family
+   (DESIGN.md Principle 3: amber = attention, never error/running, never red). */
+.lineup-name--empty .pmf__bar {
+  border-color: var(--warn-border);
 }
-.team-bouts-scroll .lineup-name--empty .pmf__input::placeholder {
-  color: var(--danger);
-  opacity: 0.75;
+.lineup-name--empty .pmf__input::placeholder {
+  color: var(--warn);
+  opacity: 0.85;
 }
-.team-bouts-scroll .lineup-name__clear {
+.lineup-name__clear {
   border: none;
   background: transparent;
   cursor: pointer;
@@ -5012,19 +5016,19 @@ button.pool-match-row {
   color: var(--ink-3);
   padding: 0 2px;
 }
-.team-bouts-scroll .lineup-name__clear:hover {
+.lineup-name__clear:hover {
   color: var(--ink-1);
 }
-.team-bouts-scroll .lineup-name__dropdown {
+.lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
   max-height: 240px;
   overflow-y: auto;
 }
-.team-bouts-scroll .pmf__option--active {
+.pmf__option--active {
   background: var(--surface-2);
 }
-.team-bouts-scroll .lineup-name__add .pmf__opt-name {
+.lineup-name__add .pmf__opt-name {
   color: var(--accent);
   font-weight: 600;
 }
@@ -7878,6 +7882,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
+/* Completed result, centred on its own line below the names (the names keep the
+   full-width matchup line so they never crowd in the narrow queue column). */
+.shiaijo-qrow__result {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 2px;
+}
 
 /* Team encounter score in the queue row: always carries an IV label so a
    bare figure is never shown out of context (a team number could read as

@@ -696,9 +696,9 @@ func TestNewRouterWithHub_NilVerifier(t *testing.T) {
 // Display handler — match on different court and non-running match
 // ---------------------------------------------------------------------------
 
-// TestCourtLive_MatchOnDifferentCourt covers the !strings.EqualFold(m.Court, court)
+// TestCourtCurrent_MatchOnDifferentCourt covers the !strings.EqualFold(m.Court, court)
 // continue branch (line 69-70 in handlers_display.go).
-func TestCourtLive_MatchOnDifferentCourt(t *testing.T) {
+func TestCourtCurrent_MatchOnDifferentCourt(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A", "B"},
@@ -710,14 +710,14 @@ func TestCourtLive_MatchOnDifferentCourt(t *testing.T) {
 	}))
 	// Request court B — match is on court A, so the court-mismatch continue fires.
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/viewer/court/B/live", nil)
+	req, _ := http.NewRequest("GET", "/api/viewer/court/B/current", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// TestCourtLive_MatchNotRunning covers the m.Status != MatchStatusRunning
+// TestCourtCurrent_MatchNotRunning covers the m.Status != MatchStatusRunning
 // continue branch (line 72-73 in handlers_display.go).
-func TestCourtLive_MatchNotRunning(t *testing.T) {
+func TestCourtCurrent_MatchNotRunning(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A"},
@@ -729,14 +729,14 @@ func TestCourtLive_MatchNotRunning(t *testing.T) {
 	}))
 	// Match exists on court A but is completed, not running.
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-// TestCourtLive_HasParticipantIDs covers the comp.HasParticipantIDs hasIDsHint
+// TestCourtCurrent_HasParticipantIDs covers the comp.HasParticipantIDs hasIDsHint
 // branch (lines 80-83 in handlers_display.go) when finding a running match.
-func TestCourtLive_HasParticipantIDs(t *testing.T) {
+func TestCourtCurrent_HasParticipantIDs(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A"},
@@ -752,7 +752,7 @@ func TestCourtLive_HasParticipantIDs(t *testing.T) {
 		{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
 	}))
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/viewer/court/A/live", nil)
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 }

@@ -1,6 +1,8 @@
 // Per-match lineup components extracted from admin_schedule.jsx (mp-d7tl).
 // pickCopySource, MatchLineupSideEditor (local), MatchLineupPanel.
 
+import { LineupNameInput } from './admin_scoring_shared.jsx';
+
 const { useState: useStateA, useEffect: useEffectA } = React;
 
 // pickCopySource — pure helper that selects the most recent saved lineup
@@ -72,7 +74,7 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
 // does not matter (safe in test/bundler contexts too).
-function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
+export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -105,6 +107,9 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     positions.forEach(p => { init[p.key] = ""; });
     return init;
   });
+  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
+    : roster;
   const [lockedAt, setLockedAt] = useStateA(null);
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
@@ -210,7 +215,12 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     // validator treats an absent key the same as an explicit "" — both
     // "missing". Sending explicit empties only bloats the persisted YAML.
     const positionsOut = {};
-    positions.forEach(p => { if (values[p.key]) positionsOut[p.key] = values[p.key]; });
+    positions.forEach(p => {
+      // Trim here too (not only at the picker's onSelect) so a Save can never
+      // persist leading/trailing or whitespace-only names — matches AdminLineup.
+      const v = (values[p.key] || "").trim();
+      if (v) positionsOut[p.key] = v;
+    });
     if (allowDuringMatch && matchStarted) {
       setPendingPositions(positionsOut);
       setShowLineupReasonPrompt(true);
@@ -300,26 +310,20 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {positions.map(p => (
-          <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+          <label key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12 }}>{p.label}</span>
-            <select
-              data-testid={`match-lineup-pos-${teamId}-${p.key}`}
-              className="input"
+            <LineupNameInput
               value={values[p.key] || ""}
+              roster={suggestions}
+              ariaLabel={`${p.label} player`}
               disabled={isLocked || saving || copying}
-              onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
-              style={{ flex: 1, padding: "4px 6px", fontSize: 13 }}
-            >
-              <option value="">— Select —</option>
-              {roster.map(member => (
-                <option key={member} value={member}>{member}</option>
-              ))}
-            </select>
+              onSelect={(name) => setValues(v => ({ ...v, [p.key]: (name || "").trim() }))}
+            />
           </label>
         ))}
         {roster.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-            No roster found. Add member names as metadata in the participant CSV.
+            This team has no registered members — type each competitor's name directly.
           </div>
         )}
       </div>
@@ -344,7 +348,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
           <button type="button"
             className="btn btn--primary btn--sm"
             onClick={save}
-            disabled={saving || copying || roster.length === 0}
+            disabled={saving || copying}
           >
             {saving ? "Saving…" : "Save lineup"}
           </button>

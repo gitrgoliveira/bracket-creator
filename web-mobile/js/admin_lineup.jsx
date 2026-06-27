@@ -164,6 +164,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const isLocked = !!lockedAt && !revising;
 
+  // Autocomplete suggestions: the registered roster (if any) plus names already
+  // typed into this lineup, so a name entered once is reusable across positions.
+  const suggestions = mergeRosterWithAssigned(roster, { positions: values });
+
   const save = async () => {
     setError("");
     setSaving(true);
@@ -232,31 +236,43 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
       <div className="card" style={{ padding: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {positions.map(p => (
-            <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
-                {p.termId
-                  ? <TermAL name={p.termId}>{p.label}</TermAL>
-                  : p.label}
-              </span>
-              <select
-                data-testid={`lineup-position-${p.key}`}
-                className="input"
-                value={values[p.key] || ""}
-                disabled={isLocked || saving}
-                onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
-                style={{ padding: "6px 8px", fontSize: 14 }}
-              >
-                <option value="">— Select —</option>
-                {roster.map(member => (
-                  <option key={member} value={member}>{member}</option>
-                ))}
-              </select>
-            </label>
-          ))}
+          {positions.map(p => {
+            const listId = `lineup-roster-${teamId}-${p.key}`;
+            return (
+              <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+                  {p.termId
+                    ? <TermAL name={p.termId}>{p.label}</TermAL>
+                    : p.label}
+                </span>
+                {/* A combobox, not a fixed <select>: many teams carry no member
+                    metadata (the common case when a team is formed by grouping
+                    individual participants), so the operator MUST be able to
+                    type any name. The datalist supplies autocomplete from the
+                    roster plus names already entered in this lineup when
+                    metadata is present, without restricting what can be saved. */}
+                <input
+                  data-testid={`lineup-position-${p.key}`}
+                  className="input"
+                  type="text"
+                  list={listId}
+                  placeholder="Type or pick a name…"
+                  value={values[p.key] || ""}
+                  disabled={isLocked || saving}
+                  onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
+                  style={{ padding: "6px 8px", fontSize: 14 }}
+                />
+                <datalist id={listId}>
+                  {suggestions.map(member => (
+                    <option key={member} value={member} />
+                  ))}
+                </datalist>
+              </label>
+            );
+          })}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No roster found on this team. Add member names as metadata in the participant CSV.
+              This team has no registered members — type each competitor's name directly.
             </div>
           )}
         </div>
@@ -277,7 +293,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             <button type="button"
               className="btn btn--primary"
               onClick={save}
-              disabled={saving || roster.length === 0}
+              disabled={saving}
             >
               {saving ? "Saving…" : "Save lineup"}
             </button>

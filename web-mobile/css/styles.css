@@ -3418,6 +3418,24 @@ button.pool-match-row {
   position: sticky;
   top: 70px;
 }
+/* Competition left rail: stacks the per-competition nav and the
+   "Other competitions" switcher as separate cards. The RAIL is the single
+   sticky unit (align-self:start leaves grid-track travel room), so both cards
+   pin together at top:70px — otherwise the second card scrolls up and slides
+   UNDER the sticky first card (whose surface background hides it). The inner
+   cards must therefore NOT stick individually. */
+.comp-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 70px;
+  align-self: start;
+}
+.comp-rail .side-nav {
+  position: static;
+  top: auto;
+}
 
 .side-nav button {
   display: flex;
@@ -5509,6 +5527,12 @@ button.pool-match-row {
   }
 
   .side-nav {
+    position: static;
+  }
+
+  /* Single-column layout: the rail stacks above the content and must scroll
+     away normally rather than pin over it. */
+  .comp-rail {
     position: static;
   }
 

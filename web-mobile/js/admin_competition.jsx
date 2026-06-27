@@ -297,9 +297,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         <div className="workspace">
           {/* Left column stacks the per-competition nav and, as a SEPARATE
               card below it, the switcher to other competitions (mp-xsc1).
-              The Other-competitions card is position:static so it doesn't
-              fight the sticky nav above it. */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              The .comp-rail wrapper is the single sticky unit so both cards
+              pin together — if only the top card sticks, the lower one scrolls
+              up and disappears beneath it. */}
+          <div className="comp-rail">
             <div className="side-nav">
               {sections.map((sec) => (
                 <div key={sec.sec}>
@@ -319,7 +320,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             {/* Other-competitions switcher + a quick "Add competition" action.
                 Rendered even with no other competitions so the operator can
                 always start a new one without going back to the dashboard. */}
-            <div className="side-nav" style={{ position: "static" }}>
+            <div className="side-nav">
               <div className="side-nav__sec">Other competitions</div>
               {otherComps.map((cc) => (
                 <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>

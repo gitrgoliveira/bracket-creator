@@ -162,6 +162,43 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	assert.Equal(t, 0, resp.HansokuB)
 }
 
+// TestCourtCurrentEmptyIpponsAreArraysNotNull — Copilot review. An unscored
+// match (here a bracket bout with only a hansoku and no ippons) must encode
+// ipponsA/ipponsB as [] on the wire, not null — the contract models them as
+// arrays and overlay clients assume []. Asserted on the raw body because the
+// test struct's omitempty can't distinguish [] from null.
+func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{
+				ID: "m-r1-0", SideA: "Aoi", SideB: "Ken",
+				Status: state.MatchStatusRunning, Court: "A",
+				ScoreA: "(H2)", // hansoku only — no ippons → parseScore returns nil
+				ScoreB: "",     // nothing scored yet → nil
+			},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, `"ipponsA":[]`, "nil ippons must encode as [] not null: %q", body)
+	assert.Contains(t, body, `"ipponsB":[]`, "nil ippons must encode as [] not null: %q", body)
+	assert.NotContains(t, body, `"ipponsA":null`)
+	assert.NotContains(t, body, `"ipponsB":null`)
+}
+
 // TestParseScore covers the inverse of engine.formatScore used by the bracket
 // branch of the current-match handler.
 func TestParseScore(t *testing.T) {

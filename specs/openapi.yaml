@@ -2379,8 +2379,9 @@ paths:
                           items:
                             $ref: '#/components/schemas/MatchResult'
                         bracket:
-                          nullable: true
-                          $ref: '#/components/schemas/Bracket'
+                          anyOf:
+                            - $ref: '#/components/schemas/Bracket'
+                            - type: "null"
         '404':
           description: Unknown court.
         '503':
@@ -3330,9 +3331,10 @@ components:
             type: string
           description: Map of position label to player ID.
         lockedAt:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
 
     ScheduleEstimate:
       type: object

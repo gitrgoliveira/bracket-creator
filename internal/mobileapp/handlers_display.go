@@ -249,16 +249,31 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 			"id":   comp.ID,
 			"name": comp.Name,
 		},
-		"phase":      phase,
-		"sideA":      buildSide(sideAName, players, comp.WithZekkenName),
-		"sideB":      buildSide(sideBName, players, comp.WithZekkenName),
-		"ipponsA":    ipponsA,
-		"ipponsB":    ipponsB,
+		"phase": phase,
+		"sideA": buildSide(sideAName, players, comp.WithZekkenName),
+		"sideB": buildSide(sideBName, players, comp.WithZekkenName),
+		// Normalize nil → [] so the JSON encodes empty arrays, not null: the
+		// contract models ipponsA/ipponsB as arrays and overlay clients assume
+		// []. A nil slice reaches here from an unscored pool match or a bracket
+		// score with no ippons ("(H2)" or "" via parseScore, which stays
+		// nil-returning so its unit tests hold).
+		"ipponsA":    emptyIfNil(ipponsA),
+		"ipponsB":    emptyIfNil(ipponsB),
 		"hansokuA":   hansokuA,
 		"hansokuB":   hansokuB,
 		"repPlayerA": repA,
 		"repPlayerB": repB,
 	}
+}
+
+// emptyIfNil returns a non-nil slice so JSON encodes [] rather than null.
+// Applied at the response boundary (currentMatchPayload) so parseScore can keep
+// returning nil (its unit tests pin that) while the wire stays array-typed.
+func emptyIfNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // parseScore is the inverse of engine.formatScore (internal/engine/scoring.go):

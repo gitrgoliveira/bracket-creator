@@ -318,11 +318,32 @@ describe('generateRosterText', () => {
       expect(parts[2]).toBe('Gyokusen');
     });
 
-    it('derived zekken is non-empty', () => {
-      const players = [{ name: 'Alice Smith', displayName: '', dojo: 'Gyokusen', danGrade: null }];
+    it('falls back when displayName is null (legacy roster shape)', () => {
+      const players = [{ name: 'Alice Smith', displayName: null, dojo: 'Gyokusen', danGrade: null }];
       const line = generateRosterText(players, true);
       const parts = line.split(',').map(s => s.trim());
-      expect(parts[1]).not.toBe('');
+      expect(parts[1]).toBe('SMITH');
+    });
+
+    it('preserves an intentional empty zekken (does NOT synthesize one)', () => {
+      // Copilot finding (PR #320 round 3): the prior `p.displayName || …`
+      // swapped any falsy displayName for a derived value, including the
+      // operator's intentional empty zekken. The new `??` form only falls
+      // back for null/undefined, so `""` round-trips verbatim and the
+      // rosterDirty diff stays stable across saves.
+      const players = [{ name: 'Alice Smith', displayName: '', dojo: 'Gyokusen', danGrade: null }];
+      const line = generateRosterText(players, true);
+      expect(line).toBe('Alice Smith, , Gyokusen');
+    });
+
+    it('trailing-whitespace name derives a non-empty zekken', () => {
+      // Copilot finding (PR #320 round 3): `name.split(' ').pop()` on
+      // "Alice " returns "" because the last token is empty. Tokenising on
+      // /\s+/ after trim filters that out and the fallback stays useful.
+      const players = [{ name: 'Alice Smith ', displayName: undefined, dojo: 'Gyokusen', danGrade: null }];
+      const line = generateRosterText(players, true);
+      const parts = line.split(',').map(s => s.trim());
+      expect(parts[1]).toBe('SMITH');
     });
   });
 });

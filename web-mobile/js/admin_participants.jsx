@@ -159,11 +159,19 @@ function levenshtein(a, b) {
 function generateRosterText(playersList, withZekkenName) {
   return (playersList || []).map((p) => {
     if (withZekkenName) {
-      // Fall back to uppercase last name when displayName is absent (e.g. sample
-      // roster from makePlayer). Without a fallback the line has only two columns
-      // which parseParticipantLines(withZekken=true) misreads — mapping dojo into
-      // the zekken slot and leaving dojo blank.
-      const zekken = p.displayName || (p.name ?? "").split(" ").pop().toUpperCase();
+      // Fall back to uppercase last name ONLY when displayName is absent
+      // (null/undefined) — `??` not `||`, so an intentional empty zekken
+      // (displayName: "") is preserved verbatim. Without that, a saved
+      // empty-zekken row would re-render with a synthetic last-name, making
+      // the rosterDirty diff flip true on every reload. The fallback covers
+      // the sample roster from makePlayer (which never sets displayName);
+      // without it, the line would have only two columns and
+      // parseParticipantLines(withZekken=true) would misread dojo into the
+      // zekken slot and leave dojo blank. Tokenise on whitespace and filter
+      // empties so a trailing-space name like "Alice " still derives "ALICE".
+      const tokens = (p.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const fallback = tokens.length ? tokens[tokens.length - 1].toUpperCase() : "";
+      const zekken = p.displayName ?? fallback;
       const base = `${p.name ?? ""}, ${zekken}, ${p.dojo ?? ""}`;
       return p.danGrade ? `${base}, ${p.danGrade}` : base;
     }

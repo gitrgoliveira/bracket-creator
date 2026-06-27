@@ -198,7 +198,7 @@ function validateRosterRows(parsed, withZekkenName) {
   return problems;
 }
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -375,6 +375,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [searchQuery, setSearchQuery] = useStateA("");
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
+  // Unsaved-roster detection: the textarea has edits not yet committed via
+  // "Apply changes". Compare against the saved roster's canonical rendering,
+  // ignoring blank-line / trailing-whitespace noise so re-typing the same
+  // roster doesn't read as dirty. Mirrors the Settings unsaved indicator.
+  const rosterDirty = useMemoA(() => {
+    const norm = (s) => s.split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+    return norm(text) !== norm(generateText(c.players || []));
+  }, [text, c.players, c.withZekkenName]);
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
@@ -733,7 +741,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
       showToast(msg);
       setImportSummary(null);
-      setNearDupPending(Array.isArray(warnings) && warnings.length > 0 ? { pairs: warnings } : null);
+      const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
+      setNearDupPending(hasWarnings ? { pairs: warnings } : null);
+      // Return to the dashboard after a clean apply so the operator lands back
+      // on the competition list. When the save surfaced near-duplicate warnings,
+      // stay put so they can review the banner before navigating away.
+      if (!hasWarnings && onBack) onBack();
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -1106,7 +1119,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               </div>
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
@@ -1213,7 +1227,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               back up after pasting/reviewing a long roster. Same handler and
               disabled rules as the top button. */}
           {lines.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}

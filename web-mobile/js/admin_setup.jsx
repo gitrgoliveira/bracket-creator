@@ -635,7 +635,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   );
 }
 
-function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode }) {
+// Minimum gap (minutes) stacked after the previous competition when defaulting
+// a new competition's start time. Before a competition has a roster its
+// schedule estimate is ~0, so this floor keeps successive competitions visibly
+// stacked; once a roster exists the real estimate takes over if it is larger.
+const MIN_STACK_BLOCK_MIN = 30;
+
+function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
   const [kind, setKind] = useStateA("individual");
   const [gender, setGender] = useStateA("M"); // for individual: M/F/X
@@ -654,6 +660,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // matches the example in spec.md US13. Only used when format=swiss.
   const [swissRounds, setSwissRounds] = useStateA(4);
   const [startTime, setStartTime] = useStateA("09:00");
+  // Once the operator types a start time, stop auto-stacking it (see the
+  // effect below) so we never clobber a deliberate choice.
+  const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
   const [numberPrefix, setNumberPrefix] = useStateA("");
@@ -672,6 +681,29 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     prevCourtsRef.current = tournament.courts;
   }, [tournament.courts]);
   const [error, setError] = useStateA("");
+
+  // Auto-stack the default start time after the previous competition on the
+  // same day. We take the latest-STARTING same-day competition and add its
+  // estimated duration (≈0 until it has a roster) floored at MIN_STACK_BLOCK_MIN,
+  // so back-to-back creates lay out sequentially. Skipped once the operator
+  // edits the field; re-runs when the selected day changes.
+  useEffectA(() => {
+    if (startTimeEditedRef.current) return;
+    const sameDay = (tournament.competitions || []).filter((cc) => cc.date === date && cc.startTime);
+    if (sameDay.length === 0) return; // no predecessor → keep the 09:00 default
+    const latest = sameDay.reduce((a, b) => (b.startTime > a.startTime ? b : a));
+    const controller = new AbortController();
+    let cancelled = false;
+    const applyStacked = (durMin) => {
+      if (cancelled || startTimeEditedRef.current) return;
+      const block = Math.max(Math.round(durMin || 0), MIN_STACK_BLOCK_MIN);
+      setStartTime(window.addMinutes(latest.startTime, block));
+    };
+    window.API.estimateCompetitionSchedule(latest.id, password, controller.signal)
+      .then((est) => applyStacked(est?.totalDurationMinutes))
+      .catch(() => { if (!controller.signal.aborted) applyStacked(0); });
+    return () => { cancelled = true; controller.abort(); };
+  }, [date, tournament.competitions, password]);
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
@@ -837,7 +869,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
             <div className="field">
               <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
             </div>
           </div>
 

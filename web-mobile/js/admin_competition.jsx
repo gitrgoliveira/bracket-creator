@@ -41,7 +41,7 @@ const AdminSettings = window.AdminSettings;
 const AdminBracket = window.AdminBracket;
 const AdminSwissRounds = window.AdminSwissRounds;
 
-function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onUpdate, onRefreshCompetition, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
+function AdminCompetition({ tournament, competition, pools, poolMatches, standings, bracket, section, onSection, onBack, onOpenCompetition, onCreateCompetition, onUpdate, onRefreshCompetition, onMoveCourt, onEditScore, onLogout, onViewerMode, tweaks, password, showToast }) {
   const c = competition;
   const t = tournament;
   const [starting, setStarting] = useStateA(false);
@@ -316,18 +316,25 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 </div>
               ))}
             </div>
-            {otherComps.length > 0 && (
-              <div className="side-nav" style={{ position: "static" }}>
-                <div className="side-nav__sec">Other competitions</div>
-                {otherComps.map((cc) => (
-                  <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
-                ))}
-              </div>
-            )}
+            {/* Other-competitions switcher + a quick "Add competition" action.
+                Rendered even with no other competitions so the operator can
+                always start a new one without going back to the dashboard. */}
+            <div className="side-nav" style={{ position: "static" }}>
+              <div className="side-nav__sec">Other competitions</div>
+              {otherComps.map((cc) => (
+                <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+              ))}
+              {otherComps.length === 0 && (
+                <div className="side-nav__hint" style={{ fontSize: 12, color: "var(--ink-3)", padding: "4px 8px" }}>No other competitions yet.</div>
+              )}
+              {onCreateCompetition && (
+                <button type="button" className="side-nav__add" disabled={navBusy} onClick={onCreateCompetition} style={{ fontWeight: 600, color: "var(--accent)" }}>+ Add competition</button>
+              )}
+            </div>
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} tournament={t} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} password={password} />}
-            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} onBack={onBack} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {section === "awards" && <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />}

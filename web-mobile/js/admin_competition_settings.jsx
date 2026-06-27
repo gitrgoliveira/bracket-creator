@@ -310,7 +310,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       setSaving(false);
       // Only clear the dirty flag if no fields were edited DURING the
       // in-flight save. Those linger in editedFieldsRef and still need a save.
-      setIsDirty(editedFieldsRef.current.size > 0);
+      const stillDirty = editedFieldsRef.current.size > 0;
+      setIsDirty(stillDirty);
+      // Return to the dashboard on a clean save (nothing left pending) so the
+      // operator lands back on the competition list after finishing edits.
+      // A toast carries the confirmation since the on-page indicator unmounts.
+      if (!stillDirty && onBack) {
+        showToast("Competition settings saved");
+        onBack();
+      }
     }).catch((e) => {
       if (!mountedRef.current) return;
       setSaving(false);

@@ -691,7 +691,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (startTimeEditedRef.current) return;
     const sameDay = (tournament.competitions || []).filter((cc) => cc.date === date && cc.startTime);
     if (sameDay.length === 0) return; // no predecessor → keep the 09:00 default
-    const latest = sameDay.reduce((a, b) => (b.startTime > a.startTime ? b : a));
+    // Compare numerically (minutes-since-midnight). The backend trims StartTime
+    // but does not normalise to zero-padded HH:MM, so a legacy/imported "9:00"
+    // would lex-sort AFTER "10:00" and pick the wrong predecessor.
+    const toMin = (s) => {
+      const [h, m] = String(s || "").split(":").map((n) => parseInt(n, 10));
+      return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+    };
+    const latest = sameDay.reduce((a, b) => (toMin(b.startTime) > toMin(a.startTime) ? b : a));
     const controller = new AbortController();
     let cancelled = false;
     const applyStacked = (durMin) => {

@@ -374,6 +374,27 @@ describe('validateRosterRows', () => {
     expect(problems[1].reason).toBe('missing dojo');
   });
 
+  it('stores the trimmed name (so a whitespace-only name renders as line N, not "   ")', () => {
+    // Copilot finding (PR #320): the toast picks `"name"` when truthy and
+    // `line N` when falsy. Storing the raw whitespace string showed an ugly
+    // `"   " missing name` label; trimming makes the falsy branch kick in.
+    const parsed = [{ name: '   ', dojo: 'Tora' }];
+    const problems = validateRosterRows(parsed, false);
+    expect(problems).toHaveLength(1);
+    expect(problems[0].name).toBe('');
+  });
+
+  it('zekken-comp dojo-missing reason wording reads as a format hint, not a hard requirement', () => {
+    // Copilot finding (PR #320): the prior "needs Name, Zekken, Dojo" wording
+    // implied we enforced a non-empty zekken, but the validator only enforces
+    // dojo. The reason now reads as a format hint ("use" not "need").
+    const parsed = [{ name: 'Alice', displayName: 'Gyokusen', dojo: '' }];
+    const problems = validateRosterRows(parsed, true);
+    expect(problems[0].reason).toMatch(/missing dojo/);
+    expect(problems[0].reason).toMatch(/use/i);
+    expect(problems[0].reason).not.toMatch(/\bneed\b/i);
+  });
+
   it('handles null/empty input defensively', () => {
     expect(validateRosterRows(null, true)).toEqual([]);
     expect(validateRosterRows([], false)).toEqual([]);

@@ -172,25 +172,30 @@ function generateRosterText(playersList, withZekkenName) {
   }).join("\n");
 }
 
-// validateRosterRows checks parsed roster rows for missing required columns
+// validateRosterRows checks parsed roster rows for the required columns
 // before they are sent to the server. Name and dojo are mandatory for every
-// competition. In a zekken competition a row needs Name, Zekken, Dojo — a
-// two-column "Name, Dojo" paste is parsed as {displayName: dojo, dojo: ""},
-// so an empty dojo is the tell-tale of a row that is missing its zekken column.
+// competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
+// are. In a zekken competition the expected three-column format is
+// Name, Zekken, Dojo — a two-column "Name, Dojo" paste is misparsed into
+// {displayName: dojo, dojo: ""}, so an empty dojo on a zekken competition is
+// the tell-tale of that misparse rather than a missing zekken value, and the
+// reason text surfaces the expected format as a hint.
 // Returns an array of { index, name, reason } for each offending row (empty
-// when the roster is valid).
+// when the roster is valid). The stored `name` is the TRIMMED value (not the
+// raw input), so whitespace-only names render as the falsy "line N" branch in
+// the apply() toast rather than a literal "   " label.
 function validateRosterRows(parsed, withZekkenName) {
   const problems = [];
   (parsed || []).forEach((p, i) => {
     const name = (p.name || "").trim();
     const dojo = (p.dojo || "").trim();
     if (!name) {
-      problems.push({ index: i, name: p.name || "", reason: "missing name" });
+      problems.push({ index: i, name, reason: "missing name" });
       return;
     }
     if (!dojo) {
       const reason = withZekkenName
-        ? "missing dojo (zekken competitions need Name, Zekken, Dojo)"
+        ? "missing dojo (zekken competitions use Name, Zekken, Dojo)"
         : "missing dojo";
       problems.push({ index: i, name, reason });
     }

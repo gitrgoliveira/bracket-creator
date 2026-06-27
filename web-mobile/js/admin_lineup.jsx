@@ -21,6 +21,8 @@
 // name, its Metadata is the list of member names per the CSV parser at
 // internal/helper/tournament.go).
 
+import { LineupNameInput } from './admin_scoring_shared.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
 // Term — kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -61,6 +63,31 @@ function rosterFor(team) {
   if (Array.isArray(team.metadata) && team.metadata.length > 0) return team.metadata;
   if (Array.isArray(team.Metadata) && team.Metadata.length > 0) return team.Metadata;
   return [];
+}
+
+// mergeRosterWithAssigned unions a team's base roster (its registered members,
+// from team.metadata via rosterFor) with any names already assigned in the
+// team's lineup. An operator who enters a substitute via the picker's "+ Add …"
+// row stores a free name that is NOT in team.metadata; without this union that
+// name would never reappear in the autocomplete for the team's OTHER positions.
+// Base (registered) names come first in their original order; extra assigned
+// names follow in first-seen order. De-duplication is case-insensitive; blank /
+// whitespace assignments are ignored. The base array is never mutated.
+function mergeRosterWithAssigned(baseRoster, lineup) {
+  const base = Array.isArray(baseRoster) ? baseRoster : [];
+  const positions = lineup && lineup.positions ? lineup.positions : null;
+  if (!positions) return base;
+  const seen = new Set(base.map(n => String(n).trim().toLowerCase()));
+  const extras = [];
+  for (const raw of Object.values(positions)) {
+    const name = String(raw == null ? "" : raw).trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extras.push(name);
+  }
+  return extras.length ? [...base, ...extras] : base;
 }
 
 // Resolve the team's stable ID. Backend uses player.id (UUID assigned
@@ -139,6 +166,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const isLocked = !!lockedAt && !revising;
 
+  // Autocomplete suggestions: the registered roster (if any) plus names already
+  // typed into this lineup, so a name entered once is reusable across positions.
+  const suggestions = mergeRosterWithAssigned(roster, { positions: values });
+
   const save = async () => {
     setError("");
     setSaving(true);
@@ -148,7 +179,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       // empty values as "missing", which is what we want.
       const positionsOut = {};
       Object.entries(values).forEach(([k, v]) => {
-        if (v) positionsOut[k] = v;
+        // Trim here too (not just onBlur) so a Save triggered without a blur —
+        // e.g. Enter — never persists leading/trailing or whitespace-only names.
+        const trimmed = (v || "").trim();
+        if (trimmed) positionsOut[k] = trimmed;
       });
       const updated = await window.API.putTeamLineup(compId, teamId, round, positionsOut, password);
       setLockedAt(updated.lockedAt || null);
@@ -214,24 +248,18 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   ? <TermAL name={p.termId}>{p.label}</TermAL>
                   : p.label}
               </span>
-              <select
-                data-testid={`lineup-position-${p.key}`}
-                className="input"
+              <LineupNameInput
                 value={values[p.key] || ""}
+                roster={suggestions}
+                ariaLabel={`${p.label} player`}
                 disabled={isLocked || saving}
-                onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
-                style={{ padding: "6px 8px", fontSize: 14 }}
-              >
-                <option value="">— Select —</option>
-                {roster.map(member => (
-                  <option key={member} value={member}>{member}</option>
-                ))}
-              </select>
+                onSelect={(name) => setValues(v => ({ ...v, [p.key]: name }))}
+              />
             </label>
           ))}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No roster found on this team. Add member names as metadata in the participant CSV.
+              This team has no registered members — type each competitor's name directly.
             </div>
           )}
         </div>
@@ -252,7 +280,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             <button type="button"
               className="btn btn--primary"
               onClick={save}
-              disabled={saving || roster.length === 0}
+              disabled={saving}
             >
               {saving ? "Saving…" : "Save lineup"}
             </button>
@@ -340,7 +368,7 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, teamIdOf, canRevise };
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf, canRevise };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };

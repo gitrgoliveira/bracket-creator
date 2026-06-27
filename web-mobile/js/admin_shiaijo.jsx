@@ -836,23 +836,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 </div>
             )}
 
-            {/* Pre-start lineup entry for a team match. Opens the team scoresheet
-                as a modal: the per-position name pickers persist via putMatchLineup
-                independent of scoring, so the operator can set the lineup and close
-                without starting — or hit "Start match" from inside. */}
-            {lineupMatch && (
-                <ScoreEditorModal
+            {/* Pre-start lineup entry for a team match. Opens the dedicated
+                per-match lineup panel: the per-position name pickers persist
+                via putMatchLineup independent of scoring, so the operator can
+                set the lineup and close without starting. */}
+            {lineupMatch && window.MatchLineupPanel && (
+                <window.MatchLineupPanel
                     key={`lineup:${matchKey(lineupMatch)}`}
-                    variant="modal"
                     match={lineupMatch}
-                    canClose={true}
-                    onClose={() => setLineupMatch(null)}
-                    onSubmit={async (patch) => {
-                        try { await onEditScore(lineupMatch.compId, lineupMatch.id, patch, lineupMatch); }
-                        catch (_e) { /* surfaced via toast */ }
-                        if (mountedRef.current) setLineupMatch(null);
-                    }}
+                    tournament={{ competitions: courtCompetitions }}
                     password={password}
+                    showToast={typeof showToast === "function" ? showToast : undefined}
+                    onClose={() => setLineupMatch(null)}
                 />
             )}
         </div>

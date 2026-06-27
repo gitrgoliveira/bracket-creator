@@ -3,9 +3,14 @@
 // Regression guard: a team with NO member metadata used to render a fixed
 // <select> limited to roster members, with the Save button disabled when the
 // roster was empty — so for teams formed by grouping individuals (no metadata)
-// the operator could not enter ANY lineup. The form now uses a free-text
-// combobox (<input list> + <datalist>) so any name can be typed, and Save is
+// the operator could not enter ANY lineup. The form now uses LineupNameInput
+// (a typeable autocomplete combobox) so any name can be typed, and Save is
 // no longer gated on the roster being non-empty.
+//
+// Because the test runtime (makeReactive) does NOT recurse into child
+// component bodies, LineupNameInput appears in the tree as a component
+// node with type === LineupNameInput function. Assertions check props on
+// those nodes rather than the inner <input>/<datalist> DOM elements.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
@@ -33,6 +38,15 @@ function findHosts(tree, typeName) {
   return out;
 }
 
+// Find component nodes (where type is a function) by function name.
+function findComponents(tree, name) {
+  const out = [];
+  walk(tree, n => {
+    if (n && typeof n.type === 'function' && n.type.name === name) out.push(n);
+  });
+  return out;
+}
+
 function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -42,9 +56,6 @@ function collectText(node) {
   return '';
 }
 
-const positionInputs = (tree) =>
-  findHosts(tree, 'input').filter(n => String(n.props?.['data-testid'] || '').startsWith('lineup-position-'));
-
 const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
 
@@ -53,17 +64,56 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
   let AdminLineup;
   let origAPI;
   let origCompMatches;
+  let origAdminLineupHelpers;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
 
   beforeEach(async () => {
     origAPI = global.window.API;
     origCompMatches = global.window.compMatches;
+    origAdminLineupHelpers = global.window.AdminLineupHelpers;
     global.window.compMatches = () => [];
     global.window.API = {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
       putTeamLineup: vi.fn().mockResolvedValue({ lockedAt: null }),
     };
+    // mergeRosterWithAssigned must be available for the suggestions computation
+    // in AdminLineup (it reads window.AdminLineupHelpers only in admin_schedule_lineup;
+    // admin_lineup.jsx calls mergeRosterWithAssigned directly from its own scope).
+    // But window.AdminLineupHelpers is used by admin_schedule_lineup — set it up
+    // here in case the module re-exports trigger it.
+    global.window.AdminLineupHelpers = {
+      positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({
+        key: String(i + 1), label: String(i + 1),
+      })),
+      rosterFor: (team) => {
+        if (!team) return [];
+        if (Array.isArray(team.metadata) && team.metadata.length > 0) return team.metadata;
+        if (Array.isArray(team.Metadata) && team.Metadata.length > 0) return team.Metadata;
+        return [];
+      },
+      mergeRosterWithAssigned: (base, lineup) => {
+        const arr = Array.isArray(base) ? base : [];
+        const positions = lineup && lineup.positions ? lineup.positions : null;
+        if (!positions) return arr;
+        const seen = new Set(arr.map(n => String(n).trim().toLowerCase()));
+        const extras = [];
+        for (const raw of Object.values(positions)) {
+          const name = String(raw == null ? '' : raw).trim();
+          if (!name) continue;
+          const key = name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          extras.push(name);
+        }
+        return extras.length ? [...arr, ...extras] : arr;
+      },
+      teamIdOf: (team) => team?.id || team?.ID || team?.name || team?.Name || '',
+      canRevise: () => false,
+    };
+    // useClickOutside is needed by LineupNameInput (called via window.useClickOutside).
+    // ui.jsx is loaded by vitest.setup.js, which sets window.useClickOutside.
+    // Nothing extra needed here.
 
     runtime = makeReactive();
     global.React = runtime.React;
@@ -76,6 +126,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     global.React = realReact;
     global.window.API = origAPI;
     global.window.compMatches = origCompMatches;
+    global.window.AdminLineupHelpers = origAdminLineupHelpers;
     vi.resetModules();
   });
 
@@ -89,17 +140,14 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     return runtime.currentTree();
   }
 
-  it('renders free-text comboboxes (not fixed selects) for a team WITHOUT metadata', async () => {
+  it('renders pickers for a team WITHOUT metadata', async () => {
     const tree = await mountFor({ id: 'uuid-grouped', name: 'Grouped Team' });
 
-    // One input per position (teamSize 3), each a text combobox bound to a datalist.
-    const inputs = positionInputs(tree);
-    expect(inputs.length).toBe(3);
-    for (const inp of inputs) {
-      expect(inp.props.type).toBe('text');
-      expect(inp.props.list).toBeTruthy();
-    }
-    // No <select> position controls remain.
+    // LineupNameInput component nodes — one per position (teamSize 3).
+    const pickers = findComponents(tree, 'LineupNameInput');
+    expect(pickers.length).toBe(3);
+
+    // No host <select> with a data-testid starting "lineup-position-".
     const selects = findHosts(tree, 'select').filter(
       s => String(s.props?.['data-testid'] || '').startsWith('lineup-position-'));
     expect(selects.length).toBe(0);
@@ -114,50 +162,44 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     expect(collectText(tree)).toContain('type each competitor');
   });
 
-  it('offers the registered roster as datalist suggestions when metadata exists', async () => {
+  it('offers the registered roster as suggestions when metadata exists', async () => {
     const tree = await mountFor({
       id: 'uuid-meta', name: 'Tora', metadata: ['Tanaka', 'Sato', 'Yamada'],
     });
-    const optionValues = findHosts(tree, 'datalist')
-      .flatMap(dl => findHosts(dl, 'option'))
-      .map(o => o.props?.value);
-    expect(optionValues).toContain('Tanaka');
-    expect(optionValues).toContain('Sato');
-    expect(optionValues).toContain('Yamada');
+    // Each LineupNameInput receives the roster as a prop.
+    const pickers = findComponents(tree, 'LineupNameInput');
+    expect(pickers.length).toBeGreaterThan(0);
+    const roster = pickers[0].props.roster;
+    expect(roster).toContain('Tanaka');
+    expect(roster).toContain('Sato');
+    expect(roster).toContain('Yamada');
     // Save is enabled here too.
     expect(saveButton(tree).props.disabled).toBeFalsy();
   });
 
-  it('sanitizes the datalist id when teamId falls back to a name with spaces/punctuation', async () => {
-    // No id on the team → teamIdOf falls back to the (messy) name.
-    const tree = await mountFor({ name: 'Team Bravo! (A)' });
-    const inputs = positionInputs(tree);
-    expect(inputs.length).toBeGreaterThan(0);
-    for (const inp of inputs) {
-      // A valid HTML id: no whitespace or punctuation that would break list binding.
-      expect(inp.props.list).toMatch(/^[A-Za-z0-9_-]+$/);
-    }
-  });
-
-  it('trims leading/trailing whitespace before saving (Save without blur)', async () => {
-    let tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
-    const inp = positionInputs(tree).find(n => n.props['data-testid'] === 'lineup-position-1');
-    inp.props.onChange({ target: { value: '  Padded Name  ' } });
-    tree = runtime.currentTree();
-    saveButton(tree).props.onClick();
+  it('trims leading/trailing whitespace before saving (onSelect + Save)', async () => {
+    const tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
+    // Drive the first LineupNameInput's onSelect with a padded name.
+    const pickers = findComponents(tree, 'LineupNameInput');
+    expect(pickers.length).toBeGreaterThan(0);
+    pickers[0].props.onSelect('  Padded  ');
+    const tree2 = runtime.currentTree();
+    saveButton(tree2).props.onClick();
     await Promise.resolve();
     expect(global.window.API.putTeamLineup).toHaveBeenCalled();
     // putTeamLineup(compId, teamId, round, positionsOut, password)
     const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
-    expect(positionsOut['1']).toBe('Padded Name');
+    expect(positionsOut['1']).toBe('Padded');
   });
 
   it('drops a whitespace-only position instead of persisting blanks', async () => {
-    let tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
-    const inp = positionInputs(tree).find(n => n.props['data-testid'] === 'lineup-position-1');
-    inp.props.onChange({ target: { value: '   ' } });
-    tree = runtime.currentTree();
-    saveButton(tree).props.onClick();
+    const tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
+    const pickers = findComponents(tree, 'LineupNameInput');
+    expect(pickers.length).toBeGreaterThan(0);
+    // onSelect with whitespace-only string — save() trims to "" and drops it.
+    pickers[0].props.onSelect('   ');
+    const tree2 = runtime.currentTree();
+    saveButton(tree2).props.onClick();
     await Promise.resolve();
     const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
     expect(positionsOut['1']).toBeUndefined();

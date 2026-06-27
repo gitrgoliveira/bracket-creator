@@ -4986,12 +4986,12 @@ button.pool-match-row {
 
 /* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
    but sized for the narrow bout row; the dropdown floats above sibling rows. */
-.team-bouts-scroll .lineup-name {
+.lineup-name {
   min-width: 0;
   flex: 1 1 auto;
   margin-bottom: 0;
 }
-.team-bouts-scroll .lineup-name__bar {
+.lineup-name__bar {
   min-height: 36px;
   padding: 4px 6px;
   flex-wrap: nowrap;
@@ -5000,14 +5000,14 @@ button.pool-match-row {
    two sides are already Aka (red) / Shiro per the colour system, so a red
    outline here reads as "both sides are Aka". Use the amber --warn family
    (DESIGN.md Principle 3: amber = attention, never error/running, never red). */
-.team-bouts-scroll .lineup-name--empty .pmf__bar {
+.lineup-name--empty .pmf__bar {
   border-color: var(--warn-border);
 }
-.team-bouts-scroll .lineup-name--empty .pmf__input::placeholder {
+.lineup-name--empty .pmf__input::placeholder {
   color: var(--warn);
   opacity: 0.85;
 }
-.team-bouts-scroll .lineup-name__clear {
+.lineup-name__clear {
   border: none;
   background: transparent;
   cursor: pointer;
@@ -5016,19 +5016,19 @@ button.pool-match-row {
   color: var(--ink-3);
   padding: 0 2px;
 }
-.team-bouts-scroll .lineup-name__clear:hover {
+.lineup-name__clear:hover {
   color: var(--ink-1);
 }
-.team-bouts-scroll .lineup-name__dropdown {
+.lineup-name__dropdown {
   z-index: 60;
   min-width: 200px;
   max-height: 240px;
   overflow-y: auto;
 }
-.team-bouts-scroll .pmf__option--active {
+.pmf__option--active {
   background: var(--surface-2);
 }
-.team-bouts-scroll .lineup-name__add .pmf__opt-name {
+.lineup-name__add .pmf__opt-name {
   color: var(--accent);
   font-weight: 600;
 }

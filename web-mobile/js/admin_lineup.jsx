@@ -21,6 +21,8 @@
 // name, its Metadata is the list of member names per the CSV parser at
 // internal/helper/tournament.go).
 
+import { LineupNameInput } from './admin_scoring_shared.jsx';
+
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
 // Term — kendo-glossary tooltip wrapper. Lazy lookup so the script
@@ -239,48 +241,22 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
       <div className="card" style={{ padding: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {positions.map(p => {
-            // teamId can fall back to the team NAME (spaces/punctuation), which
-            // is not a valid HTML id and would break the input↔datalist binding
-            // in some browsers — sanitize to [A-Za-z0-9_-]. Only one AdminLineup
-            // (one team) renders at a time, so p.key keeps ids unique per form.
-            const listId = `lineup-roster-${teamId}-${p.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
-            return (
-              <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
-                  {p.termId
-                    ? <TermAL name={p.termId}>{p.label}</TermAL>
-                    : p.label}
-                </span>
-                {/* A combobox, not a fixed <select>: many teams carry no member
-                    metadata (the common case when a team is formed by grouping
-                    individual participants), so the operator MUST be able to
-                    type any name. The datalist supplies autocomplete from the
-                    roster plus names already entered in this lineup when
-                    metadata is present, without restricting what can be saved. */}
-                <input
-                  data-testid={`lineup-position-${p.key}`}
-                  className="input"
-                  type="text"
-                  list={listId}
-                  placeholder="Type or pick a name…"
-                  value={values[p.key] || ""}
-                  disabled={isLocked || saving}
-                  onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
-                  onBlur={(e) => {
-                    const trimmed = e.target.value.trim();
-                    if (trimmed !== e.target.value) setValues(v => ({ ...v, [p.key]: trimmed }));
-                  }}
-                  style={{ padding: "6px 8px", fontSize: 14 }}
-                />
-                <datalist id={listId}>
-                  {suggestions.map(member => (
-                    <option key={member} value={member} />
-                  ))}
-                </datalist>
-              </label>
-            );
-          })}
+          {positions.map(p => (
+            <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+                {p.termId
+                  ? <TermAL name={p.termId}>{p.label}</TermAL>
+                  : p.label}
+              </span>
+              <LineupNameInput
+                value={values[p.key] || ""}
+                roster={suggestions}
+                ariaLabel={`${p.label} player`}
+                disabled={isLocked || saving}
+                onSelect={(name) => setValues(v => ({ ...v, [p.key]: name }))}
+              />
+            </label>
+          ))}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
               This team has no registered members — type each competitor's name directly.

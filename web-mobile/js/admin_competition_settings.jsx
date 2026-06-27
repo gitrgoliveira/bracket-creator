@@ -41,6 +41,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // the button and shows "Saving…" during the in-flight PUT.
   const [isDirty, setIsDirty] = useStateA(false);
   const [saving, setSaving] = useStateA(false);
+  // Court-clash warnings surfaced after a save (mp-4a52). Non-blocking: the
+  // save already committed; when present we stay on the page to show them
+  // instead of returning to the dashboard.
+  const [clashWarnings, setClashWarnings] = useStateA(null);
 
   // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
   // display it inline near the duration inputs. Re-fetches whenever the
@@ -312,12 +316,30 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // in-flight save. Those linger in editedFieldsRef and still need a save.
       const stillDirty = editedFieldsRef.current.size > 0;
       setIsDirty(stillDirty);
-      // Return to the dashboard on a clean save (nothing left pending) so the
-      // operator lands back on the competition list after finishing edits.
-      // A toast carries the confirmation since the on-page indicator unmounts.
-      if (!stillDirty && onBack) {
-        showToast("Competition settings saved");
-        onBack();
+      // On a clean save (nothing left pending), check whether the change put
+      // this competition on a court (shiaijo) at the same time as another. The
+      // save has already committed — this is a non-blocking warning. If clashes
+      // exist we surface them and STAY on the page; otherwise we return to the
+      // dashboard. A clash-check failure must not strand the operator, so it
+      // falls through to the normal saved-and-return path.
+      if (!stillDirty) {
+        window.API.getScheduleClashes(c.id, password)
+          .then((clashes) => {
+            if (!mountedRef.current) return;
+            if (Array.isArray(clashes) && clashes.length > 0) {
+              setClashWarnings(clashes);
+              showToast(`Saved — ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
+            } else {
+              setClashWarnings(null);
+              showToast("Competition settings saved");
+              if (onBack) onBack();
+            }
+          })
+          .catch(() => {
+            if (!mountedRef.current) return;
+            showToast("Competition settings saved");
+            if (onBack) onBack();
+          });
       }
     }).catch((e) => {
       if (!mountedRef.current) return;
@@ -408,6 +430,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           </button>
         </div>
       </div>
+      {clashWarnings && clashWarnings.length > 0 && (
+        <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+            ⚠ Court clash — this competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
+          </div>
+          <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
+            {clashWarnings.map((w, i) => (
+              <li key={i}>
+                <strong>{w.otherCompName}</strong> — shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
+              </li>
+            ))}
+          </ul>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+            The change was saved. Two competitions can't run on the same court at the same time — adjust the start time or assigned courts here or on the other competition.
+          </div>
+          <button type="button" className="btn btn--sm" onClick={() => { setClashWarnings(null); if (onBack) onBack(); }}>Dismiss & return to dashboard</button>
+        </div>
+      )}
       <div className="row">
         <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">

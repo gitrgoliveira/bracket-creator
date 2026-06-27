@@ -954,6 +954,62 @@ describe('API Utils', () => {
       });
     });
 
+    describe('getScheduleClashes', () => {
+      it('GETs /api/competitions/:id/schedule/clashes and returns the clash array', async () => {
+        const payload = [
+          { otherCompId: 'b', otherCompName: 'Bravo', date: '01-07-2026', sharedCourts: ['A'], overlapStart: '09:15', overlapEnd: '09:30' },
+        ];
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        const result = await API.getScheduleClashes('comp-abc', 'pw');
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/schedule/clashes',
+          expect.objectContaining({
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'pw' }),
+          })
+        );
+      });
+
+      it('returns an empty array when there are no clashes', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        const result = await API.getScheduleClashes('c1', 'pw');
+        expect(result).toEqual([]);
+      });
+
+      it('sends X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        await API.getScheduleClashes('c1', 'secret-pw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      });
+
+      it('forwards AbortSignal to fetch', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        const controller = new AbortController();
+        await API.getScheduleClashes('c1', 'pw', controller.signal);
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('throws with server error message on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.getScheduleClashes('bad-id', 'pw'))
+          .rejects.toThrow('competition not found');
+      });
+
+      it('throws default message if json parse fails on error response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.getScheduleClashes('c1', 'pw'))
+          .rejects.toThrow('Failed to check schedule clashes');
+      });
+    });
+
     describe('estimateSchedule', () => {
       it('GETs /api/schedule/estimate with required params in query string', async () => {
         global.fetch = vi.fn().mockResolvedValue({

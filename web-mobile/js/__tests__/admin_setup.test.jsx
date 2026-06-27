@@ -1,6 +1,55 @@
 import { describe, it, expect } from 'vitest';
-import { deriveCompetitionName, validatePoolSettings, validateSwissSettings } from '../admin_setup.jsx';
+import { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor } from '../admin_setup.jsx';
 import { normalizeTheme } from '../admin_branding.jsx';
+
+describe('pickStackPredecessor', () => {
+  const day = '01-07-2026';
+  it('returns null when there are no competitions', () => {
+    expect(pickStackPredecessor([], day)).toBeNull();
+    expect(pickStackPredecessor(undefined, day)).toBeNull();
+  });
+
+  it('returns null when no competition matches the date', () => {
+    expect(pickStackPredecessor([{ id: 'a', date: '02-07-2026', startTime: '09:00' }], day)).toBeNull();
+  });
+
+  it('picks the latest-STARTING same-day competition', () => {
+    const comps = [
+      { id: 'a', date: day, startTime: '09:00' },
+      { id: 'c', date: day, startTime: '11:30' },
+      { id: 'b', date: day, startTime: '10:00' },
+    ];
+    expect(pickStackPredecessor(comps, day).id).toBe('c');
+  });
+
+  it('compares numerically, not lexicographically (un-padded "9:00" vs "10:00")', () => {
+    const comps = [
+      { id: 'ten', date: day, startTime: '10:00' },
+      { id: 'nine', date: day, startTime: '9:00' },
+    ];
+    // Lex sort would pick "9:00" > "10:00"; numeric correctly picks 10:00.
+    expect(pickStackPredecessor(comps, day).id).toBe('ten');
+  });
+
+  it('Copilot finding: drops competitions with a malformed start time', () => {
+    // A legacy/imported competition with an unparseable StartTime must not
+    // become `latest` — otherwise addMinutes() would emit "NaN:NaN".
+    const comps = [
+      { id: 'good', date: day, startTime: '09:00' },
+      { id: 'bad', date: day, startTime: 'garbage' },
+    ];
+    expect(pickStackPredecessor(comps, day).id).toBe('good');
+  });
+
+  it('returns null when ALL same-day start times are malformed', () => {
+    const comps = [
+      { id: 'x', date: day, startTime: 'garbage' },
+      { id: 'y', date: day, startTime: '' },
+      { id: 'z', date: day, startTime: null },
+    ];
+    expect(pickStackPredecessor(comps, day)).toBeNull();
+  });
+});
 
 describe('deriveCompetitionName', () => {
   // Copilot round-8 finding: AdminCreateCompetition.create used

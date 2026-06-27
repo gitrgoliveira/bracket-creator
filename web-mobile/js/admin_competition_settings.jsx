@@ -295,19 +295,26 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
     };
-    // Capture the snapshot of edited fields we're about to persist. On
-    // success we clear ONLY those fields from the edited set — preserving
-    // any fields the user touched DURING the in-flight save (those need
-    // to round-trip through a subsequent save).
-    const persistingFields = new Set(editedFieldsRef.current);
+    // Snapshot the VALUE of each edited field we're about to persist (not just
+    // the field name). On success we clear a field only if its current staged
+    // value still equals what we sent — so a field RE-EDITED during the
+    // in-flight save (its value now differs) stays in the edited set and rolls
+    // into the next save. A name-only Set couldn't distinguish the original
+    // edit from a concurrent re-edit and would drop the user's latest change.
+    // localRef.current is written synchronously by the edit handlers, so it
+    // reflects any re-edit that landed while the PUT was in flight.
+    const persistingValues = {};
+    editedFieldsRef.current.forEach(k => { persistingValues[k] = localRef.current[k]; });
     setSaving(true);
     Promise.resolve(onUpdate(finalNext)).then(() => {
       if (!mountedRef.current) return;
-      // Drop the fields we just persisted from the edited set so the
-      // sync effect can absorb the server-confirmed values on the next
-      // SSE round-trip. Fields edited DURING the in-flight save stay in
-      // the set and roll into the next save.
-      persistingFields.forEach(k => editedFieldsRef.current.delete(k));
+      // Drop only the persisted fields whose staged value is unchanged, so the
+      // sync effect can absorb the server-confirmed values on the next SSE
+      // round-trip. Fields re-edited DURING the in-flight save (value differs)
+      // stay in the set and roll into the next save.
+      Object.keys(persistingValues).forEach(k => {
+        if (localRef.current[k] === persistingValues[k]) editedFieldsRef.current.delete(k);
+      });
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
       setSaveErr(null);

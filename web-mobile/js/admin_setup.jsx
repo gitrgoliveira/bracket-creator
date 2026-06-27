@@ -43,6 +43,22 @@ function deriveCompetitionName(rawName, kind, gender) {
   return "Individual";
 }
 
+// pickStackPredecessor returns the latest-STARTING same-day competition that the
+// new competition's default start time should stack after — or null when there
+// is no usable predecessor (the caller keeps the 09:00 default).
+//
+// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
+// just truthy ones: the backend only length-caps StartTime (no format
+// validation), so a legacy/imported competition could carry a malformed value.
+// Including such an entry could make it the `latest` and make the caller's
+// addMinutes() emit "NaN:NaN". Comparison is numeric (minutes-since-midnight)
+// so an un-zero-padded "9:00" doesn't lex-sort after "10:00".
+function pickStackPredecessor(competitions, date) {
+  const sameDay = (competitions || []).filter((cc) => cc.date === date && timeToMinutes(cc.startTime) !== null);
+  if (sameDay.length === 0) return null;
+  return sameDay.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
+}
+
 // Pure submit-time validation for AdminCreateCompetition's pool-format
 // fields. Returns { ok, error } so the caller (create) can route the
 // error string through setError without duplicating the per-field
@@ -694,14 +710,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   //    subsequent day changes rather than being silently overwritten.
   useEffectA(() => {
     if (startTimeEditedRef.current) return;
-    const sameDay = (tournament.competitions || []).filter((cc) => cc.date === date && cc.startTime);
-    if (sameDay.length === 0) return; // no predecessor → keep the 09:00 default
-    // Compare numerically (minutes-since-midnight). The backend trims StartTime
-    // but does not normalise to zero-padded HH:MM, so a legacy/imported "9:00"
-    // would lex-sort AFTER "10:00" and pick the wrong predecessor. timeToMinutes
-    // returns null for malformed input, but the sameDay filter guarantees a
-    // truthy startTime, so the reduce only ever compares real clock values.
-    const latest = sameDay.reduce((a, b) => ((timeToMinutes(b.startTime) || 0) > (timeToMinutes(a.startTime) || 0) ? b : a));
+    // latest.startTime is guaranteed parseable (pickStackPredecessor filters on
+    // timeToMinutes !== null), so addMinutes() below never emits "NaN:NaN".
+    const latest = pickStackPredecessor(tournament.competitions, date);
+    if (!latest) return; // no usable predecessor → keep the 09:00 default
     const controller = new AbortController();
     const applyStacked = (durMin) => {
       if (controller.signal.aborted || startTimeEditedRef.current) return;
@@ -1264,4 +1276,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor };

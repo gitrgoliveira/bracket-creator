@@ -599,6 +599,20 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     expect(body).toContain('editedFieldsRef.current.forEach');
   });
 
+  it('clears a persisted field only if its staged value is unchanged (re-edit race)', () => {
+    // Copilot finding (PR #320): a name-only Set snapshot couldn't tell an
+    // in-flight-persisted field from one RE-EDITED during the save, so the
+    // unconditional `persistingFields.forEach(delete)` would drop the user's
+    // latest change and let the SSE sync effect overwrite it. The fix snapshots
+    // VALUES and clears conditionally on value equality. These tokens are unique
+    // to saveNow, so file-level assertions are robust without carving the body.
+    expect(src).toContain('persistingValues');
+    // The fragile name-only Set snapshot must be gone.
+    expect(src).not.toContain('new Set(editedFieldsRef.current)');
+    // Conditional clear: only delete when the staged value still matches.
+    expect(src).toMatch(/if\s*\(localRef\.current\[k\]\s*===\s*persistingValues\[k\]\)\s*editedFieldsRef\.current\.delete\(k\)/);
+  });
+
   it('user-edit handlers mark fields via editedFieldsRef.add', () => {
     // Each handler that mutates `local` must mark the edited field
     // BEFORE scheduling the save, so the sync effect preserves it

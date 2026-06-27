@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
 import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches } from '../admin_shiaijo.jsx';
 
@@ -35,6 +36,79 @@ describe('shiaijoScoreCell — team numbers are never context-free', () => {
   it('shows "vs" for a scheduled match regardless of team size', () => {
     expect(shiaijoScoreCell({ status: 'scheduled', teamSize: 5 })).toEqual({ kind: 'vs' });
     expect(shiaijoScoreCell({ status: 'scheduled', teamSize: 0 })).toEqual({ kind: 'vs' });
+  });
+});
+
+// The completed result is rendered on its own centred line BELOW the names
+// (.shiaijo-qrow__result), NOT in the top-right state slot — so the (often long)
+// names keep the full-width matchup line. The state slot carries only "Final".
+describe('ShiaijoQueueRow — completed result placement', () => {
+  const realReact = global.React;
+  let runtime, ShiaijoQueueRow, orig = {};
+
+  function walk(node, visit) {
+    if (node == null || node === false || node === true) return;
+    if (Array.isArray(node)) { for (const n of node) walk(n, visit); return; }
+    if (typeof node !== 'object') return;
+    visit(node);
+    const kids = (node.children !== undefined && node.children !== null && !(Array.isArray(node.children) && !node.children.length))
+      ? node.children : node.props?.children;
+    walk(kids, visit);
+  }
+  const byClass = (tree, cls) => {
+    const out = [];
+    walk(tree, n => { if (n && typeof n.props?.className === 'string' && n.props.className.split(/\s+/).includes(cls)) out.push(n); });
+    return out;
+  };
+  const text = (node) => {
+    if (node == null) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(text).join('');
+    if (node.children) return text(node.children);
+    if (node.props?.children) return text(node.props.children);
+    return '';
+  };
+
+  beforeEach(async () => {
+    orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore; orig.iv = window.teamIVScore;
+    window.formatIpponsScore = () => '·—MK';
+    window.ipponsFromScore = () => [];
+    window.teamIVScore = () => null;
+    runtime = makeReactive();
+    global.React = runtime.React;
+    ({ ShiaijoQueueRow } = await import('../admin_shiaijo.jsx'));
+  });
+  afterEach(() => {
+    runtime.unmount(); global.React = realReact;
+    window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip; window.teamIVScore = orig.iv;
+  });
+
+  it('puts the score in a centred result line below the names, not the corner', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: { id: 'm1', compId: 'c1', status: 'completed', teamSize: 0,
+           sideA: { name: 'Mens Player 01' }, sideB: { name: 'Mens Player 03' } },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    const result = byClass(tree, 'shiaijo-qrow__result');
+    expect(result.length).toBe(1);
+    expect(text(result[0])).toContain('·—MK');
+    // The top-right state slot shows only "Final" — the score is NOT there.
+    const state = byClass(tree, 'shiaijo-qrow__state');
+    expect(state.length).toBe(1);
+    expect(text(state[0])).toContain('Final');
+    expect(text(state[0])).not.toContain('MK');
+  });
+
+  it('shows no result line for a scheduled match (centre stays vs)', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: { id: 'm2', compId: 'c1', status: 'scheduled', teamSize: 0,
+           sideA: { name: 'A' }, sideB: { name: 'B' } },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    expect(byClass(tree, 'shiaijo-qrow__result').length).toBe(0);
+    expect(byClass(tree, 'shiaijo-qrow__vs').length).toBe(1);
   });
 });
 

@@ -923,7 +923,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
@@ -951,8 +951,6 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
                         : ""}
                 </span>
                 <span className="shiaijo-qrow__state">
-                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
-                    {scoreCell.kind === "ippon" && scoreCell.ippon}
                     {isComplete && <span className="shiaijo-qrow__final">Final</span>}
                 </span>
             </div>
@@ -967,6 +965,17 @@ function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLin
                     <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</span>
                 </div>
             </div>
+            {/* Completed result on its own centred line BELOW the names — the
+                canonical "marks in the centre" position, but stacked so the
+                (often long) names keep the full-width line and never crowd. The
+                ippon string is shiro—aka, matching the Shiro-left/Aka-right
+                names above. */}
+            {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team") && (
+                <div className="shiaijo-qrow__result">
+                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {scoreCell.kind === "ippon" && scoreCell.ippon}
+                </div>
+            )}
             {showActions && (
                 <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
                     {onMoveCourt && courts.length > 1 && (

@@ -7882,6 +7882,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
+/* Completed result, centred on its own line below the names (the names keep the
+   full-width matchup line so they never crowd in the narrow queue column). */
+.shiaijo-qrow__result {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 2px;
+}
 
 /* Team encounter score in the queue row: always carries an IV label so a
    bare figure is never shown out of context (a team number could read as

@@ -385,6 +385,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     setIsDirty(true);
     // Clear a stale inline error once the user edits again.
     if (saveErr) setSaveErr(null);
+    // Clear the post-save clash banner: its "saved" wording and clash list go
+    // stale the moment new unsaved edits are staged (the edit may even resolve
+    // the clash). Re-checked on the next save.
+    if (clashWarnings) setClashWarnings(null);
   };
 
   // Number-input variant of `update`. Stores NaN in local state for empty
@@ -409,10 +413,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     });
     setIsDirty(true);
     if (saveErr) setSaveErr(null);
+    if (clashWarnings) setClashWarnings(null);
   };
 
   const toggleCourt = (cc) => {
-    const nextCourts = local.courts.includes(cc) ? local.courts.filter((x) => x !== cc) : [...local.courts, cc].sort();
+    // Compute from localRef.current (kept authoritative by update) rather than
+    // the render-closure `local.courts`: rapid toggles fired before React
+    // commits a re-render would otherwise both read the same stale snapshot and
+    // drop a toggle.
+    const cur = localRef.current.courts || [];
+    const nextCourts = cur.includes(cc) ? cur.filter((x) => x !== cc) : [...cur, cc].sort();
     if (nextCourts.length) update("courts", nextCourts);
   };
 

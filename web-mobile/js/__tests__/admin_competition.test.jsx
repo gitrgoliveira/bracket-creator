@@ -634,7 +634,28 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
         m[2],
         `${handler} must write localRef.current = next inside its setLocal updater so saveNow sees the latest staged value even when the operator clicks Save immediately after editing`
       ).toContain('localRef.current = next');
+      // Copilot finding (PR #320 round 4): the post-save clash banner says the
+      // change "was saved" — it goes stale the moment new edits are staged (the
+      // edit may even resolve the clash). Each staging handler must clear it.
+      expect(
+        m[2],
+        `${handler} must clear clashWarnings on edit so the stale "saved" clash banner isn't shown while the form is dirty`
+      ).toContain('setClashWarnings(null)');
     }
+  });
+
+  it('toggleCourt computes from localRef.current.courts, not the stale render closure', () => {
+    // Copilot finding (PR #320 round 4): deriving nextCourts from the render-
+    // closure `local.courts` drops a toggle when the operator clicks faster than
+    // React commits. localRef.current is kept authoritative by update().
+    const m = src.match(/const toggleCourt = \(cc\) => \{([\s\S]*?)\n {2}\};/);
+    expect(m, 'expected `const toggleCourt = (cc) => { ... };` block').not.toBeNull();
+    const body = m[1];
+    expect(body).toContain('localRef.current.courts');
+    // The stale-closure compute patterns must be gone (match on CODE, not the
+    // comment that quotes `local.courts` for explanation).
+    expect(body).not.toMatch(/local\.courts\.(includes|filter)/);
+    expect(body).not.toMatch(/\[\.\.\.local\.courts/);
   });
 
   it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {

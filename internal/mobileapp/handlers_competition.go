@@ -341,9 +341,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// POST /competitions can land with an embedded roster via
-		// saveCompetitionWithPlayers — same length caps as the
-		// PUT roster-PUT branch and POST /participants.
+		// saveCompetitionWithPlayers — same required-field and length
+		// caps as the roster-PUT branch and POST /participants.
 		for i, p := range comp.Players {
+			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
 			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
@@ -649,6 +653,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// handlers_participants.go.
 		if comp.Players != nil {
 			for i, p := range comp.Players {
+				if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+					return
+				}
 				if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 					return

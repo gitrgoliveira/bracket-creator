@@ -274,6 +274,23 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	return nil
 }
 
+// validatePlayerRequired rejects a roster entry with a blank name or dojo.
+// A blank dojo is the silent-corruption signature of a misformatted roster
+// row (e.g. a two-column "Name, Dojo" line in a zekken competition, which the
+// SPA parser maps to {displayName: dojo, dojo: ""}). Shared by every endpoint
+// that persists an embedded roster — POST /participants (batch), POST
+// /competitions, and the roster-PUT branch of PUT /competitions/:id — so the
+// same malformed payload is rejected identically regardless of entry point.
+func validatePlayerRequired(name, dojo string) error {
+	if strings.TrimSpace(name) == "" {
+		return &ValidationError{Message: "name must not be blank"}
+	}
+	if strings.TrimSpace(dojo) == "" {
+		return &ValidationError{Message: "dojo must not be blank"}
+	}
+	return nil
+}
+
 // validatePlayerLengths enforces caps on every persisted string of a
 // participant. Shared between the participants handler (live UI write)
 // and the import handler (manifest upload) so a malformed CSV or JSON

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // MinClashFootprintMinutes is the minimum time footprint assigned to a
@@ -55,6 +57,15 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 	}
 	tEnd := tStart + e.clashFootprintMinutes(compID)
 
+	// Resolve courts the same way the draw paths do: an empty competition
+	// court list inherits the tournament's courts (or ["A"]). Without this a
+	// legacy competition saved before court materialization — nil Courts —
+	// would silently never clash even though at draw time it occupies a real
+	// court. A LoadTournament failure leaves tourn nil; resolveClashCourts
+	// then falls back to ["A"], matching resolveCompetitionCourts.
+	tourn, _ := e.store.LoadTournament()
+	targetCourts := resolveClashCourts(target.Courts, tourn)
+
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
 		return nil, err
@@ -72,7 +83,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 		if !sameDate(target.Date, other.Date) {
 			continue
 		}
-		shared := sharedCourts(target.Courts, other.Courts)
+		shared := sharedCourts(targetCourts, resolveClashCourts(other.Courts, tourn))
 		if len(shared) == 0 {
 			continue
 		}
@@ -125,12 +136,29 @@ func parseHHMM(s string) (int, bool) {
 	return h*60 + m, true
 }
 
-// fmtHHMM renders minutes-since-midnight as "HH:MM" (wrapping at 24h).
+// fmtHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:
+// a footprint that pushes the overlap end past midnight renders as "24:15"
+// rather than a misleading "00:15", so an operator reading the warning sees
+// the next-day rollover. The value is display-only — no caller parses it back.
 func fmtHHMM(mins int) string {
 	if mins < 0 {
 		mins = 0
 	}
-	return fmt.Sprintf("%02d:%02d", (mins/60)%24, mins%60)
+	return fmt.Sprintf("%02d:%02d", mins/60, mins%60)
+}
+
+// resolveClashCourts mirrors resolveCompetitionCourts (handlers_tournament.go):
+// an empty competition court list inherits the tournament's courts, falling
+// back to ["A"] when there is no tournament. Kept as a separate engine-local
+// copy because internal/engine cannot import internal/mobileapp (import cycle).
+func resolveClashCourts(compCourts []string, tourn *state.Tournament) []string {
+	if len(compCourts) > 0 {
+		return compCourts
+	}
+	if tourn != nil && len(tourn.Courts) > 0 {
+		return append([]string(nil), tourn.Courts...)
+	}
+	return []string{"A"}
 }
 
 // sameDate is true when both dates are non-empty and equal (after trimming).
@@ -141,17 +169,18 @@ func sameDate(a, b string) bool {
 }
 
 // sharedCourts returns the sorted intersection of two court-label lists.
+// Deleting matched entries from the set as we go both de-dups (a repeated
+// label in b is only emitted once) and avoids a second bookkeeping map.
 func sharedCourts(a, b []string) []string {
-	inA := make(map[string]bool, len(a))
+	inA := make(map[string]struct{}, len(a))
 	for _, c := range a {
-		inA[c] = true
+		inA[c] = struct{}{}
 	}
-	seen := make(map[string]bool)
 	out := []string{}
 	for _, c := range b {
-		if inA[c] && !seen[c] {
+		if _, ok := inA[c]; ok {
 			out = append(out, c)
-			seen[c] = true
+			delete(inA, c)
 		}
 	}
 	sort.Strings(out)

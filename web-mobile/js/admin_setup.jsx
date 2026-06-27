@@ -93,6 +93,7 @@ function validateSwissSettings(format, swissRounds) {
 // dirty-tracking snapshot here can't drift from the shape BrandingManager emits
 // (mp-sspn). Importing keeps the defaults in one place.
 import { normalizeTheme } from './admin_branding.jsx';
+import { timeToMinutes } from './admin_schedule_utils.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
@@ -697,23 +698,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (sameDay.length === 0) return; // no predecessor → keep the 09:00 default
     // Compare numerically (minutes-since-midnight). The backend trims StartTime
     // but does not normalise to zero-padded HH:MM, so a legacy/imported "9:00"
-    // would lex-sort AFTER "10:00" and pick the wrong predecessor.
-    const toMin = (s) => {
-      const [h, m] = String(s || "").split(":").map((n) => parseInt(n, 10));
-      return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
-    };
-    const latest = sameDay.reduce((a, b) => (toMin(b.startTime) > toMin(a.startTime) ? b : a));
+    // would lex-sort AFTER "10:00" and pick the wrong predecessor. timeToMinutes
+    // returns null for malformed input, but the sameDay filter guarantees a
+    // truthy startTime, so the reduce only ever compares real clock values.
+    const latest = sameDay.reduce((a, b) => ((timeToMinutes(b.startTime) || 0) > (timeToMinutes(a.startTime) || 0) ? b : a));
     const controller = new AbortController();
-    let cancelled = false;
     const applyStacked = (durMin) => {
-      if (cancelled || startTimeEditedRef.current) return;
+      if (controller.signal.aborted || startTimeEditedRef.current) return;
       const block = Math.max(Math.round(durMin || 0), MIN_STACK_BLOCK_MIN);
       setStartTime(window.addMinutes(latest.startTime, block));
     };
     window.API.estimateCompetitionSchedule(latest.id, password, controller.signal)
       .then((est) => applyStacked(est?.totalDurationMinutes))
       .catch(() => { if (!controller.signal.aborted) applyStacked(0); });
-    return () => { cancelled = true; controller.abort(); };
+    return () => { controller.abort(); };
   }, [date, tournament.competitions, password]);
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());

@@ -332,13 +332,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             } else {
               setClashWarnings(null);
               showToast("Competition settings saved");
-              if (onBack) onBack();
+              // Don't navigate away if the operator started a NEW edit during
+              // the clash round-trip — that would silently discard it. Stay on
+              // the page so the pending change can be saved.
+              if (onBack && editedFieldsRef.current.size === 0) onBack();
             }
           })
           .catch(() => {
             if (!mountedRef.current) return;
             showToast("Competition settings saved");
-            if (onBack) onBack();
+            if (onBack && editedFieldsRef.current.size === 0) onBack();
           });
       }
     }).catch((e) => {
@@ -377,20 +380,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (saveErr) setSaveErr(null);
   };
 
-  // `updateNow` previously saved immediately (used by toggles / radio pills /
-  // court chips). Under manual save it is identical to `update` — kept as a
-  // separate name only to avoid churning the ~20 JSX call sites.
-  const updateNow = (k, v) => {
-    editedFieldsRef.current.add(k);
-    setLocal((prev) => {
-      const next = { ...prev, [k]: v };
-      localRef.current = next;
-      return next;
-    });
-    setIsDirty(true);
-    if (saveErr) setSaveErr(null);
-  };
-
   // Number-input variant of `update`. Stores NaN in local state for empty
   // input so the render side can keep the display empty (see
   // decideNumericUpdate's contract). Marks the field as edited so the
@@ -417,7 +406,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   const toggleCourt = (cc) => {
     const nextCourts = local.courts.includes(cc) ? local.courts.filter((x) => x !== cc) : [...local.courts, cc].sort();
-    if (nextCourts.length) updateNow("courts", nextCourts);
+    if (nextCourts.length) update("courts", nextCourts);
   };
 
   // draw-ready lock: output-affecting fields — those that reach the Excel
@@ -573,8 +562,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <label className="field__label">Pool size is a</label>
             {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
-              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => updateNow("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "max")} disabled={isDrawReady}>maximum</button>
+              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
           <div className="row">
@@ -707,17 +696,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {/* draw-ready lock: roundRobin is output-affecting. */}
-        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => updateNow("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
+        <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> Round-robin in pools</label>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => updateNow("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
+          <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || local.kind === "team"} /> Use Zekken display name</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => updateNow("naginata", e.target.checked)} /> Naginata competition</label>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} /> Naginata competition</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => updateNow("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
+          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
@@ -730,19 +719,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               <button
                 className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leagueTiebreakTopN", 3)}
+                onClick={() => update("leagueTiebreakTopN", 3)}
               >Top 3</button>
               <button
                 className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
                 type="button"
-                onClick={() => updateNow("leagueTiebreakTopN", 4)}
+                onClick={() => update("leagueTiebreakTopN", 4)}
               >Top 4</button>
             </div>
             <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => updateNow("leagueTwoThirdPlaces", e.target.checked)} />
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
             <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze — no 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>

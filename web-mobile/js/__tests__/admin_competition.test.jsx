@@ -550,7 +550,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 //   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
 //   2. saveNow builds an `effective` object by overlaying `localRef.current`
 //      values onto `cRef.current` for each field in `editedFieldsRef`.
-//   3. update / updateNow / updateNumber call `editedFieldsRef.current.add(k)`
+//   3. update / updateNumber call `editedFieldsRef.current.add(k)`
 //      before scheduling the save.
 //
 // Behavioral tests for the full lifecycle are blocked by vitest.setup's
@@ -579,8 +579,8 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     // An explicit Save control wired to saveNow.
     expect(src).toMatch(/onClick=\{saveNow\}/);
     // The edit handlers must NOT auto-persist: no save call inside update/
-    // updateNow/updateNumber bodies.
-    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+    // updateNumber bodies.
+    for (const handler of ['update', 'updateNumber']) {
       const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
       const m = src.match(re);
       expect(m, `expected \`const ${handler} = (...) => { ... };\``).not.toBeNull();
@@ -603,7 +603,7 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     // Each handler that mutates `local` must mark the edited field
     // BEFORE scheduling the save, so the sync effect preserves it
     // when SSE arrives during the debounce window.
-    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+    for (const handler of ['update', 'updateNumber']) {
       const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
       const m = src.match(re);
       expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();

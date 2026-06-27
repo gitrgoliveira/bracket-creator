@@ -232,14 +232,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
-  const [text, setText] = useStateA(() => (c.players || []).map((p) => {
-    if (c.withZekkenName && p.displayName) {
-      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
-      return p.danGrade ? `${base}, ${p.danGrade}` : base;
-    }
-    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
-    return p.danGrade ? `${base}, ${p.danGrade}` : base;
-  }).join("\n"));
+  // Initialise from the SAME generator that rosterDirty diffs against
+  // (generateRosterText), not the old inline 3-col-only-when-displayName
+  // logic. Otherwise a zekken competition whose players lack a displayName
+  // starts with "Name, Dojo" while rosterDirty computes "Name, LASTNAME,
+  // Dojo" → a false "Unsaved changes" flash on mount before the
+  // c.players/withZekkenName effect re-syncs text.
+  const [text, setText] = useStateA(() => generateRosterText(c.players || [], c.withZekkenName));
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);

@@ -173,12 +173,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the whole batch on the first offender (matches the all-or-nothing
 		// semantics SaveParticipants already enforces on write).
 		for i, p := range req.Players {
-			if strings.TrimSpace(p.Name) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: name must not be blank", i)})
-				return
-			}
-			if strings.TrimSpace(p.Dojo) == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: dojo must not be blank", i)})
+			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
 			}
 			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {

@@ -388,8 +388,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             fontSize: 12.5,
             padding: "4px 8px",
             borderRadius: 4,
-            background: saveErr ? "var(--red-soft)" : isDirty ? "var(--bg-2)" : lastSaved ? "var(--accent-soft)" : "transparent",
-            color: saveErr ? "var(--red)" : isDirty ? "var(--ink-2)" : "var(--accent)",
+            background: saveErr ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
+            color: saveErr ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
             transition: "all 300ms"
           }}>
@@ -687,7 +687,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           and disabled rules as the header button. */}
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
         {saveErr && <span style={{ fontSize: 12.5, color: "var(--red)", fontWeight: 600 }}>⚠ {saveErr}</span>}
-        {!saveErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>● Unsaved changes</span>}
+        {!saveErr && isDirty && !saving && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
         <button type="button" className="btn btn--primary" onClick={saveNow} disabled={!isDirty || saving}>
           {saving ? "Saving…" : "Save changes"}
         </button>

@@ -74,7 +74,7 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
 // does not matter (safe in test/bundler contexts too).
-function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
+export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -215,7 +215,12 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
     // validator treats an absent key the same as an explicit "" — both
     // "missing". Sending explicit empties only bloats the persisted YAML.
     const positionsOut = {};
-    positions.forEach(p => { if (values[p.key]) positionsOut[p.key] = values[p.key]; });
+    positions.forEach(p => {
+      // Trim here too (not only at the picker's onSelect) so a Save can never
+      // persist leading/trailing or whitespace-only names — matches AdminLineup.
+      const v = (values[p.key] || "").trim();
+      if (v) positionsOut[p.key] = v;
+    });
     if (allowDuringMatch && matchStarted) {
       setPendingPositions(positionsOut);
       setShowLineupReasonPrompt(true);
@@ -312,7 +317,7 @@ function MatchLineupSideEditor({ comp, team, match, allMatches, password, showTo
               roster={suggestions}
               ariaLabel={`${p.label} player`}
               disabled={isLocked || saving || copying}
-              onSelect={(name) => setValues(v => ({ ...v, [p.key]: name }))}
+              onSelect={(name) => setValues(v => ({ ...v, [p.key]: (name || "").trim() }))}
             />
           </label>
         ))}

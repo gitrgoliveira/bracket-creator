@@ -108,9 +108,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // from the dedicated court feed (GET /api/viewer/court/:court/matches) rather
     // than the whole-tournament aggregate. app.jsx skips its per-event aggregate
     // refetch while this view is active (so the operator's tablet stops
-    // re-downloading all courts on every score); this page keeps itself live via
-    // its own court-scoped SSE subscription. Until the first fetch resolves it
-    // falls back to the prop aggregate so the queue is never momentarily blank.
+    // re-downloading all courts on every score); this page instead subscribes to
+    // the tournament-wide /api/events SSE stream, filters to the event TYPES that
+    // can change a court's queue (see REFRESH_EVENTS below), and refetches its
+    // court feed on those — the scoping to one court happens server-side in the
+    // feed, not in the subscription. Until the first fetch resolves it falls back
+    // to the prop aggregate so the queue is never momentarily blank.
     const [courtComps, setCourtComps] = useStateSh(null);
     useEffectSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;

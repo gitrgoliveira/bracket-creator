@@ -177,7 +177,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       // empty values as "missing", which is what we want.
       const positionsOut = {};
       Object.entries(values).forEach(([k, v]) => {
-        if (v) positionsOut[k] = v;
+        // Trim here too (not just onBlur) so a Save triggered without a blur —
+        // e.g. Enter — never persists leading/trailing or whitespace-only names.
+        const trimmed = (v || "").trim();
+        if (trimmed) positionsOut[k] = trimmed;
       });
       const updated = await window.API.putTeamLineup(compId, teamId, round, positionsOut, password);
       setLockedAt(updated.lockedAt || null);
@@ -237,7 +240,11 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       <div className="card" style={{ padding: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {positions.map(p => {
-            const listId = `lineup-roster-${teamId}-${p.key}`;
+            // teamId can fall back to the team NAME (spaces/punctuation), which
+            // is not a valid HTML id and would break the input↔datalist binding
+            // in some browsers — sanitize to [A-Za-z0-9_-]. Only one AdminLineup
+            // (one team) renders at a time, so p.key keeps ids unique per form.
+            const listId = `lineup-roster-${teamId}-${p.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
             return (
               <label key={p.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
@@ -260,6 +267,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   value={values[p.key] || ""}
                   disabled={isLocked || saving}
                   onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
+                  onBlur={(e) => {
+                    const trimmed = e.target.value.trim();
+                    if (trimmed !== e.target.value) setValues(v => ({ ...v, [p.key]: trimmed }));
+                  }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 />
                 <datalist id={listId}>

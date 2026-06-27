@@ -127,4 +127,39 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     // Save is enabled here too.
     expect(saveButton(tree).props.disabled).toBeFalsy();
   });
+
+  it('sanitizes the datalist id when teamId falls back to a name with spaces/punctuation', async () => {
+    // No id on the team → teamIdOf falls back to the (messy) name.
+    const tree = await mountFor({ name: 'Team Bravo! (A)' });
+    const inputs = positionInputs(tree);
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const inp of inputs) {
+      // A valid HTML id: no whitespace or punctuation that would break list binding.
+      expect(inp.props.list).toMatch(/^[A-Za-z0-9_-]+$/);
+    }
+  });
+
+  it('trims leading/trailing whitespace before saving (Save without blur)', async () => {
+    let tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
+    const inp = positionInputs(tree).find(n => n.props['data-testid'] === 'lineup-position-1');
+    inp.props.onChange({ target: { value: '  Padded Name  ' } });
+    tree = runtime.currentTree();
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    expect(global.window.API.putTeamLineup).toHaveBeenCalled();
+    // putTeamLineup(compId, teamId, round, positionsOut, password)
+    const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
+    expect(positionsOut['1']).toBe('Padded Name');
+  });
+
+  it('drops a whitespace-only position instead of persisting blanks', async () => {
+    let tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
+    const inp = positionInputs(tree).find(n => n.props['data-testid'] === 'lineup-position-1');
+    inp.props.onChange({ target: { value: '   ' } });
+    tree = runtime.currentTree();
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
+    expect(positionsOut['1']).toBeUndefined();
+  });
 });

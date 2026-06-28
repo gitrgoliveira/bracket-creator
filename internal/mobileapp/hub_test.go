@@ -657,12 +657,13 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	assert.Equal(t, "heartbeat", payload.Type)
 }
 
-// mp-gpra review #9: when the server has broadcast nothing yet (head seq 0) and a
-// client reconnects with a stale positive Last-Event-ID (e.g. after a restart
-// with no new activity), the hub must NOT emit a resync_required frame stamped
-// id:0 — that would wrongly reset the browser's Last-Event-ID to "0". The client
-// keeps its id and picks up live events from seq 1.
-func TestHandleEvents_NoResyncWhenServerHasNoEvents(t *testing.T) {
+// mp-gpra: when the server has broadcast nothing yet (head seq 0) and a client
+// reconnects with a stale positive Last-Event-ID (restart with no new activity),
+// the hub MUST still emit resync_required — otherwise a client that keeps an
+// in-memory lastSeq across reconnects drops the first post-restart event (seq=1)
+// as a stale duplicate and goes silently stale. The frame must carry NO id: line
+// so the browser's Last-Event-ID isn't forced to "0".
+func TestHandleEvents_ResyncOnRestartWithNoEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewHub() // head seq is 0 — no Broadcast.
 
@@ -693,6 +694,9 @@ func TestHandleEvents_NoResyncWhenServerHasNoEvents(t *testing.T) {
 	}
 
 	body := w.BodyString()
-	assert.NotContains(t, body, "resync_required", "no resync_required when head seq is 0")
-	assert.NotContains(t, body, "id: 0\n", "must not emit an id: 0 frame")
+	assert.Contains(t, body, "resync_required", "head-seq-0 restart must still emit resync_required")
+	assert.Contains(t, body, `"type":"resync_required"`, "resync payload must be present")
+	// No id: line at all: head seq is 0 (no replay) and the resync is emitted
+	// without an id so the browser's Last-Event-ID is not forced to "0".
+	assert.NotContains(t, body, "id:", "head-seq-0 resync must NOT carry an id: line")
 }

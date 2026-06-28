@@ -437,24 +437,36 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			entries, complete := h.snapshotHistorySince(lastEventID)
 			currentHeadSeq := h.seq.Load()
 			// Unsatisfiable when the ring rolled past the client's Last-Event-ID
-			// (eviction) or the server restarted and its in-memory seq reset below
-			// it. currentHeadSeq==0 means the server has no events yet: nothing to
-			// replay, and a resync stamped with seq 0 would wrongly reset the
-			// client's Last-Event-ID to "0", so skip it (the client keeps its id
-			// and picks up live events from seq 1).
-			unsatisfiable := (!complete || lastEventID > currentHeadSeq) && currentHeadSeq > 0
+			// (eviction) OR the server restarted and its in-memory seq reset below
+			// the client's Last-Event-ID — INCLUDING a fresh restart at head seq 0,
+			// before any event has been broadcast (the client's stale Last-Event-ID
+			// is still ahead of 0). That last case must still resync: otherwise a
+			// client that keeps an in-memory lastSeq across reconnects would treat
+			// the first post-restart event (seq=1) as a stale duplicate and drop it,
+			// leaving the screen silently stale.
+			unsatisfiable := !complete || lastEventID > currentHeadSeq
 			if unsatisfiable {
-				// A gap-free replay is impossible. Signal the client with a
-				// resync_required frame (stamped with the current head seq so its
-				// Last-Event-ID advances to head and won't immediately re-gap),
-				// then fall through to the normal streaming loop.
+				// A gap-free replay is impossible. Tell the client to resync (reset
+				// its in-memory lastSeq + full refetch). Fall through to the normal
+				// streaming loop afterwards.
 				fmt.Printf("SSE replay: client Last-Event-ID=%d not satisfiable (complete=%v, headSeq=%d); sending resync_required\n", lastEventID, complete, currentHeadSeq)
 				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
 				resyncPayload, err := json.Marshal(resyncEvent)
 				if err != nil {
 					fmt.Printf("SSE resync marshal error: %v\n", err)
-				} else {
+				} else if currentHeadSeq > 0 {
+					// Stamp id: <head> so the browser's Last-Event-ID advances to head
+					// and the client won't immediately re-gap.
 					writeSSEEnvelope(c.Writer, currentHeadSeq, string(resyncPayload))
+					c.Writer.Flush()
+				} else {
+					// Fresh restart, head seq 0: emit the resync WITHOUT an id: line so
+					// the browser's Last-Event-ID isn't forced to "0" (a real id:0 would
+					// corrupt later reconnect checkpoints). The data frame still fires
+					// onmessage, so the client resets its lastSeq and refetches.
+					if _, werr := fmt.Fprintf(c.Writer, "data: %s\n\n", resyncPayload); werr != nil {
+						fmt.Printf("SSE resync write failed: %v\n", werr)
+					}
 					c.Writer.Flush()
 				}
 			} else {

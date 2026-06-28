@@ -35,7 +35,7 @@
       if (code) el.textContent = code.textContent; // unwrap <code> → raw source
       el.dataset.mermaidAttempted = "1";
     });
-    window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: "antiscript" });
     try {
       window.mermaid.run({ nodes: pending });
     } catch (e) {

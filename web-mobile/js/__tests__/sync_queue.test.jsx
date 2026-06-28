@@ -665,6 +665,27 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm4')).toBe(false);
     });
+
+    it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
+        // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
+        // terminal entry. A non-array element would throw on destructure and (under
+        // one try/catch) abort the entire rehydrate — the valid entry must survive.
+        const mixed = [
+            42,
+            null,
+            ['c1:bad'],
+            ['c1:good', {
+                compID: 'c1', matchID: 'good', payload: {}, password: 'pw',
+                kind: 'decision', terminal: true, method: 'POST',
+                url: '/api/competitions/c1/matches/good/decision', enqueuedAt: Date.now(),
+            }],
+        ];
+        localStorage.setItem('bc_write_queue', JSON.stringify(mixed));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'good')).toBe(true);
+    });
 });
 
 describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydrate contract)', () => {

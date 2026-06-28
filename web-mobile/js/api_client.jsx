@@ -471,7 +471,13 @@ if (typeof window !== 'undefined') {
         if (!Array.isArray(entries)) return;
         const now = Date.now();
         let anyLoaded = false;
-        for (const [key, descriptor] of entries) {
+        for (const item of entries) {
+            // Defensive: a single malformed element (corrupt/tampered storage) must
+            // not throw and abort the whole rehydrate — destructuring a non-array in
+            // the for-of header would do exactly that, dropping ALL valid queued
+            // writes. Validate the tuple shape first and skip bad items individually.
+            if (!Array.isArray(item) || item.length < 2) continue;
+            const [key, descriptor] = item;
             if (!key || !descriptor || typeof descriptor !== 'object') continue;
             // Drop entries without a timestamp or older than TTL.
             if (!descriptor.enqueuedAt || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;

@@ -6266,6 +6266,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex: 1;
   min-width: 0;
 }
+/* F5: permanent-failure variant — a queued terminal write was rejected and
+   dropped (never saved). Danger palette (mirrors .alert--error) + red dot, so it
+   reads as an error the operator must act on, not a transient "will retry". */
+.pending-write-banner--failed {
+  background: var(--danger-soft);
+  border-color: #f5c2c2;
+  color: #9b1c1c;
+}
+.pending-write-banner--failed::before {
+  background: var(--danger);
+}
 @keyframes pending-write-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }

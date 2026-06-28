@@ -215,6 +215,23 @@ function _setSyncStatus(s) {
     }
 }
 
+// Terminal-write FAILURE channel. When a queued terminal write (completed score /
+// decision / lineup) is permanently discarded — a non-retryable 4xx on retry
+// (409 conflict, 400 validation, 401/403 auth) or a corrupt entry — the write
+// never landed. Sync status alone returns to 'synced', which would let the editor
+// clear its pending banner and look "saved". This channel lets surfaces show an
+// explicit "not saved" state instead. Payload: {compID, matchID, kind, status, reason}.
+const _terminalFailListeners = new Set();
+function subscribeTerminalWriteFailed(fn) {
+    _terminalFailListeners.add(fn);
+    return () => _terminalFailListeners.delete(fn);
+}
+function _notifyTerminalWriteFailed(info) {
+    for (const fn of _terminalFailListeners) {
+        try { fn(info); } catch (_e) { /* swallow */ }
+    }
+}
+
 /**
  * Recompute and publish the correct sync status from current state:
  *   offline  — _offlineFlag is set and the queue still has entries
@@ -297,6 +314,7 @@ async function _flushQueue() {
                 if (terminal) {
                     if (!_isAllowedTerminalRequest(method, url)) {
                         console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
+                        _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                         continue;
                     }
@@ -338,17 +356,21 @@ async function _flushQueue() {
                         const body = await res.json().catch(() => ({}));
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, reason: body.reasonHuman || body.error || 'conflict (409)' });
                         }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     } else {
                         // Non-retryable response (4xx other than decision-locked above):
                         // 400 validation, 401/403 auth, 413, generic 409 conflict, etc.
-                        // This queued write can never succeed, so discard rather than retry
-                        // forever and wedge the pill on "Syncing…".
-                        // Log for devtools visibility.
-                        res.json().then((body) => {
-                            console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
-                        }).catch(() => {});
+                        // This queued write can never succeed, so discard rather than
+                        // retry forever and wedge the pill on "Syncing…". For TERMINAL
+                        // writes, surface an explicit failure so the editor shows a
+                        // "not saved" state instead of silently clearing to "saved".
+                        const body = await res.json().catch(() => ({}));
+                        console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
+                        if (terminal) {
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status}` });
+                        }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     }
                 } catch (_) {
@@ -1842,13 +1864,16 @@ const API = {
     },
 };
 
-export { API, subscribeSyncStatus, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
     // C2: expose sync-status pub/sub so components loaded as window.* globals
     // (admin_scoring_modal.jsx, etc.) can subscribe without an ES import.
     window.subscribeSyncStatus = subscribeSyncStatus;
+    // mp-gpra: terminal-write failure pub/sub — lets the score editor show an
+    // explicit "not saved" state when a queued terminal write is permanently dropped.
+    window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
     // mp-gpra: reconnectEvents and hasPendingTerminalWrite are on window.API
     // (via the API object above) — no separate window assignments needed.
 }

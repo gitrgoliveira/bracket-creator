@@ -736,3 +736,33 @@ describe('clearQueue: cancels an in-flight flush (no sends with a revoked passwo
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });
+
+describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is surfaced (no silent drop)', () => {
+    it('fires on a non-retryable 4xx for a queued terminal write', async () => {
+        // The discard path console.warns for devtools; the strict test setup fails
+        // on unexpected warns, so suppress it here (it's expected).
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // Enqueue a terminal write while offline.
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mfail', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mfail')).toBe(true);
+
+        // On flush the server returns a non-retryable 4xx (e.g. 409 conflict).
+        const failures = [];
+        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 409,
+            json: () => Promise.resolve({ error: 'conflict', reasonHuman: 'Match already finished' }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsub();
+        warnSpy.mockRestore();
+
+        // The failure was surfaced (not silently dropped) and the entry discarded.
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mfail', status: 409 });
+        expect(failures[0].reason).toContain('Match already finished');
+        expect(API.hasPendingTerminalWrite('c1', 'mfail')).toBe(false);
+    });
+});

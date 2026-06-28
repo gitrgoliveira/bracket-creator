@@ -85,6 +85,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // terminal submit closure so "Retry now" can re-invoke it directly.
   const [pendingWrite, setPendingWrite] = useStateA(false);
   const pendingFnRef = useRefA(null);
+  // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
+  // 4xx on retry) — the write never landed, so we must show an explicit "not
+  // saved" failure state rather than let the pending banner clear to "saved".
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
   // Fetched once on open so the warning banner can fire before the
   // operator submits (the server validates the same cap on PUT /score).
@@ -272,8 +276,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
     setSubmitting(true);
-    // Clear any prior pending-write state when the operator explicitly retries.
-    if (mountedRef.current) setPendingWrite(false);
+    // Clear any prior pending/failed state when the operator explicitly retries.
+    if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
     let res;
     try {
       res = await fn();
@@ -323,6 +327,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         setPendingWrite(false);
         pendingFnRef.current = null;
       }
+    });
+    return unsub;
+  }, [m.compId, m.id]);
+
+  // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
+  // retry) as an explicit "not saved" state — otherwise the write is silently
+  // dropped and the pending banner clears to look saved. Guarded like above.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeTerminalWriteFailed !== 'function') return;
+    const unsub = window.subscribeTerminalWriteFailed((info) => {
+      if (!mountedRef.current) return;
+      if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})` });
+      setPendingWrite(false); // the queued write is gone — it failed, not pending
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -786,10 +805,27 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onCancel={() => setShowCorrectionPrompt(false)}
             />
           )}
+          {/* F5: PERMANENT-failure banner — a queued terminal write was rejected
+              (non-retryable 4xx) and dropped, so it never saved. Non-dismissible
+              danger state; the operator must re-enter and submit again. Takes
+              precedence over the (now-cleared) pending banner. */}
+          {writeFailed && (
+            <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
+              <span>Not saved — {writeFailed.reason}. Re-enter the result and submit again.</span>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={submitting || !pendingFnRef.current}
+                onClick={() => { if (pendingFnRef.current) doSubmit(pendingFnRef.current); }}
+              >
+                Retry
+              </button>
+            </div>
+          )}
           {/* F5: pending-write banner — shown when a terminal submit was only queued
               (offline / transient failure). The write is durable in localStorage
               and will be retried automatically. Operator may still dismiss. */}
-          {pendingWrite && (
+          {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
               <span>Not saved yet — will keep retrying until it lands.</span>
               <button

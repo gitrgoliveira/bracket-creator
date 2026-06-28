@@ -177,6 +177,14 @@ function _isAllowedTerminalRequest(method, url) {
 
 function _persistQueue() {
     try {
+        // Remove the key (rather than writing "[]") when the queue is empty: avoids
+        // storage churn and, critically, prevents an in-flight flush that reaches
+        // _persistQueue() after clearQueue() from re-creating an empty bc_write_queue,
+        // which would undermine the credential-revocation intent of removing it.
+        if (_writeQueue.size === 0) {
+            localStorage.removeItem(QUEUE_STORAGE_KEY);
+            return;
+        }
         const entries = [..._writeQueue.entries()];
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
     } catch (_e) { /* quota / private-browsing — silently skip */ }

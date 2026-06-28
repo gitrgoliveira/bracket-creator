@@ -584,7 +584,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       refresh();
     };
     const unsub = window.API.subscribeToEvents((event) => {
-      if (event && (event.type === "participants_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted")) {
+      if (event && (event.type === "participants_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "resync_required")) {
         if (timer) return;
         timer = setTimeout(fire, 600);
       }

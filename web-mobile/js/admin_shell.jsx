@@ -369,7 +369,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
       }, jitter);
     };
     const unsub = window.API.subscribeToEvents((event) => {
-      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated" || event.type === "schedule_updated") {
+      if (event.type === "tournament_updated" || event.type === "competition_started" || event.type === "competition_completed" || event.type === "competition_deleted" || event.type === "match_updated" || event.type === "schedule_updated" || event.type === "resync_required") {
         scheduleRefresh();
       }
     });

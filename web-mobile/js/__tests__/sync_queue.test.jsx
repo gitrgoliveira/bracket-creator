@@ -710,5 +710,8 @@ describe('clearQueue: cancels an in-flight flush (no sends with a revoked passwo
         expect(flushFetch).toHaveBeenCalledTimes(1);
         expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
         expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+        // The in-flight flush's post-loop _persistQueue() must NOT re-create an
+        // empty bc_write_queue after clearQueue() removed it (credential revocation).
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });

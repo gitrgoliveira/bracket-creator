@@ -134,6 +134,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 "match_updated", "schedule_updated", "competition_started",
                 "competition_completed", "draw_generated", "draw_discarded",
                 "swiss_round_generated", "competitor_status_updated", "participants_updated",
+                // resync_required: server signalled the SSE replay was unsatisfiable
+                // (ring eviction / restart) — treat as a refresh so this court's queue
+                // doesn't stay stale until the next ordinary event happens to arrive.
+                "resync_required",
             ]);
             const off = window.API.subscribeToEvents((event) => {
                 if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;

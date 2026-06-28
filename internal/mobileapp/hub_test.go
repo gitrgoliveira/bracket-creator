@@ -146,7 +146,7 @@ func TestHubHandleEvents(t *testing.T) {
 	h.Broadcast(EventMatchUpdated, "test-data")
 
 	// Wait a bit for processing
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "test-data")
 
 	// Close the connection
 	cancel()
@@ -204,7 +204,7 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 	// Wait for the handler to finish replay. We can't easily poll the
 	// recorder's body while the stream is open, so close the context
 	// after a brief settle period and inspect the recorded body.
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "id: 5\n")
 	cancel()
 	close(closeChan)
 	select {
@@ -261,7 +261,7 @@ func TestHubRingBufferEvicts(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "resync_required")
 	cancel()
 	close(closeChan)
 	<-done
@@ -367,7 +367,7 @@ func TestHandleEventsEmitsIDLine(t *testing.T) {
 	}
 
 	h.Broadcast(EventMatchUpdated, map[string]string{"foo": "bar"})
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "id: 1\n")
 	cancel()
 	close(w.closeChan)
 	<-done
@@ -458,7 +458,7 @@ func TestHandleEvents_ResyncOnEviction(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "resync_required")
 	cancel()
 	close(closeChan)
 	select {
@@ -529,7 +529,7 @@ func TestHandleEvents_ResyncOnServerRestart(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "resync_required")
 	cancel()
 	close(closeChan)
 	select {
@@ -586,7 +586,7 @@ func TestHandleEvents_SatisfiableReplayUnchanged(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "id: 5\n")
 	cancel()
 	close(closeChan)
 	select {
@@ -687,7 +687,7 @@ func TestHandleEvents_ResyncOnRestartWithNoEvents(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "resync_required")
 	cancel()
 	close(closeChan)
 	select {
@@ -702,4 +702,15 @@ func TestHandleEvents_ResyncOnRestartWithNoEvents(t *testing.T) {
 	// No id: line at all: head seq is 0 (no replay) and the resync is emitted
 	// without an id so the browser's Last-Event-ID is not forced to "0".
 	assert.NotContains(t, body, "id:", "head-seq-0 resync must NOT carry an id: line")
+}
+
+// waitForFrame waits until the recorded SSE body contains want, then returns. A
+// deterministic replacement for a fixed sleep before cancelling an SSE request:
+// BodyString() is concurrency-safe and the initial replay/resync/heartbeat bytes
+// are written synchronously on connect, so this avoids CI flakiness under load.
+func waitForFrame(t *testing.T, w *mockResponseWriter, want string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return strings.Contains(w.BodyString(), want)
+	}, 2*time.Second, 5*time.Millisecond, "expected SSE frame %q not observed", want)
 }

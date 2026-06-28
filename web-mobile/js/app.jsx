@@ -768,6 +768,10 @@ function App() {
             if (authedRef.current) {
                 setAuthed(false);
                 setPassword("");
+                // Security: drop the offline write queue too, so the old
+                // plaintext password doesn't linger in localStorage past the
+                // reset (clearQueue self-guards its own storage access).
+                if (window.API && window.API.clearQueue) window.API.clearQueue();
                 try {
                     localStorage.removeItem("bc_authed");
                     localStorage.removeItem("bc_password");
@@ -943,6 +947,9 @@ function App() {
     setAuthed(false);
     setMode("viewer");
     setPassword("");
+    // Security: clear the offline write queue so the stale plaintext password
+    // and any pending writes don't survive logout in localStorage.
+    if (window.API && window.API.clearQueue) window.API.clearQueue();
     localStorage.removeItem("bc_authed");
     localStorage.removeItem("bc_password");
   };

@@ -429,18 +429,19 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		if lastEventID > 0 {
 			entries, complete := h.snapshotHistorySince(lastEventID)
 			currentHeadSeq := h.seq.Load()
-			unsatisfiable := !complete || lastEventID > currentHeadSeq
-			if !complete {
-				fmt.Printf("SSE replay: client requested Last-Event-ID=%d but oldest retained seq exceeds it; %d entries replayed\n", lastEventID, len(entries))
-			}
+			// Unsatisfiable when the ring rolled past the client's Last-Event-ID
+			// (eviction) or the server restarted and its in-memory seq reset below
+			// it. currentHeadSeq==0 means the server has no events yet: nothing to
+			// replay, and a resync stamped with seq 0 would wrongly reset the
+			// client's Last-Event-ID to "0", so skip it (the client keeps its id
+			// and picks up live events from seq 1).
+			unsatisfiable := (!complete || lastEventID > currentHeadSeq) && currentHeadSeq > 0
 			if unsatisfiable {
-				// The ring rolled past the client's Last-Event-ID (eviction)
-				// or the server restarted and its seq counter reset below the
-				// client's Last-Event-ID. Either way a gap-free replay is
-				// impossible. Signal the client with a resync_required frame
-				// (stamped with the current head seq so the client's
-				// Last-Event-ID advances to head and won't immediately re-gap)
+				// A gap-free replay is impossible. Signal the client with a
+				// resync_required frame (stamped with the current head seq so its
+				// Last-Event-ID advances to head and won't immediately re-gap),
 				// then fall through to the normal streaming loop.
+				fmt.Printf("SSE replay: client Last-Event-ID=%d not satisfiable (complete=%v, headSeq=%d); sending resync_required\n", lastEventID, complete, currentHeadSeq)
 				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
 				resyncPayload, err := json.Marshal(resyncEvent)
 				if err != nil {

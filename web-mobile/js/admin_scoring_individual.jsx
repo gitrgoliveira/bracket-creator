@@ -292,6 +292,18 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     return res;
   };
 
+  // F5 (re-open hydration): if a terminal write for THIS match is still queued
+  // (operator finished offline, closed the editor, then reopened before the
+  // queue drained), surface the pending banner on mount. The submit closure
+  // can't be recovered from the serialized queue, so "Retry now" stays disabled
+  // until the operator re-submits; the queue keeps auto-retrying meanwhile.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (window.API && window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+      setPendingWrite(true);
+    }
+  }, [m.compId, m.id]);
+
   // F5: subscribe to sync-status so the pending-write banner auto-clears once
   // the queue drains for this match. Mounted once; reads match identity via
   // closure. Uses mountedRef guard so setState never fires after unmount.
@@ -775,7 +787,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               <button
                 type="button"
                 className="btn btn--sm btn--ghost"
-                disabled={submitting}
+                // Disabled when there is no captured submit closure — e.g. the
+                // banner was hydrated on re-open (pendingFnRef can't be restored
+                // from the serialized queue). The queue still auto-retries.
+                disabled={submitting || !pendingFnRef.current}
                 onClick={() => {
                   if (pendingFnRef.current) doSubmit(pendingFnRef.current);
                 }}

@@ -24,6 +24,8 @@ let enqueueRunningWrite;
 
 let _origFetch;
 let _origEventSource;
+let _origLocalStorage;
+let _lsStore;
 
 beforeEach(async () => {
     vi.useFakeTimers();
@@ -37,6 +39,18 @@ beforeEach(async () => {
     global.EventSource.OPEN = 1;
 
     _origFetch = global.fetch;
+
+    // Functional in-memory localStorage so F4 persist/rehydrate is testable
+    // (jsdom's can be unavailable here). Reset before the import so the module's
+    // rehydrate IIFE sees a clean store.
+    _origLocalStorage = global.localStorage;
+    _lsStore = {};
+    global.localStorage = {
+        getItem: (k) => (k in _lsStore ? _lsStore[k] : null),
+        setItem: (k, v) => { _lsStore[k] = String(v); },
+        removeItem: (k) => { delete _lsStore[k]; },
+        clear: () => { _lsStore = {}; },
+    };
 
     mod = await import('../api_client.jsx');
     API = mod.API;
@@ -52,6 +66,11 @@ afterEach(() => {
         delete global.EventSource;
     } else {
         global.EventSource = _origEventSource;
+    }
+    if (_origLocalStorage === undefined) {
+        delete global.localStorage;
+    } else {
+        global.localStorage = _origLocalStorage;
     }
 });
 
@@ -567,5 +586,67 @@ describe('recordScore: completed write drains queued running autosave', () => {
         online = true;
         await tick(600);
         expect(delivered).toContain('completed');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// mp-gpra review fixes: clearQueue (security), rehydrate url validation
+// (security), hasPendingTerminalWrite contract (banner re-hydrate).
+// ---------------------------------------------------------------------------
+
+describe('clearQueue: drops queued writes + persisted store (logout / password_reset)', () => {
+    it('empties the queue, removes bc_write_queue, and resets sync status to synced', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        const queued = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(queued).toMatchObject({ queued: true });
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(localStorage.getItem('bc_write_queue')).not.toBeNull();
+
+        let status;
+        const unsub = subscribeSyncStatus((s) => { status = s; });
+        API.clearQueue();
+        unsub();
+
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(status).toBe('synced');
+    });
+});
+
+describe('rehydrate: tampered terminal url from localStorage is rejected (security)', () => {
+    it('drops a terminal entry whose url is not a same-origin /api/ path', async () => {
+        const evil = [['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: 'https://evil.example/steal', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(evil));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+    });
+
+    it('keeps a terminal entry with a valid /api/ url', async () => {
+        const ok = [['c1:m2', {
+            compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: '/api/competitions/c1/matches/m2/decision', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(ok));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(true);
+    });
+});
+
+describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydrate contract)', () => {
+    it('is false for a queued running write and true for a queued terminal write', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mr', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mr')).toBe(false);
+        await API.recordScore('c1', 'mt', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mt')).toBe(true);
     });
 });

@@ -640,3 +640,43 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	require.NoError(t, err, "heartbeat data must be valid JSON")
 	assert.Equal(t, "heartbeat", payload.Type)
 }
+
+// mp-gpra review #9: when the server has broadcast nothing yet (head seq 0) and a
+// client reconnects with a stale positive Last-Event-ID (e.g. after a restart
+// with no new activity), the hub must NOT emit a resync_required frame stamped
+// id:0 — that would wrongly reset the browser's Last-Event-ID to "0". The client
+// keeps its id and picks up live events from seq 1.
+func TestHandleEvents_NoResyncWhenServerHasNoEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHub() // head seq is 0 — no Broadcast.
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+	req.Header.Set("Last-Event-ID", "9999") // stale id from before a restart
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+	assert.NotContains(t, body, "resync_required", "no resync_required when head seq is 0")
+	assert.NotContains(t, body, "id: 0\n", "must not emit an id: 0 frame")
+}

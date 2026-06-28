@@ -258,8 +258,11 @@ async function _flushQueue() {
                 // Determine the effective HTTP method and URL for this entry.
                 // Running score writes (terminal=false) use the hard-coded score PUT
                 // (backward compat). Terminal entries carry their own method+url.
-                const effectiveMethod = (terminal && method) ? method : 'PUT';
-                const effectiveUrl = (terminal && url)
+                // Defense-in-depth: method/url on terminal entries may have been
+                // rehydrated from (tamperable) localStorage. Whitelist the method
+                // and require a same-origin /api/ path before they reach fetch.
+                const effectiveMethod = (terminal && ['PUT', 'POST', 'DELETE'].includes(method)) ? method : 'PUT';
+                const effectiveUrl = (terminal && typeof url === 'string' && url.startsWith('/api/'))
                     ? url
                     : `/api/competitions/${compID}/matches/${matchID}/score`;
                 try {
@@ -284,20 +287,18 @@ async function _flushQueue() {
                         // (decision already recorded) even though the client never saw a 2xx.
                         // On the subsequent queued retry the server returns 409 with
                         // error="decision_locked" or "already_ineligible" — both indicate our
-                        // earlier (lost-response) attempt succeeded. Treat as success: remove
-                        // from queue without warning. Any other 409 (unexpected) falls through
-                        // to the discard-with-warn path below.
+                        // earlier (lost-response) attempt succeeded. Any other 409
+                        // (unexpected) can never succeed on retry either — so both
+                        // cases discard the entry; only the unexpected one warns.
                         //
                         // IMPORTANT: this lost-response rule applies ONLY to queued retries
                         // inside _flushQueue. The direct recordDecision call path always throws
                         // on 409 so the score editor's force-retry prompt still fires.
                         const body = await res.json().catch(() => ({}));
-                        if (body.error === 'decision_locked' || body.error === 'already_ineligible') {
-                            if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
-                        } else {
+                        if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
-                            if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                         }
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     } else {
                         // Non-retryable response (4xx other than decision-locked above):
                         // 400 validation, 401/403 auth, 413, generic 409 conflict, etc.
@@ -345,21 +346,29 @@ async function _flushQueue() {
  * is handled by the caller's logic; this path keeps them consistent).
  * Triggers an immediate flush attempt; on failure backs off and retries.
  */
-function enqueueRunningWrite(compID, matchID, payload, password) {
-    _writeQueue.set(_revKey(compID, matchID), {
-        compID, matchID, payload, password,
-        kind: 'score', terminal: false,
-        method: 'PUT',
-        url: `/api/competitions/${compID}/matches/${matchID}/score`,
-        enqueuedAt: Date.now(),
-    });
+// Shared post-enqueue tail for both queue paths: persist, republish sync status,
+// reset the backoff counter (a fresh user write must not inherit a stale
+// max-backoff delay from a prior failure run), and kick a flush.
+function _commitEnqueue(key, descriptor) {
+    _writeQueue.set(key, descriptor);
     _persistQueue();
     _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-    // A fresh user write resets the backoff counter so it doesn't inherit a
-    // stale max-backoff delay from a prior failure run (mirrors the online handler).
     _flushAttempt = 0;
     _flushQueue();
+}
+
+/**
+ * Enqueue a running-status write for offline-resilient delivery.
+ * Last-write-wins per matchId. Running writes always PUT to the score endpoint,
+ * so method/url are omitted — _flushQueue reconstructs that path for terminal=false.
+ */
+function enqueueRunningWrite(compID, matchID, payload, password) {
+    _commitEnqueue(_revKey(compID, matchID), {
+        compID, matchID, payload, password,
+        kind: 'score', terminal: false,
+        enqueuedAt: Date.now(),
+    });
 }
 
 /**
@@ -376,17 +385,12 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
  * @param {string} matchID    - Match ID (for identity tracking)
  */
 function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
-    _writeQueue.set(key, {
+    _commitEnqueue(key, {
         compID, matchID, payload, password,
         kind, terminal: true,
         method, url,
         enqueuedAt: Date.now(),
     });
-    _persistQueue();
-    _recomputeSyncStatus();
-    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-    _flushAttempt = 0;
-    _flushQueue();
 }
 
 // Flush the queue whenever the browser comes back online.
@@ -431,6 +435,9 @@ if (typeof window !== 'undefined') {
             if (!key || !descriptor || typeof descriptor !== 'object') continue;
             // Drop entries without a timestamp or older than TTL.
             if (!descriptor.enqueuedAt || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
+            // Defense-in-depth: localStorage is tamperable. Reject terminal entries
+            // whose url is not a same-origin /api/ path before they can reach fetch.
+            if (descriptor.terminal && (typeof descriptor.url !== 'string' || !descriptor.url.startsWith('/api/'))) continue;
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
                 _writeQueue.set(key, descriptor);
@@ -485,7 +492,7 @@ function _reconnectDelay() {
 
 /** Arm the silence watchdog. Idempotent — clears any prior interval first. */
 function _armWatchdog() {
-    if (_watchdogTimer !== null) { clearInterval(_watchdogTimer); _watchdogTimer = null; }
+    _disarmWatchdog();
     _watchdogTimer = setInterval(() => {
         // If the source is gone already (e.g. onerror cleared it) do nothing —
         // the reconnect timer will re-arm the watchdog when the new source opens.
@@ -501,7 +508,7 @@ function _armWatchdog() {
                 _reconnectAttempt++;
             }
             // Watchdog re-arms itself after _ensureConnected → onopen.
-            if (_watchdogTimer !== null) { clearInterval(_watchdogTimer); _watchdogTimer = null; }
+            _disarmWatchdog();
         }
     }, SSE_WATCHDOG_INTERVAL_MS);
 }
@@ -1758,6 +1765,21 @@ const API = {
     hasPendingTerminalWrite(compID, matchID) {
         const descriptor = _writeQueue.get(_revKey(compID, matchID));
         return !!(descriptor && descriptor.terminal);
+    },
+
+    // mp-gpra (security): clearQueue — drop all queued writes (in-memory + the
+    // persisted bc_write_queue) and reset sync state. Called on logout /
+    // password_reset so a stale plaintext password and any pending writes don't
+    // linger in localStorage past credential revocation — bringing bc_write_queue
+    // to the same lifecycle as bc_password. Pending offline writes are discarded:
+    // on a password_reset they would 401 on retry anyway, and logout is explicit.
+    clearQueue() {
+        _writeQueue.clear();
+        try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushAttempt = 0;
+        _offlineFlag = false;
+        _recomputeSyncStatus();
     },
 };
 

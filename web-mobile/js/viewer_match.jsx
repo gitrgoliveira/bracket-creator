@@ -289,8 +289,14 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
           setScoringMatch(null);
           onClose();
           return res;
-        } catch (_err) {
-          // leave modal open so the error is visible
+        } catch (err) {
+          // A non-queued failure (direct 4xx validation/conflict, or an unexpected
+          // exception). ScoreEditorModal doesn't render generic submit errors and the
+          // public viewer has no toast, so surface it explicitly — log + alert (the
+          // established fallback here, mirroring app.jsx) — rather than silently
+          // leaving the modal open. The modal stays open so the operator can retry.
+          console.error("Self-run score submit failed:", err);
+          window.alert(err && err.message ? err.message : "Couldn't save the result. Please try again.");
         }
       },
       password: "",

@@ -1536,6 +1536,14 @@ paths:
                 participantIds:
                   type: array
                   maxItems: 1000
+                  description: >
+                    Participant identifiers to check in. Each is either a stable
+                    UUID or, for legacy UUID-less rosters, the composite
+                    `name|dojo` key (the same identifier the web client builds).
+                    Unlike the single-participant `{pid}` path parameter, each
+                    entry here is capped at 64 chars and validated server-side —
+                    a legacy `name|dojo` composite longer than 64 is rejected
+                    with 400.
                   items:
                     type: string
                     maxLength: 64

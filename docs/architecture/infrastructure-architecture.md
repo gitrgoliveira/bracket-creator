@@ -89,7 +89,7 @@ flowchart TB
             caddy["Caddy :443 (Let's Encrypt)"]
             app["app container :8080"]
         end
-        pd[("30 GB persistent disk<br/>/opt/tournament-data")]
+        pd[("30 GB boot disk — free-tier cap<br/>OS + Docker + image + /opt/tournament-data")]
     end
     fw --> caddy --> app --> pd
 ```
@@ -114,6 +114,10 @@ flowchart LR
 - **No database.** State is human-readable Markdown + CSV on disk; multi-file changes are made
   durable via a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - Backups are trivial — snapshot the disk or copy `tournament-data/` elsewhere.
+- **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks —
+  30 GB on GCP, 50 GB on Oracle — are the free-tier **boot-disk** allowances (they hold the OS,
+  Docker, and the app image, with `tournament-data/` alongside); the module simply uses the free
+  cap rather than provisioning a separate data disk.
 
 ## 5. Capacity & scaling
 

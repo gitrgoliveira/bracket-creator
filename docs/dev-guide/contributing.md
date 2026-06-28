@@ -55,7 +55,7 @@ make run          # starts on localhost:8080
 PORT=8081 make run
 ```
 
-Open the browser and walk through bracket generation manually — type checking and unit tests do not exercise the UI rendering path.
+Open the browser and walk through bracket generation manually. Type checking and unit tests do not exercise the UI rendering path.
 
 ### Testing the mobile / live tournament app
 
@@ -73,13 +73,13 @@ TOURNAMENT_DATA_DIR=/path PORT=8082 ./bin/bracket-creator mobile-app
 
 An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 
-**Important:** `web-mobile/` is a Preact/JSX frontend compiled by esbuild into `web-mobile/dist/` and then embedded into the Go binary at build time. Any change to `web-mobile/js/*.js` or `web-mobile/css/*.css` requires:
+**Important:** `web-mobile/` is a Preact/JSX frontend compiled by esbuild into `web-mobile/dist/` and then embedded into the Go binary at build time. Any change to `web-mobile/js/*.js` or `web-mobile/css/*.css` requires the following:
 
-1. Rebuild the JS bundle: `cd web-mobile && npm run build` (or `npx esbuild ...` — see the project `Makefile`)
+1. Rebuild the JS bundle: `cd web-mobile && npm run build` (or `npx esbuild ...`; see the project `Makefile`)
 2. Rebuild the binary: `make go/build`
 3. Restart the server: `make run-mobile`
 
-Simply editing `.js` files and refreshing the browser will **not** pick up changes — the browser is served the embedded bundle baked into the last binary build.
+Simply editing `.js` files and refreshing the browser will **not** pick up changes; the browser is served the embedded bundle baked into the last binary build.
 
 ## Create a commit
 

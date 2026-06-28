@@ -43,8 +43,8 @@ function Breadcrumbs({ items }) {
             // to <body> after every breadcrumb navigation, stranding tab order.
             // The clicked button keeps focus naturally; the destination view
             // manages its own focus. (The old blur appeared to target a mobile
-            // keyboard / hover dismissal, but a blanket blur is the wrong tool —
-            // it breaks keyboard users for a problem the browser already handles
+            // keyboard / hover dismissal, but a blanket blur is the wrong tool.
+            // It breaks keyboard users for a problem the browser already handles
             // when the navigated-away input unmounts.)
             <button type="button" onClick={() => item.onClick()}>
               {i === 0 && <span style={{ marginRight: 4 }}>←</span>}
@@ -62,7 +62,7 @@ function Breadcrumbs({ items }) {
 // How long the SSE feed must stay down before the topbar escalates from the
 // calm "Reconnecting…" pill to the full-width alert banner. Set above the
 // stream's 5s retry interval so a single failed-then-recovered cycle never
-// trips it — only an outage that survives the first retry escalates.
+// trips it; only an outage that survives the first retry escalates.
 const SUSTAINED_DOWN_MS = 8000;
 
 // Framework-free tracker for the escalation timer. `note(connected)` is called
@@ -107,11 +107,11 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   // about the tournament state"). The admin chrome previously showed nothing
   // when the SSE stream dropped, so stale data sat silently. We open our own
   // lightweight subscription purely to read the connection status exposed by
-  // API.subscribeToEvents' second (onStatus) callback — 'open' vs 'error'.
+  // API.subscribeToEvents' second (onStatus) callback: 'open' vs 'error'.
   // The callback arg is a no-op here: the dashboard already drives data
   // refreshes off its own subscription; this one only observes the connection state.
-  // Two-tier signal. A brief drop is normal — the SSE stream auto-retries
-  // every 5s — so a transient blip only flips the calm topbar pill to
+  // Two-tier signal. A brief drop is normal; the SSE stream auto-retries
+  // every 5s, so a transient blip only flips the calm topbar pill to
   // "Reconnecting…". A *sustained* outage (still down after the first retry
   // should have landed) escalates to an unmissable banner, because by then
   // the operator is scoring against data that may be stale. The threshold
@@ -143,7 +143,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
   return (
     // Wrap topbar + running-strip in a single sticky container so they scroll
     // together. This lets the topbar size naturally (min-height instead of a
-    // fixed height) — robust to font scaling / browser zoom — while still
+    // fixed height): robust to font scaling / browser zoom, while still
     // keeping the running-strip visually anchored beneath it.
     <div className="topbar-stack">
       <div className="topbar">
@@ -249,7 +249,7 @@ function AllWinnersModal({ comps, onClose }) {
   const [state, setState] = useStateA({ loading: true, results: [], error: null });
 
   // Stable signature of every comp's id:status. A pools+knockout podium can
-  // change without the *completed* set changing — e.g. a mixed comp is already
+  // change without the *completed* set changing; e.g. a mixed comp is already
   // completed (pools done) while its linked playoffs comp finishes its final.
   // Keying the effect on all comps' statuses makes the open modal refetch when
   // any competition completes or its knockout resolves, rather than showing
@@ -341,7 +341,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
     let pending = null;
     let fetching = false;
     // Track events that arrive during a pending timer or in-flight fetch
-    // so they don't silently get dropped — kick off one more refresh in
+    // so they don't silently get dropped; kick off one more refresh in
     // the finally block when set.
     let needsRefresh = false;
     const scheduleRefresh = () => {
@@ -396,7 +396,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
   // Derive the tournament-level status from competition activity instead of
   // trusting t.status, which can read "Pending" (setup) even while competitions
-  // are mid-pools — a contradiction next to the "Currently running" list below.
+  // are mid-pools: a contradiction next to the "Currently running" list below.
   const allCompleted = comps.length > 0 && comps.every((c) => c.status === "completed");
   const tournamentInProgress = running.length > 0;
 
@@ -451,7 +451,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             <div className="icon" aria-hidden="true">🥋</div>
             <h3>Add your first competition</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 460, margin: "0 auto", lineHeight: 1.5 }}>
-              A competition is one event within {t.name} — like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
+              A competition is one event within {t.name}, like Men's Individual or Women's Teams. Add one to enter participants, build the draw, and run matches.
             </div>
             <div className="empty__cta" style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
               <button type="button" className="btn btn--primary" onClick={onCreateCompetition}>+ Add competition</button>
@@ -583,7 +583,7 @@ function ShareRegistrationModal({ url, onClose, showToast }) {
   return (
     <Modal title="Share registration link" onClose={onClose} footer={<>
       <button type="button" className="btn btn--primary" onClick={() => {
-        copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed — select the link above manually", "error"));
+        copyToClipboard(url).then(() => showToast && showToast("Registration link copied!")).catch(() => showToast && showToast("Copy failed; select the link above manually", "error"));
       }}>Copy link</button>
       <button type="button" className="btn" onClick={onClose}>Close</button>
     </>}>
@@ -634,7 +634,7 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       a.remove();
       // Delay revoke so the browser initiates the download before the blob URL is torn down
       setTimeout(() => window.URL.revokeObjectURL(dlUrl), 100);
-      if (showToast) showToast("PDFs generated — download started.");
+      if (showToast) showToast("PDFs generated. Download started.");
     } catch (err) {
       if (showToast) showToast("PDF export failed: " + err.message, "error");
       else alert("PDF export failed: " + err.message);
@@ -690,8 +690,8 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         tabIndex={0}
         onClick={onOpen}
         // Only fire when focus is on the card itself, not on a nested
-        // <button> inside .tcard__actions — otherwise Enter on
-        // "Start Competition" would also trigger onOpen.
+        // <button> inside .tcard__actions; otherwise Enter on
+        // "Start competition" would also trigger onOpen.
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(); } }}
       >
         <div className="tcard__head">
@@ -703,7 +703,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               {c.date && c.startTime && " · "}
               {c.startTime && `Starts ${c.startTime}`}
               {/* Only emit the separator + court list when courts exist, and
-                  only lead with " · " when something precedes it — otherwise
+                  only lead with " · " when something precedes it; otherwise
                   an empty/null-courts comp renders a dangling " · ". */}
               {courts.length > 0 && `${(c.date || c.startTime) ? " · " : ""}${courts.join(", ")}`}
             </div>
@@ -722,7 +722,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
         </div>
         <div className="tcard__actions">
           {(c.status === "draw-ready" || (c.status === "setup" && playerCount >= 2)) && (
-            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start Competition →</button>
+            <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onStart(); }}>Start competition →</button>
           )}
           {(c.status === "pools" || c.status === "playoffs") && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>

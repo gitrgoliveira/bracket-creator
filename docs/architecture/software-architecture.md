@@ -14,7 +14,7 @@ flowchart TB
     viewer["Competitors & spectators<br/>(phones)"]
     cli["CLI user<br/>(terminal)"]
 
-    subgraph bin["bracket-creator — single Go binary"]
+    subgraph bin["bracket-creator (single Go binary)"]
         cliCmds["CLI commands<br/>create-pools · create-playoffs · print"]
         serveCmd["serve<br/>(one-shot Excel web form)"]
         mobile["mobile-app<br/>(live tournament server)"]
@@ -43,10 +43,10 @@ flowchart LR
     root["bracket-creator (root, Cobra)"]
     root --> cp["create-pools"]
     root --> cpp["create-playoffs"]
-    root --> srv["serve — Excel web form :8080"]
-    root --> ma["mobile-app — live server :8080"]
-    root --> hp["hash-password — bcrypt for locked mode"]
-    root --> pr["print — PDF generation"]
+    root --> srv["serve (Excel web form :8080)"]
+    root --> ma["mobile-app (live server :8080)"]
+    root --> hp["hash-password (bcrypt for locked mode)"]
+    root --> pr["print (PDF generation)"]
     root --> mn["man / version"]
 ```
 
@@ -89,17 +89,17 @@ flowchart TD
     cmd --> pdf
 ```
 
-**Dual domain model (in transition).** `internal/helper` is where the real algorithms live —
-its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to output generation.
+**Dual domain model (in transition).** `internal/helper` is where the real algorithms live.
+Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to output generation.
 `internal/domain` holds clean models being phased in gradually. Don't confuse the two.
 
 | Package | Responsibility |
 |---|---|
-| `cmd` | Cobra commands; each an options struct with `run()` |
+| `cmd` | Cobra commands (each an options struct with `run()`) |
 | `internal/helper` | CSV parsing, pool/match generation, binary-tree brackets, seeding, Excel rendering |
 | `internal/domain` | Clean models + canonical decision/lineup rules |
-| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; scoring, eligibility, kachinuki, schedule estimate |
-| `internal/state` | File-backed store (`tournament.md`, `competitions/<id>/config.md`, `participants.csv`); transactions + write-ahead log; per-competition locks |
+| `internal/engine` | Thin adapter that drives `helper` generation from a `state.Competition`; handles scoring, eligibility, kachinuki, schedule estimate |
+| `internal/state` | File-backed store (`tournament.md`, `competitions/<id>/config.md`, `participants.csv`). Transactions + write-ahead log, per-competition locks |
 | `internal/excel` | Excel lifecycle + `NewFileFromScratch` |
 | `internal/pdf` | PDF exports (LibreOffice-backed) |
 | `internal/mobileapp` | Gin HTTP handlers, SSE hub, auth middleware, `safeGo` |
@@ -113,7 +113,7 @@ flowchart TB
         mw["middleware.go<br/>X-Tournament-Password auth · body caps"]
         authsrc["auth_source.go<br/>PasswordVerifier (file | locked/bcrypt)"]
         handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>decision · eligibility · lineup · schedule · reset · auth-config"]
-        hub["hub.go — SSE hub<br/>seq stamping · 100-event replay ring · resync · heartbeat"]
+        hub["hub.go (SSE hub)<br/>seq stamping · 100-event replay ring · resync · heartbeat"]
         safego["safego.go<br/>panic-safe goroutines"]
         engine["engine adapter"]
         store[("state.Store<br/>WithTransaction + WAL")]
@@ -129,12 +129,12 @@ flowchart TB
 ```
 
 Server hardening (constants in `cmd/mobile_app.go`): `ReadHeaderTimeout 10s`, `ReadTimeout 30s`,
-`IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite —
-per-request cancellation runs via the request context), graceful shutdown 30s with
+`IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite;
+per-request cancellation runs via the request context). Graceful shutdown 30s with
 `Hub.Close` wired through `RegisterOnShutdown`. Every handler-spawned goroutine uses `safeGo`
 (Gin Recovery only catches the request goroutine).
 
-## 5. Write path — recording a score (ACID + broadcast)
+## 5. Write path: recording a score (ACID + broadcast)
 
 ```mermaid
 sequenceDiagram
@@ -160,7 +160,7 @@ sequenceDiagram
     H-->>SPA: 200 result
 ```
 
-Core invariant (project constitution): **persist then broadcast** — a write is durable
+Core invariant (project constitution): **persist then broadcast**. A write is durable
 (`fsync` + atomic rename, WAL for multi-file changes) before the 200 and before any SSE
 fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 
@@ -204,5 +204,5 @@ The operator console is a tablet/desktop surface; the viewer is mobile-first. Th
 
 - **Persist before broadcast**; scoring is ACID; never drop a legitimate operator change.
 - **Use layout/sheet constants** (`internal/helper/constants.go`), never string literals.
-- **`errcheck` is enforced** in production code — propagate or log, never `_ =`.
+- **`errcheck` is enforced** in production code: propagate or log, never `_ =`.
 - **Aka (Red) / Shiro (White) are positional**, distinguished by treatment, not hue alone.

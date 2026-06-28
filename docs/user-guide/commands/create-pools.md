@@ -10,24 +10,24 @@ bracket-creator create-pools [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--file` | `-f` | — | CSV file with participants **(required)** |
-| `--output` | `-o` | — | Output `.xlsx` path **(required)** |
+| `--file` | `-f` | (none) | CSV file with participants **(required)** |
+| `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
 | `--courts` | `-c` | `2` | Number of shiai-jo (courts) to distribute pools across |
 | `--players` | `-p` | `3` | Minimum players per pool |
-| `--max-players` | `-m` | — | Maximum players per pool |
+| `--max-players` | `-m` | (none) | Maximum players per pool |
 | `--pool-winners` | `-w` | `2` | Players that qualify from each pool |
 | `--round-robin` | `-r` | `false` | Force full round-robin in every pool |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
-| `--seeds` | — | — | CSV file with seed rankings |
+| `--seeds` | (none) | (none) | CSV file with seed rankings |
 | `--determined` | `-d` | `false` | Do not shuffle input order |
-| `--single-tree` | — | `false` | Produce one tree sheet instead of one per court |
+| `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
 | `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …) |
-| `--title-prefix` | — | `""` | Prefix added to sheet titles |
+| `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
 
 ## Examples
 
-Minimal — two courts, random draw:
+Minimal: two courts, random draw:
 
 ```bash
 bracket-creator create-pools -f participants.csv -o tournament.xlsx

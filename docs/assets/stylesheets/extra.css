@@ -1,13 +1,13 @@
 /* bracket-creator docs theme overrides.
  *
  * Color is scoped PER SCHEME. Material derives link/interactive colors from
- * these tokens, so an unscoped `:root` override (the previous approach) forced
- * one value into both light and dark — which made dark-mode links #333 on a
+ * these tokens; an unscoped `:root` override (the previous approach) forced
+ * one value into both light and dark, which made dark-mode links #333 on a
  * navy background (1.03:1, invisible). Each scheme now gets its own values.
  *
  * Accent = the web-mobile app's brand navy (--accent #1d3557, see DESIGN.md) so
  * the docs and the product share one interactive color. The slate scheme uses a
- * lightened navy of the same hue so links stay legible on the dark surface. */
+ * lightened navy of the same hue; links stay legible on the dark surface. */
 
 /* Light scheme */
 [data-md-color-scheme="default"] {
@@ -33,7 +33,7 @@
 }
 
 /* In-prose links are underlined by default. On a high-link-density docs site
- * the navy hue alone is only ~1.3:1 against body text, so the underline (not
+ * the navy hue alone is only ~1.3:1 against body text; the underline (not
  * the color) is what marks a link. Structural/anchor links opt out. */
 .md-typeset a {
 	text-decoration: underline;
@@ -45,7 +45,7 @@
 	text-decoration-thickness: 2px;
 }
 
-/* Permalink anchors (¶) and buttons are not prose links — no underline. */
+/* Permalink anchors (¶) and buttons are not prose links; no underline. */
 .md-typeset a.headerlink,
 .md-typeset .md-button {
 	text-decoration: none;
@@ -60,7 +60,7 @@
 }
 
 /* Mobile table polish. Inline code in table cells (commands, env vars, flags
- * like `create-pools` / `TOURNAMENT_DATA_DIR`) must not break mid-token — on a
+ * like `create-pools` / `TOURNAMENT_DATA_DIR`) must not break mid-token; on a
  * phone they were fragmenting into "create-\npools". Keep each token whole... */
 .md-typeset table:not([class]) td code,
 .md-typeset table:not([class]) th code {
@@ -69,7 +69,7 @@
 
 /* ...and let the table wrapper scroll horizontally when a row gets wider than
  * the viewport. The wrapper must be a block constrained to the content column
- * (max-width: 100%) for overflow-x to scroll the inner table — otherwise it
+ * (max-width: 100%) for overflow-x to scroll the inner table; otherwise it
  * sizes to content and spills past the column. Material wraps every table in
  * .md-typeset__table. */
 .md-typeset__table {

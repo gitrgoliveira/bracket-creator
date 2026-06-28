@@ -16,7 +16,7 @@ bracket-creator serve [flags]
 ## Usage
 
 ```bash
-# Default — available at http://localhost:8080
+# Default: available at http://localhost:8080
 bracket-creator serve
 
 # Different port

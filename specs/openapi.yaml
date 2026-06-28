@@ -11,16 +11,16 @@ info:
     The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
     `X-Tournament-Password` header for authentication, with several public exceptions:
 
-    - **`GET /api/events`** — SSE stream; always public so viewers and spectator screens
+    - **`GET /api/events`**: SSE stream; always public so viewers and spectator screens
       can receive real-time updates without an admin credential.
-    - **`GET /api/auth-config`** — always public; carries no secret material.
-    - **`POST /api/tournament/reset`** — public in file mode (the recovery path for a
+    - **`GET /api/auth-config`**: always public; carries no secret material.
+    - **`POST /api/tournament/reset`**: public in file mode (the recovery path for a
       forgotten password); returns `404` in locked mode (`--lock-password`).
-    - **`GET /api/schedule/estimate`** — stateless schedule calculator; always public.
-    - **`GET /api/competitions/{id}/competitor-status`** — public read; the `POST` write is protected.
-    - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`** — public read; `PUT`/`DELETE` are protected.
-    - **`GET /api/competitions/{id}/swiss/standings`** — public read; always public.
-    - **`GET /api/tournament/announcement`** — public read; returns the currently active admin broadcast announcement (204 when none/expired).
+    - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
+    - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
+    - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
+    - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
+    - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
   version: 2.1.0
 
 servers:
@@ -219,26 +219,26 @@ paths:
         Subscribe to real-time tournament updates via SSE.
 
         Event types (canonical set defined in `internal/mobileapp/hub.go`):
-        - `match_updated` — a match's score/court/scheduledAt changed.
+        - `match_updated`: a match's score/court/scheduledAt changed.
           `data: { competitionId, matchId, ... }`.
-        - `competition_started` — a competition transitioned out of `setup`.
+        - `competition_started`: a competition transitioned out of `setup`.
           `data: { competitionId }`.
-        - `competition_completed` — a competition transitioned to `completed`
+        - `competition_completed`: a competition transitioned to `completed`
           (either via POST /complete or via the auto-complete check after the
           last pool match scored). `data: { competitionId }`.
-        - `tournament_updated` — tournament-level config change (a competition
+        - `tournament_updated`: tournament-level config change (a competition
           was created/updated/deleted, participants updated, etc.).
-          `data: null` — clients should refresh full state.
-        - `schedule_updated` — a competition's schedule was saved.
-        - `password_reset` — the admin password was changed. Emitted
+          `data: null`; clients should refresh full state.
+        - `schedule_updated`: a competition's schedule was saved.
+        - `password_reset`: the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
-          1. `POST /api/tournament/reset` — the public recovery endpoint.
+          1. `POST /api/tournament/reset`; the public recovery endpoint.
              Payload includes `originatorId` so the submitting tab can
              suppress its own broadcast: `data: { originatorId: "<opaque>" }`.
-          2. `PUT /api/tournament` — when an admin changes the password
+          2. `PUT /api/tournament`; when an admin changes the password
              via a tournament edit. Payload is `data: {}` (no originatorId;
              all sessions including the editing tab should re-authenticate).
-          3. `POST /api/tournament` — when an existing tournament is
+          3. `POST /api/tournament`; when an existing tournament is
              overwritten with a different password. Payload is `data: {}`.
           Consumers must treat `originatorId` as optional and handle both
           payload shapes. Non-originating sessions should clear their
@@ -260,7 +260,7 @@ paths:
       summary: Get tournament configuration
       description: |
         Returns the tournament record. In **locked mode** (`--lock-password` startup flag) the
-        `password` field is stripped from the response — auth comes from the env-var bcrypt hash
+        `password` field is stripped from the response; auth comes from the env-var bcrypt hash
         and the on-disk value is irrelevant. The same redaction applies to the PUT and POST
         responses below. Use `GET /api/auth-config` to discover which mode the server is in
         without authenticating.
@@ -284,19 +284,19 @@ paths:
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
         configured yet (bootstrap). `password` must be non-empty
-        (`tournament password is required`) — an empty Password on
+        (`tournament password is required`); an empty Password on
         disk would let AuthMiddleware's `password != t.Password`
         check vacuously pass for any client sending an empty header.
         Once a tournament with a password exists, auth is required.
 
         **Locked mode (`--lock-password`)**: there is NO bootstrap
-        exception — the bcrypt env-var hash is the credential from
+        exception; the bcrypt env-var hash is the credential from
         the very first request. The `password` field in the request
         body is
-        accepted but **discarded** server-side — authentication uses the bcrypt hash from
+        accepted but **discarded** server-side; authentication uses the bcrypt hash from
         `TOURNAMENT_PASSWORD_HASH` env var, not the stored value. **Bootstrap requires
         `X-Tournament-Password` to match the env-var hash, even on a never-initialized
-        deployment** — anonymous bootstrap would let any network-reachable client race-claim
+        deployment**; anonymous bootstrap would let any network-reachable client race-claim
         the initial tournament record. The SPA's CreateTournament form detects locked mode
         via `GET /api/auth-config` and sends the env-var password as the header on the
         bootstrap POST. The response body's `password` field is empty.
@@ -333,13 +333,13 @@ paths:
             `tournament.md` is missing OR when the on-disk record is
             the literal default placeholder (`Name == "New Tournament"
             && Password == ""`). A real-named record with an empty
-            password is FAIL-CLOSED — rejected with 403 (`tournament
+            password is FAIL-CLOSED; rejected with 403 (`tournament
             misconfigured: password is not set`) before this handler
             runs; operator can use `POST /api/tournament/reset` or
             repair `tournament.md` out-of-band to recover. The
             empty-stored guard is disabled in locked mode (the
             on-disk password is irrelevant).
-          - Locked mode: `X-Tournament-Password` is REQUIRED — there
+          - Locked mode: `X-Tournament-Password` is REQUIRED; there
             is no bootstrap exception. The middleware verifies the
             header against the bcrypt hash from
             `TOURNAMENT_PASSWORD_HASH`. See
@@ -348,7 +348,7 @@ paths:
 
         Validation matches POST for `name` (rejected if empty after trim).
 
-        **File mode — Password preserve semantics**: when the request
+        **File mode; Password preserve semantics**: when the request
         body omits `password` or sends an empty string, the server
         preserves the currently-stored password. This matches the
         admin UI's `password: pass || undefined` pattern ("leave blank
@@ -361,7 +361,7 @@ paths:
         their stale localStorage credential and re-prompt; name-only
         edits do not.
 
-        **Locked mode — password rotation is disabled**: PUTs that
+        **Locked mode; password rotation is disabled**: PUTs that
         carry a non-empty `password` field are **rejected with 400**
         (`password rotation is disabled in locked mode; restart with
         a new TOURNAMENT_PASSWORD_HASH`). The auth credential lives
@@ -395,7 +395,7 @@ paths:
       summary: Reset the admin password (file mode only)
       description: |
         Replaces the stored admin password with the supplied value. Unauthenticated by
-        design — this is the documented recovery path for a forgotten admin password
+        design; this is the documented recovery path for a forgotten admin password
         on local / private deployments.
 
         The endpoint is disabled in **locked mode** (`--lock-password` CLI flag, with
@@ -450,12 +450,11 @@ paths:
       summary: Public auth-mode metadata
       description: |
         Reports the active authentication mode. Used by the SPA on first load to decide
-        whether to surface the password-reset UI. Public (no auth header required) —
-        the response carries no secret material, only the operator-visible toggle bits.
+        whether to surface the password-reset UI. Public (no auth header required);         the response carries no secret material, only the operator-visible toggle bits.
 
         `mode` is one of:
-          * `file` — admin password lives in `tournament.md` (plaintext). Default.
-          * `locked` — admin password is a bcrypt hash read from `TOURNAMENT_PASSWORD_HASH`.
+          * `file`; admin password lives in `tournament.md` (plaintext). Default.
+          * `locked`; admin password is a bcrypt hash read from `TOURNAMENT_PASSWORD_HASH`.
             `POST /api/tournament/reset` returns 404 in this mode; the SPA `/reset`
             page is still served but renders an operator-disabled message.
       responses:
@@ -509,13 +508,13 @@ paths:
         mp-e21). Gated by the MAIN password (`X-Tournament-Password`) via the
         admin middleware.
 
-          * First-time set (no admin password yet) — trust-on-first-use: the
+          * First-time set (no admin password yet); trust-on-first-use: the
             main password authorizes it; `currentPassword` is ignored.
-          * Rotation (admin password already set) — `currentPassword` must
+          * Rotation (admin password already set); `currentPassword` must
             equal the stored value, else 401. This prevents a main-password
             holder from silently re-setting the elevated credential.
 
-        Locked mode returns 404 — the credential is the
+        Locked mode returns 404; the credential is the
         `TOURNAMENT_ADMIN_PASSWORD_HASH` env var and is not settable via the
         API. The response never echoes any password (write-only).
       security:
@@ -555,7 +554,7 @@ paths:
         '401':
           description: Wrong currentPassword on rotation (or missing/invalid main password).
         '404':
-          description: Locked mode — not settable via the API.
+          description: Locked mode; not settable via the API.
         '409':
           description: No tournament configured yet.
 
@@ -582,7 +581,7 @@ paths:
             schema:
               type: object
               description: >
-                Any number of file fields. The field names are ignored — all uploaded files are
+                Any number of file fields. The field names are ignored; all uploaded files are
                 indexed by filename. Include `manifest.yaml` plus any referenced CSV files.
               additionalProperties:
                 type: string
@@ -637,7 +636,7 @@ paths:
         and receive a router-level `404`.
 
         Response carries `Cache-Control: public, max-age=31536000, immutable`
-        because the filename is unique per upload — the bytes at a given URL
+        because the filename is unique per upload; the bytes at a given URL
         never change.
       parameters:
         - in: path
@@ -672,7 +671,7 @@ paths:
         Admin-gated (`X-Tournament-Password`). Accepts `multipart/form-data`
         with fields `name` (required, ≤80 chars), `link` (optional, must be
         an `http(s)://` URL with no user-info), and `file` (required PNG or
-        JPEG, ≤1 MB detected by content sniff — not the `Content-Type` header).
+        JPEG, ≤1 MB detected by content sniff; not the `Content-Type` header).
 
         Up to **6** sponsors per tournament. The server generates the on-disk
         filename from `crypto/rand` hex; the client-supplied filename is ignored.
@@ -760,7 +759,7 @@ paths:
       description: |
         Returns the currently active admin broadcast announcement.
         Returns `204 No Content` when there is no active announcement or the
-        last one has already expired. No authentication required — viewer screens
+        last one has already expired. No authentication required; viewer screens
         poll this endpoint on SSE connect to catch announcements they may have
         missed before subscribing.
       responses:
@@ -848,7 +847,7 @@ paths:
       tags: [competitions]
       summary: Create competition
       description: |
-        Creates a new competition. The `id` field is optional — when omitted the server
+        Creates a new competition. The `id` field is optional; when omitted the server
         derives a URL-friendly slug from `name` (lowercase, spaces to hyphens, max 64 chars).
 
         Validation (returns 400 with explanatory message):
@@ -928,7 +927,7 @@ paths:
         The server writes `participants.csv` (and clears or extracts
         `seeds.csv` from each player's `seed` field) and IGNORES all
         settings fields in the body. This is how the admin
-        participants page saves the roster — its body shape is
+        participants page saves the roster; its body shape is
         `{ ...c, players: np }` where `c` is a possibly-stale
         frontend snapshot of the competition. Treating settings
         fields as authoritative in this case would silently revert
@@ -940,13 +939,13 @@ paths:
         Returns 404 when the competition does not exist (this endpoint
         never creates).
 
-        Server-managed fields — `status`, `hasParticipantIDs` — are
+        Server-managed fields; `status`, `hasParticipantIDs: are
         IGNORED in the body. Use the dedicated transition endpoints
         (`/start`, `/complete`, `/invalidate`) to change status.
 
         **Elevated password (spec 004 / mp-e21):** the ROSTER-save path
         (non-null `players`) additionally requires `X-Admin-Password`
-        when the destructive-ops gate is active — it rewrites
+        when the destructive-ops gate is active; it rewrites
         `participants.csv`, the same protected operation as the dedicated
         participant endpoints. Returns 503 if locked mode is active without
         `TOURNAMENT_ADMIN_PASSWORD_HASH`. The SETTINGS-only path
@@ -978,7 +977,7 @@ paths:
             Conflict. Output-affecting settings (format, courts, pool
             size/winners/mode, pool format, round-robin, mirror, team size,
             kind, number prefix, zekken display) were changed while the
-            competition is in `draw-ready` state — discard the draw first.
+            competition is in `draw-ready` state; discard the draw first.
             Duplicate name/number-prefix violations are returned as 400.
           content:
             application/json:
@@ -990,7 +989,7 @@ paths:
       tags: [competitions]
       summary: Delete competition
       description: |
-        Idempotent — returns 204 even when the competition does not exist.
+        Idempotent; returns 204 even when the competition does not exist.
         Allowed in any non-in-progress state (`setup`, `completed`,
         `invalid`, or unset). In-progress competitions (`pools`/`playoffs`)
         must first be invalidated via `POST /api/competitions/{id}/invalidate`.
@@ -1363,8 +1362,8 @@ paths:
           type: string
           maxLength: 201
         description: |
-          Participant identifier. Either the participant's stable UUID, or — for
-          legacy rosters without UUIDs — the composite `name|dojo` key the client
+          Participant identifier. Either the participant's stable UUID, or; for
+          legacy rosters without UUIDs; the composite `name|dojo` key the client
           sends for ID-less rows (resolved server-side, UUID first then the
           name|dojo fallback). The length cap covers the composite form:
           name (≤100) + "|" + dojo (≤100); the server applies no 64-char limit
@@ -1378,7 +1377,7 @@ paths:
         Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
         but not started). In draw-ready state the change **cascades** through draw
         artifacts: `pools.csv`, `bracket.json`, and `pool-matches.csv` are updated
-        in place — the draw structure (pool assignments, elimination bracket) is
+        in place; the draw structure (pool assignments, elimination bracket) is
         preserved. Seeds are renamed automatically by the participant update.
 
         Returns the updated player. When the cascade detects dojo conflicts,
@@ -1471,8 +1470,8 @@ paths:
           type: string
           maxLength: 201
         description: |
-          Participant identifier. Either the participant's stable UUID, or — for
-          legacy rosters without UUIDs — the composite `name|dojo` key the client
+          Participant identifier. Either the participant's stable UUID, or; for
+          legacy rosters without UUIDs; the composite `name|dojo` key the client
           sends for ID-less rows (resolved server-side, UUID first then the
           name|dojo fallback). The length cap covers the composite form:
           name (≤100) + "|" + dojo (≤100); the server applies no 64-char limit
@@ -1541,8 +1540,7 @@ paths:
                     UUID or, for legacy UUID-less rosters, the composite
                     `name|dojo` key (the same identifier the web client builds).
                     Unlike the single-participant `{pid}` path parameter, each
-                    entry here is capped at 64 chars and validated server-side —
-                    a legacy `name|dojo` composite longer than 64 is rejected
+                    entry here is capped at 64 chars and validated server-side;                     a legacy `name|dojo` composite longer than 64 is rejected
                     with 400.
                   items:
                     type: string
@@ -1630,7 +1628,7 @@ paths:
             out-of-order delivery (a lower rev than one already applied for that
             client session, e.g. a reconnect flush), or (b) the match is already
             completed, so a running write must not revert the final result.
-            Different client sessions are concurrent operators — the server
+            Different client sessions are concurrent operators; the server
             applies those last-write-wins, never stale.
           content:
             application/json:
@@ -1650,14 +1648,14 @@ paths:
                       stale:
                         type: boolean
                         description: >
-                          true when a running-write autosave was a no-op — either
+                          true when a running-write autosave was a no-op; either
                           dropped by the rev-guard as a same-session out-of-order
                           delivery, or rejected because the match is already
                           completed. Omitted on normal responses.
                     required: [stale]
         '409':
           description: |
-            Conflict — one of six codes returned in the `error` field:
+            Conflict; one of six codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
@@ -2161,7 +2159,7 @@ paths:
       summary: Get Swiss-format cumulative standings
       description: >
         Returns the cumulative standings for a Swiss-format competition,
-        ranked by wins then points. Always public (no auth required) — read-only
+        ranked by wins then points. Always public (no auth required); read-only
         viewer data, same policy as pool standings.
       security: []
       responses:
@@ -2183,8 +2181,7 @@ paths:
       tags: [competitions]
       summary: List consequential league tie-breaker tied groups
       description: >
-        Returns the consequential tied groups for a team-league competition —
-        groups of teams tied on all official criteria whose finishing positions
+        Returns the consequential tied groups for a team-league competition;         groups of teams tied on all official criteria whose finishing positions
         fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
         `leagueTwoThirdPlaces`). Public read (no auth): derived from the
         already-public standings. Returns an empty list for non-team-league
@@ -2504,8 +2501,8 @@ paths:
       description: >
         Returns the same per-competition payload as GET /api/viewer/competitions
         (config + poolMatches + bracket), but ONLY for competitions that have at
-        least one real (both-sides-resolved) match — pool or non-preview bracket
-        — physically placed on the given court right now. Keyed on actual match
+        least one real (both-sides-resolved) match; pool or non-preview bracket
+        ; physically placed on the given court right now. Keyed on actual match
         placement (not competition court config) so the feed stays correct after
         an operator moves a match to another shiaijo. Per-competition match data
         is full (not court-filtered) so client-side derivations like pool
@@ -2596,7 +2593,7 @@ components:
         `password` field in `tournament.md` is IGNORED for both auth
         and the GET/PUT/POST response shape (the response always
         returns `"password": ""`). The bootstrap exception above
-        does NOT apply — `POST /api/tournament` requires
+        does NOT apply; `POST /api/tournament` requires
         X-Tournament-Password from the very first request so a
         network-reachable attacker can't race-claim the initial
         tournament record on a fresh deployment. The reset endpoint
@@ -2614,7 +2611,7 @@ components:
       in: header
       name: X-Admin-Password
       description: |
-        Elevated (destructive-ops) password — spec 004 / mp-e21. Required
+        Elevated (destructive-ops) password; spec 004 / mp-e21. Required
         IN ADDITION to `X-Tournament-Password` on destructive endpoints:
         `DELETE /api/competitions/{id}`, `POST /api/competitions/{id}/invalidate`,
         `DELETE /api/competitions/{id}/draw`, `DELETE /api/competitions/{id}/overrides`,
@@ -2622,23 +2619,23 @@ components:
         `PUT /api/competitions/{id}/participants/{pid}`,
         `POST /api/tournament/import`, and
         `PUT /api/competitions/{id}` **when the body carries a non-null
-        `players` field** (the roster-save path — settings-only PUTs are not
+        `players` field** (the roster-save path; settings-only PUTs are not
         gated).
 
         Gate behavior:
-          * File mode — verified exact-string against the write-only
+          * File mode; verified exact-string against the write-only
             `admin_password` in `tournament.md`. While unset the gate is
             INACTIVE (the header is not required; the main password alone
             authorizes the action), so existing file deployments are
             unaffected until an admin password is set.
-          * Locked mode — verified via bcrypt against
+          * Locked mode; verified via bcrypt against
             `TOURNAMENT_ADMIN_PASSWORD_HASH`. The gate is always active
             (fail-closed): if the env var is unset/malformed the gated
             endpoints return 503 "admin password not configured".
 
         On a missing/incorrect header (when the gate is active and
         configured) the endpoint returns 401. Set or rotate the file-mode
-        value via `PUT /api/auth/admin-password`. There is no session — the
+        value via `PUT /api/auth/admin-password`. There is no session; the
         header is required on each gated request.
 
   parameters:
@@ -2786,7 +2783,7 @@ components:
           description: >
             Court labels (e.g. ["A", "B"]). Each label is a single
             character; 26-court cap (A–Z). Duplicate labels are rejected
-            with 400 — the frontend uses labels as identity keys (per-court
+            with 400; the frontend uses labels as identity keys (per-court
             rendering, schedule `byCourt` bucketing, filter values) and
             duplicates would collapse data structures.
         password:
@@ -2797,9 +2794,9 @@ components:
             (see `GET /api/auth-config`); the shared schema's
             "required" semantics below apply to **file mode** only.
 
-            **File mode** (default — authoritative credential stored
+            **File mode** (default; authoritative credential stored
             plaintext in `tournament.md`): required (non-empty) on POST
-            /tournament — an empty Password on disk would let
+            /tournament; an empty Password on disk would let
             AuthMiddleware's `password != t.Password` check vacuously
             pass for any client sending an empty
             `X-Tournament-Password` header. On PUT /tournament,
@@ -2807,14 +2804,14 @@ components:
             currently-stored password ("leave blank to keep current");
             sending a non-empty string updates it.
 
-            **Locked mode** (`--lock-password` — non-authoritative;
+            **Locked mode** (`--lock-password`; non-authoritative;
             bcrypt hash in `TOURNAMENT_PASSWORD_HASH` is the credential):
             POST /tournament accepts but **discards** the body's
             `password` server-side (the on-disk value is preserved for
             an existing record, or set to `""` for a fresh bootstrap);
             non-empty passwords are NOT rejected as a backward-compat
             convenience. PUT /tournament rejects any non-empty
-            `password` with 400 — rotation requires restarting the
+            `password` with 400; rotation requires restarting the
             server with a new hash. The response body's `password` is
             always empty in locked mode.
 
@@ -2842,13 +2839,13 @@ components:
           enum: [officiated, self-run]
           description: >
             Tournament auth posture. Chosen once at creation and **immutable** thereafter
-            (mp-7h7) — PUT /tournament rejects a mode change with 400.
+            (mp-7h7); PUT /tournament rejects a mode change with 400.
 
             - **officiated** (default): the full admin surface requires `X-Tournament-Password`.
               Constructive actions (scoring, check-in, start) and organiser-setup mutations
               all require the main password.
             - **self-run**: there is no dedicated table operator. Operational actions
-              (scoring, check-in, start, complete, swiss round generation) are public — no
+              (scoring, check-in, start, complete, swiss round generation) are public; no
               password required. Organiser-setup mutations (tournament/competition config,
               seeds, override edits (set/change result), announcements, schedule, court
               assignment, export) remain behind the main password. Destructive actions
@@ -2866,13 +2863,13 @@ components:
           description: >
             **Creation-only, file mode, self-run tournaments only.** Sets the elevated
             (destructive-ops) credential atomically in the same POST that creates the
-            tournament. Required when `mode` is `"self-run"` in file mode — without it the
+            tournament. Required when `mode` is `"self-run"` in file mode; without it the
             main gate is skipped and destructive routes would be unauthenticated.
 
             This field is **write-only at the API boundary**: it is never returned in any
             response (`json:"-"` on the server struct) and is ignored by PUT /tournament
             (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
-            field is accepted but silently ignored — the `TOURNAMENT_ADMIN_PASSWORD_HASH`
+            field is accepted but silently ignored; the `TOURNAMENT_ADMIN_PASSWORD_HASH`
             env var is the authoritative elevated credential.
         checkInWindowStart:
           type: string
@@ -2880,7 +2877,7 @@ components:
           pattern: '^\d{2}:\d{2}$'
           description: >
             Global check-in window open time (HH:MM). Displayed in the viewer as a status
-            banner ("pending / open / closed"). Informational only — does not block
+            banner ("pending / open / closed"). Informational only; does not block
             check-in API calls outside the window.
         checkInWindowEnd:
           type: string
@@ -2898,8 +2895,8 @@ components:
             Unique competition identifier. Must start with an alphanumeric
             character, contain only alphanumerics / hyphens / underscores,
             and be at most 64 chars (same rule as the `:id` path parameter
-            — see CompetitionId).
-            Optional on POST — the server derives a slug from `name` when omitted.
+            ; see CompetitionId).
+            Optional on POST; the server derives a slug from `name` when omitted.
         name:
           type: string
           maxLength: 200
@@ -2907,7 +2904,7 @@ components:
             Competition name. Trimmed server-side and rejected with 400
             (`competition name is required`) if empty after trim or
             longer than 200 characters.
-            Uniqueness check (case-insensitive) on POST/PUT — duplicate
+            Uniqueness check (case-insensitive) on POST/PUT; duplicate
             names return 400 (`competition name "X" already exists`).
         kind:
           type: string
@@ -2944,7 +2941,7 @@ components:
             Per-competition court labels (subset of Tournament.courts).
             Each label is a single character; 26-court cap; duplicates
             rejected with 400. Empty array means "use the tournament
-            default" — the engine defaults a competition with no Courts
+            default"; the engine defaults a competition with no Courts
             to 1 court.
         startTime:
           type: string
@@ -2961,11 +2958,11 @@ components:
         status:
           type: string
           description: >
-            Lifecycle state. Set by the server — do not supply on create/update.
+            Lifecycle state. Set by the server; do not supply on create/update.
             `setup` → not yet started; `draw-ready` → draw generated and available
             for preview, not yet started; `pools` → pools phase active (for a
             mixed competition the knockout bracket is already filling in
-            incrementally as pools finish — knockout matches with both sides
+            incrementally as pools finish; knockout matches with both sides
             resolved are scoreable even in this state); `playoffs` → knockout
             phase active (for mixed: every pool has been seeded into the bracket);
             `completed` → finished; `invalid` → operator-declared invalid,
@@ -2981,7 +2978,7 @@ components:
           type: boolean
         teamMatchType:
           type: string
-          description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).
+          description: Team-match scoring model; `fixed` (positions) or `kachinuki` (winner-stays).
           enum: [fixed, kachinuki]
         maxEnchoPeriods:
           type: integer
@@ -3062,7 +3059,7 @@ components:
           description: Seed rank (0 = unseeded).
         number:
           type: string
-          description: The competitor's "tag" — assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
+          description: The competitor's "tag"; assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.
@@ -3098,8 +3095,7 @@ components:
           readOnly: true
           description: >
             True when the participant has checked in. Read-only in the
-            `POST /api/competitions/{id}/participants` request body —
-            the server preserves existing check-in state on bulk import
+            `POST /api/competitions/{id}/participants` request body;             the server preserves existing check-in state on bulk import
             and ignores any incoming `checkedIn` value. Use the dedicated
             check-in endpoints (`PUT /…/participants/{pid}/checkin`,
             `POST /…/participants/checkin-bulk`,
@@ -3218,13 +3214,13 @@ components:
           type: string
           description: >
             Decision code for the match outcome. Extended set:
-            `none`/`""` — no decision recorded; `fought` — resolved by scoring;
-            `hikiwake` — draw/tie; `kiken` — withdrawal (legacy, maps to kiken-voluntary);
-            `kiken-voluntary` — voluntary withdrawal (FIK Art. 31, permanent);
-            `kiken-injury` — injury withdrawal (FIK Art. 30, reinstateable);
-            `fusenpai` — forfeit loss; `fusensho` — forfeit win;
-            `daihyosen` — resolved by representative bout;
-            `kachinuki-exhaustion` — kachinuki team match ended with one side exhausted.
+            `none`/`""`; no decision recorded; `fought: resolved by scoring;
+            `hikiwake`; draw/tie; `kiken: withdrawal (legacy, maps to kiken-voluntary);
+            `kiken-voluntary`; voluntary withdrawal (FIK Art. 31, permanent);
+            `kiken-injury`; injury withdrawal (FIK Art. 30, reinstateable);
+            `fusenpai`; forfeit loss; `fusensho: forfeit win;
+            `daihyosen`; resolved by representative bout;
+            `kachinuki-exhaustion`; kachinuki team match ended with one side exhausted.
           enum: [none, fought, hikiwake, kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
         decisionBy:
           type: string
@@ -3253,7 +3249,7 @@ components:
           type: boolean
           description: >
             True when the winner was declared by referee hantei on a tied bout
-            (FIK Art. 7-5 / 29-6). Overtime is not required — a tied scoreline may be
+            (FIK Art. 7-5 / 29-6). Overtime is not required; a tied scoreline may be
             taken straight to a judges' decision. On a bracket-match score request,
             omitting the field preserves the stored value; sending an explicit
             true/false applies it.
@@ -3291,7 +3287,7 @@ components:
             Decision code for this individual sub-match. For numbered bouts:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
             (per-bout default win). The daihyosen representative bout
-            (`position: -1`) always carries `"daihyosen"` — including when its
+            (`position: -1`) always carries `"daihyosen"`; including when its
             winner is declared by hantei on a tied bout (the frontend emits
             `decision: "daihyosen"` together with `decidedByHantei: true`). The
             server also tolerates `""` or `"fought"` alongside hantei, but
@@ -3302,11 +3298,11 @@ components:
             True when this sub-bout's winner was declared by referee hantei on a
             tied bout. Valid ONLY for the daihyosen representative bout (`position: -1`);
             regular numbered bouts have fixed regulation time and are never decided by
-            hantei. Overtime is NOT required — a tied daihyosen may be decided by judges
+            hantei. Overtime is NOT required; a tied daihyosen may be decided by judges
             directly (`encho` is optional). The accompanying `decision` is `"daihyosen"`
             (the value the frontend persists for the rep bout); the server additionally
             accepts `""` or `"fought"`. `winner` must be set and the scoreline must be
-            tied — the server rejects hantei with any other decision code.
+            tied; the server rejects hantei with any other decision code.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
@@ -3416,7 +3412,7 @@ components:
         points:
           type: integer
           description: >
-            Internal weighted composite sort key — not intended for display.
+            Internal weighted composite sort key; not intended for display.
             Individual formula (×100 for integer arithmetic):
             W×100M − L×1M + D×10K + ipponsGiven×100 − ipponsTaken.
             Team formula:

@@ -98,6 +98,71 @@ Terraform provisions the instance, network, and firewall, then installs Docker, 
 data dir, writes the app + Caddy config, and starts the app — reachable over HTTPS within minutes
 of `terraform apply`. `terraform destroy` removes everything (run it after the event).
 
+### Venue connectivity — a four-court event
+
+The cloud/host above is only half the picture. On the venue floor, every operator console,
+display screen, and spectator phone is just a **browser** reaching that one app over the network.
+A typical four-court (shiaijo A–D) layout:
+
+```mermaid
+flowchart TB
+    subgraph floor["Venue floor — 4 courts"]
+        subgraph cA["Court A"]
+            opA["Operator console<br/>tablet / laptop (admin)"]
+            dA["Display screen<br/>scoreboard / bracket"]
+        end
+        subgraph cB["Court B"]
+            opB["Operator console"]
+            dB["Display screen"]
+        end
+        subgraph cC["Court C"]
+            opC["Operator console"]
+            dC["Display screen"]
+        end
+        subgraph cD["Court D"]
+            opD["Operator console"]
+            dD["Display screen"]
+        end
+        spec["Spectator phones<br/>public viewer"]
+    end
+
+    net["Venue network<br/>router + Wi-Fi AP(s)<br/>wire operators where possible;<br/>dedicated AP for operators"]
+
+    opA & opB & opC & opD --> net
+    dA & dB & dC & dD --> net
+    spec --> net
+
+    net --> where{"Where does the app run?"}
+    where -->|cloud| up["Internet uplink"] --> cloud["Caddy + app (cloud VM)"]
+    where -->|on-prem| local["Local host on the LAN<br/>no internet needed · runs mobile-app"]
+```
+
+| Device | What it runs | Notes |
+|---|---|---|
+| Operator console — 1 per court | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiaijo |
+| Display screen — 1 per court (optional) | public display / scoreboard view | just a browser at a display URL (smart-TV browser, or a mini-PC/laptop driving a TV); read-only, no auth |
+| Spectator phones | public viewer (mobile-first) | can be on cellular — they don't need venue Wi-Fi when the app is cloud-hosted |
+
+**Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
+calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
+clients — comfortably within `SSE_MAX_CLIENTS`, but every live update fans out to all of them
+(see [Capacity & scaling](#5-capacity--scaling)).
+
+**Two venue patterns:**
+
+- **Cloud-hosted** (topology above) — venue devices reach the cloud app over the venue's internet
+  uplink; spectators can use cellular and skip venue Wi-Fi entirely. Needs a working uplink for
+  the operators and displays.
+- **On-prem / local** — run the single `mobile-app` binary on a laptop or mini-PC **on the venue
+  LAN**; operators and displays hit it locally, so **scoring keeps working with no internet at
+  all**. Put a local TLS proxy in front for secure-context features, or serve plain HTTP on the LAN.
+
+**The network is the real fix.** Client resilience (offline write queue, SSE resync, silence
+watchdog — see [Connection resilience](../dev-guide/connection-resilience.md)) keeps the app
+usable across blips, but for a smooth event: **wire the operator consoles** where you can, put
+operators on a **dedicated AP** separate from spectator guest Wi-Fi, and prefer the **on-prem**
+pattern when the venue's internet is unreliable.
+
 ## 4. Persistence model
 
 ```mermaid

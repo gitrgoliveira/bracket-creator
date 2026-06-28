@@ -1361,12 +1361,14 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
+          maxLength: 201
         description: |
           Participant identifier. Either the participant's stable UUID, or — for
           legacy rosters without UUIDs — the composite `name|dojo` key the client
           sends for ID-less rows (resolved server-side, UUID first then the
-          name|dojo fallback).
+          name|dojo fallback). The length cap covers the composite form:
+          name (≤100) + "|" + dojo (≤100); the server applies no 64-char limit
+          to this path parameter.
     put:
       tags: [participants]
       summary: Update a participant
@@ -1467,12 +1469,14 @@ paths:
         required: true
         schema:
           type: string
-          maxLength: 64
+          maxLength: 201
         description: |
           Participant identifier. Either the participant's stable UUID, or — for
           legacy rosters without UUIDs — the composite `name|dojo` key the client
           sends for ID-less rows (resolved server-side, UUID first then the
-          name|dojo fallback).
+          name|dojo fallback). The length cap covers the composite form:
+          name (≤100) + "|" + dojo (≤100); the server applies no 64-char limit
+          to this path parameter.
     put:
       tags: [participants]
       summary: Check in a single participant

@@ -2976,8 +2976,11 @@ components:
             When true, the check-in workflow is active for this competition.
             A check-in panel is shown in the viewer roster screen and operators
             can mark participants as checked in via the admin UI or the API.
-            Check-in state is informational — the draw pipeline does not filter
-            out unchecked participants.
+            When enabled, Generate Draw applies opt-in filtering: if at least one
+            participant is checked in, only checked-in participants enter the draw
+            (unchecked no-shows are excluded, and their seed assignments pruned);
+            if nobody has checked in, everyone is included. When this flag is
+            false, check-in markers are ignored and never shrink the field.
         fightingSpiritAwards:
           type: array
           description: >

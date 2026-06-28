@@ -164,7 +164,7 @@ You can enable check-in for any competition in its **Settings** tab. When check-
 - A check-in panel displays in the viewer roster screen.
 - A **Check-in window** (configurable via tournament settings as `Check-in window start/end`) displays a status banner indicating if the window is pending, open, or closed.
 - Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check-in all** to check in everyone.
-- Check-in state is informational: it is visible in the admin and viewer UI but does not automatically exclude unchecked participants from the draw. The operator is responsible for removing no-shows before clicking **Generate Draw**.
+- Check-in affects the draw with **opt-in semantics**: when you click **Generate Draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included — so simply enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
 
 #### The Draw-Preview (status `draw-ready`) Workflow
 
@@ -188,7 +188,7 @@ After all pool matches are complete, advance the pool winners to the elimination
 #### Swiss format tournament flow
 
 For large individual tournaments using the **Swiss** format:
-1. **Start**: Click **Start Competition**. The competition transitions to `pools` status (the same lifecycle status used for mixed/league formats) and Round 1 pairings are generated, pairing players with equal or similar win records (winners face winners).
+1. **Start**: Click **Start Competition**. The competition transitions to `pools` status (the same lifecycle status used for mixed/league formats) and Round 1 pairings are generated. Round 1 has no prior results, so it uses **fold pairing** when seeds are present (1 vs N, 2 vs N-1, …) or a deterministic-random pairing otherwise. The "winners face winners" grouping by win record applies from Round 2 onward.
 2. **Match Completion**: Scorers record match outcomes. A Swiss round must have all matches completed before the operator can generate the next round.
 3. **Cumulative Standings**: Standings are calculated in real time based on wins, points scored, head-to-head records, and stable alphabetical sorting. This cumulative standings view is public (no authentication required) so spectators can track who is leading the field at any point.
 4. **Advancement**: Click **Generate next round** to compute pairings for the subsequent round. This increments `swissCurrentRound` and broadcasts `swiss_round_generated` SSE events to refresh all screens.

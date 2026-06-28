@@ -783,7 +783,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not saved yet — offline. Will retry automatically.</span>
+              <span>Not saved yet — will keep retrying until it lands.</span>
               <button
                 type="button"
                 className="btn btn--sm btn--ghost"

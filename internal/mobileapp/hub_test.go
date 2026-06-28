@@ -605,39 +605,55 @@ func TestHandleEvents_SatisfiableReplayUnchanged(t *testing.T) {
 	assert.NotContains(t, body, "resync_required", "satisfiable replay must not emit resync_required")
 }
 
-// B2: the heartbeat frame must be a real data line with no id: line, so
-// the browser's Last-Event-ID is unchanged and the frame fires onmessage.
+// B2: the heartbeat frame must be a real data line with no id: line, so the
+// browser's Last-Event-ID is unchanged and the frame fires onmessage. This
+// drives HandleEvents end-to-end with a short HeartbeatInterval and asserts the
+// bytes it actually emits — so it fails if the handler stops sending heartbeats
+// or changes the wire format.
 func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	// Use a very short ticker interval by substituting a thin wrapper hub
-	// that we control. Instead of waiting 15s, we verify the wire bytes
-	// by directly writing the heartbeat frame to a buffer (unit-level test).
-	// This exercises the exact byte literal used in the ticker case.
-	var buf strings.Builder
-	_, err := buf.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n"))
-	require.NoError(t, err)
+	h := NewHub()
+	h.HeartbeatInterval = 20 * time.Millisecond // fast heartbeat for the test
 
-	heartbeatFrame := buf.String()
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
 
-	// Must NOT contain an id: line.
-	assert.NotContains(t, heartbeatFrame, "id:", "heartbeat must not contain an id: line")
-	// Must contain the data line.
-	assert.Contains(t, heartbeatFrame, "data: {\"type\":\"heartbeat\"}\n\n")
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
 
-	// Parse the payload from the data line.
-	dataPrefix := "data: "
-	idx := strings.Index(heartbeatFrame, dataPrefix)
-	require.NotEqual(t, -1, idx)
-	dataLine := heartbeatFrame[idx+len(dataPrefix):]
-	endIdx := strings.Index(dataLine, "\n")
-	require.NotEqual(t, -1, endIdx)
-	dataLine = dataLine[:endIdx]
+	// Let several heartbeat ticks fire through the real handler.
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
 
+	body := w.BodyString()
+	require.Contains(t, body, "data: {\"type\":\"heartbeat\"}\n\n", "HandleEvents must emit a heartbeat data frame")
+	// No events were broadcast, so the only frames are heartbeats — none may
+	// carry an id: line (which would perturb the browser's Last-Event-ID).
+	assert.NotContains(t, body, "id:", "heartbeat frames must not contain an id: line")
+
+	// The emitted payload parses to {"type":"heartbeat"}.
+	dataLine := body[strings.Index(body, "data: ")+len("data: "):]
+	dataLine = dataLine[:strings.Index(dataLine, "\n")]
 	var payload struct {
 		Type string `json:"type"`
 	}
-	err = json.Unmarshal([]byte(dataLine), &payload)
-	require.NoError(t, err, "heartbeat data must be valid JSON")
+	require.NoError(t, json.Unmarshal([]byte(dataLine), &payload), "heartbeat data must be valid JSON")
 	assert.Equal(t, "heartbeat", payload.Type)
 }
 

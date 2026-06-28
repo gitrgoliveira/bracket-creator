@@ -172,6 +172,12 @@ type Hub struct {
 	// subscriber channels are closed so the per-connection streaming
 	// goroutine in HandleEvents exits cleanly. Guarded by mu.
 	closed bool
+
+	// HeartbeatInterval is the SSE keep-alive cadence (default 15s, set by
+	// NewHubWithLimits). Exposed so tests can drive HandleEvents with a short
+	// interval and observe a real emitted heartbeat frame rather than asserting
+	// a hard-coded literal.
+	HeartbeatInterval time.Duration
 }
 
 func NewHub() *Hub {
@@ -202,10 +208,11 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 		historySize = DefaultHistorySize
 	}
 	return &Hub{
-		clients:     make(map[chan string]bool),
-		history:     make([]historyEntry, historySize),
-		HistorySize: historySize,
-		MaxClients:  maxClients,
+		clients:           make(map[chan string]bool),
+		history:           make([]historyEntry, historySize),
+		HistorySize:       historySize,
+		MaxClients:        maxClients,
+		HeartbeatInterval: 15 * time.Second,
 	}
 }
 
@@ -458,7 +465,11 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			}
 		}
 
-		ticker := time.NewTicker(15 * time.Second)
+		hbInterval := h.HeartbeatInterval
+		if hbInterval <= 0 {
+			hbInterval = 15 * time.Second
+		}
+		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
 
 		c.Stream(func(w io.Writer) bool {

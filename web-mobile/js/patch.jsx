@@ -272,7 +272,11 @@ function recomputeBracketQueuePositions(bracket) {
 // `state.lastSeq === 0` (or absent) → first event; accepted, no gap check.
 function checkSeqGap(state, seq, onGap) {
     if (typeof seq !== "number") return { duplicate: false, gap: false };
-    const last = (state && typeof state.lastSeq === "number") ? state.lastSeq : 0;
+    // Null-safe: without a state object there's nothing to track against and the
+    // `state.lastSeq = seq` writes below would throw. Callers always pass one;
+    // this guards misuse / a future caller that doesn't.
+    if (!state) return { duplicate: false, gap: false };
+    const last = (typeof state.lastSeq === "number") ? state.lastSeq : 0;
     if (last > 0 && seq <= last) {
         // Duplicate / replay — do NOT advance lastSeq.
         return { duplicate: true, gap: false };

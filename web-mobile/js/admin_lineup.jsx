@@ -185,6 +185,13 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         if (trimmed) positionsOut[k] = trimmed;
       });
       const updated = await window.API.putTeamLineup(compId, teamId, round, positionsOut, password);
+      // F5: a queued (offline/transient) write is NOT a confirmed save — don't
+      // clear the revising state or show "saved"; the write is durable and will
+      // retry. Keep the form editable and tell the operator it's pending.
+      if (updated && updated.queued) {
+        if (typeof showToast === "function") showToast("Offline — lineup not saved yet, will retry");
+        return;
+      }
       setLockedAt(updated.lockedAt || null);
       setRevising(false);
       if (typeof showToast === "function") showToast("Lineup saved");

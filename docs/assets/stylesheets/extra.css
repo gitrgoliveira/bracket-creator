@@ -45,8 +45,10 @@
 	text-decoration-thickness: 2px;
 }
 
-/* Permalink anchors (¶), buttons, footer/nav chrome are not prose links. */
+/* Permalink anchors (¶), buttons, and image-only links (e.g. shields.io
+ * badges) are not prose links — no underline. */
 .md-typeset a.headerlink,
-.md-typeset .md-button {
+.md-typeset .md-button,
+.md-typeset a:has(img) {
 	text-decoration: none;
 }

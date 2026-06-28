@@ -639,6 +639,32 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         const m = await import('../api_client.jsx');
         expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(true);
     });
+
+    it('rejects an /api/ url OUTSIDE /api/competitions/ (allowlist is route-scoped)', async () => {
+        const bad = [['c1:m3', {
+            compID: 'c1', matchID: 'm3', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: '/api/admin/secrets', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm3')).toBe(false);
+    });
+
+    it('rejects a disallowed method (DELETE) even on an /api/competitions/ url', async () => {
+        const bad = [['c1:m4', {
+            compID: 'c1', matchID: 'm4', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'DELETE',
+            url: '/api/competitions/c1/matches/m4/decision', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm4')).toBe(false);
+    });
 });
 
 describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydrate contract)', () => {

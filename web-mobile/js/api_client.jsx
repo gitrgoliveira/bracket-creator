@@ -158,6 +158,18 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 const QUEUE_STORAGE_KEY = 'bc_write_queue';
 const QUEUE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+// Defense-in-depth allowlist for terminal-write replay. The queue only ever
+// holds score/decision/lineup writes, which are ALWAYS PUT/POST to
+// /api/competitions/… — so a tampered or corrupted bc_write_queue entry can't be
+// flushed into some other endpoint or HTTP method. Used by both rehydrate (load)
+// and flush, kept in one place so the two checks can't drift apart.
+const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST'];
+function _isAllowedTerminalRequest(method, url) {
+    return _ALLOWED_QUEUE_METHODS.includes(method)
+        && typeof url === 'string'
+        && url.startsWith('/api/competitions/');
+}
+
 // ---------------------------------------------------------------------------
 // F4: localStorage helpers (all accesses wrapped in try/catch for
 // private-browsing / storage-quota safety — mirroring app.jsx pattern).
@@ -255,16 +267,25 @@ async function _flushQueue() {
             let networkFailed = false;  // fetch rejected → connection down → "offline"
             for (const [key, descriptor] of entries) {
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
-                // Determine the effective HTTP method and URL for this entry.
-                // Running score writes (terminal=false) use the hard-coded score PUT
-                // (backward compat). Terminal entries carry their own method+url.
-                // Defense-in-depth: method/url on terminal entries may have been
-                // rehydrated from (tamperable) localStorage. Whitelist the method
-                // and require a same-origin /api/ path before they reach fetch.
-                const effectiveMethod = (terminal && ['PUT', 'POST', 'DELETE'].includes(method)) ? method : 'PUT';
-                const effectiveUrl = (terminal && typeof url === 'string' && url.startsWith('/api/'))
-                    ? url
-                    : `/api/competitions/${compID}/matches/${matchID}/score`;
+                // Running score writes (terminal=false) don't store method/url and
+                // always PUT to the score endpoint. Terminal entries carry their own
+                // method+url, which may have been rehydrated from (tamperable)
+                // localStorage — validate against the allowlist (PUT/POST to
+                // /api/competitions/…) and DROP anything outside it rather than flush
+                // to an unexpected route or method.
+                let effectiveMethod, effectiveUrl;
+                if (terminal) {
+                    if (!_isAllowedTerminalRequest(method, url)) {
+                        console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        continue;
+                    }
+                    effectiveMethod = method;
+                    effectiveUrl = url;
+                } else {
+                    effectiveMethod = 'PUT';
+                    effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
+                }
                 try {
                     const res = await fetchWithTimeout(effectiveUrl, {
                         method: effectiveMethod,
@@ -436,8 +457,9 @@ if (typeof window !== 'undefined') {
             // Drop entries without a timestamp or older than TTL.
             if (!descriptor.enqueuedAt || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
             // Defense-in-depth: localStorage is tamperable. Reject terminal entries
-            // whose url is not a same-origin /api/ path before they can reach fetch.
-            if (descriptor.terminal && (typeof descriptor.url !== 'string' || !descriptor.url.startsWith('/api/'))) continue;
+            // whose method/url fall outside the queue allowlist (PUT/POST to
+            // /api/competitions/…) before they can ever reach fetch on replay.
+            if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) continue;
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
                 _writeQueue.set(key, descriptor);

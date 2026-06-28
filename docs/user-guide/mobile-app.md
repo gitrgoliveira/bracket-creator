@@ -136,12 +136,12 @@ The dashboard lists all competitions. Each card shows the competition type, numb
 
 ### Setting up a competition
 
-Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (Pools/Playoffs/Swiss)** lifecycle.
+Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status — Swiss-format competitions run live under the `pools` status.
 
 #### The 3-Column Participant Dashboard
 
 The participant setup view has a modern, highly productive 3-column layout:
-* **Left Column (Check-in List)**: Only visible when **Enable check-in** is turned on in the competition settings. Displays the list of imported participants with real-time check-in check-boxes. Provides quick filters (such as "Show only unchecked") and action buttons like "Check-in all".
+* **Left Column (Check-in List)**: Only visible when **Enable check-in** is turned on in the competition settings. Displays the list of imported participants with real-time check-in check-boxes. Provides a "Show unchecked" / "Show all" filter toggle and a "Check in all" action button.
 * **Centre Column (Participants & Seeds)**: Displays the roster of all saved players. This column is drag-and-drop enabled, allowing the operator to drag rows to assign seeding ranks. Ranks can also be typed manually in the seed column, and a "Shuffle unseeded" button is available to randomize the initial starting positions of unseeded competitors.
 * **Right Column (Bulk Import & Textarea)**: Contains a `LinedTextarea` with line numbers, where operators can paste newline-separated CSV participant rosters.
 

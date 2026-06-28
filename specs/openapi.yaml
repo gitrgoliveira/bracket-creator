@@ -3098,6 +3098,8 @@ components:
           type: array
           items:
             type: string
+            maxLength: 64
+          description: Participant IDs from the request that did not match any roster entry (echoed back; each capped at 64 chars, matching the request-side ID limit).
 
     ParticipantInput:
       type: object

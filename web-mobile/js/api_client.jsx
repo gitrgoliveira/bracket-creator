@@ -149,10 +149,11 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   password: string,
  *   kind: WriteKind,
  *   terminal: boolean,
- *   method: string,
- *   url: string,
+ *   method?: string,
+ *   url?: string,
  *   enqueuedAt: number,
  * }} WriteDescriptor
+ * `method`/`url` are present only on terminal entries; running entries omit them.
  */
 
 const QUEUE_STORAGE_KEY = 'bc_write_queue';

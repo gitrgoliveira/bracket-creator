@@ -41,15 +41,21 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		require.Len(t, bracket.Rounds[0], 2, "expected 2 semifinal matches")
 
 		sf1ID := bracket.Rounds[0][0].ID
+		// A FRESH result per submit: RecordMatchResult mutates the passed struct
+		// in-place (ID, identity backfill, ippon normalization), so reusing one
+		// pointer would make the "retry" send the already-mutated form rather than
+		// the original client payload. A real wifi retry re-sends a fresh payload.
 		// mIdx=0 → propagates to Rounds[1][0].SideA
-		completedResult := &state.MatchResult{
-			Winner:  "Alice",
-			IpponsA: []string{"M", "K"},
-			Status:  state.MatchStatusCompleted,
+		newResult := func() *state.MatchResult {
+			return &state.MatchResult{
+				Winner:  "Alice",
+				IpponsA: []string{"M", "K"},
+				Status:  state.MatchStatusCompleted,
+			}
 		}
 
 		// First submit — should succeed and propagate Alice to the final.
-		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, completedResult))
+		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, newResult()))
 
 		bracket, err = store.LoadBracket(compID)
 		require.NoError(t, err)
@@ -63,8 +69,8 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		snapshotWinner := finalSlot.Winner
 		snapshotStatus := finalSlot.Status
 
-		// Second submit — identical result, simulating a wifi retry.
-		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, completedResult))
+		// Second submit — a FRESH identical payload, simulating a wifi retry.
+		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, newResult()))
 
 		bracket, err = store.LoadBracket(compID)
 		require.NoError(t, err)
@@ -97,17 +103,21 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 
 		// Pick the first match. Alice wins with two ippons.
 		m := matches[0]
-		result := &state.MatchResult{
-			SideA:   m.SideA,
-			SideB:   m.SideB,
-			Winner:  m.SideA,
-			IpponsA: []string{"M", "K"},
-			IpponsB: []string{},
-			Status:  state.MatchStatusCompleted,
+		// Fresh result per submit — RecordMatchResult mutates in-place, so a real
+		// retry must re-send a fresh identical payload, not the mutated struct.
+		newResult := func() *state.MatchResult {
+			return &state.MatchResult{
+				SideA:   m.SideA,
+				SideB:   m.SideB,
+				Winner:  m.SideA,
+				IpponsA: []string{"M", "K"},
+				IpponsB: []string{},
+				Status:  state.MatchStatusCompleted,
+			}
 		}
 
 		// First submit.
-		require.NoError(t, eng.RecordMatchResult(compID, m.ID, result))
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, newResult()))
 
 		// Snapshot standings after first submit.
 		standings1, err := eng.CalculatePoolStandings(compID)
@@ -119,8 +129,8 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		require.NotNil(t, winner1, "winner must appear in standings")
 		require.NotNil(t, loser1, "loser must appear in standings")
 
-		// Second submit — same result, wifi retry.
-		require.NoError(t, eng.RecordMatchResult(compID, m.ID, result))
+		// Second submit — a FRESH identical payload, wifi retry.
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, newResult()))
 
 		standings2, err := eng.CalculatePoolStandings(compID)
 		require.NoError(t, err)

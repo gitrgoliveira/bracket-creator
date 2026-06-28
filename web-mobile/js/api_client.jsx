@@ -333,7 +333,14 @@ async function _flushQueue() {
                     if (res.ok) {
                         // Success (HTTP 200/201, including a stale {stale:true} no-op) — remove
                         // from queue only if no newer write has replaced this descriptor.
-                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        if (_writeQueue.get(key) === descriptor) {
+                            _writeQueue.delete(key);
+                            // A confirmed terminal score write needs no further rev
+                            // tracking — drop its counter (mirrors recordScore's online
+                            // completed path) so _matchRevCounters doesn't grow for the
+                            // tab's lifetime now that completed writes are queued.
+                            if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
+                        }
                     } else if (res.status >= 500 || res.status === 429) {
                         // Transient server error — server is up but erroring; keep in
                         // queue and retry with backoff, but this is NOT "offline".

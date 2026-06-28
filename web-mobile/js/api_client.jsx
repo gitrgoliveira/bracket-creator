@@ -600,6 +600,13 @@ function _ensureConnected() {
     const source = new EventSource('/api/events');
     _sharedSource = source;
 
+    // F2: arm the watchdog at connect time, not just in onopen — a CONNECTING
+    // stall (half-open / captive / saturated WiFi where onopen, and sometimes
+    // even onerror, never fire) is the exact silent-staleness this watchdog must
+    // catch. Stamp activity now so the 35s timer measures from the attempt.
+    _lastActivityAt = Date.now();
+    _armWatchdog();
+
     source.onopen = () => {
         if (source !== _sharedSource) return;
         // F2: record activity and arm the watchdog on every (re)connect.

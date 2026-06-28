@@ -281,9 +281,14 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onClose: () => setScoringMatch(null),
       onSubmit: async (patch) => {
         try {
-          await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          // A queued (offline/transient) write is NOT a confirmed save: keep the
+          // editor open and return the signal so its pending-write banner shows —
+          // closing here would be a false success on the public self-run surface.
+          if (res && res.queued) return res;
           setScoringMatch(null);
           onClose();
+          return res;
         } catch (_err) {
           // leave modal open so the error is visible
         }

@@ -1463,6 +1463,7 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 64
         description: Participant/Player ID.
     put:
       tags: [participants]
@@ -2851,14 +2852,16 @@ components:
             env var is the authoritative elevated credential.
         checkInWindowStart:
           type: string
-          maxLength: 8
+          maxLength: 5
+          pattern: '^\d{2}:\d{2}$'
           description: >
             Global check-in window open time (HH:MM). Displayed in the viewer as a status
             banner ("pending / open / closed"). Informational only — does not block
             check-in API calls outside the window.
         checkInWindowEnd:
           type: string
-          maxLength: 8
+          maxLength: 5
+          pattern: '^\d{2}:\d{2}$'
           description: Global check-in window close time (HH:MM).
 
     Competition:

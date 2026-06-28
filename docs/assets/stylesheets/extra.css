@@ -58,3 +58,22 @@
 .md-typeset a:has(img) {
 	text-decoration: none;
 }
+
+/* Mobile table polish. Inline code in table cells (commands, env vars, flags
+ * like `create-pools` / `TOURNAMENT_DATA_DIR`) must not break mid-token — on a
+ * phone they were fragmenting into "create-\npools". Keep each token whole... */
+.md-typeset table:not([class]) td code,
+.md-typeset table:not([class]) th code {
+	white-space: nowrap;
+}
+
+/* ...and let the table wrapper scroll horizontally when a row gets wider than
+ * the viewport. The wrapper must be a block constrained to the content column
+ * (max-width: 100%) for overflow-x to scroll the inner table — otherwise it
+ * sizes to content and spills past the column. Material wraps every table in
+ * .md-typeset__table. */
+.md-typeset__table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+}

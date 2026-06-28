@@ -158,7 +158,7 @@ clients — comfortably within `SSE_MAX_CLIENTS`, but every live update fans out
   all**. Put a local TLS proxy in front for secure-context features, or serve plain HTTP on the LAN.
 
 **The network is the real fix.** Client resilience (offline write queue, SSE resync, silence
-watchdog — see [Connection resilience](../dev-guide/connection-resilience.md)) keeps the app
+watchdog — see Connection resilience (design note — see bead mp-gpra)) keeps the app
 usable across blips, but for a smooth event: **wire the operator consoles** where you can, put
 operators on a **dedicated AP** separate from spectator guest Wi-Fi, and prefer the **on-prem**
 pattern when the venue's internet is unreliable.

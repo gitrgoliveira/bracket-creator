@@ -146,7 +146,7 @@ func TestHubHandleEvents(t *testing.T) {
 	h.Broadcast(EventMatchUpdated, "test-data")
 
 	// Wait a bit for processing
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "test-data")
 
 	// Close the connection
 	cancel()
@@ -204,7 +204,7 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 	// Wait for the handler to finish replay. We can't easily poll the
 	// recorder's body while the stream is open, so close the context
 	// after a brief settle period and inspect the recorded body.
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "id: 5\n")
 	cancel()
 	close(closeChan)
 	select {
@@ -232,9 +232,9 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 
 // T216: ring-buffer eviction. With HistorySize=3 the hub keeps only the
 // last 3 envelopes. Broadcasting 5 events then reconnecting with
-// Last-Event-ID=1 means events 2 has been overwritten (only 3,4,5
-// survive), so the client gets 3/4/5 replayed and a server-side warning
-// is logged (we just assert the surviving entries appear).
+// Last-Event-ID=1 means event 2 has been overwritten and the gap is
+// unsatisfiable — since B1 (mp-gpra), the hub emits resync_required at
+// the head seq (5) instead of partially replaying surviving entries.
 func TestHubRingBufferEvicts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewHubWithHistory(3)
@@ -242,6 +242,7 @@ func TestHubRingBufferEvicts(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
 	}
+	headSeq := h.seq.Load() // 5
 
 	r := gin.New()
 	r.GET("/events", h.HandleEvents())
@@ -260,18 +261,21 @@ func TestHubRingBufferEvicts(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "resync_required")
 	cancel()
 	close(closeChan)
 	<-done
 
 	body := w.BodyString()
-	// 2 was evicted (only 3,4,5 are retained); 3/4/5 must be replayed.
-	assert.Contains(t, body, "id: 3\n", "seq 3 should be replayed (oldest retained)")
-	assert.Contains(t, body, "id: 4\n")
-	assert.Contains(t, body, "id: 5\n")
+	// Since B1: unsatisfiable gaps emit resync_required at head seq, not
+	// partial replay. The surviving entries (3/4) must NOT be individually
+	// replayed; instead a single resync frame at seq 5 is emitted.
+	assert.Contains(t, body, fmt.Sprintf("id: %d\n", headSeq), "resync frame must carry id: <headSeq>")
+	assert.Contains(t, body, "resync_required", "unsatisfiable gap must emit resync_required")
 	assert.NotContains(t, body, "id: 1\n")
-	assert.NotContains(t, body, "id: 2\n", "seq 2 evicted before reconnect should NOT be replayed")
+	assert.NotContains(t, body, "id: 2\n")
+	assert.NotContains(t, body, "id: 3\n", "surviving entries must not be partially replayed on unsatisfiable gap")
+	assert.NotContains(t, body, "id: 4\n", "surviving entries must not be partially replayed on unsatisfiable gap")
 }
 
 // T216: snapshotHistorySince contract — the helper underlying the
@@ -363,7 +367,7 @@ func TestHandleEventsEmitsIDLine(t *testing.T) {
 	}
 
 	h.Broadcast(EventMatchUpdated, map[string]string{"foo": "bar"})
-	time.Sleep(50 * time.Millisecond)
+	waitForFrame(t, w, "id: 1\n")
 	cancel()
 	close(w.closeChan)
 	<-done
@@ -421,4 +425,292 @@ Subscribed:
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("HandleEvents did not exit after channel closure")
 	}
+}
+
+// B1: resync_required is emitted when replay is unsatisfiable due to ring
+// buffer eviction (client's Last-Event-ID is older than oldest retained).
+// The frame must carry id: <headSeq> and a JSON payload with type "resync_required".
+// Partial entries must NOT be replayed.
+func TestHandleEvents_ResyncOnEviction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// Ring holds only 3 entries; broadcast 5 → oldest retained is seq 3.
+	h := NewHubWithHistory(3)
+	for i := 0; i < 5; i++ {
+		h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
+	}
+	headSeq := h.seq.Load() // 5
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+	// Client last saw seq 1, which has been evicted → replay is unsatisfiable.
+	req.Header.Set("Last-Event-ID", "1")
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForFrame(t, w, "resync_required")
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+
+	// Must contain exactly one resync frame at the head seq.
+	expectedIDLine := fmt.Sprintf("id: %d\n", headSeq)
+	require.Contains(t, body, expectedIDLine, "resync frame must carry id: <headSeq>")
+
+	// Extract and parse the data line from the resync frame.
+	// Wire: "id: 5\nevent: message\ndata: {...}\n\n"
+	var resyncPayload struct {
+		Type string `json:"type"`
+		Seq  int64  `json:"seq"`
+	}
+	// Find the data line after the expected id line.
+	idIdx := strings.Index(body, expectedIDLine)
+	require.NotEqual(t, -1, idIdx, "resync id line not found")
+	after := body[idIdx:]
+	dataPrefix := "data: "
+	dataIdx := strings.Index(after, dataPrefix)
+	require.NotEqual(t, -1, dataIdx, "resync data line not found")
+	dataLine := after[dataIdx+len(dataPrefix):]
+	endIdx := strings.Index(dataLine, "\n")
+	require.NotEqual(t, -1, endIdx)
+	dataLine = dataLine[:endIdx]
+	err := json.Unmarshal([]byte(dataLine), &resyncPayload)
+	require.NoError(t, err, "resync payload must be valid JSON")
+	assert.Equal(t, "resync_required", resyncPayload.Type)
+	assert.Equal(t, headSeq, resyncPayload.Seq)
+
+	// Partial entries must NOT be replayed — only the resync frame for headSeq.
+	// Seqs 3/4 are retained but must not appear before the resync frame.
+	assert.NotContains(t, body, "id: 3\n", "partial entries must not be replayed on unsatisfiable gap")
+	assert.NotContains(t, body, "id: 4\n", "partial entries must not be replayed on unsatisfiable gap")
+}
+
+// B1 restart case: client's Last-Event-ID is greater than the server's
+// current head seq (server restarted, seq counter reset). Must emit
+// resync_required rather than replaying nothing silently.
+func TestHandleEvents_ResyncOnServerRestart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	// Fresh hub — head seq is 0. Broadcast one event so head is 1.
+	h := NewHub()
+	h.Broadcast(EventMatchUpdated, map[string]int{"i": 0})
+	headSeq := h.seq.Load() // 1
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+	// Client saw seq 9999 before the server restarted — far ahead of head.
+	req.Header.Set("Last-Event-ID", "9999")
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForFrame(t, w, "resync_required")
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+	expectedIDLine := fmt.Sprintf("id: %d\n", headSeq)
+	require.Contains(t, body, expectedIDLine, "resync frame must carry id: <headSeq>")
+
+	var resyncPayload struct {
+		Type string `json:"type"`
+	}
+	idIdx := strings.Index(body, expectedIDLine)
+	after := body[idIdx:]
+	dataPrefix := "data: "
+	dataIdx := strings.Index(after, dataPrefix)
+	require.NotEqual(t, -1, dataIdx, "resync data line not found")
+	dataLine := after[dataIdx+len(dataPrefix):]
+	endIdx := strings.Index(dataLine, "\n")
+	require.NotEqual(t, -1, endIdx)
+	dataLine = dataLine[:endIdx]
+	err := json.Unmarshal([]byte(dataLine), &resyncPayload)
+	require.NoError(t, err)
+	assert.Equal(t, "resync_required", resyncPayload.Type)
+}
+
+// B1 satisfiable case: a recent Last-Event-ID still replays the buffered
+// entries (existing behavior preserved, not replaced by resync_required).
+func TestHandleEvents_SatisfiableReplayUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHub()
+	for i := 0; i < 5; i++ {
+		h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
+	}
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+	// Last-Event-ID=2 is within the ring (ring holds 100 by default) → satisfiable.
+	req.Header.Set("Last-Event-ID", "2")
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForFrame(t, w, "id: 5\n")
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+	// Seqs 3/4/5 must be replayed; 1/2 must not; no resync_required.
+	assert.Contains(t, body, "id: 3\n", "seq 3 must be replayed")
+	assert.Contains(t, body, "id: 4\n", "seq 4 must be replayed")
+	assert.Contains(t, body, "id: 5\n", "seq 5 must be replayed")
+	assert.NotContains(t, body, "id: 1\n", "seq 1 already acked must not replay")
+	assert.NotContains(t, body, "id: 2\n", "seq 2 already acked must not replay")
+	assert.NotContains(t, body, "resync_required", "satisfiable replay must not emit resync_required")
+}
+
+// B2: the heartbeat frame must be a real data line with no id: line, so the
+// browser's Last-Event-ID is unchanged and the frame fires onmessage. This
+// drives HandleEvents end-to-end with a short HeartbeatInterval and asserts the
+// bytes it actually emits — so it fails if the handler stops sending heartbeats
+// or changes the wire format.
+func TestHandleEvents_HeartbeatFrame(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHub()
+	h.HeartbeatInterval = 20 * time.Millisecond // fast heartbeat for the test
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Wait deterministically for the first heartbeat frame rather than a fixed
+	// sleep (which is flaky on slow/contended CI). BodyString() is concurrency-safe.
+	require.Eventually(t, func() bool {
+		return strings.Contains(w.BodyString(), "data: {\"type\":\"heartbeat\"}\n\n")
+	}, 2*time.Second, 5*time.Millisecond, "HandleEvents must emit a heartbeat data frame")
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+	require.Contains(t, body, "data: {\"type\":\"heartbeat\"}\n\n", "HandleEvents must emit a heartbeat data frame")
+	// No events were broadcast, so the only frames are heartbeats — none may
+	// carry an id: line (which would perturb the browser's Last-Event-ID).
+	assert.NotContains(t, body, "id:", "heartbeat frames must not contain an id: line")
+
+	// The emitted payload parses to {"type":"heartbeat"}.
+	dataLine := body[strings.Index(body, "data: ")+len("data: "):]
+	dataLine = dataLine[:strings.Index(dataLine, "\n")]
+	var payload struct {
+		Type string `json:"type"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(dataLine), &payload), "heartbeat data must be valid JSON")
+	assert.Equal(t, "heartbeat", payload.Type)
+}
+
+// mp-gpra: when the server has broadcast nothing yet (head seq 0) and a client
+// reconnects with a stale positive Last-Event-ID (restart with no new activity),
+// the hub MUST still emit resync_required — otherwise a client that keeps an
+// in-memory lastSeq across reconnects drops the first post-restart event (seq=1)
+// as a stale duplicate and goes silently stale. The frame must carry NO id: line
+// so the browser's Last-Event-ID isn't forced to "0".
+func TestHandleEvents_ResyncOnRestartWithNoEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewHub() // head seq is 0 — no Broadcast.
+
+	r := gin.New()
+	r.GET("/events", h.HandleEvents())
+	closeChan := make(chan bool)
+	w := &mockResponseWriter{
+		ResponseRecorder: httptest.NewRecorder(),
+		closeChan:        closeChan,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
+	req.Header.Set("Last-Event-ID", "9999") // stale id from before a restart
+
+	done := make(chan struct{})
+	go func() {
+		r.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForFrame(t, w, "resync_required")
+	cancel()
+	close(closeChan)
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handler did not finish")
+	}
+
+	body := w.BodyString()
+	assert.Contains(t, body, "resync_required", "head-seq-0 restart must still emit resync_required")
+	assert.Contains(t, body, `"type":"resync_required"`, "resync payload must be present")
+	// No id: line at all: head seq is 0 (no replay) and the resync is emitted
+	// without an id so the browser's Last-Event-ID is not forced to "0".
+	assert.NotContains(t, body, "id:", "head-seq-0 resync must NOT carry an id: line")
+}
+
+// waitForFrame waits until the recorded SSE body contains want, then returns. A
+// deterministic replacement for a fixed sleep before cancelling an SSE request:
+// BodyString() is concurrency-safe and the initial replay/resync/heartbeat bytes
+// are written synchronously on connect, so this avoids CI flakiness under load.
+func waitForFrame(t *testing.T, w *mockResponseWriter, want string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return strings.Contains(w.BodyString(), want)
+	}, 2*time.Second, 5*time.Millisecond, "expected SSE frame %q not observed", want)
 }

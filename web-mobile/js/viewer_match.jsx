@@ -281,11 +281,22 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onClose: () => setScoringMatch(null),
       onSubmit: async (patch) => {
         try {
-          await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
+          // A queued (offline/transient) write is NOT a confirmed save: keep the
+          // editor open and return the signal so its pending-write banner shows —
+          // closing here would be a false success on the public self-run surface.
+          if (res && res.queued) return res;
           setScoringMatch(null);
           onClose();
-        } catch (_err) {
-          // leave modal open so the error is visible
+          return res;
+        } catch (err) {
+          // A non-queued failure (direct 4xx validation/conflict, or an unexpected
+          // exception). ScoreEditorModal doesn't render generic submit errors and the
+          // public viewer has no toast, so surface it explicitly — log + alert (the
+          // established fallback here, mirroring app.jsx) — rather than silently
+          // leaving the modal open. The modal stays open so the operator can retry.
+          console.error("Self-run score submit failed:", err);
+          window.alert(err && err.message ? err.message : "Couldn't save the result. Please try again.");
         }
       },
       password: "",

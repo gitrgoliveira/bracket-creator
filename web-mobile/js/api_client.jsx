@@ -22,8 +22,39 @@
 // body throws SyntaxError per the Fetch spec, which used to surface as
 // "alert: Unexpected end of JSON input" right after a successful save.
 // See __tests__/api.test.jsx for the regression coverage.
+//
+// Wifi-hardening additions (mp-gpra):
+//   F1 — fetchWithTimeout: per-request AbortController, 12 s default.
+//   F2 — SSE silence watchdog: reconnects if no message for 35 s (>2× heartbeat).
+//   F3 — SSE reconnect exponential backoff + jitter (1–30 s, reset on open).
+//   F4 — Write queue persisted to localStorage (6 h TTL, try/catch safe).
+//   F5 — Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
+
+// ---------------------------------------------------------------------------
+// F1: fetch with per-request timeout via AbortController
+// ---------------------------------------------------------------------------
+// fetchWithTimeout wraps the native fetch() with an AbortController so
+// any stalled request is aborted after `ms` milliseconds (default 12 s).
+// An abort is treated as a NETWORK FAILURE — the AbortError propagates as a
+// rejected promise so callers enter the same catch branch as a TCP reset.
+// The clearTimeout in finally ensures the alarm never fires after the
+// request has already settled, avoiding a stale abort on a new controller.
+// ---------------------------------------------------------------------------
+
+/**
+ * fetch() with an automatic abort timeout.
+ * @param {string} url
+ * @param {RequestInit} opts
+ * @param {number} [ms=12000]
+ * @returns {Promise<Response>}
+ */
+function fetchWithTimeout(url, opts, ms = 12000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 // normalizeViewerCompItem maps one {config, poolMatches, bracket} item from the
 // aggregate GET /api/viewer/competitions or the court-scoped GET
@@ -69,12 +100,19 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
     : `s${Math.random().toString(36).slice(2)}`;
 
 // ---------------------------------------------------------------------------
-// C2: Offline write queue
+// C2 / F4 / F5: Offline write queue
 // ---------------------------------------------------------------------------
-// Holds the latest pending "running" score write per match (last-write-wins).
+// Holds the latest pending write per queue key (last-write-wins for running
+// autosaves; terminal writes supersede running ones for the same match).
 // On any network failure the write is queued here and retried on reconnect.
-// The queue never accumulates: a new write for the same match replaces any
-// existing entry, so only the latest state is ever flushed.
+//
+// F4: The queue is persisted to localStorage on every change so that a page
+// reload or crash during a wifi gap does not lose unsaved scores/decisions.
+// Entries older than QUEUE_TTL_MS (6 h) are dropped on rehydration.
+//
+// F5: Terminal writes (completed score, decision, lineup) use the same queue
+// with additional descriptor fields: kind, terminal, method, url.
+// A terminal entry for a key SUPERSEDES any running entry for the same key.
 //
 // Sync-status state is published via _syncStatus / _syncListeners so the UI
 // (SyncStatusPill) can render synced / syncing / offline without coupling to
@@ -85,8 +123,88 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  * @typedef {'synced'|'syncing'|'offline'} SyncStatusValue
  */
 
-/** @type {Map<string, {compID: string, matchID: string, payload: object, password: string}>} */
-const _writeQueue = new Map(); // compID:matchID → pending write descriptor
+/**
+ * @typedef {'score'|'decision'|'lineup'} WriteKind
+ */
+
+/**
+ * Descriptor shape for every queue entry:
+ *   compID, matchID — for identity / rev-counter management (scores/decisions)
+ *   payload         — request body (object, will be JSON-stringified)
+ *   password        — X-Tournament-Password header value
+ *   kind            — 'score' | 'decision' | 'lineup'
+ *   terminal        — true for completed / decision / lineup writes
+ *   method          — HTTP method string ('PUT' | 'POST')
+ *   url             — same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
+ *   enqueuedAt      — Date.now() at enqueue time (for TTL eviction on reload)
+ *
+ * Running score descriptors set terminal=false and do not use method/url
+ * (they are always PUT to the score endpoint — _flushQueue hard-codes that
+ * path for backward compat with the running path).
+ *
+ * @typedef {{
+ *   compID: string,
+ *   matchID: string,
+ *   payload: object,
+ *   password: string,
+ *   kind: WriteKind,
+ *   terminal: boolean,
+ *   method?: string,
+ *   url?: string,
+ *   enqueuedAt: number,
+ * }} WriteDescriptor
+ * `method`/`url` are present only on terminal entries; running entries omit them.
+ */
+
+const QUEUE_STORAGE_KEY = 'bc_write_queue';
+const QUEUE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+// Defense-in-depth allowlist for terminal-write replay. The queue only ever
+// holds score/decision/lineup writes, which are ALWAYS PUT/POST to
+// /api/competitions/… — so a tampered or corrupted bc_write_queue entry can't be
+// flushed into some other endpoint or HTTP method. Used by both rehydrate (load)
+// and flush, kept in one place so the two checks can't drift apart.
+const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST'];
+function _isAllowedTerminalRequest(method, url) {
+    if (!_ALLOWED_QUEUE_METHODS.includes(method) || typeof url !== 'string' || !url) return false;
+    // Defense-in-depth: localStorage is tamperable. Resolve the URL against our own
+    // origin and validate the NORMALIZED same-origin pathname. A naive
+    // startsWith('/api/competitions/') would let a dot-segment payload such as
+    // "/api/competitions/../../api/admin/secrets" pass while fetch normalizes it to
+    // "/api/admin/secrets" on the wire. The URL parse also rejects absolute,
+    // cross-origin, and protocol-relative ("//evil.com/…") URLs.
+    const origin = (typeof location !== 'undefined' && location.origin) || 'http://localhost';
+    let u;
+    try {
+        u = new URL(url, origin);
+    } catch (_e) {
+        return false;
+    }
+    return u.origin === origin && u.pathname.startsWith('/api/competitions/');
+}
+
+// ---------------------------------------------------------------------------
+// F4: localStorage helpers (all accesses wrapped in try/catch for
+// private-browsing / storage-quota safety — mirroring app.jsx pattern).
+// ---------------------------------------------------------------------------
+
+function _persistQueue() {
+    try {
+        // Remove the key (rather than writing "[]") when the queue is empty: avoids
+        // storage churn and, critically, prevents an in-flight flush that reaches
+        // _persistQueue() after clearQueue() from re-creating an empty bc_write_queue,
+        // which would undermine the credential-revocation intent of removing it.
+        if (_writeQueue.size === 0) {
+            localStorage.removeItem(QUEUE_STORAGE_KEY);
+            return;
+        }
+        const entries = [..._writeQueue.entries()];
+        localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
+    } catch (_e) { /* quota / private-browsing — silently skip */ }
+}
+
+/** @type {Map<string, WriteDescriptor>} */
+const _writeQueue = new Map(); // queue key → pending write descriptor
 let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
 const _syncListeners = new Set();
 
@@ -106,6 +224,23 @@ function _setSyncStatus(s) {
     _syncStatus = s;
     for (const fn of _syncListeners) {
         try { fn(s); } catch (_e) { /* swallow */ }
+    }
+}
+
+// Terminal-write FAILURE channel. When a queued terminal write (completed score /
+// decision / lineup) is permanently discarded — a non-retryable 4xx on retry
+// (409 conflict, 400 validation, 401/403 auth) or a corrupt entry — the write
+// never landed. Sync status alone returns to 'synced', which would let the editor
+// clear its pending banner and look "saved". This channel lets surfaces show an
+// explicit "not saved" state instead. Payload: {compID, matchID, kind, status, reason}.
+const _terminalFailListeners = new Set();
+function subscribeTerminalWriteFailed(fn) {
+    _terminalFailListeners.add(fn);
+    return () => _terminalFailListeners.delete(fn);
+}
+function _notifyTerminalWriteFailed(info) {
+    for (const fn of _terminalFailListeners) {
+        try { fn(info); } catch (_e) { /* swallow */ }
     }
 }
 
@@ -143,6 +278,10 @@ let _flushAttempt = 0;
 // finishes so newly-queued or still-failed writes are retried without overlap.
 let _flushInProgress = false;
 let _flushRequested = false;
+// Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
+// snapshots this at the start and aborts if it changes mid-loop, so a credential
+// revocation can't keep sending queued writes with the now-revoked password.
+let _queueGen = 0;
 
 async function _flushQueue() {
     if (_flushInProgress) { _flushRequested = true; return; }
@@ -156,6 +295,7 @@ async function _flushQueue() {
 
             if (_writeQueue.size === 0) {
                 _offlineFlag = false;
+                _persistQueue();
                 _recomputeSyncStatus();
                 continue;
             }
@@ -165,42 +305,100 @@ async function _flushQueue() {
             // identity before deleting so a newer write (a fresh object literal set
             // under the same key by enqueueRunningWrite) is not accidentally removed.
             const entries = [..._writeQueue.entries()];
+            const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
             let anyFailed = false;      // any failure → keep in queue + backoff
             let networkFailed = false;  // fetch rejected → connection down → "offline"
             for (const [key, descriptor] of entries) {
-                const { compID, matchID, payload, password } = descriptor;
+                // If clearQueue() ran during a prior await (logout / password_reset →
+                // credential revocation), abort before sending anything else with the
+                // now-revoked password/header.
+                if (gen !== _queueGen) break;
+                // Skip entries removed or superseded since the snapshot was taken.
+                if (_writeQueue.get(key) !== descriptor) continue;
+                const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
+                // Running score writes (terminal=false) don't store method/url and
+                // always PUT to the score endpoint. Terminal entries carry their own
+                // method+url, which may have been rehydrated from (tamperable)
+                // localStorage — validate against the allowlist (PUT/POST to
+                // /api/competitions/…) and DROP anything outside it rather than flush
+                // to an unexpected route or method.
+                let effectiveMethod, effectiveUrl;
+                if (terminal) {
+                    if (!_isAllowedTerminalRequest(method, url)) {
+                        console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
+                        _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        continue;
+                    }
+                    effectiveMethod = method;
+                    effectiveUrl = url;
+                } else {
+                    effectiveMethod = 'PUT';
+                    effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
+                }
                 try {
-                    const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
-                        method: 'PUT',
+                    const res = await fetchWithTimeout(effectiveUrl, {
+                        method: effectiveMethod,
                         headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
                         body: JSON.stringify(payload),
                     });
                     if (res.ok) {
-                        // Success (HTTP 200, including a stale {stale:true} no-op) — remove
+                        // Success (HTTP 200/201, including a stale {stale:true} no-op) — remove
                         // from queue only if no newer write has replaced this descriptor.
-                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
+                        if (_writeQueue.get(key) === descriptor) {
+                            _writeQueue.delete(key);
+                            // A confirmed terminal score write needs no further rev
+                            // tracking — drop its counter (mirrors recordScore's online
+                            // completed path) so _matchRevCounters doesn't grow for the
+                            // tab's lifetime now that completed writes are queued.
+                            if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
+                        }
                     } else if (res.status >= 500 || res.status === 429) {
                         // Transient server error — server is up but erroring; keep in
                         // queue and retry with backoff, but this is NOT "offline".
                         anyFailed = true;
+                    } else if (terminal && kind === 'decision' && res.status === 409) {
+                        // F5: decision-locked-as-success for queued terminal decision entries.
+                        //
+                        // When a decision POST was sent by the operator but the network dropped
+                        // before the response arrived, the request may have landed on the server
+                        // (decision already recorded) even though the client never saw a 2xx.
+                        // On the subsequent queued retry the server returns 409 with
+                        // error="decision_locked" or "already_ineligible" — both indicate our
+                        // earlier (lost-response) attempt succeeded. Any other 409
+                        // (unexpected) can never succeed on retry either — so both
+                        // cases discard the entry; only the unexpected one warns.
+                        //
+                        // IMPORTANT: this lost-response rule applies ONLY to queued retries
+                        // inside _flushQueue. The direct recordDecision call path always throws
+                        // on 409 so the score editor's force-retry prompt still fires.
+                        const body = await res.json().catch(() => ({}));
+                        if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
+                            console.warn(`[sync] queued decision write rejected (409):`, body);
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, reason: body.reasonHuman || body.error || 'conflict (409)' });
+                        }
+                        if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     } else {
-                        // Non-retryable response (4xx): 409 conflict (ineligible_competitor
-                        // / court_busy / side_mismatch / result_finalized), 400 validation,
-                        // 401/403 auth, 413, etc. This queued running autosave can never
-                        // succeed, so discard rather than retry forever and wedge the pill
-                        // on "Syncing…" — the operator's explicit Finish is authoritative.
-                        // Log for devtools visibility.
-                        res.json().then((body) => {
-                            console.warn(`[sync] queued running write rejected (${res.status}):`, body);
-                        }).catch(() => {});
+                        // Non-retryable response (4xx other than decision-locked above):
+                        // 400 validation, 401/403 auth, 413, generic 409 conflict, etc.
+                        // This queued write can never succeed, so discard rather than
+                        // retry forever and wedge the pill on "Syncing…". For TERMINAL
+                        // writes, surface an explicit failure so the editor shows a
+                        // "not saved" state instead of silently clearing to "saved".
+                        const body = await res.json().catch(() => ({}));
+                        console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
+                        if (terminal) {
+                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status}` });
+                        }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     }
                 } catch (_) {
-                    // fetch rejected — the network is down.
+                    // fetch rejected (network down) or aborted by fetchWithTimeout.
                     anyFailed = true;
                     networkFailed = true;
                 }
             }
+            _persistQueue();
             if (_writeQueue.size === 0) {
                 _flushAttempt = 0;
                 _offlineFlag = false;
@@ -225,17 +423,56 @@ async function _flushQueue() {
 /**
  * Enqueue a running-status write for offline-resilient delivery.
  * Last-write-wins per matchId: any older pending write for the same match
- * is replaced. Triggers an immediate flush attempt; on failure backs off and
- * retries automatically.
+ * is replaced (including any terminal entry — a superseded terminal means
+ * the operator sent a newer running update after a failed finish, which
+ * is handled by the caller's logic; this path keeps them consistent).
+ * Triggers an immediate flush attempt; on failure backs off and retries.
  */
-function enqueueRunningWrite(compID, matchID, payload, password) {
-    _writeQueue.set(_revKey(compID, matchID), { compID, matchID, payload, password });
+// Shared post-enqueue tail for both queue paths: persist, republish sync status,
+// reset the backoff counter (a fresh user write must not inherit a stale
+// max-backoff delay from a prior failure run), and kick a flush.
+function _commitEnqueue(key, descriptor) {
+    _writeQueue.set(key, descriptor);
+    _persistQueue();
     _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-    // A fresh user write resets the backoff counter so it doesn't inherit a
-    // stale max-backoff delay from a prior failure run (mirrors the online handler).
     _flushAttempt = 0;
     _flushQueue();
+}
+
+/**
+ * Enqueue a running-status write for offline-resilient delivery.
+ * Last-write-wins per matchId. Running writes always PUT to the score endpoint,
+ * so method/url are omitted — _flushQueue reconstructs that path for terminal=false.
+ */
+function enqueueRunningWrite(compID, matchID, payload, password) {
+    _commitEnqueue(_revKey(compID, matchID), {
+        compID, matchID, payload, password,
+        kind: 'score', terminal: false,
+        enqueuedAt: Date.now(),
+    });
+}
+
+/**
+ * F5: Enqueue a terminal write for offline-resilient delivery.
+ * Terminal entries (completed score, decision, lineup) supersede any running
+ * entry for the same key — last-write-wins, terminal takes priority.
+ * @param {string} key        - Queue key (use _revKey or lineup key)
+ * @param {WriteKind} kind    - 'score' | 'decision' | 'lineup'
+ * @param {string} method     - HTTP method ('PUT' | 'POST')
+ * @param {string} url        - Same-origin request path (e.g. /api/competitions/…)
+ * @param {object} payload    - Request body object
+ * @param {string} password   - X-Tournament-Password value
+ * @param {string} compID     - Competition ID (for identity tracking)
+ * @param {string} matchID    - Match ID (for identity tracking)
+ */
+function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
+    _commitEnqueue(key, {
+        compID, matchID, payload, password,
+        kind, terminal: true,
+        method, url,
+        enqueuedAt: Date.now(),
+    });
 }
 
 // Flush the queue whenever the browser comes back online.
@@ -259,11 +496,72 @@ if (typeof window !== 'undefined') {
 }
 
 // ---------------------------------------------------------------------------
+// F4: Rehydrate write queue from localStorage on module load
+// ---------------------------------------------------------------------------
+// Parse any entries persisted by a previous page session. Drop stale entries
+// (older than QUEUE_TTL_MS = 6 h) so we never replay hours-old scores into
+// a tournament that has moved on. Valid entries are added to _writeQueue and
+// an immediate flush is triggered so they are delivered as soon as the page
+// has network. All localStorage access is wrapped in try/catch for
+// private-browsing / quota safety.
+// ---------------------------------------------------------------------------
+;(function _rehydrateQueue() {
+    try {
+        const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
+        if (!raw) return;
+        const entries = JSON.parse(raw);
+        if (!Array.isArray(entries)) return;
+        const now = Date.now();
+        let anyLoaded = false;
+        for (const item of entries) {
+            // Defensive: a single malformed element (corrupt/tampered storage) must
+            // not throw and abort the whole rehydrate — destructuring a non-array in
+            // the for-of header would do exactly that, dropping ALL valid queued
+            // writes. Validate the tuple shape first and skip bad items individually.
+            if (!Array.isArray(item) || item.length < 2) continue;
+            const [key, descriptor] = item;
+            if (!key || !descriptor || typeof descriptor !== 'object') continue;
+            // Drop entries without a valid timestamp or older than TTL. enqueuedAt
+            // must be a finite positive number — a tampered/corrupt entry could set
+            // it to a non-numeric truthy value (e.g. a string), making
+            // (now - enqueuedAt) NaN so the TTL comparison is false and an
+            // arbitrarily old write slips through. Validate the type first.
+            if (typeof descriptor.enqueuedAt !== 'number'
+                || !Number.isFinite(descriptor.enqueuedAt)
+                || descriptor.enqueuedAt <= 0
+                || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
+            // Defense-in-depth: localStorage is tamperable. Reject terminal entries
+            // whose method/url fall outside the queue allowlist (PUT/POST to
+            // /api/competitions/…) before they can ever reach fetch on replay.
+            if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) continue;
+            // Only restore if not already superseded by a same-session write.
+            if (!_writeQueue.has(key)) {
+                _writeQueue.set(key, descriptor);
+                anyLoaded = true;
+            }
+        }
+        if (anyLoaded) {
+            _recomputeSyncStatus();
+            _flushQueue();
+        }
+    } catch (_e) { /* private-browsing / malformed JSON — silently skip */ }
+}());
+
+// ---------------------------------------------------------------------------
 // Shared ref-counted SSE singleton
 // ---------------------------------------------------------------------------
 // All subscribeToEvents callers share ONE EventSource connection. A Set of
 // subscriber records ({callback, onStatus}) is maintained; when the last
 // subscriber unsubscribes the source is closed and nulled out.
+//
+// F2: SSE silence watchdog — if no message (including heartbeat) arrives for
+// 35 s (>2× the server's 15 s heartbeat interval, with margin for slow courts)
+// the connection is assumed stale and is torn down for a fresh reconnect.
+// _lastActivityAt is updated on every onopen and every onmessage.
+//
+// F3: Reconnect uses exponential backoff + jitter (1–30 s) instead of a fixed
+// 5 s delay. _reconnectAttempt increments on each onerror and resets to 0 in
+// onopen, so a stable connection always reconnects fast after the first error.
 // ---------------------------------------------------------------------------
 
 /** @type {EventSource|null} */
@@ -272,6 +570,49 @@ let _sharedSource = null;
 let _retryTimer = null;
 /** @type {Set<{callback: Function, onStatus: Function|undefined}>} */
 const _subscribers = new Set();
+
+// F2: timestamp of the last received SSE activity (open or message).
+let _lastActivityAt = 0;
+/** @type {ReturnType<typeof setInterval>|null} */
+let _watchdogTimer = null;
+const SSE_WATCHDOG_INTERVAL_MS = 10000;  // poll every 10 s
+const SSE_SILENCE_THRESHOLD_MS = 35000; // reconnect if silent for >35 s
+
+// F3: reconnect backoff state.
+let _reconnectAttempt = 0;
+
+/** Compute the next reconnect delay: exponential backoff 1–30 s plus up to 1 s of jitter. */
+function _reconnectDelay() {
+    return Math.min(30000, 1000 * Math.pow(2, _reconnectAttempt)) + Math.random() * 1000;
+}
+
+/** Arm the silence watchdog. Idempotent — clears any prior interval first. */
+function _armWatchdog() {
+    _disarmWatchdog();
+    _watchdogTimer = setInterval(() => {
+        // If the source is gone already (e.g. onerror cleared it) do nothing —
+        // the reconnect timer will re-arm the watchdog when the new source opens.
+        if (!_sharedSource) return;
+        if (Date.now() - _lastActivityAt > SSE_SILENCE_THRESHOLD_MS) {
+            // Silence detected: tear down the stale source and reconnect.
+            _sharedSource.close();
+            _sharedSource = null;
+            _fanOutStatus('error');
+            if (_subscribers.size > 0) {
+                if (_retryTimer) { clearTimeout(_retryTimer); }
+                _retryTimer = setTimeout(_ensureConnected, _reconnectDelay());
+                _reconnectAttempt++;
+            }
+            // Watchdog re-arms itself after _ensureConnected → onopen.
+            _disarmWatchdog();
+        }
+    }, SSE_WATCHDOG_INTERVAL_MS);
+}
+
+/** Disarm the silence watchdog (call when no subscribers remain). */
+function _disarmWatchdog() {
+    if (_watchdogTimer !== null) { clearInterval(_watchdogTimer); _watchdogTimer = null; }
+}
 
 function _emitStatus(sub, s) {
     if (typeof sub.onStatus === 'function') {
@@ -286,7 +627,7 @@ function _fanOutStatus(s) {
 }
 
 function _ensureConnected() {
-    // Guard: the 5s retry timer may fire after all subscribers have unsubscribed
+    // Guard: the retry timer may fire after all subscribers have unsubscribed
     // (clearTimeout only cancels a pending callback — it cannot stop one that is
     // already queued in the event loop). No-op when no one is listening so we
     // don't open a zombie EventSource that can never be closed.
@@ -307,13 +648,29 @@ function _ensureConnected() {
     const source = new EventSource('/api/events');
     _sharedSource = source;
 
+    // F2: arm the watchdog at connect time, not just in onopen — a CONNECTING
+    // stall (half-open / captive / saturated WiFi where onopen, and sometimes
+    // even onerror, never fire) is the exact silent-staleness this watchdog must
+    // catch. Stamp activity now so the 35s timer measures from the attempt.
+    _lastActivityAt = Date.now();
+    _armWatchdog();
+
     source.onopen = () => {
         if (source !== _sharedSource) return;
+        // F2: record activity and arm the watchdog on every (re)connect.
+        _lastActivityAt = Date.now();
+        _armWatchdog();
+        // F3: a successful open resets the backoff counter so the next error
+        // reconnects fast (starting from 1 s) rather than inheriting a long delay.
+        _reconnectAttempt = 0;
         _fanOutStatus('open');
     };
 
     source.onmessage = (event) => {
         if (source !== _sharedSource) return;
+        // F2: every message (including heartbeat {type:"heartbeat"}) resets the
+        // silence watchdog. No seq field on heartbeats — just update the timestamp.
+        _lastActivityAt = Date.now();
         let parsed;
         try {
             parsed = JSON.parse(event.data);
@@ -330,12 +687,16 @@ function _ensureConnected() {
         if (source !== _sharedSource) return;
         source.close();
         _sharedSource = null;
+        // F2: disarm the watchdog — the source is gone; a new one will re-arm it.
+        _disarmWatchdog();
         _fanOutStatus('error');
         if (_subscribers.size > 0) {
             // Clear any prior timer before re-arming so repeated error events
             // can't queue multiple concurrent reconnects.
             if (_retryTimer) clearTimeout(_retryTimer);
-            _retryTimer = setTimeout(_ensureConnected, 5000);
+            // F3: exponential backoff + jitter instead of fixed 5 s.
+            _retryTimer = setTimeout(_ensureConnected, _reconnectDelay());
+            _reconnectAttempt++;
         }
     };
 }
@@ -666,6 +1027,9 @@ const API = {
             if (_subscribers.size === 0) {
                 clearTimeout(_retryTimer);
                 _retryTimer = null;
+                // F2: disarm the watchdog when no subscribers remain — no point
+                // in polling for silence when no one is listening.
+                _disarmWatchdog();
                 if (_sharedSource) {
                     _sharedSource.close();
                     _sharedSource = null;
@@ -687,10 +1051,13 @@ const API = {
             _recomputeSyncStatus();
         }
 
+        const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
         let res;
         try {
             try {
-                res = await fetch(`/api/competitions/${compID}/matches/${matchID}/score`, {
+                // F1: use fetchWithTimeout (12 s) so a stalled wifi request doesn't
+                // block the UI indefinitely. An abort is treated as a network failure.
+                res = await fetchWithTimeout(scoreUrl, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -699,10 +1066,11 @@ const API = {
                     body: JSON.stringify(payload)
                 });
             } catch (_networkErr) {
-                // Network failure (offline / no connection). For running-status writes,
+                // Network failure or timeout abort. For running-status writes,
                 // queue for retry — last-write-wins semantics so only the latest state
-                // is ever flushed. Completed writes are not queued because they MUST
-                // be delivered; let callers handle the error with a toast.
+                // is ever flushed.
+                // F5: completed (terminal) writes are now also queued on transient
+                // failures so they are not silently lost on a wifi gap.
                 if (isRunning) {
                     enqueueRunningWrite(compID, matchID, payload, password);
                     // Return a DISCRIMINATED { queued: true } result. The write was
@@ -716,7 +1084,13 @@ const API = {
                     // never runs recordDaihyosen against stale server-side scores.
                     return { queued: true };
                 }
-                throw _networkErr;
+                // F5: completed score — enqueue as terminal and return {queued:true}.
+                // A terminal entry supersedes any running entry for the same key.
+                _enqueueTerminalWrite(
+                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
+                    payload, password, compID, matchID
+                );
+                return { queued: true };
             }
         } finally {
             if (isRunning) {
@@ -735,7 +1109,10 @@ const API = {
                 // if the completed PUT fails (e.g. Finish while offline) we KEEP the
                 // last queued running snapshot so it can still flush when the
                 // connection returns, instead of dropping the operator's scores.
-                if (_writeQueue.delete(_revKey(compID, matchID))) _recomputeSyncStatus();
+                if (_writeQueue.delete(_revKey(compID, matchID))) {
+                    _persistQueue();
+                    _recomputeSyncStatus();
+                }
                 _matchRevCounters.delete(_revKey(compID, matchID));
             }
             // A stale running write is signalled by HTTP 200 {stale:true}
@@ -748,13 +1125,20 @@ const API = {
         // drops to 0 and the pill flips back to "Synced" even though the latest
         // score never reached the server (the autosave caller swallows the
         // throw). Queuing keeps the pill on syncing/offline and re-delivers the
-        // latest state. Non-retryable 4xx are terminal (validation / conflict /
-        // finalized) — they won't succeed on retry, so they surface to explicit
-        // callers; the operator's authoritative Finish is the backstop.
+        // latest state.
         if (isRunning && (res.status >= 500 || res.status === 429)) {
             enqueueRunningWrite(compID, matchID, payload, password);
             // Discriminated { queued: true } — not server-confirmed; see the
             // network-error branch above for the full caller contract.
+            return { queued: true };
+        }
+        // F5: completed score, transient server error — enqueue as terminal.
+        // 4xx on completed scores are non-retryable and throw (below).
+        if (!isRunning && (res.status >= 500 || res.status === 429)) {
+            _enqueueTerminalWrite(
+                _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
+                payload, password, compID, matchID
+            );
             return { queued: true };
         }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
@@ -769,16 +1153,46 @@ const API = {
     // defined by mobileapp.DecisionRequest in handlers_decision.go; decisionBy
     // MUST be "shiro" or "aka", decisionReason is optional and ≤200 chars.
     // Response is the updated state.MatchResult.
+    //
+    // F1: uses fetchWithTimeout (12 s abort on stalled wifi).
+    // F5: on network failure / abort / 5xx / 429 the decision is enqueued as a
+    // terminal write for durable re-delivery. 4xx (including 409 decision_locked
+    // on the DIRECT call) always throw — the score editor relies on a thrown 409
+    // to show its force-retry prompt. The decision-locked-as-success rule (409
+    // treated as success) applies ONLY to queued retries inside _flushQueue.
     async recordDecision(compID, matchID, body, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/decision`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(body)
-        });
+        const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
+        let res;
+        try {
+            // F1: abort after 12 s; AbortError propagates as network failure.
+            res = await fetchWithTimeout(decisionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(body)
+            });
+        } catch (_networkErr) {
+            // F5: network failure or timeout — enqueue as terminal for retry.
+            _enqueueTerminalWrite(
+                _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
+                body, password, compID, matchID
+            );
+            return { queued: true };
+        }
         if (!res.ok) {
+            // F5: transient server error — enqueue for retry.
+            if (res.status >= 500 || res.status === 429) {
+                _enqueueTerminalWrite(
+                    _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
+                    body, password, compID, matchID
+                );
+                return { queued: true };
+            }
+            // 4xx (including 409 decision_locked) — throw immediately so the UI
+            // can surface the error. The decision-locked-as-success rule is ONLY
+            // for queued retries in _flushQueue, not for direct calls.
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to record decision");
         }
@@ -1014,15 +1428,40 @@ const API = {
         return res.json();
     },
     async putTeamLineup(compID, teamId, round, positions, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ teamId, competitionId: compID, round, positions })
-        });
+        const lineupUrl = `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`;
+        const lineupBody = { teamId, competitionId: compID, round, positions };
+        // F5: lineup queue key is distinct from score/decision keys so a lineup
+        // write doesn't collide with a concurrent score write for the same match.
+        const lineupKey = `lineup:${compID}:${teamId}:${round}`;
+        let res;
+        try {
+            // F1: abort after 12 s on stalled wifi.
+            res = await fetchWithTimeout(lineupUrl, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(lineupBody)
+            });
+        } catch (_networkErr) {
+            // F5: network failure or timeout — enqueue as terminal.
+            _enqueueTerminalWrite(
+                lineupKey, 'lineup', 'PUT', lineupUrl,
+                lineupBody, password, compID, ''
+            );
+            return { queued: true };
+        }
         if (!res.ok) {
+            // F5: transient server error — enqueue for retry.
+            if (res.status >= 500 || res.status === 429) {
+                _enqueueTerminalWrite(
+                    lineupKey, 'lineup', 'PUT', lineupUrl,
+                    lineupBody, password, compID, ''
+                );
+                return { queued: true };
+            }
+            // 4xx — throw immediately (409 ErrLineupLocked, 400 validation, etc.).
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to save lineup");
         }
@@ -1058,17 +1497,40 @@ const API = {
         if (force && !(reason && reason.trim())) {
             throw new Error("A change reason is required to override the lineup lock.");
         }
-        const body = { teamId, competitionId: compID, matchId, positions, force };
-        if (reason) body.changeReason = reason;
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(body)
-        });
+        const matchLineupBody = { teamId, competitionId: compID, matchId, positions, force };
+        if (reason) matchLineupBody.changeReason = reason;
+        const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
+        // F5: per-match lineup key — distinct from round-scoped lineups.
+        const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
+        let res;
+        try {
+            // F1: abort after 12 s on stalled wifi.
+            res = await fetchWithTimeout(matchLineupUrl, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(matchLineupBody)
+            });
+        } catch (_networkErr) {
+            // F5: network failure or timeout — enqueue as terminal.
+            _enqueueTerminalWrite(
+                matchLineupKey, 'lineup', 'PUT', matchLineupUrl,
+                matchLineupBody, password, compID, matchId
+            );
+            return { queued: true };
+        }
         if (!res.ok) {
+            // F5: transient server error — enqueue for retry.
+            if (res.status >= 500 || res.status === 429) {
+                _enqueueTerminalWrite(
+                    matchLineupKey, 'lineup', 'PUT', matchLineupUrl,
+                    matchLineupBody, password, compID, matchId
+                );
+                return { queued: true };
+            }
+            // 4xx — throw immediately (409 ErrLineupLocked, 400 validation, etc.).
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to save match lineup");
         }
@@ -1376,13 +1838,68 @@ const API = {
         }
         return res.json();
     },
+
+    // -------------------------------------------------------------------------
+    // F2/F3: reconnectEvents — force a fresh SSE connection.
+    // Closes the current shared source (if any), resets the reconnect backoff
+    // counter, and calls _ensureConnected(). Safe to call repeatedly — the
+    // double-connect guard in _ensureConnected() prevents duplicate sources.
+    // Exposed as API.reconnectEvents / window.API.reconnectEvents so other
+    // modules loaded as window globals can reach it without an ES import.
+    // -------------------------------------------------------------------------
+    reconnectEvents() {
+        if (_sharedSource) {
+            _sharedSource.close();
+            _sharedSource = null;
+            _disarmWatchdog();
+        }
+        if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+        _reconnectAttempt = 0;
+        _ensureConnected();
+    },
+
+    // -------------------------------------------------------------------------
+    // F5: hasPendingTerminalWrite — returns true when the queue holds a TERMINAL
+    // entry for the given (compID, matchID) score/decision key.
+    // The score editor uses this to show a "not yet saved / retry" indicator
+    // when a completed score or decision is waiting for connectivity.
+    // Exposed as API.hasPendingTerminalWrite / window.API.hasPendingTerminalWrite.
+    // -------------------------------------------------------------------------
+    hasPendingTerminalWrite(compID, matchID) {
+        const descriptor = _writeQueue.get(_revKey(compID, matchID));
+        return !!(descriptor && descriptor.terminal);
+    },
+
+    // mp-gpra (security): clearQueue — drop all queued writes (in-memory + the
+    // persisted bc_write_queue) and reset sync state. Called on logout /
+    // password_reset so a stale plaintext password and any pending writes don't
+    // linger in localStorage past credential revocation — bringing bc_write_queue
+    // to the same lifecycle as bc_password. Pending offline writes are discarded:
+    // on a password_reset they would 401 on retry anyway, and logout is explicit.
+    clearQueue() {
+        // Bump the generation FIRST so an in-flight _flushQueue loop (mid-await on
+        // a network write) aborts instead of sending the rest of its snapshot with
+        // the now-revoked password.
+        _queueGen++;
+        _writeQueue.clear();
+        try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushAttempt = 0;
+        _offlineFlag = false;
+        _recomputeSyncStatus();
+    },
 };
 
-export { API, subscribeSyncStatus, enqueueRunningWrite };
+export { API, subscribeSyncStatus, subscribeTerminalWriteFailed, enqueueRunningWrite };
 
 if (typeof window !== 'undefined') {
     window.API = API;
     // C2: expose sync-status pub/sub so components loaded as window.* globals
     // (admin_scoring_modal.jsx, etc.) can subscribe without an ES import.
     window.subscribeSyncStatus = subscribeSyncStatus;
+    // mp-gpra: terminal-write failure pub/sub — lets the score editor show an
+    // explicit "not saved" state when a queued terminal write is permanently dropped.
+    window.subscribeTerminalWriteFailed = subscribeTerminalWriteFailed;
+    // mp-gpra: reconnectEvents and hasPendingTerminalWrite are on window.API
+    // (via the API object above) — no separate window assignments needed.
 }

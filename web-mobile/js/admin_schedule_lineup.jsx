@@ -183,6 +183,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setSaving(true);
     try {
       const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), reason);
+      // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
+      // the form from updated.positions (which is absent → would clear every
+      // field) or show success; keep the operator's entered values and report
+      // pending. The write is durable and will retry.
+      if (updated && updated.queued) {
+        if (typeof showToast === "function") showToast("Offline — match lineup not saved yet, will retry");
+        return;
+      }
       // Reflect exactly what was persisted. This is also what applies the
       // copy-from-previous mid-match values: that path defers setValues until
       // this confirmed save, so a cancelled ReasonPrompt never leaves stale

@@ -1,7 +1,7 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 
@@ -666,7 +666,68 @@ function App() {
         load();
     };
 
+    // F6b: per-subscription seq tracker. Allocated once per effect run so
+    // it resets on viewerCompId/mode changes alongside the SSE reconnect.
+    const sseSeq = { lastSeq: 0 };
+
+    // F8: resync on tab resume. When the tab becomes visible again after
+    // being backgrounded, reconnect SSE (clears any stale connection) and
+    // refresh data so the UI is current. Defined inside the effect so the
+    // closure captures jitteredTimeout, maybeLoad and viewerCompId; removed
+    // in the effect cleanup alongside unsub() to avoid duplicate handlers
+    // across re-renders.
+    const onVisibilityChange = () => {
+        if (document.hidden) return;
+        window.API.reconnectEvents();
+        maybeLoad();
+        if (viewerCompId) {
+            jitteredTimeout(
+                () => window.API.fetchCompetitionDetails(viewerCompId)
+                    .then(setSelectedCompData)
+                    .catch(err => console.error('tab-resume refresh failed:', err)),
+                Math.random() * 500
+            );
+        }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     const unsub = window.API.subscribeToEvents((event) => {
+        // F6b — heartbeat: liveness only, do not patch or advance seq.
+        if (event.type === 'heartbeat') return;
+
+        // F6b — resync_required: server restarted or replay was unsatisfiable.
+        // Reset our seq counter to the server's head and do a full refetch.
+        if (event.type === 'resync_required') {
+            sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
+            maybeLoad();
+            if (viewerCompId) {
+                jitteredTimeout(
+                    () => window.API.fetchCompetitionDetails(viewerCompId)
+                        .then(setSelectedCompData)
+                        .catch(err => console.error('resync refresh failed:', err)),
+                    Math.random() * 500
+                );
+            }
+            return;
+        }
+
+        // F6b — gap detection: run on every event so the seq counter advances
+        // accurately even for events that don't patch state (e.g. lineup_updated,
+        // announcement). On a gap, trigger the same scoped refetch the per-type
+        // branches below use, so we converge without waiting for the next event.
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
+            maybeLoad();
+            if (viewerCompId) {
+                jitteredTimeout(
+                    () => window.API.fetchCompetitionDetails(viewerCompId)
+                        .then(setSelectedCompData)
+                        .catch(err => console.error('gap refetch failed:', err)),
+                    Math.random() * 500
+                );
+            }
+        });
+        if (seqResult.duplicate) return;
+
         // P1/P4 (mp-9afd): two jitter windows.
         //   detailJitter — tight (0–500ms) for per-competition detail fetches
         //     that target a single competition. Each event targets one comp,
@@ -707,6 +768,10 @@ function App() {
             if (authedRef.current) {
                 setAuthed(false);
                 setPassword("");
+                // Security: drop the offline write queue too, so the old
+                // plaintext password doesn't linger in localStorage past the
+                // reset (clearQueue self-guards its own storage access).
+                if (window.API && window.API.clearQueue) window.API.clearQueue();
                 try {
                     localStorage.removeItem("bc_authed");
                     localStorage.removeItem("bc_password");
@@ -843,7 +908,7 @@ function App() {
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
     });
-    return () => { unsub(); pendingTimers.forEach(clearTimeout); };
+    return () => { unsub(); pendingTimers.forEach(clearTimeout); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
@@ -882,6 +947,9 @@ function App() {
     setAuthed(false);
     setMode("viewer");
     setPassword("");
+    // Security: clear the offline write queue so the stale plaintext password
+    // and any pending writes don't survive logout in localStorage.
+    if (window.API && window.API.clearQueue) window.API.clearQueue();
     localStorage.removeItem("bc_authed");
     localStorage.removeItem("bc_password");
   };

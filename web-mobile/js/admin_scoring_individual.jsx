@@ -78,6 +78,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   const [submitting, setSubmitting] = useStateA(false);
+  // F5: pending-write state — set when a terminal submit resolves { queued:true }
+  // (offline / transient failure). While pending the modal stays open and shows a
+  // sticky "Not saved yet" banner. Cleared when the queue drains for this match
+  // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
+  // terminal submit closure so "Retry now" can re-invoke it directly.
+  const [pendingWrite, setPendingWrite] = useStateA(false);
+  const pendingFnRef = useRefA(null);
+  // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
+  // 4xx on retry) — the write never landed, so we must show an explicit "not
+  // saved" failure state rather than let the pending banner clear to "saved".
+  const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
   // Fetched once on open so the warning banner can fire before the
   // operator submits (the server validates the same cap on PUT /score).
@@ -157,6 +168,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "competitors",
+    // F5: thread pending-write handles so the factory can show the sticky banner
+    // when the decision write is only queued (offline / transient failure).
+    setPendingWrite, pendingFnRef,
   });
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -262,8 +276,75 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
     setSubmitting(true);
-    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // Clear any prior pending/failed state when the operator explicitly retries.
+    if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
+    let res;
+    try {
+      res = await fn();
+    } finally {
+      if (mountedRef.current) setSubmitting(false);
+    }
+    // F5: if the terminal write was only queued (offline / transient), do NOT
+    // close or advance. Instead enter pending-write mode: show the sticky banner
+    // and remember the submit closure so "Retry now" can re-invoke it.
+    if (res && res.queued) {
+      if (mountedRef.current) {
+        setPendingWrite(true);
+        pendingFnRef.current = fn;
+      }
+    }
+    return res;
   };
+
+  // F5 (re-open hydration): if a terminal write for THIS match is still queued
+  // (operator finished offline, closed the editor, then reopened before the
+  // queue drained), surface the pending banner on mount. The submit closure
+  // can't be recovered from the serialized queue, so "Retry now" stays disabled
+  // until the operator re-submits; the queue keeps auto-retrying meanwhile.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (window.API && typeof window.API.hasPendingTerminalWrite === 'function'
+        && window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+      setPendingWrite(true);
+    }
+  }, [m.compId, m.id]);
+
+  // F5: subscribe to sync-status so the pending-write banner auto-clears once
+  // the queue drains for this match. Mounted once; reads match identity via
+  // closure. Uses mountedRef guard so setState never fires after unmount.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    // Guard the window globals: in unit/render tests (and during boot ordering)
+    // subscribeSyncStatus / API can be absent — mirror SyncStatusPill's guard so
+    // the modal never throws on mount.
+    if (typeof window.subscribeSyncStatus !== 'function') return;
+    const unsub = window.subscribeSyncStatus((status) => {
+      if (!mountedRef.current) return;
+      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
+        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
+        : false;
+      if (status === 'synced' && !stillPending) {
+        setPendingWrite(false);
+        pendingFnRef.current = null;
+      }
+    });
+    return unsub;
+  }, [m.compId, m.id]);
+
+  // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
+  // retry) as an explicit "not saved" state — otherwise the write is silently
+  // dropped and the pending banner clears to look saved. Guarded like above.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeTerminalWriteFailed !== 'function') return;
+    const unsub = window.subscribeTerminalWriteFailed((info) => {
+      if (!mountedRef.current) return;
+      if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})` });
+      setPendingWrite(false); // the queued write is gone — it failed, not pending
+    });
+    return unsub;
+  }, [m.compId, m.id]);
 
   // Draw detection: check both the score.type (when present) and the
   // top-level decision string. Either being "hikiwake" means draw.
@@ -723,6 +804,50 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
             />
+          )}
+          {/* F5: PERMANENT-failure banner — a queued terminal write was rejected
+              (non-retryable 4xx) and dropped, so it never saved. Non-dismissible
+              danger state; the operator must re-enter and submit again. Takes
+              precedence over the (now-cleared) pending banner. */}
+          {writeFailed && (
+            <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
+              <span>Not saved — {writeFailed.reason}. Re-enter the result and submit again.</span>
+              {/* Only offer Retry when we still hold the submit closure. After a
+                  reopen/hydration it can't be recovered from the serialized queue,
+                  so a Retry button would be permanently disabled and misleading —
+                  the banner text already tells the operator to re-enter. */}
+              {pendingFnRef.current && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={submitting}
+                  onClick={() => doSubmit(pendingFnRef.current)}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+          {/* F5: pending-write banner — shown when a terminal submit was only queued
+              (offline / transient failure). The write is durable in localStorage
+              and will be retried automatically. Operator may still dismiss. */}
+          {pendingWrite && !writeFailed && (
+            <div className="pending-write-banner" role="status" aria-live="polite">
+              <span>Not saved yet — will keep retrying until it lands.</span>
+              {/* Only show Retry when we hold the submit closure. On a hydrated
+                  re-open it can't be restored from the serialized queue — but the
+                  queue still auto-retries in the background, so no button is fine. */}
+              {pendingFnRef.current && (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  disabled={submitting}
+                  onClick={() => doSubmit(pendingFnRef.current)}
+                >
+                  Retry now
+                </button>
+              )}
+            </div>
           )}
           <div className="score-nav">
             {prevMatch ? (

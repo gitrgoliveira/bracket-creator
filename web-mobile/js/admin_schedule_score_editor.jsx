@@ -277,8 +277,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             onClose={() => setOpenMatch(null)}
             onSubmit={async (patch) => {
               try {
-                await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (!mountedRef.current) return;
+                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                if (!mountedRef.current) return res;
+                // F5: when the terminal write was only queued (offline), return
+                // the { queued: true } signal to the editor so it can show the
+                // pending-save banner instead of closing the modal.
+                if (res && res.queued) return res;
                 // ▶ Start Match: keep the operator IN the scoring surface rather
                 // than dumping them back to the list (which forced a re-find +
                 // reopen per match). A "start" patch is status:running with no
@@ -297,8 +301,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             }}
             onSubmitAndNext={nextActiveMatch ? async (patch) => {
               try {
-                await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
-                if (!mountedRef.current) return;
+                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                if (!mountedRef.current) return res;
+                // F5: queued write — do NOT advance to the next match. Return
+                // the signal so the editor shows the pending-save banner.
+                if (res && res.queued) return res;
                 // "Finish + Start Next →": land on the next match on the SAME
                 // shiaijo AND actually start it (honest to the label). If the
                 // next match is already running/completed, just open it. Start

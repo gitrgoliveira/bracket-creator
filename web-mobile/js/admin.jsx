@@ -1,7 +1,7 @@
 // Admin side — single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -272,13 +272,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   const editMatchScore = async (compId, matchId, result, match) => {
+    let saveRes;
     try {
-      await window.API.recordScore(compId, matchId, result, password, match);
+      saveRes = await window.API.recordScore(compId, matchId, result, password, match);
     } catch (e) {
       showToast(e.message, "error");
       throw e;
     }
+    // F5: when the write was only queued (offline/transient), skip the
+    // best-effort refresh — there is nothing new on the server yet.
+    // Return saveRes so callers (onSubmit/onSubmitAndNext props) can
+    // propagate the { queued: true } signal up to the score editor.
+    if (saveRes && saveRes.queued) return saveRes;
     await refreshCompsBestEffort("Score");
+    return saveRes;
   };
 
   const addCompetition = async (c) => {
@@ -468,8 +475,65 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             .finally(() => { tournamentFetching = false; });
         }, jitter);
       };
+      // F6b: per-subscription seq tracker, reset on each effect run.
+      const sseSeq = { lastSeq: 0 };
+
+      // F8: resync on tab resume. When the tab becomes visible, reconnect
+      // SSE and refresh competition + tournament data so the admin console
+      // is current after the tab was backgrounded. Removed in cleanup.
+      const onVisibilityChange = () => {
+        if (document.hidden || cancelled) return;
+        window.API.reconnectEvents();
+        schedule((targetId) => {
+          window.API.fetchCompetitionDetails(targetId)
+            .then(data => {
+              if (cancelled || data?.config?.id !== targetId) return;
+              setAdminCompData(data);
+            })
+            .catch(err => console.error('tab-resume refresh failed:', err));
+        });
+        scheduleTournamentRefresh(false);
+      };
+      document.addEventListener('visibilitychange', onVisibilityChange);
+
       const unsub = window.API.subscribeToEvents((event) => {
         if (cancelled) return;
+
+        // F6b — heartbeat: liveness only, no patch, no seq advance.
+        if (event.type === 'heartbeat') return;
+
+        // F6b — resync_required: server restarted / replay unsatisfiable.
+        // Reset seq to the server's head and trigger a full refresh.
+        if (event.type === 'resync_required') {
+          sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
+          schedule((targetId) => {
+            window.API.fetchCompetitionDetails(targetId)
+              .then(data => {
+                if (cancelled || data?.config?.id !== targetId) return;
+                setAdminCompData(data);
+              })
+              .catch(err => console.error('resync refresh failed:', err));
+          });
+          scheduleTournamentRefresh(false);
+          return;
+        }
+
+        // F6b — gap detection: run on every event so the seq counter
+        // advances even for events with no match payload. On a gap,
+        // trigger the same scoped refetch the per-type branches use.
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
+          schedule((targetId) => {
+            window.API.fetchCompetitionDetails(targetId)
+              .then(data => {
+                if (cancelled || data?.config?.id !== targetId) return;
+                setAdminCompData(data);
+              })
+              .catch(err => console.error('gap refetch failed:', err));
+          });
+          scheduleTournamentRefresh(false);
+        });
+        if (seqResult.duplicate) return;
+
         if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started / competition_completed
@@ -520,6 +584,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         timers.forEach(clearTimeout);
         timers.clear();
         if (pendingTournament) clearTimeout(pendingTournament);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
         unsub();
       };
     }

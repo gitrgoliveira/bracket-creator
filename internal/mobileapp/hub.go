@@ -39,11 +39,12 @@ const (
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers
 	// ignore the event — their flow doesn't depend on the admin password.
-	EventPasswordReset EventType = "password_reset"
-	EventAnnouncement  EventType = "announcement"
-	EventDrawGenerated EventType = "draw_generated"
-	EventDrawDiscarded EventType = "draw_discarded"
-	EventLineupUpdated EventType = "lineup_updated"
+	EventPasswordReset  EventType = "password_reset"
+	EventAnnouncement   EventType = "announcement"
+	EventDrawGenerated  EventType = "draw_generated"
+	EventDrawDiscarded  EventType = "draw_discarded"
+	EventLineupUpdated  EventType = "lineup_updated"
+	EventResyncRequired EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -171,6 +172,12 @@ type Hub struct {
 	// subscriber channels are closed so the per-connection streaming
 	// goroutine in HandleEvents exits cleanly. Guarded by mu.
 	closed bool
+
+	// HeartbeatInterval is the SSE keep-alive cadence (default 15s, set by
+	// NewHubWithLimits). Exposed so tests can drive HandleEvents with a short
+	// interval and observe a real emitted heartbeat frame rather than asserting
+	// a hard-coded literal.
+	HeartbeatInterval time.Duration
 }
 
 func NewHub() *Hub {
@@ -201,10 +208,11 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 		historySize = DefaultHistorySize
 	}
 	return &Hub{
-		clients:     make(map[chan string]bool),
-		history:     make([]historyEntry, historySize),
-		HistorySize: historySize,
-		MaxClients:  maxClients,
+		clients:           make(map[chan string]bool),
+		history:           make([]historyEntry, historySize),
+		HistorySize:       historySize,
+		MaxClients:        maxClients,
+		HeartbeatInterval: 15 * time.Second,
 	}
 }
 
@@ -427,16 +435,53 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		// directly.
 		if lastEventID > 0 {
 			entries, complete := h.snapshotHistorySince(lastEventID)
-			if !complete {
-				fmt.Printf("SSE replay: client requested Last-Event-ID=%d but oldest retained seq exceeds it; %d entries replayed\n", lastEventID, len(entries))
+			currentHeadSeq := h.seq.Load()
+			// Unsatisfiable when the ring rolled past the client's Last-Event-ID
+			// (eviction) OR the server restarted and its in-memory seq reset below
+			// the client's Last-Event-ID — INCLUDING a fresh restart at head seq 0,
+			// before any event has been broadcast (the client's stale Last-Event-ID
+			// is still ahead of 0). That last case must still resync: otherwise a
+			// client that keeps an in-memory lastSeq across reconnects would treat
+			// the first post-restart event (seq=1) as a stale duplicate and drop it,
+			// leaving the screen silently stale.
+			unsatisfiable := !complete || lastEventID > currentHeadSeq
+			if unsatisfiable {
+				// A gap-free replay is impossible. Tell the client to resync (reset
+				// its in-memory lastSeq + full refetch). Fall through to the normal
+				// streaming loop afterwards.
+				fmt.Printf("SSE replay: client Last-Event-ID=%d not satisfiable (complete=%v, headSeq=%d); sending resync_required\n", lastEventID, complete, currentHeadSeq)
+				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
+				resyncPayload, err := json.Marshal(resyncEvent)
+				if err != nil {
+					fmt.Printf("SSE resync marshal error: %v\n", err)
+				} else if currentHeadSeq > 0 {
+					// Stamp id: <head> so the browser's Last-Event-ID advances to head
+					// and the client won't immediately re-gap.
+					writeSSEEnvelope(c.Writer, currentHeadSeq, string(resyncPayload))
+					c.Writer.Flush()
+				} else {
+					// Fresh restart, head seq 0: emit the resync WITHOUT an id: line so
+					// the browser's Last-Event-ID isn't forced to "0" (a real id:0 would
+					// corrupt later reconnect checkpoints). The data frame still fires
+					// onmessage, so the client resets its lastSeq and refetches.
+					if _, werr := fmt.Fprintf(c.Writer, "data: %s\n\n", resyncPayload); werr != nil {
+						fmt.Printf("SSE resync write failed: %v\n", werr)
+					}
+					c.Writer.Flush()
+				}
+			} else {
+				for _, entry := range entries {
+					writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
+				}
+				c.Writer.Flush()
 			}
-			for _, entry := range entries {
-				writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
-			}
-			c.Writer.Flush()
 		}
 
-		ticker := time.NewTicker(15 * time.Second)
+		hbInterval := h.HeartbeatInterval
+		if hbInterval <= 0 {
+			hbInterval = 15 * time.Second
+		}
+		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
 
 		c.Stream(func(w io.Writer) bool {
@@ -454,7 +499,14 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				}
 				return false
 			case <-ticker.C:
-				if _, err := w.Write([]byte(": keep-alive\n\n")); err != nil {
+				// Emit a real data frame (no id: line) so client JS can
+				// observe the heartbeat via onmessage. SSE comment lines
+				// (": keep-alive") are silently swallowed by the browser
+				// EventSource API and are invisible to JS handlers.
+				// Omitting id: means the browser's Last-Event-ID is
+				// unchanged — the heartbeat neither consumes a seq nor
+				// creates a gap.
+				if _, err := w.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n")); err != nil {
 					return false
 				}
 				c.Writer.Flush() // Ensure heartbeat is sent immediately

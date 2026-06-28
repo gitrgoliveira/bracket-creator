@@ -24,6 +24,8 @@ let enqueueRunningWrite;
 
 let _origFetch;
 let _origEventSource;
+let _origLocalStorage;
+let _lsStore;
 
 beforeEach(async () => {
     vi.useFakeTimers();
@@ -37,6 +39,18 @@ beforeEach(async () => {
     global.EventSource.OPEN = 1;
 
     _origFetch = global.fetch;
+
+    // Functional in-memory localStorage so F4 persist/rehydrate is testable
+    // (jsdom's can be unavailable here). Reset before the import so the module's
+    // rehydrate IIFE sees a clean store.
+    _origLocalStorage = global.localStorage;
+    _lsStore = {};
+    global.localStorage = {
+        getItem: (k) => (k in _lsStore ? _lsStore[k] : null),
+        setItem: (k, v) => { _lsStore[k] = String(v); },
+        removeItem: (k) => { delete _lsStore[k]; },
+        clear: () => { _lsStore = {}; },
+    };
 
     mod = await import('../api_client.jsx');
     API = mod.API;
@@ -52,6 +66,11 @@ afterEach(() => {
         delete global.EventSource;
     } else {
         global.EventSource = _origEventSource;
+    }
+    if (_origLocalStorage === undefined) {
+        delete global.localStorage;
+    } else {
+        global.localStorage = _origLocalStorage;
     }
 });
 
@@ -195,8 +214,9 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
 
         // Verify the warn was emitted for devtools visibility.
+        // F5: kind is now included in the warn prefix ('score' for running writes).
         expect(warnSpy).toHaveBeenCalledWith(
-            '[sync] queued running write rejected (409):',
+            '[sync] queued score write rejected (409):',
             expect.objectContaining({ error: 'ineligible_competitor' })
         );
         warnSpy.mockRestore();
@@ -223,8 +243,9 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         // Advance well past every backoff step — no retry should ever fire.
         await tick(20000);
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
+        // F5: kind is now included in the warn prefix ('score' for running writes).
         expect(warnSpy).toHaveBeenCalledWith(
-            '[sync] queued running write rejected (400):',
+            '[sync] queued score write rejected (400):',
             expect.objectContaining({ error: 'bad request' })
         );
         warnSpy.mockRestore();
@@ -430,12 +451,15 @@ describe('recordScore: queues running writes on network failure', () => {
         expect(result).toMatchObject({ queued: true });
     });
 
-    it('re-throws network errors for completed writes (must not queue)', async () => {
+    it('queues completed writes on network failure (F5 — terminal durability)', async () => {
+        // F5: completed writes are now queued for durable re-delivery on transient
+        // failures (network error, abort, 5xx, 429) instead of throwing. The caller
+        // receives { queued: true } so the UI can show a "not yet saved" state.
+        // 4xx errors on the direct call still throw (no retry possible).
         global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
 
-        await expect(
-            API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)
-        ).rejects.toThrow();
+        const result = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        expect(result).toMatchObject({ queued: true });
     });
 
     it('throws on 409 for running writes (real operator errors must not be swallowed)', async () => {
@@ -531,40 +555,270 @@ describe('recordScore: completed write drains queued running autosave', () => {
         expect(finalStatuses).toContain('synced');
     });
 
-    it('a FAILED completed write KEEPS the queued running snapshot (drain deferred to success)', async () => {
-        // Regression: the drain used to run pre-flight, so a completed write that
-        // failed (e.g. Finish while offline) discarded the last queued running
-        // snapshot — losing the operator's scores. The drain now runs only after
-        // the completed write is server-confirmed, so a failure preserves the
-        // snapshot for later delivery.
+    it('a FAILED completed write is queued as terminal (supersedes running snapshot)', async () => {
+        // F5: a completed write that fails offline is now queued as a terminal
+        // entry. It supersedes the running entry for the same key (last-write-wins,
+        // terminal takes priority) so only the terminal completed write is flushed
+        // when connectivity returns — the stale running snapshot is not re-sent.
+        // The drain of the running entry still happens only after a server-confirmed
+        // success (not pre-flight), but here the terminal enqueue replaces it.
         let online = false;
         const delivered = [];
         global.fetch = vi.fn().mockImplementation((_url, opts) => {
             const body = JSON.parse(opts.body);
             if (!online) {
-                // Offline: every write fails at the network layer.
                 return Promise.reject(new TypeError('network error'));
             }
             delivered.push(body.status);
             return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
         });
 
-        // Step 1: running write fails → queued.
-        const queued = await API.recordScore('c1', 'm_keep', { status: 'running', ipponsA: ['M'] }, 'pw', null);
-        expect(queued).toMatchObject({ queued: true });
+        // Step 1: running write fails → queued as running entry.
+        const runQueued = await API.recordScore('c1', 'm_keep', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        expect(runQueued).toMatchObject({ queued: true });
 
-        // Step 2: completed write while still offline → throws. It must NOT drain
-        // the queued running snapshot (the old pre-flight drain would have).
-        await expect(
-            API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null)
-        ).rejects.toThrow();
+        // Step 2: completed write while offline → queued as terminal (not a throw).
+        // The terminal entry supersedes the running entry for the same key.
+        const completedQueued = await API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null);
+        expect(completedQueued).toMatchObject({ queued: true });
 
-        // Step 3: connection returns; the preserved snapshot flushes on the next
-        // backoff retry. Only the running write was ever queued — the failed
-        // completed write was not, so it does not reappear.
+        // Step 3: connection returns; only the terminal completed write flushes.
         online = true;
         await tick(600);
-        expect(delivered).toContain('running');
-        expect(delivered).not.toContain('completed');
+        expect(delivered).toContain('completed');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// mp-gpra review fixes: clearQueue (security), rehydrate url validation
+// (security), hasPendingTerminalWrite contract (banner re-hydrate).
+// ---------------------------------------------------------------------------
+
+describe('clearQueue: drops queued writes + persisted store (logout / password_reset)', () => {
+    it('empties the queue, removes bc_write_queue, and resets sync status to synced', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        const queued = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(queued).toMatchObject({ queued: true });
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+        expect(localStorage.getItem('bc_write_queue')).not.toBeNull();
+
+        let status;
+        const unsub = subscribeSyncStatus((s) => { status = s; });
+        API.clearQueue();
+        unsub();
+
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(status).toBe('synced');
+    });
+});
+
+describe('rehydrate: tampered terminal url from localStorage is rejected (security)', () => {
+    it('drops a terminal entry whose url is not a same-origin /api/ path', async () => {
+        const evil = [['c1:m1', {
+            compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: 'https://evil.example/steal', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(evil));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
+    });
+
+    it('keeps a terminal entry with a valid /api/ url', async () => {
+        const ok = [['c1:m2', {
+            compID: 'c1', matchID: 'm2', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: '/api/competitions/c1/matches/m2/decision', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(ok));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm2')).toBe(true);
+    });
+
+    it('rejects an /api/ url OUTSIDE /api/competitions/ (allowlist is route-scoped)', async () => {
+        const bad = [['c1:m3', {
+            compID: 'c1', matchID: 'm3', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'POST',
+            url: '/api/admin/secrets', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm3')).toBe(false);
+    });
+
+    it('rejects a disallowed method (DELETE) even on an /api/competitions/ url', async () => {
+        const bad = [['c1:m4', {
+            compID: 'c1', matchID: 'm4', payload: {}, password: 'pw',
+            kind: 'decision', terminal: true, method: 'DELETE',
+            url: '/api/competitions/c1/matches/m4/decision', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm4')).toBe(false);
+    });
+
+    it('rejects a dot-segment path-traversal url that normalizes outside /api/competitions/', async () => {
+        // Passes a naive startsWith('/api/competitions/') but fetch would normalize
+        // it to /api/admin/secrets on the wire — must be rejected.
+        const bad = [['c1:m5', {
+            compID: 'c1', matchID: 'm5', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/../../api/admin/secrets', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm5')).toBe(false);
+    });
+
+    it('rejects a cross-origin / protocol-relative terminal url', async () => {
+        const bad = [['c1:m6', {
+            compID: 'c1', matchID: 'm6', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '//evil.example.com/api/competitions/c1/matches/m6/score', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm6')).toBe(false);
+    });
+
+    it('accepts a legitimate same-origin /api/competitions/ terminal url', async () => {
+        const good = [['c1:m7', {
+            compID: 'c1', matchID: 'm7', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m7/score', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(good));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm7')).toBe(true);
+    });
+
+    it('rejects an entry whose enqueuedAt is a non-numeric (tampered) value', async () => {
+        // A string enqueuedAt would make (now - enqueuedAt) NaN, so a naive TTL
+        // check (NaN > TTL === false) would let an arbitrarily old write through.
+        const bad = [['c1:m8', {
+            compID: 'c1', matchID: 'm8', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m8/score', enqueuedAt: 'not-a-number',
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm8')).toBe(false);
+    });
+
+    it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
+        // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
+        // terminal entry. A non-array element would throw on destructure and (under
+        // one try/catch) abort the entire rehydrate — the valid entry must survive.
+        const mixed = [
+            42,
+            null,
+            ['c1:bad'],
+            ['c1:good', {
+                compID: 'c1', matchID: 'good', payload: {}, password: 'pw',
+                kind: 'decision', terminal: true, method: 'POST',
+                url: '/api/competitions/c1/matches/good/decision', enqueuedAt: Date.now(),
+            }],
+        ];
+        localStorage.setItem('bc_write_queue', JSON.stringify(mixed));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'good')).toBe(true);
+    });
+});
+
+describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydrate contract)', () => {
+    it('is false for a queued running write and true for a queued terminal write', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mr', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mr')).toBe(false);
+        await API.recordScore('c1', 'mt', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mt')).toBe(true);
+    });
+});
+
+describe('clearQueue: cancels an in-flight flush (no sends with a revoked password)', () => {
+    it('does not send remaining queued writes after clearQueue() during a flush', async () => {
+        // Enqueue two terminal writes while offline (direct call fails → queued).
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await API.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await flushMicrotasks();
+
+        // Controllable fetch: the FIRST flush request hangs until we resolve it,
+        // so we can call clearQueue() while the loop is awaiting it.
+        let resolveFirst;
+        const flushFetch = vi.fn().mockImplementation(() => {
+            if (flushFetch.mock.calls.length === 1) {
+                return new Promise((res) => { resolveFirst = () => res({ ok: true, json: () => Promise.resolve({}) }); });
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+        global.fetch = flushFetch;
+
+        // Trigger a fresh flush; the loop sends entry 1 and parks on resolveFirst.
+        window.dispatchEvent(new Event('online'));
+        await flushMicrotasks();
+        expect(flushFetch).toHaveBeenCalledTimes(1);
+
+        // Credential revocation mid-flight, then let the in-flight request finish.
+        API.clearQueue();
+        resolveFirst();
+        await flushMicrotasks();
+
+        // The second queued write must NOT have been sent (gen-guard aborted the loop).
+        expect(flushFetch).toHaveBeenCalledTimes(1);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+        // The in-flight flush's post-loop _persistQueue() must NOT re-create an
+        // empty bc_write_queue after clearQueue() removed it (credential revocation).
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+});
+
+describe('subscribeTerminalWriteFailed: permanent terminal-write rejection is surfaced (no silent drop)', () => {
+    it('fires on a non-retryable 4xx for a queued terminal write', async () => {
+        // The discard path console.warns for devtools; the strict test setup fails
+        // on unexpected warns, so suppress it here (it's expected).
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // Enqueue a terminal write while offline.
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mfail', { status: 'completed', winner: 'A' }, 'pw', null);
+        expect(API.hasPendingTerminalWrite('c1', 'mfail')).toBe(true);
+
+        // On flush the server returns a non-retryable 4xx (e.g. 409 conflict).
+        const failures = [];
+        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 409,
+            json: () => Promise.resolve({ error: 'conflict', reasonHuman: 'Match already finished' }),
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        unsub();
+        warnSpy.mockRestore();
+
+        // The failure was surfaced (not silently dropped) and the entry discarded.
+        expect(failures.length).toBeGreaterThanOrEqual(1);
+        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mfail', status: 409 });
+        expect(failures[0].reason).toContain('Match already finished');
+        expect(API.hasPendingTerminalWrite('c1', 'mfail')).toBe(false);
     });
 });

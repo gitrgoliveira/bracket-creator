@@ -676,3 +676,39 @@ describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydr
         expect(API.hasPendingTerminalWrite('c1', 'mt')).toBe(true);
     });
 });
+
+describe('clearQueue: cancels an in-flight flush (no sends with a revoked password)', () => {
+    it('does not send remaining queued writes after clearQueue() during a flush', async () => {
+        // Enqueue two terminal writes while offline (direct call fails → queued).
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
+        await API.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        await flushMicrotasks();
+
+        // Controllable fetch: the FIRST flush request hangs until we resolve it,
+        // so we can call clearQueue() while the loop is awaiting it.
+        let resolveFirst;
+        const flushFetch = vi.fn().mockImplementation(() => {
+            if (flushFetch.mock.calls.length === 1) {
+                return new Promise((res) => { resolveFirst = () => res({ ok: true, json: () => Promise.resolve({}) }); });
+            }
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+        });
+        global.fetch = flushFetch;
+
+        // Trigger a fresh flush; the loop sends entry 1 and parks on resolveFirst.
+        window.dispatchEvent(new Event('online'));
+        await flushMicrotasks();
+        expect(flushFetch).toHaveBeenCalledTimes(1);
+
+        // Credential revocation mid-flight, then let the in-flight request finish.
+        API.clearQueue();
+        resolveFirst();
+        await flushMicrotasks();
+
+        // The second queued write must NOT have been sent (gen-guard aborted the loop).
+        expect(flushFetch).toHaveBeenCalledTimes(1);
+        expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
+        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+    });
+});

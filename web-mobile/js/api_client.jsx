@@ -240,6 +240,10 @@ let _flushAttempt = 0;
 // finishes so newly-queued or still-failed writes are retried without overlap.
 let _flushInProgress = false;
 let _flushRequested = false;
+// Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
+// snapshots this at the start and aborts if it changes mid-loop, so a credential
+// revocation can't keep sending queued writes with the now-revoked password.
+let _queueGen = 0;
 
 async function _flushQueue() {
     if (_flushInProgress) { _flushRequested = true; return; }
@@ -263,9 +267,16 @@ async function _flushQueue() {
             // identity before deleting so a newer write (a fresh object literal set
             // under the same key by enqueueRunningWrite) is not accidentally removed.
             const entries = [..._writeQueue.entries()];
+            const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
             let anyFailed = false;      // any failure → keep in queue + backoff
             let networkFailed = false;  // fetch rejected → connection down → "offline"
             for (const [key, descriptor] of entries) {
+                // If clearQueue() ran during a prior await (logout / password_reset →
+                // credential revocation), abort before sending anything else with the
+                // now-revoked password/header.
+                if (gen !== _queueGen) break;
+                // Skip entries removed or superseded since the snapshot was taken.
+                if (_writeQueue.get(key) !== descriptor) continue;
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
                 // Running score writes (terminal=false) don't store method/url and
                 // always PUT to the score endpoint. Terminal entries carry their own
@@ -1796,6 +1807,10 @@ const API = {
     // to the same lifecycle as bc_password. Pending offline writes are discarded:
     // on a password_reset they would 401 on retry anyway, and logout is explicit.
     clearQueue() {
+        // Bump the generation FIRST so an in-flight _flushQueue loop (mid-await on
+        // a network write) aborts instead of sending the rest of its snapshot with
+        // the now-revoked password.
+        _queueGen++;
         _writeQueue.clear();
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }

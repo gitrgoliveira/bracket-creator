@@ -258,10 +258,14 @@ function recomputeBracketQueuePositions(bracket) {
 
 // checkSeqGap — pure seq bookkeeping extracted from applyPatchOrdered.
 // Handles only the monotonic-seq tracking without touching the patch
-// payload. Consumers that receive every SSE event (including heartbeats
-// and non-match events) MUST call this on each event so the counter
-// advances accurately — otherwise an untracked event advances the server
-// seq and the next patched event falsely looks like a gap.
+// payload. Consumers MUST call this on every SSE event that carries a
+// numeric `seq` so the counter advances accurately — otherwise an
+// untracked seq'd event makes the next patched event falsely look like a
+// gap. It is safe (and a no-op) to call on events WITHOUT a numeric seq —
+// heartbeats and other non-seq frames early-return without mutating state,
+// so callers can pass every event through unconditionally rather than
+// special-casing them out (and risk filtering a real event by mistake).
+// Heartbeats do NOT advance the seq counter.
 //
 // Returns:
 //   { duplicate: false, gap: false } — normal forward or first event

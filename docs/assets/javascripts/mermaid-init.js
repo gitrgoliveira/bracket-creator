@@ -18,15 +18,22 @@
 (function () {
   function render() {
     if (!window.mermaid) return;
+    // Our own "attempted" marker — NOT mermaid's `data-processed`. mermaid.run()
+    // is async and skips any node already flagged `data-processed` (even an
+    // explicit `nodes` list), so touching that attribute ourselves would race its
+    // per-node rendering and blank later diagrams. A separate attribute lets us
+    // stop retrying a failed diagram (no <svg>) on every Material instant-nav swap
+    // without interfering with mermaid's own bookkeeping.
     var pending = Array.prototype.slice
       .call(document.querySelectorAll(".mermaid"))
       .filter(function (el) {
-        return !el.querySelector("svg") && el.dataset.processed !== "true";
+        return !el.querySelector("svg") && el.dataset.mermaidAttempted !== "1";
       });
     if (!pending.length) return;
     pending.forEach(function (el) {
       var code = el.querySelector("code");
       if (code) el.textContent = code.textContent; // unwrap <code> → raw source
+      el.dataset.mermaidAttempted = "1";
     });
     window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
     try {

@@ -631,8 +631,11 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 		close(done)
 	}()
 
-	// Let several heartbeat ticks fire through the real handler.
-	time.Sleep(80 * time.Millisecond)
+	// Wait deterministically for the first heartbeat frame rather than a fixed
+	// sleep (which is flaky on slow/contended CI). BodyString() is concurrency-safe.
+	require.Eventually(t, func() bool {
+		return strings.Contains(w.BodyString(), "data: {\"type\":\"heartbeat\"}\n\n")
+	}, 2*time.Second, 5*time.Millisecond, "HandleEvents must emit a heartbeat data frame")
 	cancel()
 	close(closeChan)
 	select {

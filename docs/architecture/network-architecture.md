@@ -4,7 +4,7 @@ How traffic flows between browsers and the tournament app: HTTPS termination at 
 proxy, plain HTTP to the app, real-time updates over Server-Sent Events (SSE), and the
 client-side resilience that keeps it working on flaky venue Wi-Fi.
 
-> Related: [Software architecture](software-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md) · Connection resilience (design note — see bead mp-gpra)
+> Related: [Software architecture](software-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md)
 
 ## 1. Edge topology
 
@@ -103,8 +103,7 @@ sequenceDiagram
 
 ## 4. Client resilience on flaky Wi-Fi
 
-The client treats the link as unreliable by default. See
-Connection resilience (design note — see bead mp-gpra) for the full rationale.
+The client treats the link as unreliable by default — the flows below show how.
 
 ```mermaid
 flowchart TD

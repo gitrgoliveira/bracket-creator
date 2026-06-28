@@ -4,7 +4,7 @@ How the bracket-creator codebase is organised: a single Go binary that is both a
 (Excel bracket generator) and a **live tournament web app** (the `mobile-app` server), plus a
 Preact frontend compiled into the binary.
 
-> Related: [Network architecture](network-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md) · Connection resilience (design note — see bead mp-gpra)
+> Related: [Network architecture](network-architecture.md) · [Infrastructure architecture](infrastructure-architecture.md)
 
 ## 1. System context
 
@@ -197,8 +197,7 @@ flowchart TB
 ```
 
 The operator console is a tablet/desktop surface; the viewer is mobile-first. The client's
-**offline write queue, SSE resume, and reconnect resilience** are documented separately in
-Connection resilience (design note — see bead mp-gpra) and depicted in
+**offline write queue, SSE resume, and reconnect resilience** are depicted in
 [Network architecture](network-architecture.md).
 
 ## Key design rules (see also [`CLAUDE.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/CLAUDE.md) and [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md))

@@ -89,7 +89,7 @@ func TestScoreRequestValidate(t *testing.T) {
 			}
 			require.Error(t, err)
 			var verr *ValidationError
-			require.True(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+			require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}
@@ -184,7 +184,7 @@ func TestScoreRequestValidate_IpponCounts(t *testing.T) {
 			}
 			require.Error(t, err)
 			var verr *ValidationError
-			require.True(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+			require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}
@@ -453,6 +453,11 @@ func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 			req:       ScoreRequest{DecisionReason: strings.Repeat("r", 201)},
 			wantField: "decisionReason",
 		},
+		{
+			name:      "correctionReason over 200 chars",
+			req:       ScoreRequest{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -463,6 +468,25 @@ func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}
+}
+
+// TestReasonCaps_ValidateTrimmedValue verifies the audit free-text length caps
+// are applied to the TRIMMED value, matching the write path which persists
+// strings.TrimSpace(reason). A reason that is within the cap once normalized
+// must not be rejected for surrounding whitespace.
+func TestReasonCaps_ValidateTrimmedValue(t *testing.T) {
+	atCap := strings.Repeat("c", MaxLenCorrectionReason)
+	padded := "  " + atCap + "   " // over the cap raw, within it once trimmed
+
+	t.Run("ScoreRequest.Validate correctionReason", func(t *testing.T) {
+		req := ScoreRequest{CorrectionReason: padded}
+		require.NoError(t, req.Validate(),
+			"correctionReason within cap after trim must not be rejected")
+	})
+	t.Run("validateBulkScoreLengths correctionReason", func(t *testing.T) {
+		require.NoError(t, validateBulkScoreLengths(&state.MatchResult{CorrectionReason: padded}),
+			"bulk correctionReason within cap after trim must not be rejected")
+	})
 }
 
 // TestValidateBulkScoreLengths covers the bulk-score helper. The
@@ -498,6 +522,11 @@ func TestValidateBulkScoreLengths(t *testing.T) {
 			wantField: "decisionReason",
 		},
 		{
+			name:      "correctionReason over cap",
+			mr:        state.MatchResult{CorrectionReason: strings.Repeat("c", 201)},
+			wantField: "correctionReason",
+		},
+		{
 			name: "subResult sideB over cap",
 			mr: state.MatchResult{
 				SubResults: []state.SubMatchResult{
@@ -531,7 +560,7 @@ func TestValidatePlayerLengths(t *testing.T) {
 		playerName  string
 		displayName string
 		dojo        string
-		tag         string
+		source      string
 		metadata    []string
 		wantField   string
 	}{
@@ -552,9 +581,30 @@ func TestValidatePlayerLengths(t *testing.T) {
 			wantField: "dojo",
 		},
 		{
-			name:      "tag over 200 chars",
-			tag:       strings.Repeat("t", 201),
-			wantField: "tag",
+			name:      "source over 200 chars",
+			source:    strings.Repeat("t", 201),
+			wantField: "source",
+		},
+		{
+			name:       "valid registration source: ok",
+			playerName: "Alice",
+			source:     "registered",
+		},
+		{
+			name:       "valid source any case: ok (normalized elsewhere)",
+			playerName: "Alice",
+			source:     "Manual",
+		},
+		{
+			name:       "legacy 'reserved' accepted (aliased to manual)",
+			playerName: "Alice",
+			source:     "reserved",
+		},
+		{
+			name:       "unknown registration source rejected",
+			playerName: "Alice",
+			source:     "vip",
+			wantField:  "source",
 		},
 		{
 			name:      "metadata > 16 entries",
@@ -569,7 +619,7 @@ func TestValidatePlayerLengths(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePlayerLengths(tt.playerName, tt.displayName, tt.dojo, tt.tag, tt.metadata)
+			err := validatePlayerLengths(tt.playerName, tt.displayName, tt.dojo, tt.source, tt.metadata)
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return
@@ -719,7 +769,9 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 		assert.Equal(t, "decidedByHantei", verr.Field)
 	})
 
-	t.Run("invalid hantei: no encho set", func(t *testing.T) {
+	t.Run("valid hantei: no encho set (encho is not required)", func(t *testing.T) {
+		// Encho was decoupled from hantei — a tied match may be taken straight
+		// to a judges' decision without an overtime period.
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
@@ -727,14 +779,10 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			Status:          state.MatchStatusCompleted,
 			DecidedByHantei: boolPtr(true),
 		}
-		err := req.Validate()
-		require.Error(t, err)
-		var verr *ValidationError
-		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.NoError(t, req.Validate())
 	})
 
-	t.Run("invalid hantei: encho period count is zero", func(t *testing.T) {
+	t.Run("valid hantei: encho period count is zero", func(t *testing.T) {
 		req := ScoreRequest{
 			SideA:           "Alice",
 			SideB:           "Bob",
@@ -743,11 +791,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 			DecidedByHantei: boolPtr(true),
 			Encho:           &state.EnchoMetadata{PeriodCount: 0},
 		}
-		err := req.Validate()
-		require.Error(t, err)
-		var verr *ValidationError
-		require.True(t, errors.As(err, &verr))
-		assert.Equal(t, "decidedByHantei", verr.Field)
+		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("valid hantei: tied 1-1 scoreline", func(t *testing.T) {
@@ -965,7 +1009,9 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 
-	t.Run("invalid: daihyosen hantei without encho", func(t *testing.T) {
+	t.Run("valid: daihyosen hantei without encho (encho not required)", func(t *testing.T) {
+		// Encho was decoupled from hantei — a tied daihyosen may be decided by
+		// judges without an overtime period.
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{
 				{
@@ -975,9 +1021,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := req.Validate()
-		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.NoError(t, req.Validate())
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline", func(t *testing.T) {
@@ -1059,8 +1103,8 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 				},
 				{
 					Position: -1, SideA: "TeamA", SideB: "TeamB",
-					IpponsA: []string{"M"}, IpponsB: []string{"K"},
-					Winner: "TeamA", DecidedByHantei: true, Encho: nil, // invalid: no encho
+					IpponsA: []string{"M", "K"}, IpponsB: []string{"K"}, // invalid: non-tied scoreline
+					Winner: "TeamA", DecidedByHantei: true, Encho: enchoOne,
 				},
 			},
 		}
@@ -1131,7 +1175,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
 	})
 
-	t.Run("invalid: daihyosen hantei without encho rejected on bulk path", func(t *testing.T) {
+	t.Run("valid: daihyosen hantei without encho accepted on bulk path", func(t *testing.T) {
 		r := &state.MatchResult{
 			SubResults: []state.SubMatchResult{
 				{
@@ -1141,9 +1185,7 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 				},
 			},
 		}
-		verr := validateBulkScoreLengths(r)
-		require.IsType(t, &ValidationError{}, verr)
-		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+		assert.NoError(t, validateBulkScoreLengths(r))
 	})
 
 	t.Run("invalid: daihyosen hantei with non-tied scoreline rejected on bulk path", func(t *testing.T) {
@@ -1159,5 +1201,114 @@ func TestValidateBulkScoreLengths_SubBoutDecidedByHantei(t *testing.T) {
 		verr := validateBulkScoreLengths(r)
 		require.IsType(t, &ValidationError{}, verr)
 		assert.Equal(t, "subResults[0].decidedByHantei", verr.(*ValidationError).Field)
+	})
+}
+
+// TestIsSelfRunReportableDecision covers the allowlist and rejection cases
+// for participant self-reporting in self-run tournaments.
+func TestIsSelfRunReportableDecision(t *testing.T) {
+	f := false
+	tr := true
+
+	tests := []struct {
+		name            string
+		decision        string
+		decidedByHantei *bool
+		want            bool
+	}{
+		{name: "empty decision allowed", decision: "", want: true},
+		{name: "fought allowed", decision: "fought", want: true},
+		{name: "hikiwake allowed", decision: "hikiwake", want: true},
+		{name: "fusensho rejected at top level", decision: "fusensho", want: false},
+		{name: "kiken-voluntary rejected", decision: "kiken-voluntary", want: false},
+		{name: "kiken-injury rejected", decision: "kiken-injury", want: false},
+		{name: "fusenpai rejected", decision: "fusenpai", want: false},
+		{name: "daihyosen rejected", decision: "daihyosen", want: false},
+		{name: "kachinuki-exhaustion rejected", decision: "kachinuki-exhaustion", want: false},
+		{name: "unknown decision rejected", decision: "magic", want: false},
+		{name: "decidedByHantei=true rejects even allowed decision", decision: "fought", decidedByHantei: &tr, want: false},
+		{name: "decidedByHantei=false is ok (nil-vs-false are the same signal)", decision: "fought", decidedByHantei: &f, want: true},
+		{name: "decidedByHantei nil is ok", decision: "fought", decidedByHantei: nil, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsSelfRunReportableDecision(tc.decision, tc.decidedByHantei)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIsSelfRunReportableSubDecision(t *testing.T) {
+	tests := []struct {
+		name            string
+		decision        string
+		decidedByHantei bool
+		position        int
+		want            bool
+	}{
+		{name: "empty sub-decision allowed", decision: "", position: 1, want: true},
+		{name: "fought sub-decision allowed", decision: "fought", position: 1, want: true},
+		{name: "hikiwake sub-decision allowed", decision: "hikiwake", position: 1, want: true},
+		{name: "fusensho sub-decision allowed", decision: "fusensho", position: 1, want: true},
+		{name: "kiken-voluntary sub rejected", decision: "kiken-voluntary", position: 1, want: false},
+		{name: "daihyosen sub rejected", decision: "daihyosen", position: 1, want: false},
+		{name: "position -1 (daihyosen slot) rejected", decision: "", position: -1, want: false},
+		{name: "decidedByHantei true sub rejected", decision: "fought", decidedByHantei: true, position: 1, want: false},
+		{name: "position 0 allowed", decision: "fought", position: 0, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsSelfRunReportableSubDecision(tc.decision, tc.decidedByHantei, tc.position)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestScoreRequestValidate_RevSessionCap verifies that an over-long revSession
+// (> MaxLenRevSession=64) is rejected with a 400-mapped ValidationError, while
+// empty (legacy clients) and UUID-length (36 chars) values pass.
+func TestScoreRequestValidate_RevSessionCap(t *testing.T) {
+	t.Run("empty revSession passes (legacy clients)", func(t *testing.T) {
+		req := ScoreRequest{RevSession: ""}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("UUID-length revSession passes", func(t *testing.T) {
+		req := ScoreRequest{RevSession: "550e8400-e29b-41d4-a716-446655440000"}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("over-long revSession rejected", func(t *testing.T) {
+		req := ScoreRequest{RevSession: strings.Repeat("x", 65)}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "revSession", verr.Field)
+	})
+}
+
+// TestScoreRequestValidate_RevNonNegative verifies that a negative rev is
+// rejected (it would slip past the handler's Rev>0 guard and let a stale running
+// write clobber newer state), while rev==0 (unversioned opt-out) and positive
+// revs pass.
+func TestScoreRequestValidate_RevNonNegative(t *testing.T) {
+	t.Run("rev=0 (unversioned) passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 0}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("positive rev passes", func(t *testing.T) {
+		req := ScoreRequest{Rev: 42}
+		assert.NoError(t, req.Validate())
+	})
+
+	t.Run("negative rev rejected", func(t *testing.T) {
+		req := ScoreRequest{Rev: -1}
+		err := req.Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "rev", verr.Field)
 	})
 }

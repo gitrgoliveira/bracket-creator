@@ -108,7 +108,7 @@ func scoringSetup3PlayerRoundRobin(t *testing.T) *excelize.File {
 func calcScore(t *testing.T, f *excelize.File, cell string) string {
 	t.Helper()
 	v, err := f.CalcCellValue(SheetPoolMatches, cell)
-	require.NoError(t, err, "CalcCellValue(%s)", cell)
+	require.NoErrorf(t, err, "CalcCellValue(%s)", cell)
 	return v
 }
 

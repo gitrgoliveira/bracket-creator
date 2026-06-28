@@ -39,10 +39,12 @@ const (
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers
 	// ignore the event — their flow doesn't depend on the admin password.
-	EventPasswordReset EventType = "password_reset"
-	EventAnnouncement  EventType = "announcement"
-	EventDrawGenerated EventType = "draw_generated"
-	EventDrawDiscarded EventType = "draw_discarded"
+	EventPasswordReset  EventType = "password_reset"
+	EventAnnouncement   EventType = "announcement"
+	EventDrawGenerated  EventType = "draw_generated"
+	EventDrawDiscarded  EventType = "draw_discarded"
+	EventLineupUpdated  EventType = "lineup_updated"
+	EventResyncRequired EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -61,18 +63,39 @@ const (
 const DefaultHistorySize = 100
 
 // DefaultMaxSSEClients caps concurrent /api/events subscribers per process.
-// Each subscriber allocates one buffered channel + one streaming goroutine,
-// and Broadcast fan-out is O(N) in the subscriber count. 1000 is well
-// above what a typical tournament floor needs (operator + ~5-20 viewers
-// per court × ~10 courts ≈ 50-200 connections) and well below the point
-// where the linear fan-out becomes a noticeable latency tax.
+// Each subscriber allocates one buffered channel (100-element string buffer)
+// plus one streaming goroutine. Base struct/goroutine overhead per client:
+//   - Channel buffer: 100 string headers × 16 B (pointer + length) ≈ 1.6 KB
+//   - Channel struct overhead: ~100 B
+//   - Goroutine stack: 2–8 KB (starts small, grows on demand)
+//   - Base total: ~4–10 KB resident per client
+//
+// Note: this is the base overhead only. Each queued (buffered) message also
+// keeps its payload bytes alive on the heap until the client drains it. Under
+// bursty broadcasts or slow/stalled clients a fully-backlogged channel could
+// add up to ~100 × (payload size) of additional memory per client — e.g. a
+// 2 KB JSON payload × 100 slots = ~200 KB worst-case. Stalled clients are
+// dropped by the non-blocking send (select/default) before the buffer fills
+// in practice, but the extra allocation is real during the drop window.
+//
+// At 5000 active (draining) clients the base cost is ~20–50 MB — comfortably
+// within the RAM budget of a single-core VPS or RPi-class hardware used for
+// large-scale deployments (tens of teams, 1000+ live spectators).
+//
+// Broadcast fan-out is O(N) in the subscriber count and serialises under
+// h.mu.Lock(). At 5000 clients the lock window is bounded by the
+// non-blocking channel send (select/default), so stalled clients are
+// dropped rather than blocking the broadcaster.
 //
 // Override at startup via the SSE_MAX_CLIENTS env var or by passing a
 // positive value to NewHubWithLimits. A non-positive (zero or negative)
 // value disables the cap entirely — used by tests that need to exceed
-// the default and not enforced anywhere production. The cap is mp-663
+// the default and not enforced anywhere in production. The cap is mp-663
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
-const DefaultMaxSSEClients = 1000
+// Raised from 1000 → 5000 by mp-9afd to support large-scale events (1000+
+// viewers). A real hardware load test (goroutine/fd/memory budget at 5000
+// clients) is still required before a large live deployment.
+const DefaultMaxSSEClients = 5000
 
 // SSEEvent represents the payload sent to clients.
 //
@@ -149,6 +172,12 @@ type Hub struct {
 	// subscriber channels are closed so the per-connection streaming
 	// goroutine in HandleEvents exits cleanly. Guarded by mu.
 	closed bool
+
+	// HeartbeatInterval is the SSE keep-alive cadence (default 15s, set by
+	// NewHubWithLimits). Exposed so tests can drive HandleEvents with a short
+	// interval and observe a real emitted heartbeat frame rather than asserting
+	// a hard-coded literal.
+	HeartbeatInterval time.Duration
 }
 
 func NewHub() *Hub {
@@ -179,10 +208,11 @@ func NewHubWithLimits(historySize, maxClients int) *Hub {
 		historySize = DefaultHistorySize
 	}
 	return &Hub{
-		clients:     make(map[chan string]bool),
-		history:     make([]historyEntry, historySize),
-		HistorySize: historySize,
-		MaxClients:  maxClients,
+		clients:           make(map[chan string]bool),
+		history:           make([]historyEntry, historySize),
+		HistorySize:       historySize,
+		MaxClients:        maxClients,
+		HeartbeatInterval: 15 * time.Second,
 	}
 }
 
@@ -405,16 +435,53 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		// directly.
 		if lastEventID > 0 {
 			entries, complete := h.snapshotHistorySince(lastEventID)
-			if !complete {
-				fmt.Printf("SSE replay: client requested Last-Event-ID=%d but oldest retained seq exceeds it; %d entries replayed\n", lastEventID, len(entries))
+			currentHeadSeq := h.seq.Load()
+			// Unsatisfiable when the ring rolled past the client's Last-Event-ID
+			// (eviction) OR the server restarted and its in-memory seq reset below
+			// the client's Last-Event-ID — INCLUDING a fresh restart at head seq 0,
+			// before any event has been broadcast (the client's stale Last-Event-ID
+			// is still ahead of 0). That last case must still resync: otherwise a
+			// client that keeps an in-memory lastSeq across reconnects would treat
+			// the first post-restart event (seq=1) as a stale duplicate and drop it,
+			// leaving the screen silently stale.
+			unsatisfiable := !complete || lastEventID > currentHeadSeq
+			if unsatisfiable {
+				// A gap-free replay is impossible. Tell the client to resync (reset
+				// its in-memory lastSeq + full refetch). Fall through to the normal
+				// streaming loop afterwards.
+				fmt.Printf("SSE replay: client Last-Event-ID=%d not satisfiable (complete=%v, headSeq=%d); sending resync_required\n", lastEventID, complete, currentHeadSeq)
+				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
+				resyncPayload, err := json.Marshal(resyncEvent)
+				if err != nil {
+					fmt.Printf("SSE resync marshal error: %v\n", err)
+				} else if currentHeadSeq > 0 {
+					// Stamp id: <head> so the browser's Last-Event-ID advances to head
+					// and the client won't immediately re-gap.
+					writeSSEEnvelope(c.Writer, currentHeadSeq, string(resyncPayload))
+					c.Writer.Flush()
+				} else {
+					// Fresh restart, head seq 0: emit the resync WITHOUT an id: line so
+					// the browser's Last-Event-ID isn't forced to "0" (a real id:0 would
+					// corrupt later reconnect checkpoints). The data frame still fires
+					// onmessage, so the client resets its lastSeq and refetches.
+					if _, werr := fmt.Fprintf(c.Writer, "data: %s\n\n", resyncPayload); werr != nil {
+						fmt.Printf("SSE resync write failed: %v\n", werr)
+					}
+					c.Writer.Flush()
+				}
+			} else {
+				for _, entry := range entries {
+					writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
+				}
+				c.Writer.Flush()
 			}
-			for _, entry := range entries {
-				writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
-			}
-			c.Writer.Flush()
 		}
 
-		ticker := time.NewTicker(15 * time.Second)
+		hbInterval := h.HeartbeatInterval
+		if hbInterval <= 0 {
+			hbInterval = 15 * time.Second
+		}
+		ticker := time.NewTicker(hbInterval)
 		defer ticker.Stop()
 
 		c.Stream(func(w io.Writer) bool {
@@ -432,7 +499,14 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				}
 				return false
 			case <-ticker.C:
-				if _, err := w.Write([]byte(": keep-alive\n\n")); err != nil {
+				// Emit a real data frame (no id: line) so client JS can
+				// observe the heartbeat via onmessage. SSE comment lines
+				// (": keep-alive") are silently swallowed by the browser
+				// EventSource API and are invisible to JS handlers.
+				// Omitting id: means the browser's Last-Event-ID is
+				// unchanged — the heartbeat neither consumes a seq nor
+				// creates a gap.
+				if _, err := w.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n")); err != nil {
 					return false
 				}
 				c.Writer.Flush() // Ensure heartbeat is sent immediately

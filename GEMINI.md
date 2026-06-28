@@ -15,7 +15,7 @@ Before implementing features or making architectural decisions, read the project
 - **Web Framework:** [Gin](https://github.com/gin-gonic/gin)
 - **Excel Manipulation:** [Excelize](https://github.com/xuri/excelize/v2)
 - **Frontend (bracket generator):** Vanilla HTML/JS embedded in the Go binary (`web/`)
-- **Frontend (mobile/live app):** Preact + JSX compiled by esbuild, embedded in the Go binary (`web-mobile/`)
+- **Frontend (mobile app):** Preact + JSX compiled by esbuild, embedded in the Go binary (`web-mobile/`)
 - **Containerization:** Docker & Docker Compose
 
 ### Architecture
@@ -25,11 +25,11 @@ Before implementing features or making architectural decisions, read the project
     - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
     - `excel/`: Lower-level Excel client and styling logic.
     - `resources/`: Management of embedded assets (both `web/` and `web-mobile/`).
-    - `mobileapp/`: Gin HTTP handlers for the live tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
+    - `mobileapp/`: Gin HTTP handlers for the tournament app. Handlers split by entity: `handlers_competition.go`, `handlers_match.go`, `handlers_participants.go`, `handlers_tournament.go`. Real-time updates via SSE (`hub.go`). Password auth middleware (`middleware.go`).
     - `state/`: File-backed store for the mobile app. Reads/writes `tournament.md` and per-competition `config.md` + `participants.csv` in the data folder.
     - `engine/`: Thin adapter bridging `state.Competition` to `internal/helper` pool/bracket generation.
 - `web/`: Frontend assets for the bracket-generator web UI, embedded via `go:embed`.
-- `web-mobile/`: Preact/JSX frontend for the live tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, live score editor, public viewer.
+- `web-mobile/`: Preact/JSX frontend for the tournament mobile app, embedded via `go:embed`. Pre-compiled to `web-mobile/dist/` by esbuild. Key components: `LinedTextarea` (numbered participant input), admin dashboard, score editor, public viewer.
 - `tests/`: Integration tests for the Web API and CLI.
 - `specs/`: OpenAPI specification (`openapi.yaml`) for the web API, fully synchronized with the backend implementation.
 
@@ -84,13 +84,13 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 ## Building and Running
 
 ### Prerequisites
-- Go 1.26.3+
+- Go 1.26.4+
 - Make
 
 ### Key Commands
 - **Build the application:** `make go/build` (outputs to `./bin/bracket-creator`)
 - **Run the Web UI (bracket generator):** `make run` or `./bin/bracket-creator serve`
-- **Run the mobile/live app:** `make run-mobile` (default: `./tournament-data`, port 8080)
+- **Run the mobile app:** `make run-mobile` (default: `./tournament-data`, port 8080)
   - Override port: `PORT=8082 make run-mobile`
   - Override data dir: `TOURNAMENT_DATA_DIR=/path make run-mobile`
   - The binary reads `PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` directly, so the env vars also apply when running without `make` (e.g. `TOURNAMENT_DATA_DIR=/path bracket-creator mobile-app`). Explicit `--port`/`--bind`/`--folder` flags win.
@@ -112,6 +112,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 
 ## Development Conventions
 
+- **Worktrees:** All new worktrees MUST be created inside the `.gemini/worktrees/` directory.
 - **Code Style:** Follow standard Go idioms. Use `go fmt` and `golangci-lint` for consistency.
 - **Dependency Management:** Use `go mod tidy` to manage `go.mod` and `go.sum`.
 - **Testing:**
@@ -122,8 +123,37 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 - **CI/CD:** GitHub Actions are used for validation (`.github/workflows/validate.yaml`), including security scans (`gosec`), linting, and coverage reporting via Codecov.
 - **Git:** Never commit changes directly to `main` without a PR. Ensure the build and tests pass before requesting a review.
 
+## PR Workflow
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section — `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation — never silently skip the section.
+- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
+- **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
+- **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.
+
+## Code Review
+
+- **Never report an automated-review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero.
+- When re-requesting a GitHub Copilot review, use the REST endpoint (the `gh pr edit --add-reviewer` form lowercases the login and fails):
+  `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
+- Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
+
+## Testing & Verification
+
+- **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
+- **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
+- **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
+- Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+
+## Merge & Rebase
+
+When rebasing or resolving conflicts, watch for these recurring breakages:
+- Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
+- UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- Re-run `make go/test` after every rebase; a clean rebase that compiles can still be semantically broken.
+
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -145,28 +175,35 @@ bd close <id>         # Complete work if the PR is merged
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **Handle git/sync by active profile**:
    ```bash
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
+
+   # Team-maintainer opt-in only, unless current instructions forbid it:
    git pull --rebase
    git push
-   git status  # MUST show "up to date with origin"
+   git status
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->

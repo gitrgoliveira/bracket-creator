@@ -1,7 +1,7 @@
 // Admin side — single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -42,6 +42,8 @@ const AdminCreateCompetition = window.AdminCreateCompetition;
 const AdminImportPage = window.AdminImportPage;
 const AdminSchedulePage = window.AdminSchedulePage;
 const AdminScoreEditorPage = window.AdminScoreEditorPage;
+const AdminShiaijoPage = window.AdminShiaijoPage;
+const Modal = window.Modal;
 
 // Pure helper for the "merge an updated competition into the latest
 // tournament state" pattern used by AdminApp's async handlers. Takes
@@ -51,7 +53,7 @@ const AdminScoreEditorPage = window.AdminScoreEditorPage;
 //
 // Bug shape this fixes: AdminApp's handlers (updateCompetition,
 // moveMatchCourt, editMatchScore, addCompetition, startCompetition,
-// createPlayoff, startAllCompetitions, the import onImported callback)
+// startAllCompetitions, the import onImported callback)
 // all do `await window.API.X(...)` then
 // `onUpdate({ ...t, competitions: comps })`. The closure-captured `t`
 // is the tournament at handler-definition time — if SSE fires during
@@ -110,8 +112,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // sole screen exposing the Announce button. (Other screens reach the
   // composer via the Edit-details page.)
   const [announceOpen, setAnnounceOpen] = useStateA(false);
+  // mp: "Start all" is a high-blast-radius action (it starts every eligible
+  // setup competition at once), so it runs through an explicit modal instead
+  // of a one-click red button + transient toast. State machine:
+  //   phase: "confirm" → operator sees the affected comps and confirms
+  //          "running" → Promise.allSettled in flight, inline progress
+  //          "result"  → persistent summary; NAMES failures, offers retry
+  // `comps` is the working set for the current phase (the comps we will/did
+  // start); `failed` is the subset whose start rejected (kept so "Retry
+  // failed" can re-run only those). Closed by setting startAll to null.
+  const [startAll, setStartAll] = useStateA(null);
 
-  // Expose a navigation helper used by AdminTopbar's live-strip chips,
+  // Expose a navigation helper used by AdminTopbar's running-strip chips,
   // avoiding prop-drilling through every screen. Set once per mount.
   useEffectA(() => {
     window.__adminNavigateToScore = (compId) => setView({ kind: "competition", id: compId, section: "scores" });
@@ -128,13 +140,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   useEffectA(() => { tRef.current = t; onUpdateRef.current = onUpdate; }, [t, onUpdate]);
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
-  // startAllCompetitions, createPlayoff) setAdminCompData / setAdminLoading
+  // startAllCompetitions) setAdminCompData / setAdminLoading
   // / setView post-await. Narrow window but real — gate via mountedRef.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Best-effort post-mutation refresh. Several mutation handlers below
-  // (moveMatchCourt, editMatchScore, addCompetition, createPlayoff,
+  // (moveMatchCourt, editMatchScore, addCompetition,
   // startCompetition) used to wrap the mutation AND the follow-up
   // fetchCompetitions in the same try/catch — so a transient refresh
   // failure (server slow, network blip) surfaced as a mutation failure,
@@ -155,7 +167,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
   };
 
-  // Specialised variant for CREATE flows (addCompetition / createPlayoff).
+  // Specialised variant for CREATE flows (addCompetition).
   // On refresh failure, merge the just-created record into local state so
   // the caller's immediate navigation to `view.kind="competition", id:
   // created.id` finds the comp in `t.competitions`. Pre-fix, the caller
@@ -205,7 +217,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // inactive (proceed) and null when cancelled/not-configured (abort).
     let admin = "";
     if (next && next.players != null) {
-      admin = window.promptAdminPassword();
+      admin = await window.promptAdminPassword();
       if (admin === null) return;
     }
     let updated;
@@ -215,6 +227,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw e;
     }
+    // The roster-PUT response carries a transient `warnings` array (server-
+    // authoritative near-duplicate detection). Strip it before merging so it
+    // never leaks into competition state (and back onto the next PUT); return
+    // it so callers (AdminParticipants.apply) can surface the post-save banner.
+    const { warnings: nearDupWarnings, ...updatedComp } = updated || {};
     // Merge PUT response into the LATEST tournament state. tRef.current
     // (not the closure-captured `t`) — see mergeCompetitionsIntoTournament
     // at the top of this file for why: SSE may have updated `t` during
@@ -222,7 +239,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // those updates with stale state. Same reasoning applies to
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
-      comps => comps.map(c => c.id === cid ? { ...c, ...updated } : c)));
+      comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
     // Best-effort detail refresh. Isolated from the rethrow above —
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
@@ -235,6 +252,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         console.error("Failed to refresh competition details after save:", e);
       }
     }
+    return nearDupWarnings || [];
   };
 
   // Mutation handlers split into two phases:
@@ -254,13 +272,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   const editMatchScore = async (compId, matchId, result, match) => {
+    let saveRes;
     try {
-      await window.API.recordScore(compId, matchId, result, password, match);
+      saveRes = await window.API.recordScore(compId, matchId, result, password, match);
     } catch (e) {
       showToast(e.message, "error");
       throw e;
     }
+    // F5: when the write was only queued (offline/transient), skip the
+    // best-effort refresh — there is nothing new on the server yet.
+    // Return saveRes so callers (onSubmit/onSubmitAndNext props) can
+    // propagate the { queued: true } signal up to the score editor.
+    if (saveRes && saveRes.queued) return saveRes;
     await refreshCompsBestEffort("Score");
+    return saveRes;
   };
 
   const addCompetition = async (c) => {
@@ -280,67 +305,43 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return created;
   };
 
-  const startAllCompetitions = async () => {
+  // Opens the confirm modal (does NOT start anything). The dashboard's
+  // "Start all" button calls this; confirmation happens inside the modal.
+  const startAllCompetitions = () => {
     const setupComps = (t.competitions || []).filter(c => c.status === "setup" && (c.players || []).length >= 2);
     if (setupComps.length === 0) return;
+    setStartAll({ phase: "confirm", comps: setupComps, failed: [] });
+  };
 
-    showToast(`Starting ${setupComps.length} competitions…`);
+  // Runs the actual start for a given set of competitions. Used both for the
+  // initial confirm and for "Retry failed" (which passes only the failures).
+  // Keeps the tRef/onUpdateRef/mountedRef discipline of the other handlers.
+  const runStartAll = async (comps) => {
+    setStartAll({ phase: "running", comps, failed: [] });
 
-    setAdminLoading(true);
-    const results = await Promise.allSettled(setupComps.map(c => window.API.startCompetition(c.id, password)));
+    const results = await Promise.allSettled(comps.map(c => window.API.startCompetition(c.id, password)));
 
-    let success = 0, fail = 0;
+    const failed = [];
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") success++;
-      else {
-        console.error(`Failed to start ${setupComps[i].name}:`, r.reason);
-        fail++;
+      if (r.status === "rejected") {
+        console.error(`Failed to start ${comps[i].name}:`, r.reason);
+        failed.push({ comp: comps[i], reason: (r.reason && r.reason.message) || String(r.reason) });
       }
     });
 
-    // Wrap the refresh in try/finally so a fetchCompetitions() reject
-    // doesn't leave setAdminLoading=true latched on (the loading spinner
-    // would stay visible indefinitely until the next view change). The
-    // mountedRef gate is preserved — if the user navigated away during
-    // the start, we still skip setState but always clear the loading
-    // flag via finally to avoid stale-state-on-remount surprises.
+    // Best-effort refresh — a refresh failure must not mask which comps
+    // actually started (the result summary below is authoritative).
     try {
-      const comps = await window.API.fetchCompetitions();
-      if (!mountedRef.current) return;
-      onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
+      const fresh = await window.API.fetchCompetitions();
+      if (mountedRef.current) onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => fresh));
     } catch (e) {
       console.error("startAllCompetitions: post-start refresh failed", e);
       if (mountedRef.current) showToast("Failed to refresh after start. Try reloading.", "error");
-    } finally {
-      if (mountedRef.current) setAdminLoading(false);
     }
 
-    if (fail > 0) {
-      showToast(`Started ${success} competitions, but ${fail} failed.`, "error");
-    } else if (success > 0) {
-      showToast(`Successfully started all ${success} competitions.`);
-    }
-  };
-
-  const createPlayoff = async (sourceId) => {
-    let created;
-    try {
-      created = await window.API.createPlayoff(sourceId, password);
-    } catch (e) {
-      if (mountedRef.current) showToast(e.message, "error");
-      return;
-    }
-    // See addCompetition: refresh-failure merges `created` into local
-    // state so setView's navigation to the new playoff's ID finds it in
-    // t.competitions. Pre-fix, refresh failure left the caller's
-    // setView({kind:"competition", id: created.id, ...}) navigating to
-    // a comp that AdminApp's `t.competitions.find(cc => cc.id === view.id)`
-    // can't locate, producing the "Competition not found" empty state
-    // until the next refresh.
-    await refreshCompsAfterCreate(created, "Playoff create");
     if (!mountedRef.current) return;
-    setView({ kind: "competition", id: created.id, section: "participants" });
-    showToast(`Playoff "${created.name}" created`);
+    // Persistent result — does NOT auto-dismiss. Operator closes it.
+    setStartAll({ phase: "result", comps, failed, succeeded: comps.length - failed.length });
   };
 
   const startCompetition = async (cid) => {
@@ -380,22 +381,24 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       await window.API.updateTournament(sendBody, password);
       // Bail if the admin navigated away during the in-flight PUT —
-      // mirrors startAllCompetitions / refreshCompsAfterCreate /
-      // createPlayoff. Without this gate, onUpdateRef.current (parent's
+      // mirrors startAllCompetitions / refreshCompsAfterCreate.
+      // Without this gate, onUpdateRef.current (parent's
       // setState) and showToast fire on an unmounted component,
       // producing the standard React setState-after-unmount warning.
       // Caught by /deep-review iterative pass after round-11 swept
       // updateTournament to tRef/onUpdateRef but missed the unmount
       // guard the other handlers carry.
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       // Re-read tRef.current AFTER the await — additional SSE events may
       // have landed during the save. The patch we just persisted is
       // applied on top of the freshest snapshot.
       onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
       showToast("Tournament updated");
+      return true;
     } catch (e) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) return false;
       showToast(e.message, "error");
+      return false;
     }
   };
 
@@ -436,7 +439,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         timers.add(id);
       };
       // Coalesce tournament-wide refreshes across all events so the topbar's
-      // live-strip stays current without firing one fetchCompetitions() per
+      // running-strip stays current without firing one fetchCompetitions() per
       // match update.
       let pendingTournament = null;
       let tournamentFetching = false;
@@ -472,8 +475,65 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             .finally(() => { tournamentFetching = false; });
         }, jitter);
       };
+      // F6b: per-subscription seq tracker, reset on each effect run.
+      const sseSeq = { lastSeq: 0 };
+
+      // F8: resync on tab resume. When the tab becomes visible, reconnect
+      // SSE and refresh competition + tournament data so the admin console
+      // is current after the tab was backgrounded. Removed in cleanup.
+      const onVisibilityChange = () => {
+        if (document.hidden || cancelled) return;
+        window.API.reconnectEvents();
+        schedule((targetId) => {
+          window.API.fetchCompetitionDetails(targetId)
+            .then(data => {
+              if (cancelled || data?.config?.id !== targetId) return;
+              setAdminCompData(data);
+            })
+            .catch(err => console.error('tab-resume refresh failed:', err));
+        });
+        scheduleTournamentRefresh(false);
+      };
+      document.addEventListener('visibilitychange', onVisibilityChange);
+
       const unsub = window.API.subscribeToEvents((event) => {
         if (cancelled) return;
+
+        // F6b — heartbeat: liveness only, no patch, no seq advance.
+        if (event.type === 'heartbeat') return;
+
+        // F6b — resync_required: server restarted / replay unsatisfiable.
+        // Reset seq to the server's head and trigger a full refresh.
+        if (event.type === 'resync_required') {
+          sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
+          schedule((targetId) => {
+            window.API.fetchCompetitionDetails(targetId)
+              .then(data => {
+                if (cancelled || data?.config?.id !== targetId) return;
+                setAdminCompData(data);
+              })
+              .catch(err => console.error('resync refresh failed:', err));
+          });
+          scheduleTournamentRefresh(false);
+          return;
+        }
+
+        // F6b — gap detection: run on every event so the seq counter
+        // advances even for events with no match payload. On a gap,
+        // trigger the same scoped refetch the per-type branches use.
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
+          schedule((targetId) => {
+            window.API.fetchCompetitionDetails(targetId)
+              .then(data => {
+                if (cancelled || data?.config?.id !== targetId) return;
+                setAdminCompData(data);
+              })
+              .catch(err => console.error('gap refetch failed:', err));
+          });
+          scheduleTournamentRefresh(false);
+        });
+        if (seqResult.duplicate) return;
+
         if (REFRESHABLE_EVENTS.has(event.type)) {
           // tournament_updated carries null data (tournament-wide change) — always
           // relevant.  match_updated / competition_started / competition_completed
@@ -504,8 +564,8 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
                 .catch(err => console.error("Failed to refresh competition details", err));
             });
           }
-          // Any of these may change the topbar live-strip (matches becoming
-          // live/done in *other* competitions, a comp starting, a dependent
+          // Any of these may change the topbar running-strip (matches becoming
+          // running/done in *other* competitions, a comp starting, a dependent
           // playoff unblocking, …). Coalesced so a burst is one fetch.
           // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
@@ -524,6 +584,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         timers.forEach(clearTimeout);
         timers.clear();
         if (pendingTournament) clearTimeout(pendingTournament);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
         unsub();
       };
     }
@@ -533,23 +594,34 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return <>
       <AdminDashboard
         tournament={t}
+        password={password}
         onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
         onCreateCompetition={() => setView({ kind: "createComp" })}
         onEditTournament={() => setView({ kind: "editTournament" })}
         onAnnounce={() => setAnnounceOpen(true)}
         onOpenSchedule={() => setView({ kind: "schedule" })}
         onOpenScoreEditor={() => setView({ kind: "scoreEditor" })}
+        onOpenRegistration={() => setView({ kind: "registrationDesk" })}
         onOpenImport={() => setView({ kind: "import" })}
+        onOpenShiaijo={(court) => setView({ kind: "shiaijo", court })}
         onStartAll={startAllCompetitions}
         onStartCompetition={startCompetition}
         onLogout={onLogout}
         onViewerMode={onViewerMode}
         onUpdate={onUpdate}
+        showToast={showToast}
+        authConfig={authConfig}
       />
       {announceOpen && <window.AnnouncementModal
         password={password}
         showToast={showToast}
         onClose={() => setAnnounceOpen(false)}
+      />}
+      {startAll && <StartAllModal
+        state={startAll}
+        onConfirm={() => runStartAll(startAll.comps)}
+        onRetry={() => runStartAll(startAll.failed.map(f => f.comp))}
+        onClose={() => setStartAll(null)}
       />}
     </>;
   }
@@ -561,6 +633,16 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onCreate={async (c) => {
         try {
           const created = await addCompetition(c);
+          // Non-blocking court-clash check: warn if the new competition lands
+          // on a shiaijo already in use at the same time. The create still
+          // proceeds; the operator can adjust its start time / courts after.
+          try {
+            const clashes = await window.API.getScheduleClashes(created.id, password);
+            if (Array.isArray(clashes) && clashes.length > 0) {
+              const names = clashes.map((w) => w.otherCompName).join(", ");
+              showToast(`Heads up: court clash with ${names} — adjust start time or courts in Settings`, "error");
+            }
+          } catch { /* clash check is best-effort; never block creation */ }
           setView({ kind: "competition", id: created.id, section: "participants" });
         } catch {
           // error already alerted inside addCompetition
@@ -568,6 +650,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
+      password={password}
     />;
   }
 
@@ -575,7 +658,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     return <AdminEditTournament
       tournament={t}
       onCancel={() => setView({ kind: "dashboard" })}
-      onSave={(patch) => { updateTournament(patch); setView({ kind: "dashboard" }); }}
+      onSave={async (patch) => { const ok = await updateTournament(patch); if (ok && mountedRef.current) setView({ kind: "dashboard" }); return ok; }}
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       authConfig={authConfig}
@@ -607,6 +690,35 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     />;
   }
 
+  if (view.kind === "shiaijo") {
+    return <AdminShiaijoPage
+      key={view.court}
+      tournament={t}
+      court={view.court}
+      onBack={() => setView({ kind: "dashboard" })}
+      onEditScore={editMatchScore}
+      onMoveCourt={moveMatchCourt}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      password={password}
+      showToast={showToast}
+      tweaks={tweaks}
+      onSwitchCourt={(court) => setView({ kind: "shiaijo", court })}
+    />;
+  }
+
+  if (view.kind === "registrationDesk") {
+    return <window.AdminRegistrationDeskPage
+      tournament={t}
+      onBack={() => setView({ kind: "dashboard" })}
+      onLogout={onLogout}
+      onViewerMode={onViewerMode}
+      onUpdate={onUpdate}
+      password={password}
+      showToast={showToast}
+    />;
+  }
+
   if (view.kind === "import") {
     return <AdminImportPage
       tournament={t}
@@ -626,10 +738,34 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 
   if (view.kind === "competition") {
     const c = t.competitions.find((cc) => cc.id === view.id);
-    if (!c) return <div className="page"><div className="empty"><h3>Competition not found</h3></div></div>;
+    if (!c) return (
+      <div className="page">
+        <div className="comp-shell-actions">
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+        </div>
+        <div className="empty">
+          <h3>Competition not available</h3>
+          {/* Two indistinguishable causes for the operator: the comp was
+              deleted, OR this view is briefly ahead of the server while SSE
+              catches up. Word it so going back / reloading is clearly safe. */}
+          <p className="comp-shell-msg">
+            This competition may have been removed, or your view is briefly out of
+            sync while real-time updates catch up. Going back to the dashboard or
+            reloading the page is safe — if it still exists, it will reappear.
+          </p>
+        </div>
+      </div>
+    );
     // Only use adminCompData when it matches the current view; otherwise it's stale.
     const detail = adminCompData && adminCompData.config && adminCompData.config.id === view.id ? adminCompData : null;
-    if (adminLoading && !detail) return <div className="page"><div className="loading">Loading details...</div></div>;
+    if (adminLoading && !detail) return (
+      <div className="page">
+        <div className="comp-shell-actions">
+          <button type="button" className="btn btn--ghost" onClick={() => setView({ kind: "dashboard" })}>← Back to dashboard</button>
+        </div>
+        <window.LoadingSpinner text="Loading details..." />
+      </div>
+    );
 
     return <AdminCompetition
       tournament={t}
@@ -642,9 +778,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onSection={(section) => setView({ ...view, section })}
       onBack={() => setView({ kind: "dashboard" })}
       onOpenCompetition={(id, section) => setView({ kind: "competition", id, section: section || "overview" })}
+      onCreateCompetition={() => setView({ kind: "createComp" })}
       onUpdate={(next) => updateCompetition(c.id, next)}
       onRefreshCompetition={() => window.API.fetchCompetitionDetails(c.id).then(setAdminCompData).catch(err => console.error("refresh failed:", err))}
-      onCreatePlayoff={createPlayoff}
       onMoveCourt={moveMatchCourt}
       onEditScore={editMatchScore}
       onLogout={onLogout}
@@ -663,6 +799,68 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 // Defense-in-depth alongside the server-side fix.
 function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
+}
+
+// StartAllModal — three-phase dialog for the dashboard "Start all" action.
+// Follows the shared .modal-backdrop / .modal pattern (mirrors
+// AnnouncementModal). The confirm and result phases are dismissable (backdrop
+// click + Escape); the running phase is NOT — closing mid-start would orphan
+// in-flight requests with no feedback, so the close affordances are withheld
+// while phase === "running".
+function StartAllModal({ state, onConfirm, onRetry, onClose }) {
+  const dismissable = state.phase !== "running";
+  const { phase, comps = [], failed = [] } = state;
+
+  let title = "Start all competitions";
+  if (phase === "running") title = "Starting competitions…";
+  else if (phase === "result") title = failed.length === 0 ? "All competitions started" : "Some competitions failed";
+
+  const footer = <>
+    {phase === "confirm" && <>
+      <button type="button" className="btn btn--ghost" onClick={onClose}>Cancel</button>
+      <button type="button" className="btn btn--primary" onClick={onConfirm}>Start {window.pluralize(comps.length, "competition")}</button>
+    </>}
+    {phase === "result" && <>
+      {failed.length > 0 && <button type="button" className="btn btn--primary" onClick={onRetry}>Retry failed</button>}
+      <button type="button" className="btn" onClick={onClose}>Close</button>
+    </>}
+  </>;
+
+  return (
+    <Modal title={title} onClose={onClose} dismissable={dismissable} footer={footer}>
+      {phase === "confirm" && <>
+        <p className="start-all__lead">
+          This will start {window.pluralize(comps.length, "competition")} now. Once a
+          competition starts, its pools and bracket are generated and scoring opens.
+        </p>
+        <ul className="start-all__list">
+          {comps.map(c => <li key={c.id}>{c.name}</li>)}
+        </ul>
+      </>}
+      {phase === "running" && (
+        <div className="start-all__running">
+          <span className="spinner" aria-hidden="true"></span>
+          <span aria-live="polite">Starting {window.pluralize(comps.length, "competition")}…</span>
+        </div>
+      )}
+      {phase === "result" && <>
+        <p className="start-all__lead" aria-live="polite">
+          Started {state.succeeded} of {comps.length}.
+          {failed.length > 0 && ` ${window.pluralize(failed.length, "competition")} failed to start.`}
+        </p>
+        {failed.length > 0 && (
+          <ul className="start-all__list start-all__list--failed">
+            {failed.map(f => (
+              <li key={f.comp.id}>
+                <span className="start-all__failed-name">{f.comp.name}</span>
+                {f.reason && <span className="start-all__failed-reason">{f.reason}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </>}
+    </Modal>
+  );
 }
 
 window.AdminApp = AdminApp;

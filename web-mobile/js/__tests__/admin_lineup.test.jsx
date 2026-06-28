@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { canRevise, rosterFor, teamIdOf, positionsForSize } from '../admin_lineup.jsx';
+import { canRevise, rosterFor, mergeRosterWithAssigned, teamIdOf, positionsForSize } from '../admin_lineup.jsx';
 
 // admin_lineup.jsx ships three module-private helpers that gate the
 // "Revise lineup" flow and normalize the team-shape variants that the
@@ -36,118 +36,111 @@ describe('canRevise', () => {
     expect(canRevise({ id: 'c1' }, 0)).toBe(false);
   });
 
-  describe('wire-format-drift guard (the recent hardening)', () => {
-    // Regression anchor: the heuristic previously returned true whenever
-    // no `Round N+2` match was running AND no `Round N+1` was live.
-    // For a pool-only competition (no `Round N` labels at all), both
-    // checks evaluated to false and the helper unconditionally returned
-    // true — allowing Revise even when we have no idea what round the
-    // server is on. The fix requires at least one `^Round \d+$` label
-    // before delegating to the round-specific checks.
+  describe('fail-closed when no bracket matches exist for the round', () => {
+    // canRevise now filters on phase==="bracket" && roundIndex===round.
+    // Any comp shape that produces no matching bracket matches returns false.
 
     it('returns false when compMatches returns an empty list', () => {
       window.compMatches = () => [];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
-    it('returns false when no match has a `Round N` label (pool-only shape)', () => {
+    it('returns false for pool-only comp (no phase=bracket matches)', () => {
       window.compMatches = () => [
-        { id: 'm1', round: 'Pool A', status: 'completed' },
-        { id: 'm2', round: 'Pool A', status: 'completed' },
-        { id: 'm3', round: 'Pool B', status: 'scheduled' },
+        { id: 'm1', phase: 'pool', round: 'Pool A', status: 'completed' },
+        { id: 'm2', phase: 'pool', round: 'Pool A', status: 'completed' },
+        { id: 'm3', phase: 'pool', round: 'Pool B', status: 'scheduled' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
-    it('returns false when round labels exist but are not the `Round N` shape', () => {
-      // Custom labels (e.g. "Final", "Semifinals") that don't match the
-      // strict regex must also fail-closed — the round-specific checks
-      // would never match these strings anyway.
+    it('returns false when bracket matches exist but not for the requested roundIndex', () => {
+      // round=0 but all bracket matches have roundIndex=1 → currentMatches empty.
       window.compMatches = () => [
-        { id: 'm1', round: 'Finals', status: 'completed' },
-        { id: 'm2', round: 'Semifinals', status: 'completed' },
+        { id: 'm1', phase: 'bracket', roundIndex: 1, status: 'completed' },
+        { id: 'm2', phase: 'bracket', roundIndex: 1, status: 'completed' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
-    it('returns false when round field is non-string (e.g. numeric)', () => {
-      // If the wire format ever switches to a numeric round, the regex
-      // won't match — must still fail-closed.
+    it('returns false when matches have no roundIndex (old shape without the field)', () => {
+      // roundIndex undefined !== 0 (strict), so currentMatches is empty → false.
       window.compMatches = () => [
-        { id: 'm1', round: 1, status: 'completed' },
-        { id: 'm2', round: 2, status: 'scheduled' },
-      ];
-      expect(canRevise({ id: 'c1' }, 0)).toBe(false);
-    });
-
-    it('returns false when round is "Round 1.5" or "round 1" (case/format drift)', () => {
-      // The regex is /^Round \d+$/ — strict. Lowercase, decimals, or
-      // trailing text should all fail-closed.
-      window.compMatches = () => [
-        { id: 'm1', round: 'round 1', status: 'completed' },
-        { id: 'm2', round: 'Round 1.5', status: 'completed' },
-        { id: 'm3', round: 'Round 1 (Quarterfinal)', status: 'completed' },
+        { id: 'm1', phase: 'bracket', round: 'Finals', status: 'completed' },
+        { id: 'm2', phase: 'bracket', round: 'Semifinals', status: 'completed' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
   });
 
-  describe('round-specific gating (after wire-format guard passes)', () => {
-    it('returns false when a current-round match is still live', () => {
-      // round=0 (display "Round 1"); a current-round match is in
-      // "Round 1" (round + 1 == 1). Live → block revise.
+  describe('round-specific gating (uses m.roundIndex + m.phase)', () => {
+    it('returns false when a current-round match is still running', () => {
+      // round=0; a bracket match with roundIndex=0 is running → block.
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'running' },
-        { id: 'm2', round: 'Round 1', status: 'completed' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'running' },
+        { id: 'm2', phase: 'bracket', roundIndex: 0, status: 'completed' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
     it('returns false when a next-round match has already started (running)', () => {
-      // round=0; next round is "Round 2" (round + 2 == 2). Running
-      // there means the operator can't revise — the round we'd be
-      // revising the lineup for is already in flight.
+      // round=0; roundIndex=1 (next) is running → revise blocked.
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'completed' },
-        { id: 'm2', round: 'Round 2', status: 'running' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },
+        { id: 'm2', phase: 'bracket', roundIndex: 1, status: 'running' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
     it('returns false when a next-round match has already started (completed)', () => {
-      // Symmetric with the "running" case — once a Round 2 match has
-      // finished, Round 1's lineup is fully consumed.
+      // Symmetric: once roundIndex=1 is finished, roundIndex=0 lineup is consumed.
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'completed' },
-        { id: 'm2', round: 'Round 2', status: 'completed' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },
+        { id: 'm2', phase: 'bracket', roundIndex: 1, status: 'completed' },
+      ];
+      expect(canRevise({ id: 'c1' }, 0)).toBe(false);
+    });
+
+    it('returns false when current-round matches are scheduled but not yet played', () => {
+      // All roundIndex=0 matches still scheduled — round not complete → block.
+      window.compMatches = () => [
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
+        { id: 'm2', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
 
     it('returns true on the happy path (current round done, next round not yet started)', () => {
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'completed' },
-        { id: 'm2', round: 'Round 1', status: 'completed' },
-        { id: 'm3', round: 'Round 2', status: 'scheduled' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },
+        { id: 'm2', phase: 'bracket', roundIndex: 0, status: 'completed' },
+        { id: 'm3', phase: 'bracket', roundIndex: 1, status: 'scheduled' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(true);
     });
 
-    it('returns true when no Round 2 match exists yet (final-round lineup correction)', () => {
+    it('returns true when no next-round match exists yet (final-round lineup correction)', () => {
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'completed' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },
       ];
       expect(canRevise({ id: 'c1' }, 0)).toBe(true);
     });
 
-    it('handles round offset correctly: round=1 looks at Round 2/3', () => {
-      // round=1 (display "Round 2"); current round is Round 2,
-      // next round is Round 3. A live Round 2 match blocks revise.
+    it('handles round offset correctly: round=1 gates on roundIndex=1', () => {
+      // round=1; a bracket match with roundIndex=1 is running → block.
       window.compMatches = () => [
-        { id: 'm1', round: 'Round 1', status: 'completed' },
-        { id: 'm2', round: 'Round 2', status: 'running' },
+        { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'completed' },
+        { id: 'm2', phase: 'bracket', roundIndex: 1, status: 'running' },
       ];
       expect(canRevise({ id: 'c1' }, 1)).toBe(false);
+    });
+
+    it('returns false when no bracket matches exist for the requested round', () => {
+      // Pool-only comp: no phase=bracket matches → currentMatches empty → false.
+      window.compMatches = () => [
+        { id: 'm1', phase: 'pool', round: 'Pool A', status: 'completed' },
+      ];
+      expect(canRevise({ id: 'c1' }, 0)).toBe(false);
     });
   });
 });
@@ -195,6 +188,70 @@ describe('rosterFor', () => {
   it('returns [] when metadata is not an array (defensive)', () => {
     expect(rosterFor({ metadata: 'not an array' })).toEqual([]);
     expect(rosterFor({ Metadata: { 0: 'wrong shape' } })).toEqual([]);
+  });
+});
+
+describe('mergeRosterWithAssigned', () => {
+  // An operator entering a substitute via the picker's "+ Add …" row stores a
+  // free name that is NOT in team.metadata. Without folding the lineup's
+  // already-assigned names back into the roster, that substitute vanishes from
+  // the autocomplete for the team's other positions.
+
+  it('returns the base roster unchanged when no lineup is given', () => {
+    const base = ['Tanaka', 'Sato'];
+    expect(mergeRosterWithAssigned(base, null)).toEqual(['Tanaka', 'Sato']);
+    expect(mergeRosterWithAssigned(base, undefined)).toEqual(['Tanaka', 'Sato']);
+    expect(mergeRosterWithAssigned(base, {})).toEqual(['Tanaka', 'Sato']);
+  });
+
+  it('appends an added substitute not present in the base roster', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Tanaka', jiho: 'Newcomer' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Newcomer']);
+  });
+
+  it('keeps base names first, then extras in first-seen order', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Zeta', taisho: 'Alpha' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Zeta', 'Alpha']);
+  });
+
+  it('de-duplicates case-insensitively against base and other extras', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { p1: 'tanaka', p2: 'Newcomer', p3: 'NEWCOMER' } };
+    // "tanaka" collides with base "Tanaka"; second "NEWCOMER" collides with the
+    // first "Newcomer" — both dropped.
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Newcomer']);
+  });
+
+  it('ignores blank / whitespace-only assignments', () => {
+    const base = ['Tanaka'];
+    const lineup = { positions: { p1: '', p2: '   ', p3: 'Sub' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sub']);
+  });
+
+  it('trims surrounding whitespace on added names', () => {
+    const base = [];
+    const lineup = { positions: { p1: '  Padded  ' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Padded']);
+  });
+
+  it('tolerates a non-array base roster', () => {
+    const lineup = { positions: { p1: 'Solo' } };
+    expect(mergeRosterWithAssigned(null, lineup)).toEqual(['Solo']);
+    expect(mergeRosterWithAssigned(undefined, lineup)).toEqual(['Solo']);
+  });
+
+  it('does not mutate the base roster array', () => {
+    const base = ['Tanaka'];
+    mergeRosterWithAssigned(base, { positions: { p1: 'Sub' } });
+    expect(base).toEqual(['Tanaka']);
+  });
+
+  it('returns the same base array reference when there are no extras (no needless copy)', () => {
+    const base = ['Tanaka', 'Sato'];
+    const lineup = { positions: { senpo: 'Tanaka', jiho: 'Sato' } };
+    expect(mergeRosterWithAssigned(base, lineup)).toBe(base);
   });
 });
 

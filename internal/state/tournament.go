@@ -104,6 +104,10 @@ func (s *Store) copyTournament(t *Tournament) *Tournament {
 		cp.Courts = make([]string, len(t.Courts))
 		copy(cp.Courts, t.Courts)
 	}
+	if t.Contacts != nil {
+		cp.Contacts = make([]TournamentContact, len(t.Contacts))
+		copy(cp.Contacts, t.Contacts)
+	}
 	return &cp
 }
 

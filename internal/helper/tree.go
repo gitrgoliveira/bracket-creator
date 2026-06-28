@@ -25,6 +25,17 @@ type Node struct {
 	Right   *Node
 }
 
+// MatchNum returns the sequential match number assigned to this node by
+// AssignMatchNumbers (0 if not yet assigned). Exported so cross-package callers —
+// notably the engine-vs-Excel numbering-parity test — can read the authoritative
+// printed-sheet number without reaching into the unexported field.
+func (n *Node) MatchNum() int64 {
+	if n == nil {
+		return 0
+	}
+	return n.matchNum
+}
+
 func CreateBalancedTree(leafValues []string) *Node {
 	mid := len(leafValues) / 2
 	node := &Node{}
@@ -138,11 +149,22 @@ func parsePoolRank(rankStr string) int64 {
 // distributes them into bracket slots, the first-place finisher of one pool
 // is paired against the second-place finisher of another pool.
 //
-// The algorithm cycles through all pools, advancing a round counter every
-// time a full set of pools has been placed.  The position rank for each slot
-// is computed as (i + round) % poolWinners, which shifts the rank picked for
-// successive pools so that adjacent bracket slots always contain different
-// finishing positions.
+// The algorithm emits one full pass over the pools per "round" r (r =
+// 0..poolWinners-1). Within a round, pool p contributes the finisher of rank
+// (p + r) % poolWinners. For any fixed pool p, the ranks chosen across the
+// rounds form a cyclic shift of {0..poolWinners-1} — a permutation — so every
+// "<pool>-<ordinal>" placeholder appears EXACTLY once: no duplicates, none
+// missing, for ALL pool counts and poolWinners values. Adjacent slots hold
+// different pools whose ranks differ by 1 (mod poolWinners), preserving the
+// cross-pool seeding intent so 1st-place finishers are paired against lower
+// finishers of other pools.
+//
+// (The previous formulation gated its round counter on
+// `len(pools)%poolWinners == 0`, which aliased the rank rotation for
+// non-coprime combinations — e.g. poolWinners>=4 with 2/6/10 pools — silently
+// duplicating some placeholders and dropping others. Since mp-turx makes these
+// placeholders the leaves of the LIVE in-place knockout, that corrupted real
+// results; this formulation is duplicate-free by construction.)
 //
 // Example with 4 pools and 2 winners per pool:
 //
@@ -156,23 +178,16 @@ func GenerateFinals(pools []Pool, poolWinners int) []string {
 	finalists := make([][]string, len(pools))
 	for i := 0; i < len(pools); i++ {
 		for j := 0; j < poolWinners; j++ {
-			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, getOrdinal(j+1)))
+			finalists[i] = append(finalists[i], fmt.Sprintf("%s-%s", pools[i].PoolName, GetOrdinal(j+1)))
 		}
 	}
 
 	matches := make([]string, 0, len(pools)*poolWinners)
-	round := -1
-	for i := 0; i < len(pools)*poolWinners; i++ {
-
-		poolPos := i % len(pools)
-
-		if poolPos == 0 && len(pools)%poolWinners == 0 {
-			round++
-		} else if round < 0 {
-			round = 0
+	for r := 0; r < poolWinners; r++ {
+		for p := 0; p < len(pools); p++ {
+			pos := (p + r) % poolWinners
+			matches = append(matches, finalists[p][pos])
 		}
-		pos := (i + round) % poolWinners
-		matches = append(matches, finalists[poolPos][pos])
 	}
 
 	return matches
@@ -251,6 +266,44 @@ func SubdivideTree(node *Node, numSubtrees int) []*Node {
 	return subtrees
 }
 
+// TreeToLeafArray converts a tree built by CreateBalancedTree into a
+// power-of-two leaf array suitable for buildBracketFromLeaves. Internal nodes
+// recurse into left and right subtrees, padding each side to
+// NextPow2(max(len(left), len(right))) with "" (bye slots) before
+// concatenating. The result length is always NextPow2(N) where N is the
+// number of real leaves, and bye positions mirror the tree's structural
+// asymmetry so the same matchups produced by the Excel bracket are reproduced.
+func TreeToLeafArray(node *Node) []string {
+	if node == nil {
+		return nil
+	}
+	if node.LeafNode {
+		return []string{node.LeafVal}
+	}
+	left := TreeToLeafArray(node.Left)
+	right := TreeToLeafArray(node.Right)
+	target := NextPow2(max(len(left), len(right)))
+	for len(left) < target {
+		left = append(left, "")
+	}
+	for len(right) < target {
+		right = append(right, "")
+	}
+	return append(left, right...)
+}
+
+// ApplyPoolAdjustments applies the same pre-order treeAdjustment traversal
+// that PrintLeafNodes performs when pools=true. Use before TreeToLeafArray
+// to reproduce the pool-finalist ordering the Excel bracket applies.
+func ApplyPoolAdjustments(node *Node) {
+	if node == nil || node.LeafNode {
+		return
+	}
+	treeAdjustment(node)
+	ApplyPoolAdjustments(node.Left)
+	ApplyPoolAdjustments(node.Right)
+}
+
 func RoundToPowerOf2(x, y float64) (int, error) {
 	if y == 0 {
 		return 0, fmt.Errorf("divisor cannot be zero")
@@ -303,7 +356,7 @@ func TreePageLayout(numPlayers, numCourts int, singleTree bool) (int, error) {
 	return numPages, nil
 }
 
-func getOrdinal(n int) string {
+func GetOrdinal(n int) string {
 	if n <= 0 {
 		return strconv.Itoa(n)
 	}

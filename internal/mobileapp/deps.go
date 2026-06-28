@@ -23,6 +23,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// TournamentLoader is the consumer-boundary view of state.Store used by
+// handlers that need to inspect the tournament-level configuration (e.g.
+// Mode) without taking a dependency on the full store. *state.Store
+// satisfies this interface by structural match.
+type TournamentLoader interface {
+	LoadTournament() (*state.Tournament, error)
+}
+
 // CompetitionStore is the consumer-boundary view of state.Store used by
 // handler families that need to read/write competition-level data
 // (config.md, pools, brackets, schedule). Methods are added here only as
@@ -38,6 +46,10 @@ type CompetitionStore interface {
 	// LoadCompetition returns the competition record, or (nil, nil) when
 	// no record exists for this ID. Mirrors state.Store.LoadCompetition.
 	LoadCompetition(id string) (*state.Competition, error)
+	// LoadPoolMatches returns the pool-match results for compID.
+	LoadPoolMatches(id string) ([]state.MatchResult, error)
+	// LoadBracket returns the elimination bracket for compID.
+	LoadBracket(id string) (*state.Bracket, error)
 }
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by
@@ -71,6 +83,12 @@ type ScoringEngine interface {
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// CheckCrossCompCourtBusy checks whether the court for matchID is
+	// already occupied by a running match in a different competition.
+	// Must be called before entering WithTransaction to avoid a deadlock
+	// (store.RunningMatchOnCourt acquires read locks on other competitions;
+	// calling it while holding a write lock risks a circular wait).
+	CheckCrossCompCourtBusy(compID, matchID string) error
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. Used by
 	// the dedicated POST /decision endpoint (T090). When the prior
@@ -162,14 +180,20 @@ type Broadcaster interface {
 // CompetitionStore / TeamLineupStore / etc. interfaces at the
 // registration site, same pattern the other handler families use.
 //
-// Consumers (current): handlers_lineup.go (the PUT, T156). The score
-// and decision handlers are queued for migration once the engine
-// methods learn tx-aware variants; until then they hold the concrete
-// *engine.Engine which internally locks per-comp.
+// Consumers (current): handlers_lineup.go (the PUT, T156);
+// handlers_match.go (score, mp-95mg — wraps WithCourtExclusivityLock +
+// WithTransaction); handlers_decision.go (decision, T156).
 type CompetitionTransactor interface {
 	// WithTransaction runs fn under the per-competition write lock for
 	// compID. fn receives a state.StoreTx handle whose methods skip
 	// re-locking; the lock is released on return (success or error).
 	// Mirrors state.Store.WithTransaction.
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
+	// WithCourtExclusivityLock runs fn under the store's court-exclusivity
+	// mutex, which must be acquired BEFORE any per-comp lock. Use this to
+	// wrap a cross-competition court-busy check + WithTransaction pair so
+	// two concurrent match-starts on the same court in different
+	// competitions can't both pass the check before either commits (TOCTOU).
+	// Mirrors state.Store.WithCourtExclusivityLock.
+	WithCourtExclusivityLock(fn func() error) error
 }

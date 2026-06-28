@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,16 +15,25 @@ func TestApplyTournamentDefaults_ZeroValues(t *testing.T) {
 	ApplyTournamentDefaults(tour)
 	assert.Equal(t, 1.5, tour.ClockToElapsedMultiplier)
 	assert.Equal(t, 10, tour.SlowestCourtBufferPct)
+	assert.Equal(t, []string{"A"}, tour.Courts)
+}
+
+func TestApplyTournamentDefaults_EmptySlice(t *testing.T) {
+	tour := &Tournament{Courts: []string{}}
+	ApplyTournamentDefaults(tour)
+	assert.Equal(t, []string{"A"}, tour.Courts)
 }
 
 func TestApplyTournamentDefaults_NonZeroPreserved(t *testing.T) {
 	tour := &Tournament{
 		ClockToElapsedMultiplier: 2.0,
 		SlowestCourtBufferPct:    20,
+		Courts:                   []string{"A", "B"},
 	}
 	ApplyTournamentDefaults(tour)
 	assert.Equal(t, 2.0, tour.ClockToElapsedMultiplier)
 	assert.Equal(t, 20, tour.SlowestCourtBufferPct)
+	assert.Equal(t, []string{"A", "B"}, tour.Courts)
 }
 
 func TestApplyTournamentDefaults_Nil(t *testing.T) {
@@ -95,6 +105,85 @@ func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 		require.NoError(t, yaml.Unmarshal(b, &got))
 		assert.True(t, got.DecidedByHantei)
 	})
+}
+
+// TestTournamentTheme_RoundTrip verifies that Theme survives a YAML marshal/
+// unmarshal cycle and that LogoPath is not exposed via JSON (mp-scf).
+func TestTournamentTheme_RoundTrip(t *testing.T) {
+	t.Run("full theme survives YAML round-trip", func(t *testing.T) {
+		tour := &Tournament{
+			Name: "Test",
+			Theme: &Theme{
+				PrimaryColor:    "#ff0000",
+				AccentSoftColor: "#ffe0e0",
+				WindowTitle:     "My Cup 2026",
+				LogoPath:        "logo.png",
+			},
+		}
+		b, err := yaml.Marshal(tour)
+		require.NoError(t, err)
+		var got Tournament
+		require.NoError(t, yaml.Unmarshal(b, &got))
+		require.NotNil(t, got.Theme)
+		assert.Equal(t, "#ff0000", got.Theme.PrimaryColor)
+		assert.Equal(t, "#ffe0e0", got.Theme.AccentSoftColor)
+		assert.Equal(t, "My Cup 2026", got.Theme.WindowTitle)
+		assert.Equal(t, "logo.png", got.Theme.LogoPath)
+	})
+	t.Run("logo_path is omitted from JSON", func(t *testing.T) {
+		tour := &Tournament{
+			Name:  "Test",
+			Theme: &Theme{PrimaryColor: "#1d3557", LogoPath: "logo.png"},
+		}
+		b, err := json.Marshal(tour)
+		require.NoError(t, err)
+		s := string(b)
+		assert.Contains(t, s, `"primaryColor":"#1d3557"`)
+		assert.NotContains(t, s, "logoPath")
+		assert.NotContains(t, s, "logo_path")
+		assert.NotContains(t, s, "logo.png")
+	})
+	t.Run("legacy tournament without theme key parses cleanly", func(t *testing.T) {
+		raw := `name: Old Tournament
+password: secret
+courts: [A]
+`
+		var got Tournament
+		require.NoError(t, yaml.Unmarshal([]byte(raw), &got))
+		assert.Nil(t, got.Theme)
+	})
+}
+
+// TestValidateTheme covers the hex-color acceptance criteria (mp-scf).
+func TestValidateTheme(t *testing.T) {
+	cases := []struct {
+		name    string
+		theme   *Theme
+		wantErr bool
+	}{
+		{"nil is valid", nil, false},
+		{"empty struct is valid", &Theme{}, false},
+		{"valid colors", &Theme{PrimaryColor: "#1d3557", AccentSoftColor: "#e7eaf3"}, false},
+		{"uppercase hex valid", &Theme{PrimaryColor: "#1D3557"}, false},
+		{"bad primary", &Theme{PrimaryColor: "red"}, true},
+		{"bad primary short", &Theme{PrimaryColor: "#fff"}, true},
+		{"bad accent", &Theme{AccentSoftColor: "notacolor"}, true},
+		{"empty primary ok", &Theme{AccentSoftColor: "#e7eaf3"}, false},
+		{"empty accent ok", &Theme{PrimaryColor: "#1d3557"}, false},
+		{"window title ok", &Theme{WindowTitle: "My Tournament 2026"}, false},
+		{"window title at max length ok", &Theme{WindowTitle: strings.Repeat("a", 100)}, false},
+		{"window title too long", &Theme{WindowTitle: strings.Repeat("a", 101)}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateTheme(tc.theme)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 // --- Tournament.Days() ---
@@ -211,4 +300,154 @@ func TestValidateTeamMatchType(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateCompetitionTeamSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		teamSize int
+		wantErr  bool
+	}{
+		{"team with size 0 errors", "team", 0, true},
+		{"team with size 1 errors", "team", 1, true},
+		{"team with size 2 ok", "team", 2, false},
+		{"team with size 5 ok", "team", 5, false},
+		{"individual with size 0 ok", "individual", 0, false},
+		{"individual with size 1 errors", "individual", 1, true},
+		{"individual with size 2 errors", "individual", 2, true},
+		{"negative value errors", "individual", -1, true},
+		{"empty kind with size 0 ok", "", 0, false},
+		{"empty kind with size 1 errors", "", 1, true},
+		{"empty kind with size 3 errors", "", 3, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCompetitionTeamSize(tc.kind, tc.teamSize)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// --- Sponsors (mp-c38) ---
+
+// TestTournament_SponsorsRoundTrip pins the YAML round-trip contract:
+// populated sponsors must survive marshal/unmarshal with name, file, and
+// link preserved. omitempty on Link must omit the key for sponsors with
+// no link set.
+func TestTournament_SponsorsRoundTrip(t *testing.T) {
+	original := Tournament{
+		Name: "Round-Trip Cup",
+		Sponsors: []Sponsor{
+			{Name: "Acme Corp", File: "8a3f9c12d7b6e041.png", Link: "https://acme.example"},
+			{Name: "BetaCo", File: "1f2e3d4c5b6a7080.jpg"}, // no link
+		},
+	}
+	b, err := yaml.Marshal(&original)
+	require.NoError(t, err)
+	yamlStr := string(b)
+	// Assert first sponsor fields are present.
+	assert.Contains(t, yamlStr, "name: Acme Corp")
+	assert.Contains(t, yamlStr, "link: https://acme.example")
+	// Structural omitempty check: the second sponsor has no link, so the
+	// `link:` key must be entirely absent from the YAML — not `link: ""`
+	// or `link: null`. This is what `yaml:"link,omitempty"` guarantees.
+	assert.Contains(t, yamlStr, "name: BetaCo")
+	assert.NotContains(t, yamlStr, "link: \"\"\nname: BetaCo",
+		"YAML must not emit link: \"\" for sponsors with no link")
+	// Parse the second sponsor block to confirm the key is truly absent,
+	// not just empty. We look for a "link:" line between the two name lines.
+	acmeIdx := strings.Index(yamlStr, "name: Acme Corp")
+	betaIdx := strings.Index(yamlStr, "name: BetaCo")
+	require.True(t, acmeIdx >= 0 && betaIdx > acmeIdx, "both sponsor entries must be present")
+	betaBlock := yamlStr[betaIdx:]
+	assert.NotContains(t, betaBlock[:strings.Index(betaBlock+"\n---", "\n---")], "link:",
+		"omitempty: link key must be absent from the no-link sponsor's YAML block")
+
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(b, &got))
+	require.Len(t, got.Sponsors, 2)
+	assert.Equal(t, "Acme Corp", got.Sponsors[0].Name)
+	assert.Equal(t, "8a3f9c12d7b6e041.png", got.Sponsors[0].File)
+	assert.Equal(t, "https://acme.example", got.Sponsors[0].Link)
+	assert.Equal(t, "BetaCo", got.Sponsors[1].Name)
+	assert.Empty(t, got.Sponsors[1].Link, "omitempty link must round-trip as empty")
+}
+
+// TestTournament_NoSponsorsKey_LegacyParse ensures legacy tournament.md
+// files (predating mp-c38) deserialize with an empty/nil Sponsors slice
+// rather than failing. Strict-mode unmarshal would break older configs.
+func TestTournament_NoSponsorsKey_LegacyParse(t *testing.T) {
+	legacy := []byte(`name: Legacy Cup
+date: "01-06-2026"
+courts: ["A", "B"]
+`)
+	var got Tournament
+	require.NoError(t, yaml.Unmarshal(legacy, &got))
+	assert.Empty(t, got.Sponsors, "missing sponsors key must deserialize as empty slice")
+}
+
+// TestTournament_EmptySponsors_OmitsKey pins the reverse direction: a
+// tournament with no sponsors must NOT emit `sponsors: []` so existing
+// files round-trip byte-for-equivalent when no sponsors are configured.
+func TestTournament_EmptySponsors_OmitsKey(t *testing.T) {
+	tour := Tournament{Name: "No-Sponsor Cup"}
+	b, err := yaml.Marshal(&tour)
+	require.NoError(t, err)
+	assert.NotContains(t, string(b), "sponsors:", "empty Sponsors must be omitted from YAML")
+}
+
+func TestValidateSponsor(t *testing.T) {
+	tests := []struct {
+		name    string
+		sponsor Sponsor
+		wantErr error
+	}{
+		{name: "empty name", sponsor: Sponsor{}, wantErr: ErrSponsorNameRequired},
+		{name: "name too long", sponsor: Sponsor{Name: strings.Repeat("a", MaxSponsorNameLen+1)}, wantErr: ErrSponsorNameTooLong},
+		{name: "valid name no link", sponsor: Sponsor{Name: "Acme"}, wantErr: nil},
+		{name: "valid name and link", sponsor: Sponsor{Name: "Acme", Link: "https://acme.example"}, wantErr: nil},
+		{name: "link too long", sponsor: Sponsor{Name: "Acme", Link: "https://" + strings.Repeat("x", MaxSponsorLinkLen)}, wantErr: ErrSponsorLinkTooLong},
+		{name: "link not http", sponsor: Sponsor{Name: "Acme", Link: "ftp://acme.example"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "link no host", sponsor: Sponsor{Name: "Acme", Link: "https://"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "link with credentials", sponsor: Sponsor{Name: "Acme", Link: "https://user:pass@acme.example"}, wantErr: ErrSponsorLinkInvalid},
+		{name: "plain http link", sponsor: Sponsor{Name: "Acme", Link: "http://acme.example"}, wantErr: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateSponsor(tc.sponsor)
+			if tc.wantErr != nil {
+				assert.ErrorIs(t, err, tc.wantErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateTournamentMode(t *testing.T) {
+	assert.NoError(t, ValidateTournamentMode(""))
+	assert.NoError(t, ValidateTournamentMode(TournamentModeOfficiated))
+	assert.NoError(t, ValidateTournamentMode(TournamentModeSelfRun))
+	assert.Error(t, ValidateTournamentMode("unknown-mode"))
+}
+
+func TestMatchResult_RoundRoundtrip(t *testing.T) {
+	mr := MatchResult{
+		ID:    "test-match-1",
+		Round: 3,
+	}
+
+	data, err := json.Marshal(mr)
+	assert.NoError(t, err)
+
+	var got MatchResult
+	err = json.Unmarshal(data, &got)
+	assert.NoError(t, err)
+
+	assert.Equal(t, 3, got.Round)
 }

@@ -17,6 +17,7 @@
 - [Competitor Colours (Aka and Shiro)](#competitor-colours-aka-and-shiro)
 - [Scoreboard Structure](#scoreboard-structure)
 - [How a Match Is Decided](#how-a-match-is-decided)
+- [Pool Match Order](#pool-match-order)
 - [How an Individual Pool Is Decided](#how-an-individual-pool-is-decided)
 - [Team Matches](#team-matches)
 - [Seeding](#seeding)
@@ -156,6 +157,8 @@ Three referees (shinpan) officiate each match. Each holds a red and a white flag
 
 Fouls include stepping out of bounds, dropping the shinai, making illegal contact, or other prohibited acts (FIK Article 17). **Two hansoku result in one ippon awarded to the opponent** (FIK Article 20). Hansoku are **cumulative for the duration of the concerned shiai**, including encho — they do not reset between regulation time and overtime.
 
+Per the FIK *Regulations of Kendo Shiai and Shinpan* (Shinpan Management, p.15, Table 1 — "Recording Matters and Indications"), a hansoku is recorded as a **red upward triangle (▲)** against the offending competitor. **When the second hansoku is committed, the ▲ is deleted** and one ippon is placed on the opponent's side — so the outstanding count is always 0 or 1 and a competitor never displays two triangles. In **sosai** (simultaneous mutual hansoku that cancel out for penalty purposes), the ▲ marks are **left in place**. The running number of hansoku is tracked separately.
+
 ## Match Formats
 
 ### Sanbon-Shobu (Three-Point Match)
@@ -181,7 +184,7 @@ FIK Article 7-3 also lists **chusen** (drawing lots) as a possible resolution me
 
 If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei** — upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei — one side must be chosen.
 
-The scoreboard will have an "H" in the person who wins.
+The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters — it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
 
 ## Match Procedure
 
@@ -244,7 +247,7 @@ Each match has a **red (aka)** side and a **white (shiro)** side. Before each bo
 
 ### In Pool Matches
 
-The first-listed player/team in the match-up is **red (aka)** and the second-listed is **white (shiro)**. The pool draw order determines who is listed first — typically the player with the lower pool position number takes red.
+The first-listed player/team in the match-up is **red (aka)** and the second-listed is **white (shiro)**. The pool draw order determines who is listed first.
 
 ### In Elimination (Knockout) Matches
 
@@ -260,21 +263,25 @@ The scoreboard is what table operators and court managers work from — either o
 
 ### Individual Match Scoreboard
 
-Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hantei/hansoku point).
+Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hansoku point — the ippon awarded by the opponent's second hansoku). A hantei (judges' decision) win is **not** an ippon at all; it is marked **Ht** on the winner's side to record that the referees **decided the match** (see below).
 
-| Name (White) | | | vs | | | Name (Red) |
-|---|---|---|---|---|---|---|
-| Tanaka | M | K | | | D | Suzuki |
+| White | ▲ | out | in | vs | in | out | ▲ | Red |
+|---|---|---|---|---|---|---|---|---|
+| Tanaka | – | M | K | | | D | – | Suzuki |
+
+Each competitor's marks read **outward-to-inward** — from their own name toward the centre `vs` column — and the two sides mirror across that centre.
 
 - **Two scoring slots per side** — in sanbon-shobu, filling both means an outright win (2 ippon). The match winner is determined by who has more total ippon. If one side has 1 ippon and the other has 0 at time-up, the side with 1 wins.
+- **Ippon fill order — outside to inside (fixed rule)** — each side's ippons **start at the slot nearest that competitor's name (the outer edge) and fill inward toward the centre `vs`**. White's first ippon lands in its leftmost (name-side) slot and fills rightward; Red's first ippon lands in its rightmost (name-side) slot and fills leftward. Both scores therefore grow from each name toward the middle, mirrored across `vs`. This ordering is fixed and not configurable — it must never fill centre-outward on either side. (In the example above Tanaka has M then K reading inward from the left; Suzuki has D in his outer, name-side slot.)
+- **Hansoku triangle position** — the outstanding-hansoku **▲** is placed **immediately beside the competitor's name, on the inner side of the name** (between the name and that side's ippon slots). It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward.
 - **vs** — centre column, normally blank. **X** marks a hikiwake (draw).
-- **Fouls** — hansoku are tracked per side. Every 2 fouls awards 1 ippon to the opponent (recorded as **H** in one of the opponent's slots).
+- **Fouls** — hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Shinpan Management p.15, Table 1; position as above). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1 — a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
 - **Draw** — an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
-- **Hantei** — if a knockout match is decided by judges' decision, an **H** is placed in the winner's scoring slot.
+- **Hantei** — if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon) — it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
 
-A team match block has one row per individual bout plus a **summary row**. Each bout uses the same scoring structure as an individual match. The team match result is decided by **IV** (Individual Victories) first, then **PW** (Points Won) as tiebreaker.
+A team match block has one row per individual bout plus a **summary row**. Each bout uses the same scoring structure as an individual match. The team match result is decided by **IV** (Individual Victories) first, then **PW** (Points Won) as tiebreaker. This bout-row layout follows the FIK dantai-shiai (team match) scoreboard in the *Regulations of Kendo Shiai and Shinpan*, Shinpan Management Table 2 (p.16): white/shiro names on the left, red/aka on the right, scoring marks in the centre.
 
 | Row | Name (White) | | | vs | | | Name (Red) |
 |---|---|---|---|---|---|---|---|
@@ -284,7 +291,7 @@ A team match block has one row per individual bout plus a **summary row**. Each 
 | ... | ... | | | | | | ... |
 
 - **Summary row** — shows the aggregated **IV** (Individual Victories) and **PW** (Points Won) for each team. These are computed automatically from the bout rows below.
-- **Bout rows** — the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**.
+- **Bout rows** — the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**. Each bout row follows the same individual-scoreboard conventions: ippons fill **outside-to-inside** (from each name toward the centre) and the outstanding-hansoku **▲** sits **next to the name on its inner side** (see [Individual Match Scoreboard](#individual-match-scoreboard)).
 - If both IV and PW are equal: in pools it is a **draw**; in knockout, a **daihyosen** (representative match) is recorded as an additional bout row below the regular bouts.
 
 ### Pool Results Table
@@ -351,6 +358,39 @@ For **team elimination matches**, the block expands with sub-bout rows and a sum
 1. **Within regulation time**: first to 2 points wins (sanbon-shobu), or the competitor leading at time-up wins.
 2. **Draw in pools**: if the score is level (0–0 or 1–1) at time-up, it is a hikiwake.
 3. **Draw in knockout**: encho is played. If still tied after encho, **hantei** decides the winner.
+
+## Pool Match Order
+
+Pools are played in a fixed rotation order that ensures even rest between bouts for each competitor.
+
+### 3-person pool
+
+Fighters are numbered 1, 2, 3. The three bouts are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 1 | 3 |
+| 3 | 2 | 3 |
+
+### 4-person pool
+
+Each fighter has 3 bouts. The six matches are played in this order:
+
+| Bout | Red (Aka) | White (Shiro) |
+|------|-----------|---------------|
+| 1 | 1 | 2 |
+| 2 | 3 | 2 |
+| 3 | 3 | 4 |
+| 4 | 1 | 4 |
+| 5 | 1 | 3 |
+| 6 | 2 | 4 |
+
+This ordering ensures that no fighter has consecutive bouts — each competitor rests for at least one bout between their matches.
+
+### Larger pools
+
+For pools of 5 or more, the same principle applies: matches are ordered so that each competitor rests between bouts. The exact rotation follows the tournament's published schedule.
 
 ## How an Individual Pool Is Decided
 

@@ -91,7 +91,7 @@ func TestDecisionRequestValidate(t *testing.T) {
 			}
 			require.Error(t, err)
 			var verr *ValidationError
-			require.True(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+			require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
 			assert.Equal(t, tt.wantField, verr.Field)
 		})
 	}

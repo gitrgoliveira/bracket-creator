@@ -401,7 +401,7 @@ func TestUniqueWALIDDifferentEachCall(t *testing.T) {
 	seen := make(map[string]bool, 1000)
 	for i := 0; i < 1000; i++ {
 		id := NewWALID()
-		assert.False(t, seen[id], "duplicate WAL id: %s", id)
+		assert.Falsef(t, seen[id], "duplicate WAL id: %s", id)
 		seen[id] = true
 	}
 }

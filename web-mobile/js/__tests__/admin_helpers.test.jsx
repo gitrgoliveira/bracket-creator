@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -131,6 +131,33 @@ describe('hasBothSides', () => {
   });
 });
 
+// hasPoolOriginPlaceholder gates the admin "Knockout filling in" banner. Unlike
+// !hasBothSides it must be TRUE only for pool-origin "Pool A-1st" placeholders —
+// NOT for "Winner of rX-mY" feeders or structural byes — so the banner doesn't
+// show for standalone playoffs or bye-containing brackets (Copilot round-7 finding).
+describe('hasPoolOriginPlaceholder', () => {
+  it('returns true when a side is a pool-origin "Pool X-Nth" placeholder', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Pool A-1st", sideB: "Bob" })).toBe(true);
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "Pool B-2nd" })).toBe(true);
+    expect(hasPoolOriginPlaceholder({ sideA: { id: "", name: "Pool C-1st" }, sideB: "Bob" })).toBe(true);
+  });
+
+  it('returns false for "Winner of rX-mY" feeders (a playoffs bracket is not "filling in")', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Winner of r0-m1", sideB: "Bob" })).toBe(false);
+    expect(hasPoolOriginPlaceholder({ sideA: "Winner of r1-m0", sideB: "Winner of r1-m1" })).toBe(false);
+  });
+
+  it('returns false for structural byes and resolved matches', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "" })).toBe(false);
+    expect(hasPoolOriginPlaceholder({ sideA: "Alice", sideB: "Bob" })).toBe(false);
+    expect(hasPoolOriginPlaceholder(null)).toBe(false);
+  });
+
+  it('returns false for a real participant whose name merely contains "Pool"', () => {
+    expect(hasPoolOriginPlaceholder({ sideA: "Liverpool FC", sideB: "Bob" })).toBe(false);
+  });
+});
+
 describe('compMatchStats', () => {
   const realMatch = (status) => ({
     sideA: { id: "a", name: "Alice" },
@@ -144,7 +171,7 @@ describe('compMatchStats', () => {
   };
 
   it('returns zeros for a competition with no matches', () => {
-    expect(compMatchStats({})).toEqual({ total: 0, done: 0, live: 0 });
+    expect(compMatchStats({})).toEqual({ total: 0, done: 0, running: 0 });
   });
 
   it('counts flat poolMatches', () => {
@@ -155,7 +182,7 @@ describe('compMatchStats', () => {
         realMatch("scheduled"),
       ],
     };
-    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, running: 1 });
   });
 
   it('counts pools[].matches when poolMatches is absent', () => {
@@ -165,7 +192,7 @@ describe('compMatchStats', () => {
         { matches: [realMatch("running")] },
       ],
     };
-    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 3, done: 1, running: 1 });
   });
 
   it('counts bracket rounds in addition to pool matches', () => {
@@ -178,12 +205,12 @@ describe('compMatchStats', () => {
         ],
       },
     };
-    expect(compMatchStats(c)).toEqual({ total: 4, done: 2, live: 1 });
+    expect(compMatchStats(c)).toEqual({ total: 4, done: 2, running: 1 });
   });
 
   it('skips bye / unresolved sides (normalizeMatch placeholders)', () => {
     const c = { poolMatches: [realMatch("completed"), byeMatch] };
-    expect(compMatchStats(c)).toEqual({ total: 1, done: 1, live: 0 });
+    expect(compMatchStats(c)).toEqual({ total: 1, done: 1, running: 0 });
   });
 });
 
@@ -688,5 +715,70 @@ describe('deriveTournamentDays', () => {
     expect(deriveTournamentDays('05-06-2026', 1.5)).toEqual([]); // non-integer
     expect(deriveTournamentDays('05-06-2026', NaN)).toEqual([]);
     expect(deriveTournamentDays('05-06-2026', '3')).toEqual([]); // non-number
+  });
+});
+
+describe('normalizeCourts', () => {
+  it('returns the array if it is a non-empty array', () => {
+    expect(normalizeCourts(["A", "B"])).toEqual(["A", "B"]);
+  });
+
+  it('returns ["A"] for null or undefined', () => {
+    expect(normalizeCourts(null)).toEqual(["A"]);
+    expect(normalizeCourts(undefined)).toEqual(["A"]);
+  });
+
+  it('returns ["A"] for an empty array', () => {
+    expect(normalizeCourts([])).toEqual(["A"]);
+  });
+
+  it('returns ["A"] for a truthy non-array like a string', () => {
+    expect(normalizeCourts("AB")).toEqual(["A"]);
+  });
+});
+
+describe('courtCount', () => {
+  it('returns the length of the array', () => {
+    expect(courtCount(["A", "B"])).toBe(2);
+  });
+
+  it('returns 1 for null or undefined', () => {
+    expect(courtCount(null)).toBe(1);
+    expect(courtCount(undefined)).toBe(1);
+  });
+
+  it('returns 1 for an empty array', () => {
+    expect(courtCount([])).toBe(1);
+  });
+
+  it('returns 1 for a truthy non-array like a string', () => {
+    expect(courtCount("AB")).toBe(1);
+  });
+});
+
+describe('resolveRoundIndex', () => {
+  it('returns m.roundIndex when non-negative', () => {
+    expect(resolveRoundIndex({ roundIndex: 0 })).toBe(0);
+    expect(resolveRoundIndex({ roundIndex: 3 })).toBe(3);
+  });
+
+  it('falls back to numeric m.round when roundIndex is absent', () => {
+    expect(resolveRoundIndex({ round: 2 })).toBe(2);
+  });
+
+  it('clamps negative numeric round to 0 via fallback', () => {
+    expect(resolveRoundIndex({ round: -1 })).toBe(0);
+  });
+
+  it('returns 0 for pool matches with no roundIndex or numeric round', () => {
+    expect(resolveRoundIndex({ round: 'Pool A', status: 'completed' })).toBe(0);
+  });
+
+  it('returns 0 when match has no round fields at all', () => {
+    expect(resolveRoundIndex({})).toBe(0);
+  });
+
+  it('prefers roundIndex over numeric round', () => {
+    expect(resolveRoundIndex({ roundIndex: 1, round: 5 })).toBe(1);
   });
 });

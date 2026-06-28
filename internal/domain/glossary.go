@@ -181,20 +181,20 @@ var Glossary = map[string]Term{
 	"zekken": {
 		ID:      "zekken",
 		Kanji:   "ゼッケン",
-		Short:   "Back name-tag",
-		Tooltip: "The cloth name-tag worn on the competitor's back. The display can show this name (instead of the registered name) so spectators see what's physically visible.",
-	},
-	"dojo": {
-		ID:      "dojo",
-		Kanji:   "道場",
-		Short:   "Club or school",
-		Tooltip: "The training school or club a competitor represents. The pool generator avoids placing two competitors from the same dojo in the same pool when it can.",
+		Short:   "Name tag (nafuda)",
+		Tooltip: "The name tag affixed to the centre of the tare (waist protector). Also called nafuda. The display can show this name (instead of the registered name) so spectators see what's physically visible.",
 	},
 	"dan": {
 		ID:      "dan",
 		Kanji:   "段",
 		Short:   "Rank",
 		Tooltip: "A competitor's grade — shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form.",
+	},
+	"dojo": {
+		ID:      "dojo",
+		Kanji:   "道場",
+		Short:   "Club or school",
+		Tooltip: "The training school or club a competitor represents. The pool generator avoids placing two competitors from the same dojo in the same pool when it can.",
 	},
 	"waza": {
 		ID:      "waza",

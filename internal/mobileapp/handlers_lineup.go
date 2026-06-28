@@ -4,7 +4,7 @@
 //
 // GET returns the lineup for a (team, round) tuple, PUT sets/replaces
 // it, DELETE removes it. The lineup is mutable up until the round's
-// first match goes live — once frozen, subsequent PUTs return 409 with
+// first match starts — once frozen, subsequent PUTs return 409 with
 // ErrLineupLocked (FR-040, FR-041, R4 / CHK012).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -28,9 +29,19 @@ import (
 // LineupRequest is the body for PUT /lineups/:round. We accept the
 // positions map as the only required field — teamID/round/compID are
 // pinned by the URL path, and LockedAt is server-managed (the engine
-// stamps it when the round's first match goes live).
+// stamps it when the round's first match starts).
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
+	// Force, on the match-scoped PUT only, bypasses the start-of-match
+	// freeze so an operator running behind can still set/correct a lineup
+	// after the match has started (officiated mode). Lineup validation
+	// still applies. Ignored by the round-scoped PUT.
+	Force bool `json:"force"`
+	// ChangeReason is mandatory when Force=true — it must be a non-empty
+	// audit justification in the format "<category>: <note>"
+	// (e.g. "Substitution: injury to jiho"). Omitted for pre-match
+	// lineup submissions.
+	ChangeReason string `json:"changeReason,omitempty"`
 }
 
 // matchLineupLockedMsg is the 409 body for the match-scoped endpoints.
@@ -83,7 +94,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and round"})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, lineupForPublic(lineup))
 	})
 
 	// Match-scoped read (mp-825). 404 lets the caller fall back to the
@@ -103,7 +114,7 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no lineup submitted for this team and match"})
 			return
 		}
-		c.JSON(http.StatusOK, lineup)
+		c.JSON(http.StatusOK, lineupForPublic(lineup))
 	})
 }
 
@@ -128,14 +139,16 @@ func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID strin
 // server.go) as the auth boundary; a richer role check lands when
 // per-role auth is implemented.
 //
-// The third parameter (`tx CompetitionTransactor`) is the T156 hook.
+// The `tx CompetitionTransactor` parameter is the T156 hook.
 // The PUT body wraps its three store calls — load comp (for teamSize),
 // set lineup, reload lineup (for the response) — in one
 // WithTransaction so they all commit under a single per-comp lock
-// acquire. `*state.Store` satisfies all three interfaces
-// (TeamLineupStore + CompetitionStore + CompetitionTransactor) so
-// wiring stays drop-in.
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor) {
+// acquire. `hub Broadcaster` receives an EventLineupUpdated after
+// each successful write so SSE clients can re-fetch lineup data.
+// `*state.Store` satisfies the first three interfaces (TeamLineupStore +
+// CompetitionStore + CompetitionTransactor); the SSE hub satisfies
+// Broadcaster and is wired separately in production.
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster) {
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -245,6 +258,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.JSON(http.StatusOK, persistedLineup)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
@@ -261,6 +275,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
@@ -308,7 +323,49 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
-			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+			if req.Force && strings.TrimSpace(req.ChangeReason) == "" {
+				respErr = &httpErr{
+					status: http.StatusBadRequest,
+					body:   gin.H{"error": "changeReason is required when force=true"},
+				}
+				return nil
+			}
+			// Bound the audit free-text (same cap as every other reason field) so
+			// a 1MB changeReason can't land in the lineup YAML. Only force writes
+			// persist it (see below), so this only matters on the force path.
+			// Cap the TRIMMED value: the write persists strings.TrimSpace(...),
+			// so trailing/leading whitespace must not trip a false 400.
+			if req.Force {
+				if err := validateMaxLen("changeReason", strings.TrimSpace(req.ChangeReason), MaxLenChangeReason); err != nil {
+					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+					return nil
+				}
+			}
+			// force is a mid-match override: only valid once the match has
+			// actually started (running or completed). Reject a pre-match force
+			// so a client can't use the override path — or persist an audit
+			// reason — on a normal pre-match lineup edit.
+			if req.Force {
+				status := lookupMatchStatusUnderTx(stx, compID, matchID)
+				if status != state.MatchStatusRunning && status != state.MatchStatusCompleted {
+					respErr = &httpErr{
+						status: http.StatusBadRequest,
+						body:   gin.H{"error": "force override is only allowed after the match has started"},
+					}
+					return nil
+				}
+			}
+			// ChangeReason is an audit justification for a mid-match override
+			// only. For a normal (force=false) pre-match save it carries no
+			// meaning, so don't persist a client-supplied value.
+			setLineup := stx.SetTeamLineup
+			if req.Force {
+				lineup.ChangeReason = strings.TrimSpace(req.ChangeReason)
+				setLineup = stx.SetTeamLineupForce
+			} else {
+				lineup.ChangeReason = ""
+			}
+			if err := setLineup(compID, lineup, teamSize); err != nil {
 				switch {
 				case errors.Is(err, state.ErrLineupLocked):
 					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": matchLineupLockedMsg}}
@@ -344,6 +401,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.JSON(http.StatusOK, persistedLineup)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	r.DELETE("/competitions/:id/teams/:tid/match-lineups/:matchId", func(c *gin.Context) {
@@ -360,6 +418,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 }
 

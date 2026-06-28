@@ -19,6 +19,22 @@ func (stubCompetitionStore) LoadCompetition(string) (*state.Competition, error) 
 	return nil, nil
 }
 
+func (stubCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, error) {
+	return nil, nil
+}
+
+func (stubCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
+	return nil, nil
+}
+
+// stubTournamentLoader is a no-op implementation of TournamentLoader. Same
+// rationale as stubCompetitionStore.
+type stubTournamentLoader struct{}
+
+func (stubTournamentLoader) LoadTournament() (*state.Tournament, error) {
+	return nil, nil
+}
+
 // stubScoringEngine is a no-op implementation of ScoringEngine. Same
 // rationale as stubCompetitionStore.
 type stubScoringEngine struct{}
@@ -36,6 +52,10 @@ func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, str
 }
 
 func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string) error {
+	return nil
+}
+
+func (stubScoringEngine) CheckCrossCompCourtBusy(string, string) error {
 	return nil
 }
 
@@ -124,6 +144,10 @@ func (stubCompetitionTransactor) WithTransaction(string, func(state.StoreTx) err
 	return nil
 }
 
+func (stubCompetitionTransactor) WithCourtExclusivityLock(fn func() error) error {
+	return fn()
+}
+
 // TestDepsInterfacesCompile is a compile-time guard that the consumer-
 // boundary interfaces (deps.go) are satisfied by both the stub
 // implementations above AND the production concrete types. If a method
@@ -142,6 +166,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ Broadcaster           = stubBroadcaster{}
 		_ TeamLineupStore       = stubTeamLineupStore{}
 		_ CompetitionTransactor = stubCompetitionTransactor{}
+		_ TournamentLoader      = stubTournamentLoader{}
 	)
 
 	// Concrete types — proves the production types remain drop-in
@@ -159,5 +184,6 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		// the lineup PUT migration uses. *state.Store satisfies it via
 		// the Slice 6 / T155 method.
 		_ CompetitionTransactor = (*state.Store)(nil)
+		_ TournamentLoader      = (*state.Store)(nil)
 	)
 }

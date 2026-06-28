@@ -1,11 +1,60 @@
 /* Bracket Creator — clean utilitarian, polished */
 
+/* ---------- Self-hosted fonts (offline-safe, embedded via go:embed) ----------
+   Anton + Archivo, both SIL Open Font License 1.1 (OFL.txt shipped alongside
+   each .woff2 under /vendor/fonts/). Latin-subset woff2; Archivo keeps its
+   weight axis (100–900). Used by the Aka/Shiro scoreboard + display surfaces
+   via --font-impact / --font-strong. Body text stays on system --font. */
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/vendor/fonts/anton/anton-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/vendor/fonts/archivo/archivo-latin.woff2") format("woff2");
+}
+
 :root {
   --accent: #1d3557;
+  /* Darkened accent for filled-button hover (primary, active score button).
+     applyTheme() recomputes this from a runtime Branding accent so the hover
+     tracks the configured colour instead of a hard-coded navy (mp-nubo). */
+  --accent-strong: #16263f;
   --accent-soft: #e7eaf3;
   --accent-fg: #ffffff;
   --red: #c1121f;
   --red-soft: #fde7e8;
+  /* Danger/error — semantic alias of the Aka red (non-overlapping per
+     Principle 3). Use --danger for error/destructive intent so the meaning
+     reads at the call site; it resolves to the canonical palette red. */
+  --danger: var(--red);
+  --danger-soft: var(--red-soft);
+  /* Warning/caution — amber. Non-overlapping with --red (Aka/danger) and
+     --accent (navy/running) per DESIGN.md Principle 3. Used by the offline
+     sync pill, .alert--warn and .tag-badge--warn. */
+  --warn: #b45309;        /* amber-700: warning text/icon, >=4.5:1 on --warn-soft */
+  --warn-strong: #f59e0b; /* amber-500: saturated accent border (status pills) */
+  --warn-soft: #fffbeb;   /* amber-50: warning fill */
+  --warn-border: #fde68a; /* amber-200: warning hairline border */
+  --warn-ink: #78350f;    /* amber-900: strongest warning text, ~8:1 on --warn-soft */
+
+  /* Success / present — green. The "this is checked-in / advancing / a winner /
+     succeeded" signal, distinct from the status-pipeline playoffs green
+     (#ecfdf5/#065f46/#a7f3d0, badge-only carve-out) and never used for
+     Aka/danger or running. Promoted from per-component literals that had spread
+     across check-in rows, the seeding panel, league matrix, alerts and the
+     registration desk. Mirrors the --warn ramp. */
+  --ok: #16a34a;          /* green-600: check fills, win accents, progress-done */
+  --ok-strong: #15803d;   /* green-700: stronger text/border on soft */
+  --ok-soft: #f0fdf4;     /* green-50: success fill */
+  --ok-border: #dcfce7;   /* green-100: success hairline border */
+  --ok-ink: #166534;      /* green-800: strongest success text, AA on --ok-soft */
   --white-side: #f6f7fb;
 
   --ink: #1a1d24;
@@ -18,6 +67,31 @@
   --line-2: #eef0f4;
   --bg: #f7f8fa;
   --surface: #ffffff;
+  /* Secondary surface — slightly tinted fill for cards/cells that sit on
+     --surface or on a modal backdrop. Referenced as var(--bg-2) by the
+     match-detail card, pool-matrix cells and the shiro foul-counter; was
+     never defined, so those backgrounds resolved to transparent (the
+     match-detail card bled the page through in the modal). mp-13y. */
+  --bg-2: #f1f5f9;
+  --surface-2: #f1f5f9;
+
+  /* Type scale — rem-based so user browser font-size preference is respected.
+     Named by semantic role, not by pixel size. 1rem = browser default (16px).
+     --fs-title-* are aliases kept for backward compatibility. */
+  --fs-xs:   0.6875rem;  /* 11px — overline, badge labels           */
+  --fs-sm:   0.8125rem;  /* 13px — table cells, secondary labels     */
+  --fs-base: 1rem;       /* 16px — body text                         */
+  --fs-md:   1.125rem;   /* 18px — prominent labels, input hints     */
+  --fs-lg:   1.375rem;   /* 22px — section headings                  */
+  --fs-xl:   1.625rem;   /* 26px — page title                        */
+
+  /* Backward-compat aliases */
+  --fs-title-page: var(--fs-xl);
+  --fs-title-card: var(--fs-sm);
+  --fs-overline:   var(--fs-xs);
+
+  /* Line-height tokens */
+  --lh-base:  1.5;   /* body prose, form hints */
 
   --r-sm: 6px;
   --r: 10px;
@@ -27,9 +101,35 @@
   --shadow: 0 1px 2px rgba(20, 25, 40, 0.05), 0 8px 20px -12px rgba(20, 25, 40, 0.18);
   --shadow-lg: 0 12px 32px -16px rgba(20, 25, 40, 0.25);
 
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Focus ring (DESIGN.md §6): the soft 3px ring on text-entry controls
+     (.input/.textarea/.select, .radio-pill, .lined-textarea, .ipt-btn).
+     Buttons use the solid `outline: 2px solid var(--accent)` convention instead. */
+  --focus-ring: 0 0 0 3px var(--accent-soft);
+  /* Active/highlight card ring (DESIGN.md §5 "Running signal"): the navy
+     running/highlight halo on cards (.bc-match--running/--highlight,
+     .sched-row--running, .vsched-item--running). Same value as --focus-ring
+     today, separate token by intent so the two can diverge independently. */
+  --ring-active: 0 0 0 3px var(--accent-soft);
+
+  /* Standard ease-out curve — the project's default entrance/transition
+     easing (DESIGN.md Motion). Decelerates hard, no overshoot. */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Archivo is self-hosted (always available via @font-face above), so it leads
+     the body stack — consistent cross-platform rendering, variable weight axis. */
+  --font: "Archivo", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-display: "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Archivo", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Aka/Shiro distinction system (DESIGN.md §4 "Aka/Shiro side treatment").
+     Opt-in: existing components keep --font / --font-display untouched. */
+  --font-impact: "Anton", "Archivo", var(--font-display); /* scoreboard numerals, big side labels */
+  --font-strong: "Archivo", var(--font);                  /* side names, chips */
+
+  /* Shiro (white) side framing — the only genuinely new colour tokens.
+     Aka reuses --red / --red-soft; danger also reuses --red (non-overlapping). */
+  --shiro-edge: #2a3346;              /* dark cool frame so white reads as a side */
+  --shiro-hatch: rgba(42, 51, 70, 0.07); /* 45° diagonal hatch tint */
+  --aka-bright: #ff3b3b;              /* luminous red for dark TV/overlay surfaces (Aka glow) */
 }
 
 * {
@@ -47,8 +147,8 @@ body {
   font-family: var(--font);
   color: var(--ink);
   background: var(--bg);
-  font-size: 15px;
-  line-height: 1.4;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -82,9 +182,9 @@ a:hover {
 }
 
 /* ---------- Top bar (admin) ---------- */
-/* The .topbar-stack wrapper is sticky; topbar + live-strip sit inside as
+/* The .topbar-stack wrapper is sticky; topbar + running-strip sit inside as
    normal flow, so the topbar can size to its content (font scaling / zoom
-   never clip the brand block, and the live-strip stays glued underneath
+   never clip the brand block, and the running-strip stays glued underneath
    without a hardcoded offset). */
 .topbar-stack {
   position: sticky;
@@ -139,6 +239,87 @@ a:hover {
   flex: 1;
 }
 
+/* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
+   `.dot--running` running-match signal (Principle 3): a healthy data
+   connection is a calm, passive status, so its dot is static navy. Only the
+   disconnected state moves, so motion is reserved for the state that actually
+   needs attention. This keeps it distinct from the strip's pulsing dot sitting
+   directly below it. */
+.topbar__conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.topbar__conn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: none;
+}
+
+.topbar__conn--down {
+  color: var(--red);
+}
+
+.topbar__conn--down .topbar__conn__dot {
+  background: var(--red);
+  animation: conn-pulse 1.6s ease-out infinite;
+}
+
+@keyframes conn-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 35%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+  }
+}
+
+/* Sustained-outage escalation. The calm `.topbar__conn` pill covers transient
+   reconnects; this full-width strip only appears once a drop outlives the
+   stream's first retry, when the operator may be scoring against stale data.
+   Solid red + white (≈6.4:1) so it's unmissable across a bright hall; role=alert
+   announces it to assistive tech. */
+.conn-alert {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--red);
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.conn-alert__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-fg);
+  flex: none;
+  animation: conn-alert-pulse 1.4s ease-out infinite;
+}
+
+@keyframes conn-alert-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-fg) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-fg) 0%, transparent);
+  }
+}
+
 .topbar__nav {
   display: flex;
   gap: 4px;
@@ -180,11 +361,15 @@ a:hover {
   border-color: var(--ink-4);
 }
 
-/* ---------- Live status strip (under topbar) ---------- */
+/* ---------- Running status strip (under topbar) ---------- */
 /* Stickiness is provided by the parent .topbar-stack so the strip never
    needs to know the topbar's height — it sits naturally below in flow. */
-.live-strip {
-  background: var(--red-soft);
+/* Running-strip: the admin "matches running now" bar. It is a NAVIGATION control
+   (each chip is a button → opens that match's score editor), so it stays — but
+   recoloured off red onto --accent navy, since red is now reserved for Aka +
+   danger. The running state is still conveyed by the strip's presence + pulsing dot. */
+.running-strip {
+  background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
   padding: 6px 20px;
   display: flex;
@@ -193,25 +378,25 @@ a:hover {
   font-size: 12px;
 }
 
-.live-strip__lbl {
+.running-strip__lbl {
   font-weight: 700;
-  color: var(--red);
+  color: var(--accent);
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: 6px;
 }
 
-.live-strip__chips {
+.running-strip__chips {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.live-strip__chip {
+.running-strip__chip {
   background: var(--surface);
-  border: 1px solid var(--red);
+  border: 1px solid var(--accent);
   border-radius: 999px;
   padding: 3px 10px;
   display: inline-flex;
@@ -222,22 +407,22 @@ a:hover {
   transition: background 120ms;
 }
 
-.live-strip__chip:hover {
-  background: var(--red);
+.running-strip__chip:hover {
+  background: var(--accent);
   color: white;
 }
 
-.live-strip__court {
+.running-strip__court {
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 0.04em;
 }
 
-.live-strip__names {
+.running-strip__names {
   font-size: 12px;
 }
 
-.live-strip__more {
+.running-strip__more {
   color: var(--ink-3);
   font-size: 11px;
 }
@@ -273,7 +458,7 @@ a:hover {
 }
 
 .page-head__title {
-  font-size: 26px;
+  font-size: var(--fs-title-page);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
@@ -288,7 +473,10 @@ a:hover {
 
 .page-head__actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+  row-gap: 8px;
   align-items: center;
 }
 
@@ -330,11 +518,27 @@ a:hover {
   color: var(--ink);
   font-weight: 500;
   font-size: 13.5px;
-  transition: all 120ms;
+  /* Enumerate the animated properties — `all` also animated the focus
+     outline (it should snap in) and risks animating layout (mp-nubo P3). */
+  transition: background-color 120ms, border-color 120ms, color 120ms;
 }
 
 .btn:hover {
   border-color: var(--ink-4);
+}
+
+/* Pressed feedback — a 1px nudge reads as a press without color churn, and
+   is instant (transform isn't in the transition list) (mp-nubo P3). */
+.btn:active {
+  transform: translateY(1px);
+}
+
+/* Match the app's focus-visible convention (.score-btn / .input / .disclosure
+   all use a 2px accent ring); without this .btn fell back to the UA default
+   1px ring, which is low-contrast on the navy primary button (mp-nubo). */
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .btn--primary {
@@ -344,8 +548,19 @@ a:hover {
 }
 
 .btn--primary:hover {
-  background: #16263f;
-  border-color: #16263f;
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+/* Armed "Finish" state: the commit button has been tapped once and now shows
+   the computed verdict, awaiting a confirming second tap. Deepen the fill and
+   add the accent ring so it reads as "armed, tap again to record" — navy, not
+   red (red is reserved for Aka/danger; this is a confirm, not a warning). */
+.btn--confirm,
+.btn--confirm:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .btn--danger {
@@ -382,7 +597,7 @@ a:hover {
 
 .btn--sm {
   padding: 5px 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   border-radius: 6px;
 }
 
@@ -422,8 +637,8 @@ a:hover {
 }
 
 .score-btn--active:hover {
-  background-color: #16263f;
-  border-color: #16263f;
+  background-color: var(--accent-strong);
+  border-color: var(--accent-strong);
   color: var(--accent-fg);
 }
 
@@ -442,6 +657,19 @@ a:hover {
 .score-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Consolidated keyboard focus ring for buttons + court chips. Only a handful
+   of :focus-visible rules existed, so .btn and the court chips fell back to
+   the UA default outline. Use the project's 3px --accent-soft ring language
+   (matches the input focus ring in §6 Accessibility / .lined-textarea). The
+   .ipt-btn focus is owned elsewhere — deliberately not included here. */
+.btn:focus-visible,
+.court-popover button:focus-visible,
+.running-strip__chip:focus-visible,
+.radio-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .score-btn:disabled {
@@ -465,6 +693,10 @@ a:hover {
   box-shadow: none;
 }
 
+.card--sm {
+  padding: 14px;
+}
+
 .card__head {
   display: flex;
   align-items: center;
@@ -474,8 +706,18 @@ a:hover {
 
 .card__title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-title-card);
   letter-spacing: -0.01em;
+}
+
+/* Overline / eyebrow utility (mp-p1tw) — replaces ~10 hand-rolled inline
+   copies that drifted across 10.5/11/12px and 0.06/0.08/0.1em. */
+.overline {
+  font-size: var(--fs-overline);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
 }
 
 .card__sub {
@@ -492,7 +734,7 @@ a:hover {
 }
 
 .field__label {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ink-2);
   letter-spacing: 0.01em;
@@ -519,7 +761,18 @@ a:hover {
 .textarea:focus,
 .select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
+}
+
+/* Bare <input> elements inside the scoring surfaces (e.g. inline name/score
+   fields without the .input class) had no visible focus state — keyboard and
+   the M/K/D/T/H shortcut operators couldn't see where focus landed. Give them
+   the same accent ring as classed inputs (DESIGN.md §6). */
+.scoring-panel input:focus-visible,
+.editor-modal input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
 .textarea {
@@ -541,13 +794,15 @@ a:hover {
 
 .lined-textarea:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .lined-textarea__nums {
   padding: 9px 8px;
   background: var(--surface-2);
-  color: var(--ink-3);
+  /* --ink-3 on --surface-2 (#f1f5f9) is only 4.41:1 — just under AA for this
+     gutter. Step to --ink-2 (9.37:1) so the line numbers clear 4.5:1. */
+  color: var(--ink-2);
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.55;
@@ -683,7 +938,7 @@ a:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
   padding: 2px 8px;
@@ -734,9 +989,12 @@ a:hover {
   display: inline-block;
 }
 
-.dot--live {
-  background: #ef4444;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+/* Running-match signal: pulsing dot. Colour moved off red → --accent navy so red is
+   reserved for Aka (side) + danger (DESIGN.md §2/§4). The PULSE (motion) is the
+   running-match signal, not the hue. */
+.dot--running {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
   animation: pulse 1.6s infinite;
 }
 
@@ -744,11 +1002,11 @@ a:hover {
 
   0%,
   100% {
-    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+    box-shadow: 0 0 0 4px var(--accent-soft);
   }
 
   50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 6px transparent;
   }
 }
 
@@ -793,7 +1051,7 @@ a:hover {
 }
 
 .tcard__meta {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ink-3);
   display: flex;
   flex-wrap: wrap;
@@ -874,10 +1132,16 @@ a:hover {
 .bc-round-matches {
   display: flex;
   flex-direction: column;
-  justify-content: space-around;
-  flex: 1;
   gap: 8px;
   position: relative;
+}
+
+/* Rounds ≥ 1 absolutely position each card at the measured midpoint of its two
+   feeders (see BracketTree). flex: 1 makes the column fill the round height (all
+   .bc-round columns are stretched to the tallest — round 0 — by .bc-tree's
+   align-items: stretch), giving the absolutely-positioned cards their extent. */
+.bc-round-matches--abs {
+  flex: 1;
 }
 
 .bc-match-wrap {
@@ -914,6 +1178,8 @@ a:hover {
   position: relative;
   z-index: 1;
   cursor: pointer;
+  /* clip the new side tints + leading colour bars to the rounded card corners */
+  overflow: hidden;
 }
 
 .bc-match:hover {
@@ -923,12 +1189,12 @@ a:hover {
 
 .bc-match--highlight {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--ring-active);
 }
 
-.bc-match--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+.bc-match--running {
+  border-color: var(--accent);
+  box-shadow: var(--ring-active);
 }
 
 .bc-match--done {
@@ -950,6 +1216,11 @@ a:hover {
   font-weight: 600;
 }
 
+.bc-match-num {
+  color: var(--ink-4);
+  margin-right: 2px;
+}
+
 .bc-court {
   color: var(--ink-2);
 }
@@ -958,8 +1229,8 @@ a:hover {
   color: var(--ink-3);
 }
 
-.bc-live {
-  color: var(--red);
+.bc-running {
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -968,22 +1239,94 @@ a:hover {
   margin-left: auto;
 }
 
+/* Structural-bye placeholder rendered in the upstream bracket column so the
+   tree gap is visible — matches the Excel Tree sheet's empty-slot treatment. */
+.bc-bye-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 13px;
+  min-height: 44px;
+  border: 1.5px dashed var(--line-strong, #c7cdd9);
+  border-radius: var(--r);
+  background: var(--line, #f0f2f5);
+  pointer-events: none;
+  user-select: none;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-bye-slot__name {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bc-bye-slot__tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  flex-shrink: 0;
+}
+
 .bc-side {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 8px 10px 8px 13px;
   font-size: 13.5px;
   min-height: 38px;
+  /* Aka/Shiro side treatment (DESIGN.md §4): a leading coloured bar + a faint
+     side tint so red vs white reads even in the dense bracket tree. The bar is
+     the side identity; subtle enough to stack many cards without noise. */
+  position: relative;
+}
+/* Leading colour bar — universal across all variants (the side identity).
+   The side-tinted backgrounds are scoped per-variant below, because v2 (full
+   flood) and v3 (compact) carry their own background treatments. */
+.bc-side::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.bc-side--a::before { background: var(--red); }
+.bc-side--b::before { background: var(--accent); }
+.bc-side--winner::before { width: 5px; }
+
+/* v1 (classic line-bracket) side tints: red-soft for Aka, hatched white for
+   Shiro. Scoped to v1 so v2/v3 keep their own backgrounds. */
+.bc-match--v1 .bc-side--a {
+  background: var(--red-soft);
+}
+.bc-match--v1 .bc-side--b {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
 }
 
+/* Winner: bolder name; the thicker bar (above) carries the win signal so we
+   don't flood accent-soft, which would fight the red side's tint. */
 .bc-side--winner {
-  background: linear-gradient(90deg, rgba(29, 53, 87, 0.04), transparent 80%);
   font-weight: 600;
 }
-
 .bc-side--winner .bc-name {
   color: var(--ink);
+}
+/* Explicit winner marker — weight/colour alone are weak signals (a11y +
+   colour-blind). A green check makes the advancing side unambiguous. */
+.bc-winner-tick {
+  color: var(--ok);
+  font-weight: 800;
+  margin-right: 4px;
 }
 
 .bc-side--empty .bc-name--tbd {
@@ -995,23 +1338,6 @@ a:hover {
   height: 1px;
   background: var(--line-2);
   margin: 0 12px;
-}
-
-.bc-seed {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ink-3);
-  background: var(--line-2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  min-width: 20px;
-  text-align: center;
-}
-
-.bc-seed--empty {
-  background: transparent;
-  color: transparent;
 }
 
 .bc-name-wrap {
@@ -1093,11 +1419,6 @@ a:hover {
   color: white;
 }
 
-.bc-match--v2 .bc-side--winner.bc-side--a .bc-seed {
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-}
-
 .bc-match--v2 .bc-side--winner.bc-side--b {
   background: var(--accent);
   color: var(--accent-fg);
@@ -1107,11 +1428,6 @@ a:hover {
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-name,
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-dojo,
 .bc-match--v2 .bc-side--winner.bc-side--b .bc-score {
-  color: var(--accent-fg);
-}
-
-.bc-match--v2 .bc-side--winner.bc-side--b .bc-seed {
-  background: rgba(255, 255, 255, 0.2);
   color: var(--accent-fg);
 }
 
@@ -1161,8 +1477,14 @@ a:hover {
 /* ---------- Pools ---------- */
 .pools-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+
+@media (orientation: landscape) and (min-width: 580px) {
+  .pools-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .pool {
@@ -1198,7 +1520,7 @@ a:hover {
 }
 
 .pool__meta {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ink-3);
 }
 
@@ -1223,22 +1545,154 @@ a:hover {
   letter-spacing: 0.04em;
 }
 
+.pool__table th.num,
 .pool__table td.num {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
+.pool__table th:last-child,
+.pool__table td:last-child {
+  padding-right: 16px;
+}
+
+/* Uniform green advancing row (no ▲ arrow, no cut-border — tint + badge carry the signal) */
 .pool__table tr.advancing {
   background: #ecfdf5;
 }
 
-.pool__table tr.advancing td:first-child::before {
-  content: "▲";
-  color: #16a34a;
-  margin-right: 6px;
+/* Rank badge inline after player name in the standings table */
+.rank-badge {
+  display: inline-block;
+  font-size: 0.6em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  line-height: 1.45;
+  background: var(--line-2);
+  color: var(--ink-3);
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.rank-badge--adv {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+/* Numbered match list section header */
+.pool-match-section-label {
   font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 12px 14px 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pool-match-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
+}
+
+/* Numbered match list rows */
+.pool-match-numbered-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 14px;
+}
+
+.pool-match-numbered-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto 1fr;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  /* button-reset: keep visual identical to the old div, restore keyboard focus */
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.pool-match-numbered-row__num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.pool-match-numbered-row__side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+
+.pool-match-numbered-row__side--shiro {
+  background: var(--white-side, #f6f7fb);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(42,51,70,0.07) 3px, rgba(42,51,70,0.07) 6px);
+  border-radius: 6px 0 0 6px;
+}
+
+.pool-match-numbered-row__side--aka {
+  background: var(--red-soft, #fde7e8);
+  justify-content: flex-end;
+  flex-direction: row-reverse;
+  text-align: right;
+  border-radius: 0 6px 6px 0;
+}
+
+.pool-match-numbered-row__name {
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 1.2;
+  /* Wrap rather than ellipsis: the side cell is narrow and the Shiro/Aka
+     text badge was dropped (the hatched/red fill already encodes side), so
+     the name now owns the full cell width and may wrap to a second line. */
+  overflow-wrap: anywhere;
+}
+
+/* Screen-reader-only utility: visually hidden, still announced. Used to keep
+   the Shiro/Aka side label for assistive tech after the visible badge was
+   removed from the numbered pool match row. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pool-match-numbered-row__score {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 52px;
+  text-align: center;
+  letter-spacing: 0.04em;
 }
 
 /* ---------- Pool match results ---------- */
@@ -1299,9 +1753,9 @@ a:hover {
   border-color: var(--ink-4);
 }
 
-.sched-row--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+.sched-row--running {
+  border-color: var(--accent);
+  box-shadow: var(--ring-active);
 }
 
 .sched-row--done {
@@ -1348,7 +1802,7 @@ a:hover {
 }
 
 .sched-row__side .dojo {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
@@ -1379,11 +1833,41 @@ a:hover {
   position: fixed;
   inset: 0;
   background: rgba(15, 20, 35, 0.55);
-  backdrop-filter: blur(2px);
   display: grid;
   place-items: center;
   z-index: 100;
   padding: 20px;
+}
+@supports (backdrop-filter: blur(2px)) {
+  .modal-backdrop { backdrop-filter: blur(2px); }
+}
+
+/* Court-reassignment confirmation — a small, centred confirm card. Moving a
+   match to another shiaijo takes it off this court, so it's gated here. */
+.shiaijo-move-confirm {
+  width: min(380px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(15, 20, 35, 0.28);
+  padding: 20px;
+}
+.shiaijo-move-confirm__title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+.shiaijo-move-confirm__body {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.shiaijo-move-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .modal {
@@ -1433,6 +1917,18 @@ a:hover {
   font-size: 18px;
   color: var(--ink-3);
   padding: 4px 8px;
+  min-width: 36px;
+  min-height: 36px;
+}
+@media (pointer: coarse) {
+  .modal__close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+.modal__close:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* ---------- Auth modal ---------- */
@@ -1465,130 +1961,96 @@ a:hover {
 
 .auth__error {
   color: var(--red);
-  font-size: 12.5px;
+  font-size: 12px;
   margin-top: 6px;
 }
 
 .auth__hint {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ink-3);
   text-align: center;
   margin-top: 14px;
 }
 
-/* ---------- Live match panel (admin) ---------- */
-.live-panel {
+/* ---------- Running match panel (admin) ---------- */
+/* Bracket page layout: the tree and the winner-picker / scoring panel sit
+   side by side when there's room. The panel keeps a minimum width so the
+   reused inline scoring editor never squashes or clips; when the bracket and
+   that minimum can't both fit, the panel wraps to a full-width row BELOW the
+   bracket (flex line-break on basis 560 + 520 > available). */
+.bracket-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.bracket-layout__bracket {
+  /* grows to fill; min-width:0 lets it shrink so .bracket-canvas scrolls
+     (overflow-x:auto) instead of forcing page overflow. */
+  flex: 1 1 560px;
+  min-width: 0;
+}
+.bracket-layout__panel {
+  /* Grows to fill its flex line. When it wraps below the bracket (the common
+     case at desktop widths) it fills the whole row, so its card lines up edge-
+     to-edge with the bracket card above — no max-width cap that would leave a
+     ragged right edge. min-width keeps the inline editor from squashing when
+     it DOES sit beside the bracket. */
+  flex: 1 1 520px;
+  min-width: 500px;
+}
+/* Phones / small tablets: drop the minimum so the panel fills the single
+   column instead of overflowing; the editor's own coarse-pointer rules handle
+   compact sizing from here. */
+@media (max-width: 760px) {
+  .bracket-layout__panel {
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+}
+
+.running-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 22px;
 }
 
-.live-panel__head {
+.running-panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
 }
 
-.live-panel__title {
+.running-panel__title {
   font-weight: 600;
   font-size: 16px;
 }
+/* Centred content column: the panel card fills the row (so it aligns with the
+   bracket card), but the reused editor / result card are capped here so they
+   read as a comfortable scoreboard width instead of stretching edge-to-edge. */
+.running-panel__inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
 
-.live-panel__court {
+/* Completed-match result view: the shared MatchDetailCard (same as the viewer)
+   followed by the confirmation-gated edit action. */
+.running-panel__result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.running-panel__court {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--ink-3);
   padding: 3px 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-}
-
-.score-card {
-  display: grid;
-  grid-template-columns: 1fr 60px 1fr;
-  align-items: stretch;
-  gap: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-}
-
-.score-side {
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.score-side--white {
-  background: var(--white-side);
-}
-
-.score-side--red {
-  background: #fdf2f2;
-}
-
-.score-side__lbl {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-}
-
-.score-side__name {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.score-side__dojo {
-  font-size: 12px;
-  color: var(--ink-3);
-}
-
-.score-side__points {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 4px;
-}
-
-.score-pt {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  display: grid;
-  place-items: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.score-pt--filled {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
-
-.score-side--red .score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--empty {
-  color: var(--ink-4);
-}
-
-.score-side__buttons {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .ipt-btn {
@@ -1604,52 +2066,6 @@ a:hover {
 
 .ipt-btn:hover {
   border-color: var(--ink-4);
-}
-
-.score-vs {
-  display: grid;
-  place-items: center;
-  background: white;
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--ink-3);
-  font-family: var(--font-display);
-}
-
-.live-panel__actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  flex-wrap: wrap;
-}
-
-/* Mode tabs */
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--line-2);
-  border-radius: 10px;
-  margin-bottom: 16px;
-}
-
-.mode-tabs button {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink-2);
-}
-
-.mode-tabs button.is-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ---------- Viewer (mobile) ---------- */
@@ -1705,7 +2121,7 @@ a:hover {
 }
 
 .viewer__sub {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ink-3);
 }
 
@@ -1719,6 +2135,82 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+}
+
+.viewer__admin-pill:hover {
+  border-color: var(--ink-4);
+  color: var(--ink);
+}
+
+/* Status badge in the scoring panel head (CORRECTION / ● NOW / PRE-MATCH).
+   Same pill shape as .viewer__admin-pill but it is NOT interactive — no
+   pointer cursor or hover, so operators don't read it as a control. */
+.editor-head-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* C2: Sync-status pill — appears in the scoring-panel header while a match
+   is running. Three variants: synced (accent/navy), syncing (ink-3), offline
+   (amber — distinct from red which is reserved for Aka and SSE errors).
+   COPY RULE: the word "live" must never appear in .sync-pill__label text. */
+.sync-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-3);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+.sync-status-pill .sync-pill__dot {
+  font-size: 8px;
+  line-height: 1;
+}
+.sync-status-pill .sync-pill__label {
+  line-height: 1.2;
+}
+/* synced — accent (navy) — positive/confirmed state */
+.sync-pill--synced {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 25%, transparent);
+  background: var(--accent-soft);
+}
+/* syncing — neutral ink, pulsing dot to indicate in-flight */
+.sync-pill--syncing {
+  color: var(--ink-2);
+  border-color: var(--line);
+  background: var(--surface);
+}
+/* syncing dot pulses to signal the write is in flight (motion is the
+   primary in-flight signal, per DESIGN.md Principle 3). */
+.sync-pill--syncing .sync-pill__dot {
+  animation: sync-pill-pulse 1s ease-in-out infinite;
+}
+@keyframes sync-pill-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-pill--syncing .sync-pill__dot { animation: none; }
+}
+/* offline — amber warning; no red (red is Aka/error-only per DESIGN.md) */
+.sync-pill--offline {
+  color: var(--warn-ink);
+  border-color: var(--warn-strong);
+  background: var(--warn-soft);
 }
 
 .viewer__tabs {
@@ -1758,9 +2250,55 @@ a:hover {
   border-radius: 1px 1px 0 0;
 }
 
+.viewer__filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.viewer__filter-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear {
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.viewer__filter-clear:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
 .viewer__body {
   padding: 14px 16px 80px;
   flex: 1;
+}
+
+.viewer__court-filter {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.viewer__court-filter .input {
+  width: auto;
 }
 
 /* My match card (player viewer hero) */
@@ -1774,10 +2312,14 @@ a:hover {
   overflow: hidden;
 }
 
+.my-match--running {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
 .my-match__lbl {
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   opacity: 0.7;
 }
@@ -1806,7 +2348,7 @@ a:hover {
   background: rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   padding: 8px 10px;
-  font-size: 11.5px;
+  font-size: 11px;
   flex: 1;
 }
 
@@ -1841,6 +2383,12 @@ button.my-match__opp {
   border: none;
   text-align: left;
   cursor: pointer;
+  color: inherit;
+}
+
+/* Anchor vlist rows — remove browser default underline */
+a.vlist-item {
+  text-decoration: none;
 }
 
 .my-match__opp .l {
@@ -1902,18 +2450,28 @@ button.my-match__opp {
   padding: 10px 12px;
 }
 
-.vsched-item--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 3px var(--red-soft);
+.vsched-item--running {
+  border-color: var(--accent);
+  box-shadow: var(--ring-active);
+  background-color: var(--accent-soft);
 }
 
 .vsched-item__head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 11px;
   color: var(--ink-3);
+  margin-bottom: 2px;
+}
+
+.vsched-item__ctx {
+  font-size: 10px;
+  color: var(--ink-3);
   margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .vsched-item__time {
@@ -1938,9 +2496,23 @@ button.my-match__opp {
 
 .vsched-item__side {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   min-width: 0;
+  /* Aka/Shiro side treatment (DESIGN.md §4): tint each side so red vs white
+     reads in the viewer schedule list. Keep the original block flow (name over
+     dojo); just add padding + a tint. */
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.vsched-item__side--shiro {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+  text-align: right;
+}
+.vsched-item__side--aka {
+  background: var(--red-soft);
 }
 
 .vsched-item__side--w {
@@ -1974,6 +2546,229 @@ button.my-match__opp {
 .vsched-item__score {
   font-family: var(--font-mono);
   font-weight: 700;
+}
+/* Live (in-progress) score on a running match: accent-tinted so it reads as
+   "current score, still climbing" rather than a settled final result. */
+.vsched-item__score--live {
+  color: var(--accent);
+}
+
+/* Button vsched-item: .vsched-item defines bg + border via CSS; just reset default
+   browser button appearance without clobbering those values. */
+button.vsched-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+button.vsched-item:not([data-clickable]) {
+  cursor: default;
+}
+
+/* Queue position chip — flex-pushed to the right of vsched-item__head */
+.vsched-item__queue {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+}
+.vsched-item__queue--next {
+  color: var(--accent);
+}
+
+/* Final / status label — pushed right when queue chip is absent */
+.vsched-item__status {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+/* HANTEI badge */
+.vsched-item__hantei {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent-soft, #eef);
+  color: var(--accent, #36c);
+}
+
+/* Winner badge — flat accent, no gradient */
+.winner-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.winner-badge--lg {
+  padding: 14px 18px;
+  font-size: 18px;
+}
+.winner-badge__icon {
+  font-size: 22px;
+}
+.winner-badge--lg .winner-badge__icon {
+  font-size: 28px;
+}
+
+/* MyMatchPanel: "Following: Name [Clear]" header row */
+.my-match__follow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.my-match__follow-lbl {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.my-match__follow-name {
+  font-weight: 600;
+}
+.my-match__follow-row .tag-badge {
+  font-size: 9px;
+}
+.my-match__follow-row .btn--clear-follow {
+  margin-left: auto;
+}
+
+/* Viewer filter bar — active-player/watchlist indicator */
+.viewer-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-soft, #eef);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.viewer-filter-bar__icon {
+  color: var(--accent, #36c);
+}
+
+/* Section-title with inline running-match dot */
+.section-title--running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* WatchlistPanel dojo bulk-add row */
+.watchlist-dojo-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.watchlist-dojo-row__label {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row__feedback {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.watchlist-dojo-row .input {
+  font-size: 13px;
+  padding: 4px 8px;
+}
+.watchlist-count {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+/* DisplayModes details/summary */
+.viewer-display-modes {
+  margin-top: 20px;
+}
+.viewer-display-modes > summary {
+  cursor: pointer;
+}
+.viewer-display-modes__row-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.viewer-display-modes__link {
+  color: var(--text-link, #2563eb);
+  text-decoration: none;
+}
+.viewer-display-modes__sep {
+  color: var(--ink-3);
+  margin-left: 8px;
+}
+
+/* Bracket full-bleed container inside viewer body */
+.viewer-bracket-bleed {
+  margin-left: -16px;
+  margin-right: -16px;
+  position: relative;
+}
+
+.viewer-bracket-bleed--overflow-right::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 56px;
+  background: linear-gradient(to right, transparent, var(--bg));
+  pointer-events: none;
+  z-index: 2;
+}
+@media (min-width: 768px) {
+  .viewer-bracket-bleed {
+    margin-left: -20px;
+    margin-right: -20px;
+  }
+}
+@media (min-width: 1024px) {
+  .viewer-bracket-bleed {
+    margin-left: -28px;
+    margin-right: -28px;
+  }
+}
+
+/* Competition list item layout */
+.comp-item {
+  position: relative;
+}
+.comp-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.comp-item__body {
+  min-width: 0;
+}
+
+/* Running count indicator in competition progress row */
+.bc-running-count {
+  color: var(--red);
+  font-weight: 600;
+}
+
+/* PoolMatchRow as button — do NOT set display here; the base .pool-match-row
+   rule (display:grid) has lower specificity and would be overridden. Clear UA
+   button chrome per-side so the class's border-bottom still applies. */
+button.pool-match-row {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  color: inherit;
 }
 
 /* tournament index list */
@@ -2031,6 +2826,51 @@ button.my-match__opp {
   color: white;
 }
 
+/* Prominent admin pill — only while the tournament has zero competitions, so
+   the operator setting up a fresh tournament isn't left hunting for the entry
+   point. Solid white fill + navy text reads as the primary action on the navy
+   hero; reverts to the quiet pill above once any competition exists. */
+.viewer__head--hero .viewer__admin-pill--prominent {
+  background: var(--accent-fg);
+  border-color: var(--accent-fg);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+  padding: 7px 14px;
+  letter-spacing: 0.02em;
+  /* Lift the white pill off the navy hero so it reads as a raised, pressable
+     control, then a slow white ring pulse draws the eye — the loud "set this
+     up" signal while the tournament has zero competitions. White ring (not the
+     navy running-pulse of §3) so the two motion languages never collide. */
+  box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35);
+  animation: admin-pill-pulse 2s var(--ease-out) infinite;
+}
+
+.viewer__head--hero .viewer__admin-pill--prominent:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  /* Intent shown — settle the pulse so it doesn't nag during interaction. */
+  animation: none;
+}
+
+@keyframes admin-pill-pulse {
+  0% {
+    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
+                0 0 0 0 color-mix(in srgb, var(--accent-fg) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
+                0 0 0 7px color-mix(in srgb, var(--accent-fg) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer__head--hero .viewer__admin-pill--prominent {
+    animation: none;
+  }
+}
+
 .viewer__logo {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -2051,28 +2891,107 @@ button.my-match__opp {
   color: var(--ink-3);
 }
 
-.hero-live {
+/* Tournament info card (mp-ef3) — public event details */
+.tournament-info {
+  background: var(--accent-soft);
+  border: 1px solid rgba(29, 53, 87, 0.22); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.tournament-info__title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+.tournament-info__grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.tournament-info__label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.tournament-info__value {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.tournament-info__link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(29, 53, 87, 0.3);
+  text-underline-offset: 2px;
+}
+
+.tournament-info__link:hover {
+  text-decoration-color: var(--accent);
+}
+
+.tournament-info__contact {
+  line-height: 1.6;
+}
+
+.tournament-info__contact-label {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.hero-running {
   background: var(--surface);
-  border: 1px solid var(--red);
+  border: 1px solid var(--accent);
   border-radius: var(--r-lg);
   padding: 12px 14px 14px;
   margin-bottom: 16px;
-  box-shadow: 0 0 0 4px var(--red-soft);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
-.hero-live__lbl {
-  font-size: 10.5px;
+.hero-running__lbl {
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--red);
+  color: var(--accent);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
+.hero-running__vsched {
+  margin-top: 8px;
+}
+
+/* "Up next" section title gets extra top breathing room */
+.viewer__upnext-title {
+  margin-top: 20px;
+}
+
+/* Glossary vlist extra top gap */
+.viewer__glossary-vlist {
+  margin-top: 12px;
+}
+
 /* Competition list cards (viewer home) */
 .vlist-item--comp {
   gap: 10px;
+  width: 100%;
 }
 
 .vlist-item__eyebrow {
@@ -2115,8 +3034,11 @@ button.my-match__opp {
 
 .vlist-item__bar>div {
   height: 100%;
+  width: 100%;
   background: var(--accent);
-  transition: width 300ms;
+  transform-origin: left;
+  transform: scaleX(var(--bar-fill, 0));
+  transition: transform 300ms;
 }
 
 .vlist-item__pct {
@@ -2153,6 +3075,21 @@ button.my-match__opp {
   background: var(--accent-soft);
 }
 
+/* No competitions yet — promote the "Add competition" tile from a quiet dashed
+   placeholder to the page's primary action: solid accent frame, soft-navy fill,
+   and elevation so the operator's first step is unmistakable. Reverts to the
+   plain dashed tile once any competition exists (class is conditional). */
+.tcard--add.tcard--add-cta {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow);
+}
+
+.tcard--add.tcard--add-cta:hover {
+  box-shadow: var(--shadow-lg);
+}
+
 /* Inline tabs/sections */
 .section-title {
   font-size: 12px;
@@ -2182,7 +3119,7 @@ button.my-match__opp {
 }
 
 .podium-step--1 {
-  background: linear-gradient(180deg, #fef9c3 0%, #fde68a 100%);
+  background: #fef9c3;
   border-color: #fde68a;
   min-height: 150px;
   min-width: 150px;
@@ -2190,15 +3127,15 @@ button.my-match__opp {
 }
 
 .podium-step--2 {
-  background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%);
-  border-color: #e2e8f0;
+  background: var(--surface);
+  border-color: var(--line);
   min-height: 130px;
   order: 1;
 }
 
 .podium-step--3 {
-  background: linear-gradient(180deg, #fed7aa 0%, #fdba74 100%);
-  border-color: #fdba74;
+  background: #fff7ed;
+  border-color: #fed7aa;
   min-height: 110px;
   order: 3;
 }
@@ -2220,6 +3157,67 @@ button.my-match__opp {
   font-size: 11px;
   color: var(--ink-3);
   margin-top: 2px;
+}
+
+/* mp-8jbo: champion-hero awards podium layout */
+/* Hero card — 1st place champion, full width gold solid */
+.awards-hero {
+  background: #fef9c3;
+  border: 2px solid #fcd34d;
+  border-radius: 14px;
+  padding: 18px 16px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.awards-hero__crown {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.awards-hero__eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.awards-hero__name {
+  font-size: 22px;
+  font-weight: 800;
+  margin-top: 4px;
+  line-height: 1.2;
+}
+
+.awards-hero__dojo {
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-top: 2px;
+}
+
+/* Row: stacked layout for 2nd and 3rd place cards */
+.awards-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Center a single card (2nd place row) */
+.awards-row--center {
+  justify-content: center;
+}
+
+.awards-row--center .podium-step {
+  width: 180px;
+}
+
+/* Equal-width cards within a row (3rd place pair) */
+.place--eq {
+  flex: 1;
+  min-width: 0;
+  border-radius: 12px 12px 0 0;
 }
 
 /* Stats strip */
@@ -2253,6 +3251,157 @@ button.my-match__opp {
   margin-top: 6px;
 }
 
+/* stat-box link variant — a button-reset that keeps the stat-box layout
+   but is clickable (e.g. "View podium →" in the completed stats strip). */
+.stat-box__link {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.stat-box__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
+}
+
+/* Stat value at text scale: the default .stat-box .v is 22px display, sized
+   for short numbers. Long/textual values ("2 pools", "3h 10m", "View podium →")
+   read better one step down. Modifier instead of scattered inline font-size. */
+.stat-box .v--sm {
+  font-size: 16px;
+}
+
+/* Clickable action card (mp-a5d6): the overview's navigate-on-click cards
+   (Scores/Results, draw preview, export) need the same affordance as the
+   dashboard's .tcard so they read as interactive, not static. Mirrors
+   .tcard:hover for system consistency. */
+.card--action {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.card--action:hover {
+  border-color: var(--ink-4);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.card--action:active {
+  transform: translateY(0);
+}
+
+.card--action:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow), var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card--action {
+    transition: none;
+  }
+  .card--action:hover {
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .card--action:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* Next-steps checklist (mp-a5d6) — status-aware overview for setup state.
+   Composes existing tokens; no new color values. */
+.comp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.comp-step {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+
+.comp-step:last-child {
+  border-bottom: none;
+}
+
+.comp-step__icon {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.comp-step--done .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--active .comp-step__icon {
+  color: var(--accent);
+}
+
+.comp-step--todo .comp-step__icon {
+  color: var(--ink-3);
+}
+
+.comp-step__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.comp-step__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.comp-step--done .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step--active .comp-step__label {
+  color: var(--ink);
+}
+
+.comp-step--todo .comp-step__label {
+  color: var(--ink-3);
+}
+
+.comp-step__detail {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.comp-step--active .comp-step__detail {
+  color: var(--ink-2);
+}
+
+.comp-step__cta {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.comp-steps__hint {
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-2);
+}
+
 /* Sidebar (admin tournament) */
 .workspace {
   display: grid;
@@ -2268,6 +3417,24 @@ button.my-match__opp {
   height: max-content;
   position: sticky;
   top: 70px;
+}
+/* Competition left rail: stacks the per-competition nav and the
+   "Other competitions" switcher as separate cards. The RAIL is the single
+   sticky unit (align-self:start leaves grid-track travel room), so both cards
+   pin together at top:70px — otherwise the second card scrolls up and slides
+   UNDER the sticky first card (whose surface background hides it). The inner
+   cards must therefore NOT stick individually. */
+.comp-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 70px;
+  align-self: start;
+}
+.comp-rail .side-nav {
+  position: static;
+  top: auto;
 }
 
 .side-nav button {
@@ -2326,6 +3493,29 @@ button.my-match__opp {
   font-size: 15px;
   margin: 0 0 4px;
 }
+/* Inline recovery control inside an empty state (e.g. the court picker shown
+   for an unknown shiaijo). */
+.empty__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.empty__action .input {
+  width: auto;
+  min-width: 130px;
+}
+.empty > div:not(.icon):not(.empty__cta-note) {
+  font-size: 13px;
+}
+
+/* Primary CTA inside an empty state (e.g. "Open admin" when no competitions
+   exist) — deliberate rhythm between the hint and the action, then a tighter
+   gap to its sub-note. */
+.empty__cta { margin-top: 16px; }
+.empty__cta-note { margin-top: 8px; }
 
 /* Inline seed list */
 .seed-list {
@@ -2347,8 +3537,8 @@ button.my-match__opp {
 }
 
 .seed-row.is-checked-in {
-  background: #f0fdf4; /* Very light green */
-  border-color: #dcfce7;
+  background: var(--ok-soft); /* Very light green */
+  border-color: var(--ok-border);
 }
 
 .seed-row.is-checked-in .seed-row__name {
@@ -2370,7 +3560,7 @@ button.my-match__opp {
 }
 
 .seed-row.has-seed.is-checked-in {
-  background: linear-gradient(90deg, #fffbeb 0%, #f0fdf4 100%);
+  background: linear-gradient(90deg, #fffbeb 0%, var(--ok-soft) 100%);
 }
 
 .seed-row__handle {
@@ -2445,6 +3635,74 @@ button.my-match__opp {
   color: var(--ink-3);
 }
 
+.viewer__results-badge {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  min-width: 22px;
+  text-align: center;
+  line-height: 1.6;
+  flex-shrink: 0;
+}
+
+.viewer-nav-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.viewer-nav-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  min-width: 0;
+}
+
+.viewer-nav-card:hover {
+  background: var(--bg-2);
+}
+
+.viewer-nav-card__icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.viewer-nav-card__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.viewer-nav-card__title {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink-1);
+}
+
+.viewer-nav-card__sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-nav-card__chev {
+  color: var(--ink-3);
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
 .seed-row__input {
   width: 60px;
   padding: 4px 8px;
@@ -2470,10 +3728,31 @@ button.my-match__opp {
 }
 
 @media (pointer: coarse) {
+  /* Touch devices: meet the 44px target on every button. Desktop (fine
+     pointer) keeps the denser 34px so admin tables stay compact (mp-nubo). */
+  .btn {
+    min-height: 44px;
+  }
   .btn--icon-sm {
     min-width: 44px;
     min-height: 44px;
     padding: 8px 10px;
+  }
+  /* Scoring buttons (sb-points-grid) are the operator's most-tapped control —
+     meet the 44px touch target on tablets/phones (DESIGN.md §6). */
+  .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  /* Shiaijo console court controls: the per-row reassign picker (A▾) and the
+     header court switcher. The Score / ↑ / ↓ controls already force the queue
+     row to 44px tall under coarse pointer, so flooring the picker costs no
+     extra row height. */
+  .score-edit-row__court--btn {
+    min-height: 44px;
+  }
+  .page-head__actions .input {
+    min-height: 44px;
   }
 }
 
@@ -2487,6 +3766,7 @@ button.my-match__opp {
   position: relative;
   flex: 1;
   min-width: 220px;
+  margin-bottom: 8px;
 }
 
 .pmf__bar {
@@ -2502,13 +3782,20 @@ button.my-match__opp {
   cursor: text;
 }
 
+/* Standalone bar (WatchlistPanel) — outside a .pmf wrapper, owns its spacing.
+   Inside .pmf the wrapper's margin-bottom spaces the block; a bar margin there
+   would inflate .pmf and push the absolutely-anchored .pmf__dropdown away. */
+.pmf__bar--standalone {
+  margin-bottom: 8px;
+}
+
 .pmf__bar:focus-within {
   border-color: var(--accent);
 }
 
 .pmf__placeholder {
   color: var(--ink-3);
-  font-size: 12.5px;
+  font-size: 12px;
   padding: 2px 4px;
 }
 
@@ -2525,8 +3812,8 @@ button.my-match__opp {
 }
 
 .pmf__chip.is-checked-in {
-  background: #f0fdf4;
-  color: #166534;
+  background: var(--ok-soft);
+  color: var(--ok-ink);
 }
 
 .pmf__chip button {
@@ -2674,7 +3961,7 @@ button.my-match__opp {
 }
 
 .dropzone__sub {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--ink-3);
   margin-top: 2px;
 }
@@ -2697,7 +3984,7 @@ button.my-match__opp {
 }
 
 .tw-sched__filter-label {
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--ink-3);
   font-weight: 600;
   text-transform: uppercase;
@@ -2742,7 +4029,9 @@ button.my-match__opp {
 
 .tw-court__sub {
   font-size: 11px;
-  color: var(--ink-3);
+  /* Sits in .tw-court__head (background: --line-2 #eef0f4). --ink-3 there is
+     only 4.24:1; step to --ink-2 (9.0:1 on --line-2) to clear 4.5:1. */
+  color: var(--ink-2);
 }
 
 .tw-court__list {
@@ -2770,9 +4059,9 @@ button.my-match__opp {
   font-size: 13px;
 }
 
-.tw-match--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 2px var(--red-soft);
+.tw-match--running {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .tw-match--done {
@@ -2806,6 +4095,13 @@ button.my-match__opp {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tw-match__round {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary, #666);
+  margin-left: 0.25rem;
 }
 
 .tw-match__players {
@@ -2905,9 +4201,23 @@ button.my-match__opp {
   border-radius: 10px;
 }
 
-.score-edit-row--live {
-  border-color: var(--red);
-  box-shadow: 0 0 0 2px var(--red-soft);
+/* Shared running-row highlight. A match in progress is signalled by highlighting
+   its row (accent ring), NEVER a centre "●" dot. Apply `is-running` to any
+   compact match-row container. The labelled "● NOW" badge is a separate status
+   affordance (headers/bracket nodes) and is unaffected. */
+.is-running {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-soft);
+  /* No border-radius here: each host keeps its own (score-edit-row 10px,
+     shiaijo-qrow 8px, …). The inset ring follows the host's radius, so running
+     rows don't change shape vs their non-running siblings. */
+}
+
+/* The score editor's running row keeps its own border-color shift but inherits
+   the shared highlight via the shared class on the element; this rule only adds
+   the accent border so the ring + bg come from .is-running (no double-styling). */
+.score-edit-row--running {
+  border-color: var(--accent);
 }
 
 .score-edit-row--complete {
@@ -2967,8 +4277,15 @@ button.my-match__opp {
   font-size: 14px;
   font-weight: 700;
   min-width: 44px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
 }
+/* Symmetric foul gutters flanking the score (Shiro left, Aka right). Reserved
+   even when empty so the centred score never shifts as a hansoku ▲ appears. */
+.score-edit-row__foul { min-width: 0.85em; display: inline-flex; justify-content: center; }
+.score-edit-row__scoreval { text-align: center; }
 
 
 .score-edit-row__correction {
@@ -2986,6 +4303,21 @@ button.my-match__opp {
   max-height: calc(100vh - 32px);
   overflow: auto;
   box-shadow: var(--shadow-lg);
+}
+
+/* Inline scoring variant (shiaijo operator view, mp-c2yr): ScoreEditorModal /
+   TeamScoreEditorModal rendered with variant="inline" — same head/body/foot
+   markup, but flowing in the page's right column instead of an overlay. No
+   backdrop, no fixed sizing; the surrounding card supplies the frame. */
+.scoring-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.scoring-panel .editor-modal__foot--nav {
+  position: static;
 }
 
 .editor-modal__head {
@@ -3032,17 +4364,25 @@ button.my-match__opp {
   flex-direction: column;
   justify-content: center;
   transition: background 0.3s ease;
+  /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
+     top bar so the colour reads as real area. Matches the inline editor's
+     Proposal C. */
+  border-top: 5px solid var(--line);
 }
 
+/* AKA = right side (sides array renders shiro first/left, aka second/right) */
 .sb-side--aka {
-  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
-  border-right: 1px solid rgba(0,0,0,0.05);
+  background: var(--red-soft);
+  border-top-color: var(--red);
   text-align: left;
 }
 
+/* SHIRO = left side: framed white + 45° hatch so "white" reads as a side */
 .sb-side--shiro {
-  background: linear-gradient(135deg, #f8faff 0%, #f0f4ff 100%);
-  border-left: 1px solid rgba(0,0,0,0.05);
+  background: var(--white-side);
+  border-top-color: var(--accent);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
   text-align: right;
 }
 
@@ -3051,15 +4391,30 @@ button.my-match__opp {
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.02em;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
+/* the side label (".sb-dojo" historically held it) becomes the identity chip —
+   one statement of the side, colour-coded, like the inline editor's chip */
 .sb-dojo {
-  font-size: 13px;
-  color: var(--ink-3);
-  font-weight: 500;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  font: 800 11px/1 var(--font-strong);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.sb-side--shiro .sb-dojo {
+  align-self: flex-end;
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+}
+.sb-side--aka .sb-dojo {
+  background: var(--red);
+  color: #fff;
 }
 
 .sb-center {
@@ -3076,6 +4431,16 @@ button.my-match__opp {
   display: flex;
   gap: 12px;
   margin: 12px 0;
+}
+
+/* Ippon fill order is fixed OUTSIDE-TO-INSIDE: each side's first ippon sits in
+   the slot nearest that competitor's name (the board's outer edge) and fills
+   inward toward the centre. Shiro (left column) packs its slots to the left
+   (outer) by default; Aka (right column) must mirror it — pack to the right and
+   render pts[0] at the outer (right) edge. See running_a_kendo_tournament.md →
+   Individual Match Scoreboard. */
+.sb-side--aka .sb-slots {
+  flex-direction: row-reverse;
 }
 
 .sb-slot {
@@ -3364,7 +4729,7 @@ button.my-match__opp {
   border-color: var(--ink);
 }
 
-.live-panel__court-btn {
+.running-panel__court-btn {
   font: inherit;
   color: inherit;
   background: transparent;
@@ -3379,7 +4744,7 @@ button.my-match__opp {
   text-overflow: ellipsis;
 }
 
-.live-panel__court-btn:hover {
+.running-panel__court-btn:hover {
   border-color: var(--line);
   background: var(--surface-2);
 }
@@ -3485,7 +4850,7 @@ button.my-match__opp {
 
 /* Team Score Editor */
 .editor-modal--team {
-  width: min(640px, calc(100vw - 32px));
+  width: min(760px, 96vw);
 }
 
 .team-header {
@@ -3546,6 +4911,183 @@ button.my-match__opp {
   align-items: flex-end;
 }
 
+/* Canonical team scoresheet alignment — shared by both the shiaijo inline
+   panel (.scoring-panel > .team-bouts-scroll) and the admin modal
+   (.editor-modal--team > … > .team-bouts-scroll).
+   The bare rules above size the two side columns to content (1fr ==
+   minmax(min-content, 1fr)), so a side with a selected name floors wider
+   than the empty side and the AKA stack is right-justified while SHIRO is
+   centred — the name, mark slots, ippon row and fouls then sit on three
+   different axes. Pin both sides to an equal minmax(0,1fr) column and
+   centre both stacks so every element shares one axis down the sheet.
+   Owned by .team-bouts-scroll so both rendering contexts inherit it. */
+.team-bouts-scroll .team-sub-match__row {
+  grid-template-columns: minmax(0, 1fr) 160px minmax(0, 1fr);
+  /* Tighter than the bare 12px so each side column has room to fit all three
+     top-row ippon marks (3 × 44px) on one wrap line — keeps the 5 marks to two
+     rows (3 + 2) instead of three at a ~1024 landscape split. */
+  gap: 8px;
+}
+.team-bouts-scroll .team-sub-match__side,
+.team-bouts-scroll .team-sub-match__side--right {
+  align-items: center;
+  min-width: 0;
+}
+/* The name row must take its side column's width, not its content's
+   max-content width — otherwise a selected name floors the row wider than
+   the minmax(0,1fr) track and overflows the panel's edge (the right-aligned
+   AKA side clips visibly). width:100% + the input's existing min-width:0 lets
+   the name shrink to an ellipsis when the two-column split is tight (e.g. a
+   ~575px scoring panel on a 1024px landscape iPad). */
+.team-bouts-scroll .tsm-name {
+  width: 100%;
+  min-width: 0;
+}
+/* Scored ippon letters live in the centre, between the two competitors:
+   [shiro letters] [result] [aka letters]. Each side block is buttons-only. */
+.team-bouts-scroll .team-sub-match__center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.team-bouts-scroll .tsm-center-marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.team-bouts-scroll .tsm-center-pts {
+  display: flex;
+  gap: 3px;
+}
+.team-bouts-scroll .team-sub-match__center .editor-side__pt {
+  width: 26px;
+  height: 26px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  border-radius: 5px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  color: var(--ink-1);
+}
+.team-bouts-scroll .team-sub-match__center .editor-side__pt--filled {
+  border-color: var(--ink-3);
+}
+.team-bouts-scroll .team-sub-match__score {
+  min-width: 34px;
+}
+/* Outstanding hansoku: a red ▲ on the offending side's inner edge, sitting
+   with the centre marks (canonical kendo scoresheet). A 2nd foul discharges
+   it to an H ippon for the opponent. */
+.team-bouts-scroll .tsm-foul-tri {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1;
+  align-self: center;
+}
+/* Per-bout tie toggle, now inside the centre column directly under the marks
+   (the X it produces sits on that centre line). */
+.team-bouts-scroll .team-sub-match__tie {
+  display: flex;
+  justify-content: center;
+}
+.team-bouts-scroll .team-sub-match__tie .btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* Typeable lineup picker/writer — reuses the .pmf chrome (viewer WatchPicker)
+   but sized for the narrow bout row; the dropdown floats above sibling rows. */
+.lineup-name {
+  min-width: 0;
+  flex: 1 1 auto;
+  margin-bottom: 0;
+}
+.lineup-name__bar {
+  min-height: 36px;
+  padding: 4px 6px;
+  flex-wrap: nowrap;
+}
+/* An unfilled lineup slot is a "fill this" caution, not an error — and the
+   two sides are already Aka (red) / Shiro per the colour system, so a red
+   outline here reads as "both sides are Aka". Use the amber --warn family
+   (DESIGN.md Principle 3: amber = attention, never error/running, never red). */
+.lineup-name--empty .pmf__bar {
+  border-color: var(--warn-border);
+}
+.lineup-name--empty .pmf__input::placeholder {
+  color: var(--warn);
+  opacity: 0.85;
+}
+.lineup-name__clear {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--ink-3);
+  padding: 0 2px;
+}
+.lineup-name__clear:hover {
+  color: var(--ink-1);
+}
+.lineup-name__dropdown {
+  z-index: 60;
+  min-width: 200px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.pmf__option--active {
+  background: var(--surface-2);
+}
+.lineup-name__add .pmf__opt-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Compact bout-number gutter replaces the wide Senpo/Jiho label column, and
+   the team-name header band is given a matching gutter + the same centre
+   region width so "Osaka Dojo / VS / Tokyo" line up with each bout's
+   SHIRO / dash / AKA columns down the sheet. Values verified in-browser. */
+.team-bouts-scroll .team-sub-match {
+  grid-template-columns: 34px 1fr;
+  gap: 8px;
+}
+.team-bouts-scroll .team-sub-match__pos {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  margin-bottom: 0;
+}
+.team-sub-match__pos-num {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.team-sub-match__pos-name {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+}
+.scoring-panel--team .sb-match {
+  grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
+  margin-left: 46px;
+  margin-right: 10px;
+}
+
 .team-sub-match__pts {
   display: flex;
   gap: 3px;
@@ -3553,8 +5095,9 @@ button.my-match__opp {
 
 .team-sub-match__btns {
   display: flex;
-  gap: 3px;
+  gap: 6px;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .team-sub-match__fouls {
@@ -3572,6 +5115,53 @@ button.my-match__opp {
   padding: 4px;
   border-radius: 4px;
 }
+
+/* Per-side player name, grouped with that side's score controls so every
+   bout's columns align down the sheet (the physical kendo scoresheet). */
+.tsm-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.team-sub-match__side--right .tsm-name { flex-direction: row-reverse; }
+.tsm-name__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  font-size: 12px;
+  padding: 2px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink-1);
+}
+.tsm-name__select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tsm-name__select--empty { border-color: var(--red); opacity: 0.75; }
+.tsm-name__static {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Rendered as a standalone hint in the team header block (not inside a
+   bout side), so target the class directly. */
+.tsm-lineup__incomplete {
+  font-size: 11px;
+  color: var(--ink-3);
+  padding: 2px 0 4px;
+  font-style: italic;
+}
+/* Only the AKA (right) static name aligns toward its right-hand badge; the
+   SHIRO (left) name keeps the default left alignment with its own badge. */
+.team-sub-match__side--right .tsm-name__static { text-align: right; }
+.tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
+
+/* (compact team tsm-name overrides removed — canonical layout via .team-bouts-scroll) */
 
 .team-sub-match__score--a-win {
   background: var(--white-side);
@@ -3601,6 +5191,9 @@ button.my-match__opp {
   background: var(--surface-2);
   border-radius: 8px;
   margin-top: 4px;
+  /* Override the legacy dark-scoreboard `color: white` above — this is the
+     light variant, so text must be dark ink to stay readable on surface-2. */
+  color: var(--ink-1);
 }
 
 .team-summary__side {
@@ -3614,6 +5207,11 @@ button.my-match__opp {
 
 .team-summary__label {
   font-size: 12px;
+  /* --ink-2, not --ink-3: at 12px/600 on the slate summary band --ink-3 lands
+     at 4.41:1, just under WCAG AA. This is the verdict caption the operator
+     glances at under hall glare, so hold it above the line. */
+  color: var(--ink-2);
+  opacity: 1;
 }
 
 .team-summary__result {
@@ -3621,6 +5219,21 @@ button.my-match__opp {
   font-size: 13px;
   text-align: center;
   white-space: nowrap;
+  color: var(--accent);
+}
+
+/* Centre cell mirrors the side cells (label on top, value below) so the
+   verdict word sits on the same baseline as the IV/PW stats either side. */
+.team-summary__side--center {
+  align-items: center;
+  text-align: center;
+}
+.team-summary__verdict {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--accent);
 }
 
 /* ---------- Aka/Shiro color badges ---------- */
@@ -3645,9 +5258,36 @@ button.my-match__opp {
 }
 
 .bc-color-badge--shiro {
-  background: #e8eaf0;
+  /* framed white to match the system (was flat grey #e8eaf0) */
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+/* Competitor number prefix (e.g. "K1") shown before a player name. The value
+   in player.number already embeds the competition's configured numberPrefix;
+   this only styles it as a compact monospace badge (mp-3 / numberPrefix).
+   Deliberately neutral (not red/navy) so it doesn't read as Aka/Shiro/running-match state
+   (mp-938b colour law). */
+.num-prefix {
+  font-family: var(--font-mono);
+  font-size: 0.64em;
+  font-weight: 700;
   color: var(--ink-2);
+  background: var(--line-2);
   border: 1px solid var(--line);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+/* Provisional (pre-draw) competitor number — muted + dotted underline so it
+   reads as "not final yet" versus the solid accent of an assigned number. */
+.num-prefix--provisional {
+  color: var(--ink-3);
+  font-weight: 600;
+  border-bottom: 1px dotted var(--ink-4);
 }
 
 /* Schedule / TW-match compact badges (A/S) */
@@ -3671,9 +5311,9 @@ button.my-match__opp {
 }
 
 .tw-match__badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .tw-match__time--editable {
@@ -3693,31 +5333,6 @@ button.my-match__opp {
   text-decoration: underline;
 }
 
-/* VSchedItem Aka/Shiro side badges */
-.vsched-item__color-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 7.5px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  vertical-align: middle;
-}
-
-.vsched-item__color-badge--aka {
-  background: var(--red);
-  color: white;
-  margin-right: 4px;
-}
-
-.vsched-item__color-badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-  margin-left: 4px;
-}
 
 /* Pool match row Aka/Shiro */
 .pool-match-row {
@@ -3745,6 +5360,22 @@ button.my-match__opp {
   justify-content: flex-end;
 }
 
+/* Aka/Shiro side treatment (DESIGN.md §4): tint each side cell so red vs white
+   reads as area, not just a 7px badge. SideA = Aka (left grid col), the
+   --right cell = Shiro. Padding + radius give the tint a contained shape. */
+.pool-match-row__side {
+  padding: 4px 8px;
+  border-radius: 7px;
+}
+.pool-match-row__side:not(.pool-match-row__side--right) {
+  background: var(--red-soft);
+}
+.pool-match-row__side--right {
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+}
+
 .pool-match-row__name {
   white-space: nowrap;
   overflow: hidden;
@@ -3758,7 +5389,7 @@ button.my-match__opp {
 .pool-match-row__badge {
   display: inline-flex;
   align-items: center;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.06em;
   padding: 1px 3px;
@@ -3772,9 +5403,9 @@ button.my-match__opp {
 }
 
 .pool-match-row__badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .pool-match-row__score {
@@ -3789,7 +5420,7 @@ button.my-match__opp {
 .se-color-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.06em;
   padding: 1px 4px;
@@ -3805,29 +5436,10 @@ button.my-match__opp {
 }
 
 .se-color-badge--shiro {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
   margin-left: 4px;
-}
-
-/* Aka ippon buttons in scoreboard */
-.ipt-btn--aka {
-  background: var(--red-soft);
-  border-color: var(--red);
-  color: var(--red);
-}
-
-.score-pt--aka.score-pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-
-.score-pt--shiro.score-pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
 }
 
 /* Team header color label */
@@ -3846,9 +5458,9 @@ button.my-match__opp {
 }
 
 .team-header__side--white .team-header__color {
-  background: #e8eaf0;
-  color: var(--ink-2);
-  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 /* Draw/hantei tag in bracket */
@@ -3860,12 +5472,17 @@ button.my-match__opp {
   margin-left: auto;
 }
 
-/* Decision outcome chips and encho marker in bracket meta row */
+/* Decision outcome chips and encho marker in bracket meta row.
+   text-transform: none overrides the uppercasing inherited from
+   .bc-match-meta so chips render their authored case — the hantei
+   mark must read "Ht" (decides the match), never "HT", and stay
+   distinct from the "H" hansoku ippon; likewise Kiken / Fus. / DH */
 .bc-decision-chip,
 .bc-encho {
   font-size: 10px;
   font-weight: 700;
   color: var(--accent);
+  text-transform: none;
 }
 
 /* ---------- Multi-day schedule tabs ---------- */
@@ -3880,7 +5497,7 @@ button.my-match__opp {
   padding: 6px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   background: var(--surface);
   color: var(--ink-2);
@@ -3913,6 +5530,12 @@ button.my-match__opp {
     position: static;
   }
 
+  /* Single-column layout: the rail stacks above the content and must scroll
+     away normally rather than pin over it. */
+  .comp-rail {
+    position: static;
+  }
+
   .row,
   .row-3 {
     grid-template-columns: 1fr;
@@ -3942,7 +5565,7 @@ button.my-match__opp {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   z-index: 500;
   pointer-events: none;
-  animation: toast-in 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  animation: toast-in 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes toast-in {
@@ -3981,7 +5604,7 @@ button.my-match__opp {
 
 .parse-preview .cell--missing {
   color: var(--red, #c00);
-  background: #fff0f0;
+  background: var(--danger-soft);
 }
 
 .alert {
@@ -3992,21 +5615,113 @@ button.my-match__opp {
 }
 
 .alert--error {
-  background: #fff0f0;
+  background: var(--danger-soft);
   border-color: #f5c2c2;
   color: #9b1c1c;
 }
 
 .alert--warn {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #78350f;
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+  color: var(--warn-ink);
 }
 
 .alert--success {
-  background: #f0fdf4;
-  border-color: #86efac;
-  color: #15803d;
+  background: var(--ok-soft);
+  border-color: #86efac; /* green-300: alert border is stronger than the hairline ok-border token */
+  color: var(--ok-strong);
+}
+
+/* ---------- League tie-breaker banner (.league-tiebreak) ----------
+   Amber "attention" treatment (--warn-*) — never navy --accent (running state)
+   and never red (Aka/danger). Composes .alert .alert--warn for the base
+   background/border/color, then adds layout specifics.
+   P1: fully tokenized — zero hex fallbacks.
+   P3: coarse-pointer rule at bottom ensures ≥44px touch targets on tablets. */
+.league-tiebreak {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: var(--r);
+}
+
+.league-tiebreak__title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  /* color inherited from .alert--warn → var(--warn-ink) */
+}
+
+.league-tiebreak__desc {
+  color: var(--ink-2);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.league-tiebreak__group {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--warn-border);
+}
+.league-tiebreak__group:last-of-type {
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
+.league-tiebreak__pos {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.league-tiebreak__teams {
+  font-size: 13px;
+  color: var(--ink-1);
+}
+
+.league-tiebreak__group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.league-tiebreak__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.league-tiebreak__finalize {
+  border-top: 1px solid var(--warn-border);
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.league-tiebreak__err {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+/* Entrance: 150ms fade + subtle lift (DESIGN.md: ~140–160ms range, --ease-out). */
+@keyframes league-tiebreak-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.league-tiebreak {
+  animation: league-tiebreak-in 150ms var(--ease-out) both;
+}
+
+/* Tablet touch targets: ≥44px height on banner buttons (DESIGN.md §6 a11y floor). */
+@media (pointer: coarse) {
+  .league-tiebreak .btn { min-height: 44px; }
+}
+
+/* Gate entrance animation for users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .league-tiebreak { animation: none; }
 }
 
 .seed-row__handle {
@@ -4033,9 +5748,9 @@ button.my-match__opp {
 }
 
 .tag-badge--warn {
-  background: #fff8e1;
-  color: #b45309;
-  border-color: #fde68a;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-color: var(--warn-border);
 }
 
 .field__select {
@@ -4093,6 +5808,10 @@ button.my-match__opp {
   border-radius: 10px;
   padding: 12px 14px;
   margin: 4px 0 8px;
+  /* When expanded inline inside the .vsched 2-column grid (≥1024px), span the
+     full width so the card stacks BELOW the clicked row, not beside it
+     (mp-13y #1). Harmless in the flex/block single-column layout. */
+  grid-column: 1 / -1;
 }
 
 .match-detail-card__head {
@@ -4114,6 +5833,10 @@ button.my-match__opp {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.match-detail-card__comp {
+  color: var(--ink-2, #374151);
 }
 
 .match-detail-card__close {
@@ -4147,28 +5870,22 @@ button.my-match__opp {
   text-align: right;
 }
 
+/* Winner: bold only — keep the side colour (Shiro dark / Aka red) so the
+   colour coding still reads after a result. */
 .match-detail-card__side--win .match-detail-card__name {
-  font-weight: 700;
-  color: var(--accent);
+  font-weight: 800;
 }
 
 .match-detail-card__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.match-detail-card__color-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  flex-shrink: 0;
 }
-.match-detail-card__color-badge--aka { background: var(--red); color: #fff; }
-.match-detail-card__color-badge--shiro { background: #f0f0f0; color: #333; border: 1px solid #ddd; }
+/* Colour-coded player names (replaces the SHIRO/AKA badges), matching the
+   shared scoreboard's .msb-name / .msb-name--aka. */
+.match-detail-card__name--shiro { color: #111; }
+.match-detail-card__name--aka { color: var(--red, #b91c1c); }
 
 .match-detail-card__score {
   font-size: 18px;
@@ -4235,48 +5952,105 @@ button.my-match__opp {
   gap: 4px;
 }
 
-.match-detail-card__sub-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  padding: 3px 0;
+/* ---------- Shared FIK scoreboard (match_scoreboard.jsx) ----------
+   ONE component for the viewer card, the self-run modal and the TV display.
+   §263 individual = ippon-letter slots; §277 team = IV/PW summary + bout rows.
+   `variant="tv"` adds .msb--tv (larger, vh-based) — same markup either way.
+   Shiro = left/dark, Aka = right/red. */
+.msb { width: 100%; }
+.msb-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+  border-top: 1px solid var(--line, #eee); font-size: 13px; }
+/* Remove the leading hairline only when the FIRST row is not a summary row —
+   i.e. the individual scoreboard, whose first (and only) row is a score row.
+   In a team scoreboard the summary row is first and keeps its own thick rule
+   (below); the first bout row sits second, so it keeps its hairline. */
+.msb-row:first-child:not(.msb-row--summary) { border-top: none; }
+.msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+.msb-marks { flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  gap: 4px; min-width: 104px; }
+.msb-slots { display: flex; align-items: center; gap: 2px; }
+.msb-slot { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 20px; padding: 0 3px; border: 1px solid var(--line-2, #e5e7eb);
+  border-radius: 3px; font-family: var(--font-mono, monospace); font-weight: 700;
+  font-size: 13px; color: #111; }
+.msb-slot--aka { color: var(--red, #b91c1c); }
+.msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
+.msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
+.msb-ht { font-size: 10px; color: var(--ink-3); font-weight: 600; }
+/* Win indicator for an ippon-less decision (hantei "Ht" / fusensho·kiken "○"):
+   the mark sits in the winning side's slot. No special colour — the slot keeps
+   its side colour (Shiro dark, Aka red); only the weight is bumped so the mark
+   reads as the result (mp-13y: green was never part of the FIK spec). */
+.msb-slots--win .msb-slot { font-weight: 800; }
+/* §277 summary row: labelled IV/PW per side */
+.msb-row--summary { border-top: 2px solid #111; }
+.msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
+  font-size: 16px; font-weight: 800; height: auto; }
+.msb-lab { display: block; font-size: 10px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
+abbr.msb-lab { text-decoration: none; cursor: help; }
+/* running-match highlight: navy running-signal language (DESIGN.md Principle 3).
+   --accent-soft fill (same token used by bc-match--running / sched-row--running)
+   plus a symmetric inset ring that reads as the active-row halo without a
+   one-sided accent stripe or any layout shift. */
+.msb-row--now {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--accent) 35%, transparent);
 }
+.msb-row--queued .msb-name { color: #9ca3af; }
+.msb-row--queued .msb-name--aka { color: #d4a5a8; }
+.msb-row--queued .msb-slot { color: #9ca3af; }
+/* Daihyosen */
+.msb-row--dh-banner { justify-content: center; border-top: 2px solid #111; padding: 6px 0 2px; }
+.msb-dh-tag { display: inline-block; background: #111; color: #fff; font-size: 10px;
+  font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 3px; }
+.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: var(--ink-3); }
+/* TV variant — scale up for the fullscreen board.
+   The font sizes and slot box dimensions are multiplied by --msb-scale
+   (default 1); a few fixed values (horizontal padding, slot border-radius)
+   are intentionally left unscaled so they stay crisp. The per-court board
+   sets --msb-scale on the body container based on visible row count: fewer
+   rows → bigger scale, so the same row template fills the screen whether the
+   pool has 3 matches or 10. Other consumers of variant="tv" (TvWhiteBoard,
+   streaming overlay) leave --msb-scale unset and get the default sizes. */
+.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }
+.msb--tv .msb-name { font-size: calc(3vh * var(--msb-scale, 1)); }
+.msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
+.msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
+.msb--tv .msb-vs { min-width: 3vh; font-size: calc(2vh * var(--msb-scale, 1)); }
+/* Centre dash between the Shiro and Aka ippon slots. Rendered as an explicit
+   span so Preact null-children don't accidentally keep the cell non-empty.
+   Hidden on non-TV surfaces; visible only in .msb--tv context. */
+.msb-sep { display: none; }
+.msb--tv .msb-sep { display: inline; color: var(--ink-2, #3a414e); font-weight: 700; }
+.msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
+.msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
+.msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
+.msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
+.msb--tv .msb-dh-tag { font-size: calc(1.8vh * var(--msb-scale, 1)); padding: 0.4vh 1.2vh; letter-spacing: .12em; }
+/* TV bout decisiveness: winning side's filled slots are slightly bolder
+   so spectators can read the match result at a glance from distance. */
+.msb--tv .msb-slots--win .msb-slot { font-size: calc(3.2vh * var(--msb-scale, 1)); }
 
-.match-detail-card__sub-pos {
-  color: var(--ink-3);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  flex: 1;
-}
-
-.match-detail-card__sub-score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 14px;
-  min-width: 32px;
-}
-.match-detail-card__sub-score--right { text-align: right; }
-
-/* ---------- Pool Round-Robin Matrix (Viewer) ---------- */
-.pool-matrix-wrap {
+/* ---------- League Round-Robin Matrix (Viewer) ---------- */
+.league-matrix-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-.pool-matrix {
+.league-matrix {
   border-collapse: collapse;
   font-size: 11px;
   min-width: 100%;
 }
 
-.pool-matrix__corner {
+.league-matrix__corner {
   background: transparent;
   min-width: 80px;
 }
 
-.pool-matrix__col-head {
+.league-matrix__col-head {
   text-align: center;
   padding: 4px 6px;
   font-weight: 700;
@@ -4284,9 +6058,10 @@ button.my-match__opp {
   color: var(--ink-3);
   border-bottom: 2px solid var(--line);
   min-width: 36px;
+  cursor: help;
 }
 
-.pool-matrix__row-head {
+.league-matrix__row-head {
   padding: 6px 8px 6px 0;
   text-align: left;
   border-right: 1px solid var(--line);
@@ -4294,7 +6069,7 @@ button.my-match__opp {
   max-width: 120px;
 }
 
-.pool-matrix__num {
+.league-matrix__num {
   font-weight: 700;
   color: var(--ink-3);
   font-size: 11px;
@@ -4302,13 +6077,13 @@ button.my-match__opp {
   font-family: var(--font-mono);
 }
 
-.pool-matrix__pname {
+.league-matrix__pname {
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.pool-matrix__cell {
+.league-matrix__cell {
   text-align: center;
   padding: 4px 2px;
   font-weight: 700;
@@ -4317,19 +6092,30 @@ button.my-match__opp {
   border: 1px solid var(--line-light);
 }
 
-.pool-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
-.pool-matrix__cell--empty { background: var(--bg-2); }
-.pool-matrix__cell--pending { color: var(--ink-3); }
-.pool-matrix__cell--live { color: var(--red); }
-.pool-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
-.pool-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
-.pool-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+.league-matrix__cell--self { color: var(--ink-4); background: var(--bg-2); }
+.league-matrix__cell--empty { background: var(--bg-2); }
+.league-matrix__cell--pending { color: var(--ink-3); }
+/* A bout in progress: the cell highlight alone signals "now" (no centre dot).
+   Inset accent ring on the accent-soft fill, matching the shared .is-running. */
+.league-matrix__cell--running { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
+.league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
+.league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+.league-matrix__cell[role="button"] { cursor: pointer; }
+.league-matrix__cell[role="button"]:hover { filter: brightness(0.92); }
+.league-matrix__cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.pool-matrix__win { color: #16a34a; }
-.pool-matrix__loss { color: #dc2626; }
-.pool-matrix__draw { color: var(--ink-2); }
+.league-matrix__win { color: var(--ok); }
+.league-matrix__loss { color: var(--danger); }
+/* Draw = neutral ippon letters (no win/loss hue). Plain text — never underlined:
+   an underline reads as a hyperlink on static data. The draw is already the
+   visual odd-one-out (uncoloured letters on the neutral cell), and the Matches
+   list above carries the authoritative "M–K". --ink-2 holds >4.5:1 on the cell. */
+.league-matrix__draw {
+  color: var(--ink-2);
+}
 
-.pool-matrix__legend {
+.league-matrix__legend {
   display: flex;
   gap: 12px;
   margin-top: 6px;
@@ -4339,14 +6125,14 @@ button.my-match__opp {
   align-items: center;
 }
 
-.pool-matrix__legend-item {
+.league-matrix__legend-item {
   padding: 1px 5px;
   border-radius: 3px;
   font-weight: 700;
 }
-.pool-matrix__legend-item--win { color: #16a34a; background: rgba(22, 163, 74, 0.1); }
-.pool-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
-.pool-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
+.league-matrix__legend-item--win { color: var(--ok); background: rgba(22, 163, 74, 0.1); }
+.league-matrix__legend-item--loss { color: #dc2626; background: rgba(220, 38, 38, 0.08); }
+.league-matrix__legend-item--draw { color: var(--ink-2); background: var(--bg-2); }
 
 /* ---------- FoulCounter (Individual Scoring) ---------- */
 .sb-fouls {
@@ -4447,6 +6233,56 @@ button.my-match__opp {
   justify-content: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+/* F5: pending-write banner — offline / transient queued terminal write */
+.pending-write-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-sm);
+  padding: 8px 12px; /* align to the .alert spacing scale */
+  font-size: var(--fs-sm);
+  color: var(--warn-ink);
+  font-weight: 500;
+  margin-bottom: 8px;
+  animation: pending-write-in 160ms ease-out;
+}
+/* Leading amber dot — matches the offline sync-pill's glance language so the
+   two offline signals read as one family. Static (not pulsing): this is passive
+   status ("will retry automatically"); DESIGN.md reserves the amber *pulse* for
+   a demanded next action, which here is the explicit "Retry now" button. */
+.pending-write-banner::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--warn-strong);
+}
+.pending-write-banner > span {
+  flex: 1;
+  min-width: 0;
+}
+/* F5: permanent-failure variant — a queued terminal write was rejected and
+   dropped (never saved). Danger palette (mirrors .alert--error) + red dot, so it
+   reads as an error the operator must act on, not a transient "will retry". */
+.pending-write-banner--failed {
+  background: var(--danger-soft);
+  border-color: #f5c2c2;
+  color: #9b1c1c;
+}
+.pending-write-banner--failed::before {
+  background: var(--danger);
+}
+@keyframes pending-write-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-write-banner { animation: none; }
 }
 
 /* ---------- H ippon button ---------- */
@@ -4579,6 +6415,12 @@ button.my-match__opp {
   line-height: 1.45;
   letter-spacing: normal;
   text-transform: none;
+  /* Reset text layout that may be inherited from the anchor's context. A
+     glossary term inside a nowrap row (e.g. the team scoresheet tie toggle,
+     which keeps its marks on one line) would otherwise pass nowrap into the
+     tooltip body, so the definition runs off in a single line and clips past
+     the max-width instead of wrapping. */
+  white-space: normal;
   cursor: default;
   visibility: hidden;
   opacity: 0;
@@ -4732,9 +6574,9 @@ button.my-match__opp {
   text-transform: uppercase;
   cursor: pointer;
   min-height: 24px;
-  transition: border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out),
+              background-color 120ms var(--ease-out);
 }
 .encho-pill:hover,
 .encho-pill:focus-visible {
@@ -4742,6 +6584,12 @@ button.my-match__opp {
   color: var(--accent);
   background: var(--accent-soft);
   outline: none;
+}
+/* :hover and :focus-visible shared the border/bg change, so a keyboard tab
+   looked identical to a mouse hover. Add the accent ring on focus only so it's
+   distinct and matches the rest of the control vocabulary (DESIGN.md §6). */
+.encho-pill:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 
 /* Encho row (expanded) — full counter UI; preserves earlier layout. */
@@ -4752,7 +6600,6 @@ button.my-match__opp {
   margin-bottom: 12px;
   font-size: 12px;
   flex-wrap: wrap;
-  transition: padding 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .encho-row__label {
   display: flex;
@@ -4833,7 +6680,7 @@ button.my-match__opp {
 }
 .editor-modal--compact .sb-name {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.01em;
   margin-bottom: 2px;
@@ -4852,9 +6699,9 @@ button.my-match__opp {
   height: 38px;
   font-size: 16px;
   border-radius: 6px;
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: background-color 120ms var(--ease-out),
+              border-color 120ms var(--ease-out),
+              color 120ms var(--ease-out);
 }
 /* Drop the heavy scale+shadow on filled slots; use an inset 2px border in
    the side colour for a "value locked in" instrument-readout feel. */
@@ -4906,8 +6753,8 @@ button.my-match__opp {
 
 /* --- Compact mode: team header ------------------------------------------ */
 .editor-modal--compact.editor-modal--team {
-  /* Slightly wider in compact mode to keep the two-row tsm__side comfy. */
-  width: min(720px, calc(100vw - 32px));
+  /* Same width as the base .editor-modal--team — canonical layout applies to both. */
+  width: min(760px, 96vw);
 }
 /* Scope to the team modal only — the individual modal has its own .sb-match
    rule above (line ~4652) with a wider 120px centre column. Without this
@@ -4937,157 +6784,13 @@ button.my-match__opp {
   letter-spacing: 0.2em;
 }
 
-/* --- Compact mode: team-sub-match 2-row layout --------------------------- */
-.editor-modal--compact .team-sub-match {
-  padding: 3px 8px;
-  border-bottom: 1px solid var(--line); /* fallback */
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: 0;
-  background: transparent;
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 8px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match:last-child {
-  border-bottom: none;
-}
-.editor-modal--compact .team-sub-match__pos {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-  color: var(--ink-3);
-  margin-bottom: 0;
-  text-transform: uppercase;
-}
-.editor-modal--compact .team-sub-match__pos > span:first-child {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-.editor-modal--compact .team-sub-match__row {
-  display: grid;
-  grid-template-columns: 1fr 50px 1fr;
-  gap: 6px;
-  align-items: center;
-}
-.editor-modal--compact .team-sub-match__side {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.editor-modal--compact .team-sub-match__side--right {
-  align-items: stretch;
-}
+/* --- Compact mode: team-sub-match layout (removed — canonical layout via
+   .team-bouts-scroll now applies to both the inline panel and the modal) --- */
 /* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible so the
-   legacy column stack is preserved exactly. Compact mode then overrides to
-   display: flex to get the 2-row strip layout. */
+   canonical column stack is preserved exactly. */
 .tsm-row-1,
 .tsm-row-2 {
   display: contents;
-}
-.editor-modal--compact .tsm-row-1 {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-1 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-row-2 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  justify-content: space-between;
-}
-.editor-modal--compact .team-sub-match__side--right .tsm-row-2 {
-  flex-direction: row-reverse;
-}
-.editor-modal--compact .tsm-side-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  min-width: 38px;
-}
-.editor-modal--compact .team-sub-match__pts {
-  display: flex;
-  gap: 4px;
-}
-.editor-modal--compact .editor-side__pt {
-  width: 28px;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 800;
-  border-radius: 5px;
-  border: 1.5px solid var(--line);
-  background: var(--surface);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  color: var(--ink-3);
-  transition: background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  padding: 0;
-}
-.editor-modal--compact .editor-side__pt--filled {
-  box-shadow: inset 0 0 0 2px currentColor;
-}
-.editor-modal--compact .team-sub-match__side--right .editor-side__pt--filled {
-  background: var(--red);
-  border-color: var(--red);
-  color: white;
-}
-.editor-modal--compact .team-sub-match__side:not(.team-sub-match__side--right) .editor-side__pt--filled {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
-}
-.editor-modal--compact .team-sub-match__btns {
-  display: flex;
-  gap: 3px;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .team-sub-match__btns .ipt-btn {
-  min-width: 26px;
-  min-height: 32px;
-  padding: 4px 4px;
-  font-size: 11px;
-  font-weight: 700;
-}
-.editor-modal--compact .tsm-fouls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 0;
-  flex-wrap: nowrap;
-}
-.editor-modal--compact .tsm-fouls__label {
-  font-size: 9px;
-  letter-spacing: 0.05em;
-}
-.editor-modal--compact .tsm-fouls__btn {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  font-size: 14px;
-}
-.editor-modal--compact .tsm-fouls__count {
-  font-size: 13px;
-}
-.editor-modal--compact .tsm-fusensho .btn {
-  padding: 2px 8px;
-  font-size: 11px;
-  min-height: 28px;
-}
-.editor-modal--compact .team-sub-match__score {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 16px;
-  min-width: 50px;
-  padding: 2px;
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
@@ -5126,6 +6829,30 @@ button.my-match__opp {
   gap: 4px;
 }
 
+/* Centered overtime pill — sits below the foul boxes in the individual scorer
+   (the EnchoControl renders its own .encho-row child, which this centers). */
+.encho-center {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+/* Stacked decision place: a "Decision:" header, the judges'-decision (hantei)
+   affordance as the top row, then the withdrawal/forfeit controls as the
+   bottom row. Overrides the default inline-row .decision-controls layout. */
+.decision-controls--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.decision-controls--stacked .decision-controls__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ？ icon that carries the glossary tooltip for a decision button. */
 .glossary-hint .tw-term {
   border-bottom: none;
@@ -5152,9 +6879,65 @@ button.my-match__opp {
   gap: 6px;
 }
 
+/* --- Touch-target floor for compact ippon buttons --------------------- *
+   The compact rule above (.editor-modal--compact .sb-points-grid .ipt-btn)
+   sets a 34px min-height for fine pointers (laptop scoring). On the tablets
+   operators actually score on, those out-specified the generic
+   `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
+   the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
+   Restore the floor at equal-or-greater specificity, placed AFTER the compact
+   blocks so source order also favours it. Fine pointers keep the dense 34px.
+   (Team sub-match button floor is now handled by .team-bouts-scroll context.) */
+@media (pointer: coarse) {
+  .editor-modal--compact .sb-points-grid .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Touch-target floor for the inline operator console and team modal --- *
+   The shiaijo console is the surface operators actually score on, on a
+   tablet, so every in-bout control takes the DESIGN.md §6 ≥44px coarse-pointer
+   floor. Scoped to .team-bouts-scroll so BOTH the inline .scoring-panel and the
+   .editor-modal team modal inherit it. The ippon mark row (.team-sub-match__btns)
+   is already flex-wrap, so at full 44px width the 5 marks wrap to two rows
+   (3 + 2) when a side column is tight (≈147px on a 1024 landscape iPad) and
+   stay on one row when there's room — container-driven, no viewport query.
+   The centre score slots can't take 44px WIDTH (the centre column is a fixed
+   160px shared by both sides' 2 slots + the result; 4×34 already overflows),
+   so they keep their fitting 26px width and take the full 44px height —
+   vertical room is free, which roughly doubles the tap area. */
+@media (pointer: coarse) {
+  .team-bouts-scroll .ipt-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .team-bouts-scroll .tsm-fouls__btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .team-bouts-scroll .team-sub-match__center .editor-side__pt {
+    min-height: 44px;
+  }
+  .team-bouts-scroll .lineup-name__clear {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Keyboard focus ring for ippon buttons ---------------------------- *
+   Operators tab through the scoring grid; make the focused ippon button
+   obvious with the accent ring language (DESIGN.md §6 / §3). Scoped to the
+   .ipt-btn family this region owns. */
+.ipt-btn:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
 /* --- Decision prompt motion (compact + roomy) -------------------------- */
 .decision-prompt {
-  animation: decision-prompt-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: decision-prompt-in 160ms var(--ease-out) both;
 }
 @keyframes decision-prompt-in {
   from { opacity: 0; transform: translateY(12px); }
@@ -5195,11 +6978,57 @@ button.my-match__opp {
   display: contents;
 }
 
+/* --- Daihyosen (representative-bout) affordance ------------------------- */
+/* An always-available manual control on knockout team matches. Quiet by
+   default (ghost button, neutral frame); when a tie on IV+PW is detected it
+   gains an accent frame + a soft attention pulse so the operator's eye lands
+   on the path forward. The default copy stays >=4.5:1 on --bg-2 and the tied
+   copy on --accent-soft by using --ink-2 for the hint. mp-c2yr. */
+.daihyosen-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border, #d8dee9);
+  border-radius: 8px;
+  background: var(--bg-2);
+}
+.daihyosen-controls__title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.daihyosen-controls__hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.daihyosen-controls__err {
+  font-size: 12px;
+  color: var(--danger);
+}
+.daihyosen-controls--tied {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  animation: daihyosen-tied-pulse 1.8s ease-out infinite;
+}
+.daihyosen-controls--tied .daihyosen-controls__title {
+  color: var(--accent-strong);
+}
+@keyframes daihyosen-tied-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 53, 87, 0.28); }
+  50%      { box-shadow: 0 0 0 6px rgba(29, 53, 87, 0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .dot--live,
+  .dot--running,
+  .topbar__conn--down .topbar__conn__dot,
+  .conn-alert__dot,
   .spinner,
   .toast,
   .decision-prompt,
+  .daihyosen-controls--tied,
   .announcement-banner {
     animation: none;
   }
@@ -5335,6 +7164,21 @@ button.my-match__opp {
   background: rgba(255, 255, 255, 0.15);
   color: #ffffff;
 }
+.ann-bell-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.ann-bell-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.1); }
+.ann-bell-btn--on { color: rgba(255, 255, 255, 0.95); }
+.ann-bell-btn--denied { opacity: 0.35; cursor: default; }
 
 @media (max-width: 480px) {
   .announcement-overlay {
@@ -5344,5 +7188,1853 @@ button.my-match__opp {
     max-width: none;
     max-height: calc(100vh - 16px);
     max-height: calc(100dvh - 16px);
+  }
+}
+
+/* mp-4fd: On-deck match alert banner */
+.match-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  animation: match-alert-slide-in 0.25s ease-out;
+}
+
+@keyframes match-alert-slide-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .match-alert-banner { animation: none; }
+}
+
+.match-alert-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.match-alert-banner__badge {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.match-alert-banner__text {
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-alert-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.match-alert-banner__dismiss {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+}
+
+.match-alert-banner__dismiss:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* mp-4fd: shared "✕ Clear" button for the followed-player indicator. */
+.btn--clear-follow {
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+}
+
+/* ============================================================
+   TV scoreboard — Aka/Shiro colored half-panels (display.jsx
+   TvDisplay). Fullscreen per-court board; vw/vh units so it
+   scales to any TV. DESIGN.md §4 Aka/Shiro side treatment.
+   ============================================================ */
+.tvd-board {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  border-radius: 1vh;
+  overflow: hidden;
+}
+.tvd-side {
+  position: relative;
+  padding: 4vh 4vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1vh;
+  min-width: 0;
+}
+.tvd-side__bar { position: absolute; top: 0; left: 0; right: 0; height: 0.9vh; z-index: 2; }
+.tvd-side__lab { font-family: var(--font-impact); font-size: 2.6vh; letter-spacing: 0.14em; position: relative; z-index: 2; }
+.tvd-side__name {
+  font-family: var(--font-strong);
+  font-weight: 800;
+  font-size: 6vh;
+  line-height: 1.02;
+  position: relative; z-index: 2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tvd-side__dojo { font-size: 2.4vh; opacity: 0.55; position: relative; z-index: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* SHIRO — left: framed white + 45° hatch over the dark board */
+.tvd-side--shiro { background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)); }
+.tvd-side--shiro::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, transparent 0 1.1vh, rgba(255,255,255,0.05) 1.1vh 1.3vh);
+}
+.tvd-side--shiro .tvd-side__bar { background: #fff; }
+.tvd-side--shiro .tvd-side__lab { color: rgba(255,255,255,0.8); }
+
+/* AKA — right: red flood + glow */
+.tvd-side--aka { text-align: right; align-items: flex-end; background: linear-gradient(180deg, rgba(204,17,34,0.55), rgba(204,17,34,0.28)), #0b0d12; }
+.tvd-side--aka::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(80% 60% at 80% 0%, rgba(255,59,59,0.35), transparent 60%);
+}
+.tvd-side--aka .tvd-side__bar { background: var(--aka-bright, #ff3b3b); }
+.tvd-side--aka .tvd-side__lab { color: #ffd9dc; }
+
+/* centre — real score MK – M (Shiro white, Aka red), + decision/fouls */
+.tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: rgba(0,0,0,0.25); }
+.tvd-score { font-family: var(--font-impact); font-size: 9vh; line-height: 0.9; display: flex; align-items: center; gap: 0.18em; }
+.tvd-score__s { color: #fff; }
+.tvd-score__d { color: rgba(255,255,255,0.3); font-size: 0.55em; }
+.tvd-score__a { color: var(--aka-bright, #ff5b54); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
+.tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); letter-spacing: 0.05em; color: rgba(255,255,255,0.75); }
+.tvd-centre__fouls { font-size: 2.2vh; opacity: 0.65; font-weight: 500; }
+.tvd-centre__vs { font-family: var(--font-impact); font-size: 5vh; color: rgba(255,255,255,0.4); writing-mode: vertical-rl; }
+
+/* up-next: tiny muted note in the header (NOT a big badge) */
+.tvd-upnext-note { font: 700 2.2vh/1 var(--font-strong); letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,209,102,0.85); }
+
+/* ---------- Sponsor strip (mp-c38) ----------
+   Used on viewer home, LobbyDisplay, and TvDisplay. Three variants
+   share the base styles; per-variant overrides handle the different
+   backdrops and logo heights of each surface. */
+.sponsor-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 16px 12px;
+  margin-top: 16px;
+}
+.sponsor-strip__logo {
+  height: 40px;
+  width: auto;
+  max-width: 160px;
+  object-fit: contain;
+  display: block;
+}
+.sponsor-strip__link,
+.sponsor-strip__item {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.sponsor-strip__link:hover .sponsor-strip__logo {
+  filter: brightness(1.05);
+}
+
+/* Viewer variant — sits in the white viewer body, neutral framing. */
+.sponsor-strip--viewer {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* Lobby variant — dark lobby board; logos need a touch more breathing
+   room and a subtle backdrop so they remain legible against the dark
+   gradient behind them. */
+.sponsor-strip--lobby {
+  background: rgba(255, 255, 255, 0.04);
+  padding: 14px 24px;
+  margin-top: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sponsor-strip--lobby .sponsor-strip__logo {
+  height: 48px;
+  filter: brightness(1.1);
+}
+
+/* TV variant — fullscreen per-court board; smaller strip so it stays
+   subordinate to match info. */
+.sponsor-strip--tv {
+  /* Normal flow — not absolute. position: absolute would take the strip
+     out of flow and overlay the upcoming-matches list below it (the tvd
+     container only has 4vh bottom padding, but the strip is ~6vh tall).
+     Keeping it in flow lets the flex column stack sponsor strip under the
+     queue cards without overlap. */
+  padding: 1vh 2vw;
+  margin-top: auto; /* push to bottom of the flex column when there's space */
+  background: rgba(0, 0, 0, 0.35);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 2vw;
+}
+.sponsor-strip--tv .sponsor-strip__logo {
+  height: 5vh;
+  max-width: 12vw;
+  filter: brightness(1.05);
+}
+
+@media (max-width: 480px) {
+  .sponsor-strip__logo { height: 32px; max-width: 120px; }
+  .sponsor-strip { gap: 12px; padding: 12px 8px; }
+}
+
+/* mp-dm5e: tied standings row — amber caution highlight. Background-only,
+   matching the `.pool__row--me` row-tint idiom (no side accent).
+   Scoped to `.pool__table tr` so the amber fill wins over both `.pool__table
+   tr.advancing` (green, higher specificity) and `.pool__row--me` (navy, same
+   base specificity but defined later): a tie that needs breaking is the more
+   urgent signal, so it must not be masked for advancing qualifiers or the
+   followed player. */
+.pool__table tr.pool__row--tied { background: var(--warn-soft); }
+
+/* mp-wvkh: followed-player highlights */
+.pool__row--me { background: rgba(29,53,87,0.07); }
+/* Matrix row: top inset shadow on every cell so the highlight shows through win/loss/draw backgrounds */
+.league-matrix__row--me td,
+.league-matrix__row--me th { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35); }
+.league-matrix__row--me .league-matrix__row-head { background: rgba(29,53,87,0.07); font-weight: 700; }
+/* Matrix col: left inset shadow so it doesn't override win/loss/draw cell backgrounds */
+.league-matrix__col--me { box-shadow: inset 2px 0 0 rgba(29,53,87,0.35); font-weight: 700; }
+/* Corner cell (row and col): combine both shadows */
+.league-matrix__row--me .league-matrix__col--me { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35), inset 2px 0 0 rgba(29,53,87,0.35); }
+.bc-match--my-match { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
+.vsched-item--me { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
+
+/* App version footer at the bottom of pages */
+.app-version-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 11px;
+  /* --ink-4 (#6c7480) is only 4.44:1 on --bg — just under AA. Step to the
+     darker --ink-2 (#3a414e, 9.66:1 on --bg). Site-specific darken; do NOT
+     mutate --ink-4 itself (it's the shared fine-print floor). */
+  color: var(--ink-2);
+  padding: 16px 0;
+  margin-top: 32px;
+}
+.app-version-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+.app-version-link:hover {
+  text-decoration: underline;
+}
+.app-version-link svg {
+  margin-right: 4px;
+}
+
+/* ---------- Pool standings draw-pos default (replaces inline styles) ---------- */
+.pool-standings__draw-pos {
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+.pool-standings__draw-pos--override {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ---------- Pool table empty-state row ---------- */
+.pool__table-empty {
+  text-align: center;
+  color: var(--ink-3);
+  font-size: 13px;
+  padding: 16px;
+}
+
+/* ---------- Section-title modifiers ---------- */
+.section-title--flush { margin-top: 0; }
+.section-title--inrow { margin-top: 0; display: flex; align-items: center; gap: 8px; }
+
+/* ---------- Hint text utilities (inline note, muted) ---------- */
+.hint    { font-size: 12px; color: var(--ink-3); margin-bottom: 8px; }
+.hint--sm { font-size: 11px; color: var(--ink-3); }
+.hint--md { font-size: 13px; color: var(--ink-3); }
+
+/* ---------- Pool table cell classes (replaces inline styles) ---------- */
+.pool__match-count { font-size: 12px; color: var(--ink-3); }
+.pool__player-name { font-weight: 500; }
+.pool__dojo-name   { font-size: 11px; color: var(--ink-3); }
+
+/* ---------- Mymatch / watchlist card spacing ---------- */
+.mymatch-card { margin-bottom: 16px; }
+
+/* ---------- Watchlist card heading (not an eyebrow — no uppercase) ---------- */
+.watchlist-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.watchlist-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+  letter-spacing: -0.01em;
+}
+.watchlist-bell-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.watchlist-bell-btn:hover { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 30%); }
+.watchlist-bell-btn--muted {
+  background: transparent;
+  color: var(--ink-3);
+}
+.watchlist-bell-btn--muted:hover { background: var(--line); color: var(--ink-2); }
+
+/* vsched inside the watchlist card: flat row list, no nested card boxes.
+   Regular items become hairline-separated rows; running items keep their
+   accent ring since they carry meaningful live state. */
+.vsched--incard { gap: 0; margin-top: 12px; }
+.vsched--incard .vsched-item:not(.vsched-item--running) {
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 8px 2px;
+}
+.vsched--incard .vsched-item:not(.vsched-item--running):first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+.vsched--incard .vsched-item--running {
+  border-radius: 8px;
+  margin: 2px 0;
+}
+
+/* ---------- Checked-in tick in watchlist chips ---------- */
+.pmf__chip-tick { margin-left: 4px; font-size: 10px; }
+
+/* ---------- mp-xhaa: unified watchlist panel ---------- */
+/* The hero (navy .my-match block) now nests inside the white watchlist card.
+   It is a featured region, not a nested card (no border/shadow) — give it
+   breathing room from the picker above and drop its own bottom margin so the
+   card padding owns the trailing space. */
+.mymatch-card .my-match {
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+
+/* Slightly looser chip bar: chips can carry a pin star + remove button. */
+.watchlist-chips { gap: 6px; }
+
+/* Pin star toggles the primary entity (shown only when ≥2 entities). */
+.pmf__chip-pin {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px 0 0;
+}
+.pmf__chip-icon { font-size: 11px; opacity: 0.7; }
+
+/* Dojo chips read as a distinct entity type (neutral fill vs the player
+   chips' accent-soft). */
+.pmf__chip--dojo {
+  background: var(--line-2);
+  color: var(--ink-2);
+}
+
+/* The pinned-primary chip is filled with the accent so it's unmistakable;
+   defined after the dojo rule so it wins for a pinned dojo chip. */
+.pmf__chip.is-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.pmf__chip.is-primary .pmf__chip-pin { color: #fbbf24; }
+
+/* Dropdown dojo rows: tint the leading glyph with the accent so dojo options
+   are scannable against the player rows. */
+.pmf__option--dojo .pmf__check { color: var(--accent); font-weight: 700; }
+
+.watchlist-pin-hint { margin-top: 8px; }
+.watchlist-primary-done { margin-top: 12px; }
+
+/* ---------- Awards view header (replaces inline styles) ---------- */
+.awards__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.awards__title { margin: 0; font-size: 18px; }
+.awards__title--fs { font-size: 28px; }
+.awards__subtitle { font-size: 12px; color: var(--ink-3); }
+.awards__subtitle--fs { font-size: 16px; }
+
+/* ---------- SSE offline banner ---------- */
+.sse-offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f2e2e4; /* fallback — approximate red-10% over bg */
+  background: color-mix(in oklch, var(--red) 10%, var(--bg));
+  border: 1px solid rgba(193, 18, 31, 0.35); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--red) 35%, transparent);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+  margin-bottom: 8px;
+}
+.sse-offline-banner__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+}
+
+/* ---------- Pending deep-link follow confirmation banner ---------- */
+.pending-follow-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  font-size: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pending-follow-banner__label {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.pending-follow-banner__name {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* Vlist row with inline padding override */
+.vlist-item--row-padded { padding: 0 12px 12px; }
+/* Non-interactive vlist row — no hover cursor */
+.vlist-item--static { cursor: default; }
+
+/* ---------- PMF / player-filter utilities ---------- */
+.pmf__checkin-tag { margin-left: 8px; font-size: 9px; }
+
+/* ---------- Pool overview summary panel ---------- */
+.pool--overview-summary { padding: 14px; margin-bottom: 12px; }
+.pool__overflow-note { margin-top: 8px; }
+.pool__view-all-btn  { margin-top: 8px; font-size: 13px; padding: 0; }
+
+
+/* ---------- Toast internals (mp: ops-console toast contract) ---------- */
+/* Lay out the icon, message, and (error-only) dismiss control on one row.
+   The base .toast keeps its pill shape and single-slot positioning; this just
+   arranges the children inline and gives error toasts a tappable dismiss. */
+.toast { display: flex; align-items: center; gap: 10px; }
+.toast__icon { line-height: 1; flex: 0 0 auto; }
+.toast__msg  { flex: 1 1 auto; }
+.toast__dismiss {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin: -2px -8px -2px 0;
+  cursor: pointer;
+  pointer-events: auto; /* base .toast is pointer-events:none — re-enable so the X is clickable */
+}
+.toast__dismiss:hover { opacity: 1; }
+@media (pointer: coarse) {
+  .toast__dismiss { padding: 8px 10px; margin: -8px -10px -8px 0; }
+}
+
+/* ---------- Competition shell fallback (not-found / loading) ---------- */
+.comp-shell-actions { margin-bottom: 16px; }
+.comp-shell-msg {
+  margin: 8px auto 0;
+  max-width: 42ch;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ---------- Start-all confirm/progress/result modal ---------- */
+.start-all__lead { margin: 0 0 12px; font-size: 14px; color: var(--ink-2); }
+.start-all__list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.start-all__list--failed { list-style: none; padding-left: 0; }
+.start-all__list--failed li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--red);
+  border-radius: var(--r-sm);
+  background: var(--red-soft);
+}
+.start-all__failed-name { font-weight: 600; color: var(--ink-1); }
+.start-all__failed-reason { font-size: 12px; color: var(--ink-3); }
+.start-all__running {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+/* confirmDialog()/promptDialog() — shared modal primitive (ui.jsx DialogHost).
+   Reuses .modal-backdrop/.modal/.modal__* ; only the message + prompt input
+   need their own rules. */
+.dialog-msg {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.dialog-prompt-input {
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* ---------- Edit-tournament form stack ----------
+   The edit page is a long form split into concern-grouped cards
+   (basics, schedule, public info, access). A flex stack gives every
+   card a consistent 16px separation; the Branding + Sponsors cards
+   render inside the same stack, so the gap owns their spacing (neither
+   carries its own margin-top). */
+.edit-stack { display: flex; flex-direction: column; gap: 16px; }
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+}
+.edit-actions__note {
+  flex: 1 1 320px;
+  min-width: 240px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.edit-actions__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.edit-actions__dirty {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* Inline field-level validation error (mp-sspn) — sits directly under the
+   offending input so the message is read at its cause, not just the top banner. */
+.field__error {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--red);
+}
+
+/* Disclosure header (mp-sspn) — a card__head that toggles a collapsible
+   section. Matches the existing CourtPacePanel convention (card__title flex
+   row with a +/− indicator on the right), but uses a real <button> so
+   keyboard activation and semantics come for free. Full-width hit target. */
+.disclosure {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.disclosure__text { display: flex; flex-direction: column; gap: 2px; }
+.disclosure__toggle {
+  flex-shrink: 0;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.2;
+  color: var(--ink-3);
+}
+.disclosure:hover .disclosure__toggle { color: var(--ink-2); }
+.disclosure:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--r-sm);
+}
+
+/* ---------- Branding section (mp-scf) ----------
+   Uses the standard .card / .card__head / .card__title chrome like every
+   other settings card (mp-p1tw) — only the field-layout helpers below are
+   branding-specific. */
+.branding__colors { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.branding__colors .field { flex: 1 1 0; min-width: 160px; margin-bottom: 0; }
+.branding__logo { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 4px; }
+.branding__logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.branding__logo-actions { display: flex; justify-content: flex-end; }
+
+
+/* ── Shiaijo operator console (Direction C, mp-c2yr) ──────────────────────
+   Two-column: queue (left ~40%) + inline scoring & context (right). Stacks
+   below 900px so tablet-portrait gets scoring-on-top, queue-below. */
+.shiaijo {
+  display: grid;
+  grid-template-columns: minmax(300px, 38%) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+
+/* Shiro/Aka badges run 7px across the console; bump them on the operator
+   console so they stay legible at arm's length in a bright hall (critique
+   P2). Scoped to .shiaijo so the dense schedule editor is untouched. */
+.shiaijo .se-color-badge { font-size: 10px; padding: 2px 5px; }
+.shiaijo-sides .se-color-badge { font-size: 10px; padding: 2px 6px; }
+
+.linklike {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--accent); text-decoration: underline; cursor: pointer;
+}
+
+/* Up Next — elevated call-to-court card */
+.shiaijo-upnext__card {
+  border: 1px solid var(--accent-soft);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.shiaijo-upnext__card.is-called {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.shiaijo-upnext__time { font-size: 12px; color: var(--ink-2); font-weight: 600; }
+.shiaijo-upnext__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shiaijo-upnext__actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.shiaijo-upnext__hint { font-size: 12px; color: var(--ink-2); line-height: 1.4; }
+.shiaijo-upnext__error { font-size: 12px; color: var(--danger); margin-top: 6px; }
+
+/* Team-match lineup prompt above the inline scoring panel */
+.shiaijo-lineup-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px; border: 1px solid var(--accent-soft); border-radius: 10px;
+  background: var(--accent-soft);
+}
+.shiaijo-lineup-bar__label { font-size: 12px; color: var(--ink-2); min-width: 0; }
+
+/* Inline lineup editor (no popup) — lives in the main column where the
+   scoring panel would be. */
+.lineup-panel--inline { padding: 16px 18px; }
+
+/* Queue-row controls bar — its own full-width line below the matchup, so the
+   court picker / Score / ↑ / ↓ never crowd the names. Right-aligned; wraps if
+   the row gets very narrow. */
+.shiaijo-qrow__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.shiaijo-row__pick { padding: 2px 10px; font-size: 11px; }
+/* ↑/↓ reorder arrows: square, monospace-centred glyph so the arrow sits true. */
+.shiaijo-row__move { padding: 2px 7px; font-size: 12px; line-height: 1; min-width: 26px; text-align: center; }
+
+/* Touch devices: the Score / ↑ / ↓ controls must each meet the 44px target
+   (DESIGN.md §6 / Principle 4). The base .btn coarse rule already floors
+   height; we floor width too and widen the gap so the controls don't crowd
+   into a mis-tappable cluster. They sit on their own line, so there's room. */
+@media (pointer: coarse) {
+  .shiaijo-qrow__actions { gap: 10px; }
+  .shiaijo-row__pick,
+  .shiaijo-row__move {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Big sides block for the Up Next card */
+.shiaijo-sides { display: flex; align-items: center; gap: 12px; }
+.shiaijo-sides__side { flex: 1; min-width: 0; }
+.shiaijo-sides__side .name { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shiaijo-sides__side .dojo { font-size: 11px; color: var(--ink-3); }
+.shiaijo-sides__vs { font-size: 12px; color: var(--ink-3); }
+.shiaijo-sides--lg .name { font-size: 18px; }
+
+/* Queue row (Upcoming / Completed): a compact stacked card. The matchup gets a
+   full-width line so player NAMES stay readable in the narrow queue column;
+   meta sits above, controls below. Replaces the old wide score-edit-row grid
+   that squeezed the names to nothing. */
+.shiaijo-qrow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.shiaijo-qrow--complete { opacity: 0.72; }
+.shiaijo-qrow__top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 12px;
+}
+.shiaijo-qrow__time { font-weight: 600; color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shiaijo-qrow__state { font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: var(--ink); white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+.shiaijo-qrow__final { font-family: var(--font-sans); font-weight: 600; font-size: 10px; color: var(--ink-3); }
+/* Matchup: two equal name columns flanking the centre "vs", names hug centre. */
+.shiaijo-qrow__match { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; }
+.shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
+/* Completed result, centred on its own line below the names (the names keep the
+   full-width matchup line so they never crowd in the narrow queue column). */
+.shiaijo-qrow__result {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  margin-top: 2px;
+}
+
+/* Team encounter score in the queue row: always carries an IV label so a
+   bare figure is never shown out of context (a team number could read as
+   wins / points otherwise). */
+.shiaijo-row__teamscore { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+.shiaijo-row__iv {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--ink-3);
+  text-decoration: none;
+  border: 0;
+}
+
+.shiaijo-context__toggle {
+  background: none; border: 0; cursor: pointer; width: 100%; text-align: left;
+  display: flex; align-items: center; gap: 6px;
+}
+/* Inline "Show all N" / "Show fewer" toggle under the Completed list. */
+.shiaijo-completed__more {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.shiaijo-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
+}
+
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+   round ("Final"), so the operator knows which pool/round they'll be scoring.
+   Lighter than the .section-title above it — a secondary tier, not a peer. */
+.shiaijo-subgroup + .shiaijo-subgroup {
+  margin-top: 14px;
+}
+.shiaijo-subgroup__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+.shiaijo-subgroup__title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Context panel (collapsible) */
+.shiaijo-context { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.shiaijo-context__toggle { padding: 12px 14px; }
+.shiaijo-context__body { padding: 0 14px 14px; }
+.shiaijo-context__bracket { overflow: auto; max-height: 360px; }
+
+/* "Which pool is next" banner above the pool standings. */
+.shiaijo-context__next {
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+.shiaijo-context__next-label { color: var(--ink-3); }
+/* Reused PoolsViewer in a narrow panel: single column, no inner scroll —
+   the current pool renders in full (the operator scrolls the page, not a
+   cramped box). */
+.shiaijo-context__pools .pools-grid { grid-template-columns: 1fr; gap: 12px; }
+
+.shiaijo__placeholder { margin: 0; }
+
+/* Heads-up when a second bout is running on this court (operator started one
+   from another competition's admin view). The console officiates one bout at a
+   time, so the others are surfaced here rather than stranded. Navy = running
+   signal (Principle 3), never red. */
+.shiaijo-also-running {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--ink-1);
+}
+.shiaijo-also-running__title { font-weight: 700; font-size: 13px; }
+.shiaijo-also-running__list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.shiaijo-also-running__comp { color: var(--ink-3); }
+.shiaijo-also-running__hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Page title doubles as the court switcher: the H1 shows a chevron and a
+   transparent native <select> overlays it (native picker + a11y, no duplicate
+   control). Only rendered when there is more than one court. */
+.shiaijo-title-select {
+  position: relative;
+  display: inline-block;
+}
+.shiaijo-title-select .page-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.shiaijo-title-select__chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  line-height: 1;
+  transition: background 150ms ease, color 150ms ease;
+}
+.shiaijo-title-select:hover .shiaijo-title-select__chevron {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.shiaijo-title-select__native {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.shiaijo-title-select:focus-within .page-head__title {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Competition selector in page-head (AC3) — mirrors the Shiaijo title on the
+   right edge: the competition name gets the full display-title treatment (same
+   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
+   caption beneath that lines up with the title's own sub-caption on the left. */
+.shiaijo-officiating {
+  text-align: right;
+}
+/* Navy so the changeable competition reads distinct from the fixed court name,
+   tying it to the navy chevron chip while keeping the identical title scale. */
+.shiaijo-officiating__name {
+  color: var(--accent);
+}
+.shiaijo-officiating__sub {
+  text-align: right;
+}
+.shiaijo-title-select--right {
+  text-align: right;
+}
+
+/* Amber nudge — composes the shared .alert--warn (amber `--warn-*` tokens only,
+   never red/danger or navy/running). It is an actionable control: clicking
+   switches the page-head competition selector to the competition that needs this
+   court, so the operator never has to hunt the dropdown. */
+.shiaijo-nudge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+.shiaijo-nudge:hover {
+  background: var(--warn-border);
+}
+.shiaijo-nudge:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 2px;
+}
+.shiaijo-nudge__icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.shiaijo-nudge__text {
+  line-height: 1.4;
+  font-weight: 500;
+}
+.shiaijo-nudge__cta {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .shiaijo { grid-template-columns: 1fr; }
+  /* Stack layout for tablet portrait mode (queue below scoring). */
+  .shiaijo__queue { order: 1; }
+}
+
+/* ---------- Loading Spinner ---------- */
+.loading-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+  padding: 40px;
+  color: var(--ink);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--line);
+  border-left-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-spinner {
+    animation: none;
+    border-color: var(--accent);
+  }
+  .loading-page,
+  .loading-text {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+  }
+}
+
+/* ===========================================================================
+   Registration desk (mp-25bk) — cross-competition check-in surface.
+   Prefix: rd-. Reuses the .workspace shell, .badge, .tag-badge, .input, .select,
+   .btn, .empty, .spinner vocabulary. "Checked-in = green" matches the existing
+   seeding panel (.seed-row.is-checked-in); navy --accent is reserved for the
+   active rail selection and the search focus, per DESIGN.md Principle 3.
+   Component-local check-in greens mirror the literals already used by
+   .seed-row.is-checked-in (an established carve-out for this exact concept).
+   =========================================================================== */
+
+.rd-workspace {
+  align-items: start;
+  /* Cap the main column so the competitor's name and the number they're handed
+     read as a pair instead of being flung to opposite edges of an ultra-wide
+     row; centre the rail+main block so wide screens stay balanced rather than
+     left-shifted. The <860px media query below resets this to a single column. */
+  grid-template-columns: 240px minmax(0, 720px);
+  justify-content: center;
+}
+
+/* --- Rail: competition selector ----------------------------------------- */
+.rd-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 8px;
+  position: sticky;
+  top: 70px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+}
+
+.rd-rail__divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 4px;
+}
+
+.rd-rail__item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 9px 11px;
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.rd-rail__item:hover {
+  background: var(--line-2);
+}
+
+.rd-rail__item.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.rd-rail__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-rail__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rd-rail__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+  line-height: 1.25;
+}
+
+.rd-rail__item.is-active .rd-rail__name {
+  color: var(--accent);
+}
+
+.rd-rail__sub {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.rd-rail__bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line-2);
+  overflow: hidden;
+}
+
+.rd-rail__bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transform-origin: left;
+  transition: transform 300ms var(--ease-out);
+}
+
+.rd-rail__bar-fill.is-done {
+  background: var(--ok);
+}
+
+.rd-rail__count {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.rd-rail__count strong {
+  color: var(--ink-1);
+  font-weight: 700;
+}
+
+/* --- Main column -------------------------------------------------------- */
+.rd-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.rd-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Search is the visual anchor — largest control on the surface. */
+.rd-search {
+  position: relative;
+  flex: 1 1 320px;
+  display: flex;
+  align-items: center;
+}
+
+.rd-search__icon {
+  position: absolute;
+  left: 14px;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+
+.rd-search__input {
+  width: 100%;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 13px 40px 13px 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  color: var(--ink-1);
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
+}
+
+.rd-search__input::placeholder {
+  color: var(--ink-4);
+  font-weight: 400;
+}
+
+.rd-search__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.rd-search__clear {
+  position: absolute;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  background: var(--line-2);
+  color: var(--ink-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.rd-search__clear:hover {
+  background: var(--line);
+  color: var(--ink-1);
+}
+
+.rd-headline {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.rd-headline__metric {
+  font-size: 20px;
+  color: var(--ink-2);
+}
+
+.rd-headline__metric strong {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.rd-headline__noun {
+  font-size: 11px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+.rd-walkup-btn {
+  flex-shrink: 0;
+}
+
+/* --- Toolbar (filters) -------------------------------------------------- */
+.rd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rd-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.rd-filter .select {
+  padding: 6px 26px 6px 9px;
+  font-size: 12px;
+  width: auto;
+}
+
+.rd-toggle {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.rd-toggle:hover {
+  border-color: var(--ink-4);
+}
+
+.rd-toggle.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rd-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-toolbar__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* --- Hand-over callout: the moment after a check-in --------------------- */
+.rd-handoff {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
+  animation: rd-handoff-in 200ms var(--ease-out);
+}
+
+@keyframes rd-handoff-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.rd-handoff__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  color: var(--ok-strong);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 999px;
+}
+
+.rd-handoff__close:hover {
+  background: var(--ok-border);
+}
+
+.rd-handoff__lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ok-ink);
+}
+
+.rd-handoff__lead strong {
+  font-weight: 700;
+}
+
+.rd-handoff__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rd-handoff__tag {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rd-handoff__comp {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* --- Player tag pill (the thing handed over) ---------------------------- */
+.rd-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.rd-tag__value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.rd-tag--number {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.rd-tag--team {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font);
+}
+
+.rd-tag--team .rd-tag__value {
+  font-family: var(--font);
+}
+
+
+.rd-tag--lg {
+  padding: 7px 14px;
+}
+
+.rd-tag--lg .rd-tag__value {
+  font-size: 20px;
+}
+
+/* --- Roster rows -------------------------------------------------------- */
+.rd-roster {
+  display: flex;
+  flex-direction: column;
+}
+
+.rd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--line-2);
+  transition: background 120ms var(--ease-out);
+}
+
+.rd-row:hover {
+  background: var(--line-2);
+}
+
+.rd-row--last {
+  border-bottom-color: transparent;
+}
+
+.rd-row.is-checked {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+}
+
+.rd-row.is-checked:hover {
+  background: var(--ok-border);
+}
+
+.rd-row.is-partial {
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
+}
+
+/* The check toggle — the primary action. Generous hit area (≥44px coarse). */
+.rd-check {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.rd-check__box {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 2px solid var(--ink-4);
+  background: var(--surface);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.rd-check:hover .rd-check__box {
+  border-color: var(--ok);
+}
+
+.rd-row.is-checked .rd-check__box {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.rd-row.is-partial .rd-check__box {
+  background: var(--warn-strong);
+  border-color: var(--warn-strong);
+}
+
+.rd-check:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-check:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.rd-row__id {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rd-row__name-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.rd-row__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.rd-row__zekken {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+  background: var(--line-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.rd-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-wrap: wrap;
+}
+
+.rd-row__dojo {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.rd-row__seed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.rd-row__right {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rd-row__handover {
+  flex-shrink: 0;
+}
+
+/* Inline edit (pencil): quiet until the row is hovered/focused, so it never
+   competes with the check toggle or player tag. */
+.rd-row__edit {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  color: var(--ink-4);
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms var(--ease-out), background 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+
+.rd-row:hover .rd-row__edit,
+.rd-row__edit:focus-visible {
+  opacity: 1;
+}
+
+.rd-row__edit:hover {
+  background: var(--line-2);
+  color: var(--ink-1);
+}
+
+.rd-row__edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rd-row__edit:disabled {
+  cursor: default;
+  opacity: 0;
+}
+
+/* Touch devices have no hover — keep the pencil visible so it's reachable.
+   Also bump the check toggle to the DESIGN.md ≥44px coarse-pointer minimum. */
+@media (pointer: coarse) {
+  .rd-row__edit {
+    opacity: 1;
+  }
+  .rd-check {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.rd-edit__note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* Other-competition chips */
+.rd-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.rd-chips__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-4);
+}
+
+.rd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 120ms var(--ease-out), background 120ms var(--ease-out);
+}
+
+.rd-chip:hover:not(:disabled) {
+  border-color: var(--ok);
+}
+
+.rd-chip__mark {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--ok);
+}
+
+.rd-chip.is-checked {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok-ink);
+  cursor: default;
+}
+
+/* Player number (the tag to hand over) for this competition, shown on the chip
+   so it's visible in "all competitions" mode where there's no single tag. */
+.rd-chip__num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 1px;
+}
+
+.rd-chip.is-checked .rd-chip__num {
+  color: var(--ok-ink);
+  background: var(--surface);
+}
+
+.rd-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- Group-by-dojo ------------------------------------------------------ */
+.rd-group {
+  margin-bottom: 10px;
+}
+
+.rd-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 6px;
+  position: sticky;
+  top: 60px;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.rd-group__name {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+
+.rd-group__count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-4);
+  background: var(--line-2);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.rd-group__bulk {
+  margin-left: auto;
+}
+
+/* --- Walk-up inline form ------------------------------------------------ */
+.rd-walkup {
+  border: 1px solid var(--accent-soft);
+  background: var(--accent-soft);
+  border-radius: var(--r);
+  padding: 14px 16px;
+}
+
+.rd-walkup__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.rd-walkup__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.rd-walkup__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.rd-walkup .field__opt {
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
+.rd-walkup__actions {
+  margin-top: 12px;
+}
+
+/* --- Empty / no-match states ------------------------------------------- */
+.rd-empty {
+  margin-top: 8px;
+}
+
+.rd-empty__sub {
+  font-size: 13px;
+  color: var(--ink-2);
+  max-width: 420px;
+  margin: 4px auto 14px;
+  line-height: 1.5;
+}
+
+.rd-empty--done .icon {
+  color: var(--ok);
+  opacity: 1;
+}
+
+/* --- Responsive --------------------------------------------------------- */
+@media (max-width: 860px) {
+  .rd-workspace {
+    grid-template-columns: 1fr;
+  }
+  .rd-rail {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scroll-snap-type: x proximity;
+  }
+  .rd-rail__item {
+    width: 210px;
+    min-width: 210px;
+    max-width: 210px;
+    flex: 0 0 210px;
+    scroll-snap-align: start;
+  }
+  .rd-rail__divider {
+    width: 1px;
+    height: auto;
+    margin: 4px 2px;
+    flex: 0 0 1px;
+  }
+}
+
+@media (max-width: 560px) {
+  .rd-row {
+    flex-wrap: wrap;
+  }
+  .rd-row__handover {
+    width: 100%;
+    padding-left: 48px;
+  }
+  .rd-headline {
+    order: 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rd-handoff {
+    animation: none;
+  }
+  .rd-rail__bar-fill,
+  .rd-row,
+  .rd-check__box,
+  .rd-toggle,
+  .rd-chip,
+  .rd-search__input {
+    transition: none;
   }
 }

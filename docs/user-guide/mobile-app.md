@@ -1,6 +1,6 @@
-# Mobile / Live Tournament App
+# Mobile Tournament App
 
-The `mobile-app` command starts a live tournament management server for use **on the day of the tournament**. Any device on the same network can open the URL to view live results or — with the admin password — manage pools and scores.
+The `mobile-app` command starts a real-time tournament management server for use **on the day of the tournament**. Any device on the same network can open the URL to view real-time results or — with the admin password — manage pools and scores.
 
 ## Starting the server
 
@@ -19,6 +19,8 @@ TOURNAMENT_DATA_DIR=/path/to/data PORT=8082 bracket-creator mobile-app
 | `--folder` / `-f` | `TOURNAMENT_DATA_DIR` | `.` |
 | `--port` / `-p` | `PORT` | `8080` |
 | `--bind` / `-b` | `BIND_ADDRESS` | `localhost` |
+| (none) | `API_RATE_LIMIT` | `5000` |
+| (none) | `API_RATE_LIMIT_BURST` | `10000` |
 
 An explicit flag always wins over the env var.
 
@@ -175,15 +177,13 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 5. If the draw is satisfactory, click **Start Competition**. This transitions the status to `pools` (for mixed and Swiss formats) or `playoffs` (for playoffs-only) and exposes the matches to scorers and the public viewer.
 6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard Draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
 
-### Live tournament play
-
-#### Pools (live)
+### Pools
 
 Once the competition has started, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores — edit** tab or the dedicated score editor to record match results.
 
-#### Bracket (live)
+### Bracket
 
-After all pool matches are complete, advance the pool winners to the elimination bracket. The bracket updates live as scores come in.
+After all pool matches are complete, advance the pool winners to the elimination bracket. The bracket updates in real time as scores come in.
 
 #### Swiss format tournament flow
 

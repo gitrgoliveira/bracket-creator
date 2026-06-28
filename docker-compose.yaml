@@ -37,3 +37,35 @@ services:
       # across container restarts/recreations, preventing data loss.
       - ./tournament-data:/tournament-data
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # opt-in: uncomment the service below if you need PDF export.
+  # WARNING: pulls in LibreOffice headless (~500 MB+) — do NOT enable unless
+  # the PDF feature is required. The two services above use lean scratch images
+  # and MUST remain the default.
+  #
+  # Host port 8082 is used to avoid clashing with bracket-creator (8080) and
+  # bracket-creator-mobile (8081). All other volume/env conventions mirror the
+  # mobile service above.
+  # ---------------------------------------------------------------------------
+  # bracket-creator-mobile-pdf:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.mobile-pdf
+  #   image: ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:${VERSION:-latest}
+  #   environment:
+  #     - BIND_ADDRESS=0.0.0.0
+  #     - PORT=8080
+  #     - TOURNAMENT_DATA_DIR=/tournament-data
+  #     # Set to 'true' to enable locked password mode in production/staging environments
+  #     - LOCK_PASSWORD=false
+  #     # When LOCK_PASSWORD=true, supply a bcrypt hash of the password here:
+  #     # - TOURNAMENT_PASSWORD_HASH=
+  #   ports:
+  #     # Exposes the PDF-capable live tournament manager on host port 8082.
+  #     - "8082:8080"
+  #   volumes:
+  #     # Mounts the tournament-data folder to the host to persist live tournament state
+  #     # across container restarts/recreations, preventing data loss.
+  #     - ./tournament-data:/tournament-data
+  #   restart: unless-stopped

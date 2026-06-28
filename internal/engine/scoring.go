@@ -10,12 +10,43 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // errMatchNotFound is returned by withPoolMatch / withBracketMatch when no
 // match with the given ID exists in the respective data store.
 var errMatchNotFound = errors.New("match not found")
+
+// ErrMatchSideMismatch is returned when a score payload names competitors
+// (sideA/sideB) that differ from the match's stored pairing. Match identity
+// is fixed at generation; a score only carries the *result*, never a new
+// pairing. Rejecting prevents a malformed or buggy client from silently
+// rewriting who is in a match — the live path that produced cross-pool pool
+// rows (a stored Pool E bout overwritten with competitors from other pools).
+// Handlers map this to HTTP 409.
+var ErrMatchSideMismatch = errors.New("match side mismatch: score payload competitors differ from the stored pairing")
+
+// reconcileSides folds the stored pairing into a score payload's result.
+// An empty payload side is backfilled from the stored side (e.g. a payload
+// that omits sides, or a not-yet-resolved bracket slot). A non-empty payload
+// side that disagrees with a non-empty stored side is a mismatch — the caller
+// must reject rather than overwrite the stored competitor. Returns true on the
+// first such disagreement; result is left partially filled but is discarded by
+// the caller on mismatch.
+func reconcileSides(result *state.MatchResult, storedA, storedB string) (mismatch bool) {
+	if result.SideA == "" {
+		result.SideA = storedA
+	} else if storedA != "" && result.SideA != storedA {
+		mismatch = true
+	}
+	if result.SideB == "" {
+		result.SideB = storedB
+	} else if storedB != "" && result.SideB != storedB {
+		mismatch = true
+	}
+	return mismatch
+}
 
 // withPoolMatch atomically loads pool matches, calls mutate on the one
 // matching matchId, and saves the updated slice. Returns errMatchNotFound
@@ -60,6 +91,13 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 		for rIdx := range bracket.Rounds {
 			for mIdx := range bracket.Rounds[rIdx] {
 				if bracket.Rounds[rIdx][mIdx].ID == matchId {
+					// NOTE: no playability gate here. withBracketMatch backs the
+					// SCHEDULING mutators (UpdateMatchCourt / UpdateMatchTime),
+					// which must work on not-yet-resolved (placeholder) knockout
+					// matches so operators can pre-arrange courts/times. The
+					// per-match playability gate lives only in the SCORING paths
+					// (recordBracketMatchResult / recordBracketMatchResultTx /
+					// OverrideBracketWinner).
 					mutate(&bracket.Rounds[rIdx][mIdx])
 					return nil
 				}
@@ -101,6 +139,15 @@ func applyHansokuIppons(result *state.MatchResult) {
 	}
 }
 
+// isWinForSide reports whether subWinner indicates a win for the given
+// match-level side. It checks both the canonical match side name and the
+// sub-result-level side name (which may differ when the operator used a
+// player name instead of the team name). The subSide != "" guard prevents
+// "" == "" false-positives when sub-bout sides are unset (quick-score).
+func isWinForSide(subWinner, matchSide, subSide string) bool {
+	return subWinner == matchSide || (subSide != "" && subWinner == subSide)
+}
+
 // deriveDaihyosenWinner fills result.Winner from a completed daihyosen
 // sub-result (Position == -1) when the caller has not set it explicitly.
 // Playoff team matches end in daihyosen when IV and PW are tied; the
@@ -117,8 +164,8 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		if sub.Position != -1 || sub.Winner == "" {
 			continue
 		}
-		sideAWin := sub.Winner == result.SideA || sub.Winner == sub.SideA
-		sideBWin := sub.Winner == result.SideB || sub.Winner == sub.SideB
+		sideAWin := isWinForSide(sub.Winner, result.SideA, sub.SideA)
+		sideBWin := isWinForSide(sub.Winner, result.SideB, sub.SideB)
 		switch {
 		case sideAWin:
 			result.Winner = result.SideA
@@ -127,6 +174,84 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 		}
 		return
 	}
+}
+
+// backfillMatchIdentity preserves the participant ids stamped on a pool/league
+// match at generation, and resolves the winner id. It runs inside every
+// score-write closure right before the whole-struct `*r = *result` overwrite:
+// score requests carry side NAMES only (no ids), so without this the overwrite
+// would wipe SideAID/SideBID on the first score and break league-matrix cell
+// mapping. WinnerID is resolved from an explicit WinnerSide hint when present
+// (the only way to tell apart two participants who share a name), else from a
+// name match (unambiguous unless both sides share a name), and as a last
+// resort — for a same-name head-to-head with no side hint — from the scoreline
+// (the side with more ippons is the winner). `stored` is the on-disk record
+// (with the generation-time ids); `result` is the incoming score. Purely
+// additive — never touches name-based scoring/standings logic.
+//
+// It also preserves the daihyosen/tiebreaker rep-player names (mp-62vr) the
+// same preserve-on-empty way: once the operator records which player each team
+// fielded, a later score write that omits them (e.g. a correction that only
+// re-sends the ippons) must not wipe them. An explicit value in `result`
+// always wins, so the operator can still change the rep player.
+func backfillMatchIdentity(result, stored *state.MatchResult) {
+	if result.RepPlayerA == "" {
+		result.RepPlayerA = stored.RepPlayerA
+	}
+	if result.RepPlayerB == "" {
+		result.RepPlayerB = stored.RepPlayerB
+	}
+	if result.SideAID == "" {
+		result.SideAID = stored.SideAID
+	}
+	if result.SideBID == "" {
+		result.SideBID = stored.SideBID
+	}
+	if result.WinnerID != "" {
+		return
+	}
+	switch {
+	case result.WinnerSide == "A":
+		result.WinnerID = result.SideAID
+	case result.WinnerSide == "B":
+		result.WinnerID = result.SideBID
+	case result.Winner != "" && result.Winner == result.SideA && result.Winner != result.SideB:
+		result.WinnerID = result.SideAID
+	case result.Winner != "" && result.Winner == result.SideB && result.Winner != result.SideA:
+		result.WinnerID = result.SideBID
+	case result.Winner != "":
+		// Same-name head-to-head (Winner matches both sides) with no
+		// WinnerSide hint — e.g. the admin score editor, which picks a
+		// winner by name. The winning side usually has more ippons, so
+		// infer from the scoreline. Equal counts (hantei/undecidable) or a
+		// draw (empty Winner) leave WinnerID empty → name fallback.
+		switch a, b := countScoringIppons(result.IpponsA), countScoringIppons(result.IpponsB); {
+		case a > b:
+			result.WinnerID = result.SideAID
+		case b > a:
+			result.WinnerID = result.SideBID
+		}
+	}
+}
+
+// defaultWinIppon is the FIK maru "○" (U+25CB) written into a winner's
+// ippon slots for a default win (fusensho/fusenpai/kiken/daihyosen): no
+// technique was struck, so a waza letter (M/K/D/T/H) would misrepresent the
+// scoreline. Centralised so the two RecordDecision twins (eligibility.go,
+// scoring_tx.go) can't drift onto a Unicode lookalike. countScoringIppons
+// still counts it — it is non-empty and not the "•" placeholder.
+const defaultWinIppon = "○"
+
+// countScoringIppons counts real ippon marks, ignoring empty entries and the
+// "•" placeholder the UI uses for an unfilled slot.
+func countScoringIppons(ippons []string) int {
+	n := 0
+	for _, v := range ippons {
+		if v != "" && v != "•" {
+			n++
+		}
+	}
+	return n
 }
 
 func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.MatchResult) error {
@@ -139,19 +264,20 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 // RecordMatchResult calls this after applyHansokuIppons; the K3 rollback
 // path calls it directly to restore the prior result byte-for-byte.
 func (e *Engine) writeMatchResult(compId string, matchId string, result *state.MatchResult) error {
+	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
-		}
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -161,6 +287,8 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
 			return err
 		}
+	} else if sideMismatch {
+		return ErrMatchSideMismatch
 	}
 	// Side-effect writes are non-fatal: the match score is already on disk,
 	// so propagating would cause a 500 retry that double-records the score.
@@ -192,19 +320,20 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// ineligibility write below fails with AlreadyIneligibleError.
 	prior, _ := e.lookupExistingResult(compId, matchId)
 
+	var sideMismatch bool
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
-		}
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -214,6 +343,8 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		if err := e.recordBracketMatchResult(compId, matchId, result); err != nil {
 			return nil, err
 		}
+	} else if sideMismatch {
+		return nil, ErrMatchSideMismatch
 	}
 	status, err := e.recordIneligibilityFromDecision(compId, matchId, result)
 	if err != nil {
@@ -275,7 +406,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 //
 // Once team-pool-rotation or per-round elimination lineups land, this
 // helper grows the bracket-scan lookup. The store-side
-// roundHasLiveOrCompletedMatchLocked in state/team_lineup.go already
+// roundHasRunningOrCompletedMatchLocked in state/team_lineup.go already
 // handles per-round bracket inspection — the gap is just the
 // matchId→round mapping here.
 //
@@ -355,17 +486,48 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 	return e.CalculatePoolStandings(compId)
 }
 
+// poolStandingsLoader is the read surface computeStandingsFrom needs. Both
+// *state.Store and state.StoreTx satisfy it (identical signatures), so the
+// single scoring core below can run either against the cached/single-flight
+// store path (CalculatePoolStandings) or inside a write transaction (the
+// mp-e2k1 pool-rescore guard in scoring_tx.go), with NO duplicated formula.
+type poolStandingsLoader interface {
+	LoadCompetition(compID string) (*state.Competition, error)
+	LoadPools(compID string) ([]helper.Pool, error)
+	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+}
+
+// computeStandings is the non-tx standings core. It delegates to the shared
+// computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
+// grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	pools, err := e.store.LoadPools(compId)
+	return e.computeStandingsFrom(e.store, compId)
+}
+
+// computeStandingsFrom is the single source of truth for pool standings. It
+// reads pools/matches/competition through loader (so a transaction can pass a
+// StoreTx and see its just-applied write), and reads overrides via
+// e.store.LoadOverrides directly — overrides are read-only in the scoring path
+// and are not part of any transaction's mutation set, so no tx variant is
+// needed.
+func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
+	pools, err := loader.LoadPools(compId)
 	if err != nil {
 		return nil, err
 	}
-	results, err := e.store.LoadPoolMatches(compId)
+	results, err := loader.LoadPoolMatches(compId)
 	if err != nil {
 		return nil, err
 	}
 
-	comp, _ := e.store.LoadCompetition(compId)
+	comp, err := loader.LoadCompetition(compId)
+	if err != nil {
+		// Propagate a genuine read/parse fault rather than silently proceeding
+		// with comp==nil, which would pick the wrong scoring mode (individual vs
+		// team) and undermine the tx guard's fail-closed intent. A genuinely
+		// absent competition maps to (nil, nil) and is left as individual mode.
+		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
+	}
 	isTeam := comp != nil && comp.TeamSize > 0
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool
@@ -418,8 +580,8 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 
 			if isTeam && len(m.SubResults) > 0 {
 				for _, sub := range m.SubResults {
-					sideAWin := sub.Winner == m.SideA || sub.Winner == sub.SideA
-					sideBWin := sub.Winner == m.SideB || sub.Winner == sub.SideB
+					sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
+					sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
 					switch {
 					case sideAWin:
 						sA.IndividualWins++
@@ -448,21 +610,17 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 		var sorted []state.PlayerStanding
 		for _, s := range playerStandings {
 			if isTeam {
-				// Team weighted score (Excel formula):
-				// W × 1B − L × 10M + T × 100K + IV × 1000 − IL × 100 + IT × 10 + PW − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000_000 - s.Losses*1_000_000_000 + s.Draws*10_000_000 +
-					s.IndividualWins*100_000 - s.IndividualLosses*10_000 + s.IndividualDraws*1_000 +
-					s.PointsWon*100 - s.PointsLost
+				// Single packed ranking score over the full team tiebreak chain
+				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
+				s.Points = teamStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | IV:%d IL:%d IT:%d | PW:%d PL:%d",
 					s.Wins, s.Losses, s.Draws,
 					s.IndividualWins, s.IndividualLosses, s.IndividualDraws,
 					s.PointsWon, s.PointsLost)
 			} else {
-				// Individual weighted score (Excel formula):
-				// W × 1,000,000 − L × 10,000 + D × 100 + PW × 1 − PL × 0.01
-				// Scaled by 100 to use integers:
-				s.Points = s.Wins*100_000_000 - s.Losses*1_000_000 + s.Draws*10_000 + s.IpponsGiven*100 - s.IpponsTaken
+				// Single packed ranking score over the individual chain
+				// (W, L, D, ippons given, ippons taken). See individualStandingPoints.
+				s.Points = individualStandingPoints(*s)
 				s.ScoreSummary = fmt.Sprintf("W:%d L:%d D:%d | P:%d-%d",
 					s.Wins, s.Losses, s.Draws, s.IpponsGiven, s.IpponsTaken)
 			}
@@ -473,70 +631,22 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 			return sorted[i].Points > sorted[j].Points
 		})
 
-		// Apply tiebreaker results as a secondary sort within tied groups.
-		// Win counts are scoped per group: only TB matches between the players
-		// in the same tied group influence that group's ordering, preventing
-		// wins from an unrelated tied group from bleeding into another.
-		for i := 0; i < len(sorted); {
-			j := i + 1
-			for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-				j++
-			}
-			if j-i >= 2 {
-				groupNames := make(map[string]bool, j-i)
-				for k := i; k < j; k++ {
-					groupNames[sorted[k].Player.Name] = true
-				}
-				groupTBWins := map[string]int{}
-				for _, m := range matches {
-					if !IsTiebreakerMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-						continue
-					}
-					if groupNames[m.SideA] && groupNames[m.SideB] {
-						groupTBWins[m.Winner]++
-					}
-				}
-				if len(groupTBWins) > 0 {
-					sort.SliceStable(sorted[i:j], func(a, b int) bool {
-						return groupTBWins[sorted[i+a].Player.Name] > groupTBWins[sorted[i+b].Player.Name]
-					})
-				}
-			}
-			i = j
+		// Apply supplementary-bout results as a secondary sort within each tied
+		// group (groups located by the single detectPoolTies Points-equality
+		// walk). Win counts are scoped per group — only bouts between members of
+		// the same tied group count — so results from an unrelated tied group
+		// never bleed across. TB (ippon-shobu) applies to all formats; DH
+		// (representative) only to team competitions.
+		applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
+		if isTeam {
+			applyTiebreakSort(sorted, matches, IsPoolDaihyosenMatchID)
 		}
 
-		// Apply pool-daihyosen results as a secondary sort within tied groups
-		// for team competitions. Mirrors the TB block above: DH wins are scoped
-		// per tied group to prevent cross-group bleed.
-		if isTeam {
-			for i := 0; i < len(sorted); {
-				j := i + 1
-				for j < len(sorted) && sorted[j].Points == sorted[i].Points {
-					j++
-				}
-				if j-i >= 2 {
-					groupNames := make(map[string]bool, j-i)
-					for k := i; k < j; k++ {
-						groupNames[sorted[k].Player.Name] = true
-					}
-					groupDHWins := map[string]int{}
-					for _, m := range matches {
-						if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-							continue
-						}
-						if groupNames[m.SideA] && groupNames[m.SideB] {
-							groupDHWins[m.Winner]++
-						}
-					}
-					if len(groupDHWins) > 0 {
-						sort.SliceStable(sorted[i:j], func(a, b int) bool {
-							return groupDHWins[sorted[i+a].Player.Name] > groupDHWins[sorted[i+b].Player.Name]
-						})
-					}
-				}
-				i = j
-			}
-		}
+		// Detect ties before applying manual rank overrides. detectPoolTies walks
+		// adjacent elements, so it must run while the slice is still Points-sorted.
+		// Overrides only change the display order; the underlying scoring tie is real
+		// regardless of how the operator chose to resolve it.
+		markTiedStandings(comp, sorted, poolResults[p.PoolName])
 
 		// Apply manual rank overrides
 		overrides, _ := e.store.LoadOverrides(compId)
@@ -572,6 +682,134 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 	return allStandings, nil
 }
 
+// markTiedStandings sets Tied=true on standings rows that are genuinely tied
+// (same Points on every criterion) and where the tie is visible/consequential
+// given the competition format and match-completion state.
+//
+// Gating rules by format:
+//
+//   - Pools (not league): mark tied groups only after ALL regular matches in
+//     that pool are complete. Regular = excludes TB ("-TB-") and DH ("-DH-")
+//     supplementary bouts. Pre-completion the rank is provisional, so no amber.
+//
+//   - League (comp.Format == state.CompFormatLeague), both team and individual:
+//     EMERGING-TIE trigger. Once ANY of the top-N competitors (N =
+//     effectiveTopN(comp), clamped to pool size) has completed ALL their own
+//     regular fights, mark Tied=true on every tied group whose MinPosition <=
+//     effectiveTopN AND that is not covered by the two-joint-3rd-places
+//     exemption (LeagueTwoThirdPlaces + MinPosition >= 3).
+//
+// matches contains only the regular+supplementary matches for this specific
+// pool (already filtered upstream by poolNameFromMatchID).
+func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
+	if len(sorted) == 0 {
+		return
+	}
+
+	// Separate regular matches (exclude supplementary TB/DH bouts).
+	var regularMatches []state.MatchResult
+	for _, m := range matches {
+		if !IsTiebreakerMatchID(m.ID) && !IsPoolDaihyosenMatchID(m.ID) {
+			regularMatches = append(regularMatches, m)
+		}
+	}
+
+	isLeague := comp != nil && comp.Format == state.CompFormatLeague
+
+	if isLeague {
+		markTiedStandingsLeague(comp, sorted, regularMatches)
+	} else {
+		markTiedStandingsPools(sorted, regularMatches)
+	}
+}
+
+// markTiedStandingsPools marks tied rows in a pools (non-league) competition.
+// Rows are only marked once ALL regular matches in the pool are complete.
+func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+	// Gate: there must be at least one regular match, and all must be completed.
+	// With no matches at all the pool hasn't started — everyone is tied at 0
+	// points, which must NOT surface as amber.
+	if len(regularMatches) == 0 {
+		return
+	}
+	for _, m := range regularMatches {
+		if m.Status != state.MatchStatusCompleted {
+			return // pool not yet finished — no amber
+		}
+	}
+
+	// Pool is complete; mark every tied group.
+	for _, positions := range detectPoolTies(sorted) {
+		for _, idx := range positions {
+			sorted[idx].Tied = true
+		}
+	}
+}
+
+// markTiedStandingsLeague marks tied rows in a league competition using the
+// emerging-tie trigger: once ANY top-N competitor has finished all their own
+// regular fights, mark consequential tied groups amber. Works for both team
+// and individual leagues.
+func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+	topN := min(effectiveTopN(comp), len(sorted))
+
+	// Build per-competitor regular match counts and completion status.
+	// A competitor is "done" when every regular match they appear in is Completed.
+	type compStatus struct {
+		total     int
+		completed int
+	}
+	status := make(map[string]*compStatus, len(sorted))
+	for _, s := range sorted {
+		status[s.Player.Name] = &compStatus{}
+	}
+	for _, m := range regularMatches {
+		if _, okA := status[m.SideA]; okA {
+			status[m.SideA].total++
+			if m.Status == state.MatchStatusCompleted {
+				status[m.SideA].completed++
+			}
+		}
+		if _, okB := status[m.SideB]; okB {
+			status[m.SideB].total++
+			if m.Status == state.MatchStatusCompleted {
+				status[m.SideB].completed++
+			}
+		}
+	}
+
+	// Check if ANY top-N competitor has completed all their own fights.
+	triggerFired := false
+	for i := range topN {
+		name := sorted[i].Player.Name
+		cs := status[name]
+		if cs != nil && cs.total > 0 && cs.completed == cs.total {
+			triggerFired = true
+			break
+		}
+	}
+	if !triggerFired {
+		return
+	}
+
+	// Trigger has fired: mark tied groups that intersect the top-N band and
+	// are not covered by the two-joint-3rd-places exemption.
+	for _, positions := range detectPoolTies(sorted) {
+		minPos := positions[0] + 1 // 1-based
+		g := TiedGroup{
+			Teams:       standingsAt(sorted, positions),
+			MinPosition: minPos,
+			MaxPosition: positions[len(positions)-1] + 1,
+		}
+		if !isConsequentialTie(g, comp) {
+			continue
+		}
+		for _, idx := range positions {
+			sorted[idx].Tied = true
+		}
+	}
+}
+
 // recordBracketMatchResult is the main bracket-side scoring path. It
 // runs the entire mutation (find target match, set winner/status/
 // scores, propagate winner to subsequent rounds) under the per-
@@ -594,16 +832,23 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchId {
+					// A knockout match is playable only once both sides are
+					// resolved competitors (feeder pools/matches finished). This
+					// replaces the old bracket-wide Preview gate so the knockout
+					// fills in incrementally as pools qualify.
+					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
+						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchId)
+					}
 					// Merge stored sides into result when the payload omitted
 					// them so that deriveDaihyosenWinner can map a
 					// representative player name back to the canonical team
 					// name. Must happen before deriveDaihyosenWinner and
-					// before writing result.Winner back to the bracket.
-					if result.SideA == "" {
-						result.SideA = m.SideA
-					}
-					if result.SideB == "" {
-						result.SideB = m.SideB
+					// before writing result.Winner back to the bracket. A
+					// non-empty payload side that disagrees with the resolved
+					// bracket side is rejected — a score must not rewrite the
+					// seeded pairing.
+					if reconcileSides(result, m.SideA, m.SideB) {
+						return ErrMatchSideMismatch
 					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
@@ -627,6 +872,15 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					if result.ResultSource != "" {
+						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
+					}
+					// Twin parity with recordBracketMatchResultTx (scoring_tx.go):
+					// carry the operator correction note when set, so the non-tx
+					// write path doesn't silently drop it for a future caller.
+					if result.CorrectionReason != "" {
+						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
+					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
@@ -822,6 +1076,9 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			for mIdx := range bracket.Rounds[rIdx] {
 				m := &bracket.Rounds[rIdx][mIdx]
 				if m.ID == matchId {
+					if !bracketMatchPlayable(m) {
+						return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+					}
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted

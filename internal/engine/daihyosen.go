@@ -1,4 +1,4 @@
-// Package engine — daihyosen (representative-bout) play-off for tied
+// Package engine — daihyosen (representative-bout) tie-breaker for tied
 // knockout-stage team matches.
 //
 // Daihyosen is the FIK tie-breaker for knockout team matches that end
@@ -188,6 +188,12 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	}
 	poolDH := map[string]*poolDHInfo{}
 	poolCourt := map[string]string{}
+	// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
+	// is not yet completed. Daihyosen tie-breaks must only be injected after a
+	// pool's regular round-robin is finished — otherwise a partial-result tie
+	// would inject DH matches that a later result breaks, orphaning them. (See
+	// the matching guard in InjectTiebreakerMatches.)
+	regularIncomplete := map[string]bool{}
 	for _, m := range allMatches {
 		pn, ok := poolNameFromMatchID(m.ID)
 		if !ok {
@@ -207,11 +213,17 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			}
 			poolDH[pn].count++
 			poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+		} else if m.Status != state.MatchStatusCompleted {
+			regularIncomplete[pn] = true
 		}
 	}
 
 	var injected []state.MatchResult
 	for poolName, poolStandings := range standings {
+		// Don't inject daihyosen until the pool's regular matches are all done.
+		if regularIncomplete[poolName] {
+			continue
+		}
 		info := poolDH[poolName]
 		existingCount := 0
 		existingPairs := map[string]bool{}
@@ -220,7 +232,8 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			existingPairs = info.existingPairs
 		}
 
-		for _, group := range detectPoolTies(poolStandings) {
+		for _, positions := range detectPoolTies(poolStandings) {
+			group := standingsAt(poolStandings, positions)
 			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)
@@ -283,8 +296,8 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 		if sub.Position < 0 {
 			continue
 		}
-		sideAWin := sub.Winner == sideAName || sub.Winner == sub.SideA
-		sideBWin := sub.Winner == sideBName || sub.Winner == sub.SideB
+		sideAWin := isWinForSide(sub.Winner, sideAName, sub.SideA)
+		sideBWin := isWinForSide(sub.Winner, sideBName, sub.SideB)
 		switch {
 		case sideAWin:
 			a.IndividualWins++

@@ -33,7 +33,8 @@ func TestNewRouter(t *testing.T) {
 	}
 	res := resources.NewResources(nil, mockFS)
 
-	r, _ := NewRouter(store, eng, res, NewFileVerifier(store))
+	r, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
 
 	// Test Health check
 	w := httptest.NewRecorder()
@@ -61,7 +62,7 @@ func TestNewRouter(t *testing.T) {
 		w = httptest.NewRecorder()
 		req, _ = http.NewRequest("GET", asset, nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "expected 200 for %s", asset)
+		assert.Equalf(t, http.StatusOK, w.Code, "expected 200 for %s", asset)
 	}
 
 	// Test SPA Fallback

@@ -23,6 +23,7 @@ type poolOptions struct {
 	seedsPath       string
 	outputWriter    *bufio.Writer
 	roundRobin      bool
+	poolFormat      string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
@@ -235,8 +236,13 @@ func (o *poolOptions) createPools(entries []string) error {
 	// divide the tree depending on the number of pages
 	subtrees := helper.SubdivideTree(tree, numPages)
 
-	// Create pool matches and get winners BEFORE creating tree sheets
-	if o.roundRobin {
+	// Create pool matches and get winners BEFORE creating tree sheets.
+	// Mirror the engine's authoritative PoolFormat × RoundRobin mapping
+	// (internal/engine/pools.go) so an exported partial-pool competition
+	// gets the path-graph match set, not full round-robin.
+	if o.poolFormat == "partial" {
+		helper.CreatePartialPoolMatches(pools)
+	} else if o.roundRobin {
 		helper.CreatePoolRoundRobinMatches(pools)
 	} else {
 		helper.CreatePoolMatches(pools)
@@ -288,7 +294,7 @@ func (o *poolOptions) createPools(entries []string) error {
 
 	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, o.courts, playerCoords)
 
-	if err := helper.CreateTagsSheet(f, pools); err != nil {
+	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 

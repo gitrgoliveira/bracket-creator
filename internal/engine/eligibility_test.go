@@ -21,7 +21,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-blocked"
 
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	// Seed participants with explicit UUIDs — state.LoadParticipants
 	// only treats the first column as an ID when it parses as UUID v4.
@@ -51,7 +51,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 
 	err := eng.StartMatch(compID, "Pool A-0")
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want errors.Is == ErrIneligibleCompetitor, got %v", err)
+	assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "want errors.Is == ErrIneligibleCompetitor, got %v", err)
 
 	var ineligErr *IneligibleCompetitorError
 	require.ErrorAs(t, err, &ineligErr)
@@ -70,7 +70,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 		t.Helper()
 		eng, store, _ := setupTestEngine(t)
 		compID := "undo-test"
-		createTestCompetition(t, store, compID, "mixed", 3)
+		createTestCompetition(t, store, compID, "league", 3)
 
 		aliceID := helper.NewUUID4()
 		bobID := helper.NewUUID4()
@@ -128,7 +128,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 
 		_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken", "shiro", "scoring fix", nil, false)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, ErrDecisionLocked), "want ErrDecisionLocked, got %v", err)
+		assert.Truef(t, errors.Is(err, ErrDecisionLocked), "want ErrDecisionLocked, got %v", err)
 	})
 
 	t.Run("force=true bypasses the decision lock", func(t *testing.T) {
@@ -174,6 +174,35 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 	})
 }
 
+// TestRecordDecision_DefaultWinIpponMarkers pins that a default-win
+// decision auto-fills the winner's ippon slots with the FIK maru "○"
+// marker, not a waza letter: no technique was struck, so "M" (Men)
+// would misrepresent the scoreline (mp-lybf).
+func TestRecordDecision_DefaultWinIpponMarkers(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "default-win-marker"
+	createTestCompetition(t, store, compID, "league", 2)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	// decisionBy "shiro" → Bob (shiro/SideB) is the no-show, so Alice
+	// (aka/SideA) is the survivor and her IpponsA carries the fill.
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "fusensho", "shiro", "no-show", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsA)
+	assert.Empty(t, result.IpponsB)
+}
+
 // TestRecordDecision_ConcurrentKiken verifies CHK047/T105: when two
 // operators on different courts simultaneously try to kiken the same
 // player, the second call returns *AlreadyIneligibleError (HTTP 409
@@ -181,7 +210,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "concurrent-kiken"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -234,7 +263,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "race-kiken"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -299,7 +328,7 @@ func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
 func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "fusensho-bypass"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -321,7 +350,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	// Now record fusensho on Alice in Pool A-1. This should NOT trip the
 	// concurrent-kiken guard — fusensho doesn't write ineligibility.
 	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "shiro", "default win", nil, false)
-	assert.NoError(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
+	assert.NoErrorf(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
 }
 
 // TestCheckEligibility_AllEligible verifies that CheckEligibility returns
@@ -329,7 +358,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 func TestCheckEligibility_AllEligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-all"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	err := eng.CheckEligibility(compID, []string{"pid1", "pid2", ""})
 	assert.NoError(t, err)
@@ -341,7 +370,7 @@ func TestCheckEligibility_AllEligible(t *testing.T) {
 func TestCheckEligibility_OneIneligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-one"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
 		PlayerID: "ineligible-pid",
@@ -364,7 +393,7 @@ func TestCheckEligibility_OneIneligible(t *testing.T) {
 func TestCheckEligibility_EmptyIDsSkipped(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "elig-empty"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	err := eng.CheckEligibility(compID, []string{"", ""})
 	assert.NoError(t, err)
@@ -703,7 +732,7 @@ func TestRecordDecision_KikenReinstateable(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			eng, store, _ := setupTestEngine(t)
 			compID := "reinstateable-test-" + tc.decision
-			createTestCompetition(t, store, compID, "mixed", 2)
+			createTestCompetition(t, store, compID, "league", 2)
 
 			aliceID := helper.NewUUID4()
 			require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -731,7 +760,7 @@ func TestRecordDecision_KikenReinstateable(t *testing.T) {
 func TestReinstateCompetitor(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "reinstate-test"
-	createTestCompetition(t, store, compID, "mixed", 2)
+	createTestCompetition(t, store, compID, "league", 2)
 
 	playerID := helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -882,4 +911,363 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 		}
 	}
 	require.True(t, found, "second match must exist in bracket after rollback")
+}
+
+// TestStartMatch_RejectsSimultaneousMatch verifies the simultaneity gate
+// (Phase 2c): when a participant is already Running in another match within
+// the same competition, StartMatch must return *IneligibleCompetitorError
+// matching errors.Is(err, ErrIneligibleCompetitor) with a reason that
+// mentions "already fighting".
+func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
+	t.Run("pool match running blocks second pool match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-pool"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Running), A-2: Alice vs Charlie (Scheduled)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "A-1", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusScheduled},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		require.Error(t, err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor, got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+
+	t.Run("SideB participant running blocks second match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-sideb"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Running). A-1: Charlie vs Bob (Scheduled).
+		// Bob (SideB of A-0) is running — starting A-1 should be blocked.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "A-1", SideA: "Charlie", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-1")
+		require.Error(t, err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+
+	t.Run("completed match does not block new match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-completed"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Completed). A-2: Alice vs Charlie (Scheduled).
+		// Completed match must NOT block Alice from starting A-2.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		assert.NoError(t, err, "completed match must not block the simultaneity check")
+	})
+
+	t.Run("scheduled match does not block new match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-scheduled"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// A-0: Alice vs Bob (Scheduled). A-2: Alice vs Charlie (Scheduled).
+		// Another scheduled match must NOT block.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+
+		err := eng.StartMatch(compID, "A-2")
+		assert.NoError(t, err, "scheduled match must not block the simultaneity check")
+	})
+
+	t.Run("bracket match running blocks pool match for same participant", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-bracket"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		charlieID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+			{ID: charlieID, Name: "Charlie", Dojo: "C"},
+		}))
+
+		// Alice is Running in a bracket match; trying to start a pool match
+		// involving Alice should be blocked.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+		}))
+		require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "B-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "C"},
+				},
+			},
+		}))
+
+		err := eng.StartMatch(compID, "P-0")
+		require.Error(t, err)
+		assert.Truef(t, errors.Is(err, ErrIneligibleCompetitor), "got %v", err)
+
+		var ineligErr *IneligibleCompetitorError
+		require.ErrorAs(t, err, &ineligErr)
+		assert.Contains(t, ineligErr.Reason, "already fighting")
+	})
+}
+
+// TestStartMatch_CourtExclusivity verifies mp-95mg: StartMatch and
+// StartMatchTx must reject starting a match on a court that already
+// has a running match, across ALL competitions sharing the tournament.
+func TestStartMatch_CourtExclusivity(t *testing.T) {
+	t.Run("court busy in same competition blocks new match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "court-same-comp"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.StartMatch(compID, "m2")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, err, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "m1", courtErr.MatchID)
+	})
+
+	t.Run("court busy in different competition blocks new match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		// comp1 has a running match on court A.
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		// comp2 wants to start a match on court A.
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.StartMatch("comp2", "m2")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, err, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "m1", courtErr.MatchID)
+		assert.Equal(t, "comp1", courtErr.CompID)
+	})
+
+	t.Run("free court allows match to start", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "court-free"
+		createTestCompetition(t, store, compID, "league", 3)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+
+		// Use hyphenated IDs so they survive the CSV round-trip used by the
+		// tx-path simultaneity check (LoadPoolMatchesLocked reads disk).
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "P-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		// P-1 is on court A which is free — but Alice is also in P-0 on court B.
+		// Court check passes, but player simultaneity should block it.
+		err := eng.StartMatch(compID, "P-1")
+		require.Error(t, err, "Alice is already fighting; StartMatch should return an error")
+		assert.False(t, errors.Is(err, ErrCourtBusy), "court A is free; should not get ErrCourtBusy")
+		assert.True(t, errors.Is(err, ErrIneligibleCompetitor), "want ErrIneligibleCompetitor (player already fighting), got %v", err)
+	})
+
+	t.Run("match with no court assigned is never blocked by court exclusivity", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "no-court"
+		createTestCompetition(t, store, compID, "league", 3)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "m2", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: ""},
+		}))
+
+		err := eng.StartMatch(compID, "m2")
+		// No court assigned → court check skipped; other checks may pass or fail
+		// but ErrCourtBusy must not appear.
+		assert.False(t, errors.Is(err, ErrCourtBusy), "unassigned-court match must not trigger ErrCourtBusy")
+	})
+}
+
+func TestStartMatchTx_CourtExclusivity(t *testing.T) {
+	t.Run("court busy in same competition blocks via tx path", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "tx-court-same"
+		createTestCompetition(t, store, compID, "league", 3)
+		// IDs must be hyphenated (PoolName-MatchIdx) so they survive the CSV
+		// round-trip that LoadPoolMatchesLocked uses inside a transaction.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "P-1", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		var engErr error
+		txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+			engErr = eng.StartMatchTx(tx, compID, "P-1")
+			return nil
+		})
+		require.NoError(t, txErr)
+		require.Error(t, engErr)
+		assert.True(t, errors.Is(engErr, ErrCourtBusy), "want ErrCourtBusy, got %v", engErr)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, engErr, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "P-0", courtErr.MatchID)
+	})
+
+	// Cross-competition court detection is intentionally NOT performed inside
+	// StartMatchTx: calling store.RunningMatchOnCourt (which acquires read locks
+	// on all other competitions) while holding compID's write lock via
+	// WithTransaction risks a circular-wait deadlock. The check is split: callers
+	// must invoke CheckCrossCompCourtBusy BEFORE entering WithTransaction.
+	t.Run("court busy in different competition does NOT block via tx path", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		// StartMatchTx only performs the intra-comp check; it should NOT return
+		// ErrCourtBusy for a cross-comp conflict (that is caught pre-tx by
+		// CheckCrossCompCourtBusy — tested below).
+		var engErr error
+		txErr := store.WithTransaction("comp2", func(tx state.StoreTx) error {
+			engErr = eng.StartMatchTx(tx, "comp2", "P-0")
+			return nil
+		})
+		require.NoError(t, txErr)
+		assert.NoError(t, engErr, "StartMatchTx must not block on cross-comp court conflict (pre-tx check handles it)")
+	})
+}
+
+// TestCheckCrossCompCourtBusy verifies that CheckCrossCompCourtBusy detects
+// cross-competition court occupancy when called before entering WithTransaction.
+func TestCheckCrossCompCourtBusy(t *testing.T) {
+	t.Run("no conflict when court is free", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp1", "P-0"))
+	})
+
+	t.Run("no conflict when no other competition uses the court", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+		// Court A is busy in comp1 but comp2's match is on court B — no conflict.
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp2", "P-0"))
+	})
+
+	t.Run("conflict when other competition has a running match on same court", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		}))
+
+		createTestCompetition(t, store, "comp2", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
+			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "A"},
+		}))
+
+		err := eng.CheckCrossCompCourtBusy("comp2", "P-0")
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, ErrCourtBusy), "want ErrCourtBusy, got %v", err)
+
+		var courtErr *CourtBusyError
+		require.ErrorAs(t, err, &courtErr)
+		assert.Equal(t, "A", courtErr.Court)
+		assert.Equal(t, "comp1", courtErr.CompID)
+	})
+
+	t.Run("no error when match has no court assigned", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		createTestCompetition(t, store, "comp1", "league", 3)
+		require.NoError(t, store.SavePoolMatches("comp1", []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: ""},
+		}))
+		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp1", "P-0"))
+	})
 }

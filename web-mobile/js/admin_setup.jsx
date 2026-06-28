@@ -18,6 +18,8 @@ const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
+// mp-s1gl: link-base helpers from viewer.jsx (exposed on window at load time).
+const isNonPublicOrigin = window.isNonPublicOrigin || (() => false);
 
 // Returns the final competition name, trimming the raw user input before
 // the empty-check so a whitespace-only string ("   ") falls through to the
@@ -39,6 +41,22 @@ function deriveCompetitionName(rawName, kind, gender) {
   if (gender === "F") return "Women's Individual";
   if (gender === "M") return "Men's Individual";
   return "Individual";
+}
+
+// pickStackPredecessor returns the latest-STARTING same-day competition that the
+// new competition's default start time should stack after — or null when there
+// is no usable predecessor (the caller keeps the 09:00 default).
+//
+// Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
+// just truthy ones: the backend only length-caps StartTime (no format
+// validation), so a legacy/imported competition could carry a malformed value.
+// Including such an entry could make it the `latest` and make the caller's
+// addMinutes() emit "NaN:NaN". Comparison is numeric (minutes-since-midnight)
+// so an un-zero-padded "9:00" doesn't lex-sort after "10:00".
+function pickStackPredecessor(competitions, date) {
+  const sameDay = (competitions || []).filter((cc) => cc.date === date && timeToMinutes(cc.startTime) !== null);
+  if (sameDay.length === 0) return null;
+  return sameDay.reduce((a, b) => (timeToMinutes(b.startTime) > timeToMinutes(a.startTime) ? b : a));
 }
 
 // Pure submit-time validation for AdminCreateCompetition's pool-format
@@ -87,6 +105,12 @@ function validateSwissSettings(format, swissRounds) {
   return { ok: true, error: null };
 }
 
+// Theme normalization lives next to its canonical user, BrandingManager, so the
+// dirty-tracking snapshot here can't drift from the shape BrandingManager emits
+// (mp-sspn). Importing keeps the defaults in one place.
+import { normalizeTheme } from './admin_branding.jsx';
+import { timeToMinutes } from './admin_schedule_utils.jsx';
+
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant — auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
@@ -101,14 +125,95 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // DurationDays: default 1 for tournaments that predate this field
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
-  const [courts, setCourts] = useStateA(tournament.courts.length);
-  const [checkInStart, setCheckInStart] = useStateA(tournament.checkInWindowStart || "");
-  const [checkInEnd, setCheckInEnd] = useStateA(tournament.checkInWindowEnd || "");
+  const [courts, setCourts] = useStateA(window.courtCount(tournament.courts));
   // Tournament mode (mp-7h7): read-only after creation — shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
+  // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
+  // Empty string means "no block configured".
+  const [openingBlock, setOpeningBlock] = useStateA(tournament.openingBlock || "");
+  const [lunchBlock, setLunchBlock] = useStateA(tournament.lunchBlock || "");
+  const [closingBlock, setClosingBlock] = useStateA(tournament.closingBlock || "");
+  // mp-ef3: public tournament info fields.
+  // mp-s1gl: externally-shareable base URL for QR codes / share links.
+  const [publicURL, setPublicURL] = useStateA(tournament.publicURL || "");
+  const [venueAddress, setVenueAddress] = useStateA(tournament.venueAddress || "");
+  const [venueMapURL, setVenueMapURL] = useStateA(tournament.venueMapURL || "");
+  const [openingTime, setOpeningTime] = useStateA(tournament.openingTime || "");
+  const [closingTime, setClosingTime] = useStateA(tournament.closingTime || "");
+  const [rulesURL, setRulesURL] = useStateA(tournament.rulesURL || "");
+  const [awardsNote, setAwardsNote] = useStateA(tournament.awardsNote || "");
+  const [infoNotes, setInfoNotes] = useStateA(tournament.infoNotes || "");
+  const [contacts, setContacts] = useStateA((tournament.contacts || []).map((ct, i) => ({ ...ct, _key: i })));
+  const nextKeyRef = useRefA((tournament.contacts || []).length);
   const [pass, setPass] = useStateA(""); // Leave empty to keep existing, unless changed
   const [error, setError] = useStateA("");
+  // mp-sspn: which field the current validation error belongs to, so the
+  // message renders inline beside its cause instead of only at the page top.
+  // null = no field-scoped error (general errors still use the top banner).
+  const [errorField, setErrorField] = useStateA(null);
+  // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
+  // Initialise through normalizeTheme so the very first render holds the same
+  // shape BrandingManager emits — when the server returns theme:{} for a
+  // logo-only tournament, the raw value is a truthy empty object that would
+  // otherwise reach the dirty snapshot and the save payload as `{}` (the
+  // backend tolerates it but it's cleaner not to rely on that).
+  const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
+
+  // mp-sspn: in-flight save state — disables the primary button and swaps its
+  // label to "Saving…" so the long form's primary action gives feedback
+  // (previously it fired-and-navigated with no on-button cue). mountedRef
+  // gates the post-await setSaving so a successful save (which unmounts this
+  // view via navigation) doesn't setState on a torn-down component.
+  const [saving, setSaving] = useStateA(false);
+  // The `saving` STATE drives the button label/disabled; the savingRef LATCH
+  // is the actual re-entry guard. State updates are async, so two rapid
+  // Ctrl+S / clicks could both pass an `if (saving)` check before the
+  // re-render flips it and fire duplicate PUTs. The ref is mutated and read
+  // synchronously within the same tick, so the second call sees it.
+  const savingRef = useRefA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  // mp-sspn: refs for the four validated fields so a failed save can focus +
+  // scroll the offending input into view — on a 4-card form the top banner
+  // alone lands off-screen when Save is clicked from the bottom.
+  const nameRef = useRefA(null);
+  const dateRef = useRefA(null);
+  const daysRef = useRefA(null);
+  const courtsRef = useRefA(null);
+  const fieldRefs = { name: nameRef, date: dateRef, durationDays: daysRef, courts: courtsRef };
+
+  // mp-sspn: progressive disclosure for the long optional public-info block.
+  // Open by default only when the tournament already has public data, so
+  // existing values are never hidden behind a collapsed section.
+  const hasPublicInfo = !!(publicURL || venueAddress || venueMapURL || openingTime ||
+    closingTime || rulesURL || awardsNote || infoNotes || (contacts && contacts.length));
+  const [publicOpen, setPublicOpen] = useStateA(hasPublicInfo);
+
+  // mp-sspn: dirty tracking for the unsaved-changes cue + cancel guard.
+  // Branding colours/title ride along on "Save changes" (via onThemeChange ->
+  // theme), so they MUST count toward dirty or a branding-only edit is silently
+  // lost on cancel/navigate. The reason theme was tricky: BrandingManager fires
+  // onThemeChange on mount with a *defaults-filled* object, which differs from
+  // the raw tournament.theme and would false-dirty on load. normalizeTheme mirrors
+  // BrandingManager's own normalization (same defaults; empty/logo-only config
+  // -> null) so the pre- and post-sync snapshots compare equal.
+  const initialSnapRef = useRefA(null);
+  const [dirty, setDirty] = useStateA(false);
+  useEffectA(() => {
+    const snap = JSON.stringify({
+      name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+      publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+      awardsNote, infoNotes, pass,
+      contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
+      theme: normalizeTheme(theme),
+    });
+    if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
+    setDirty(snap !== initialSnapRef.current);
+  }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
+    publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
+    awardsNote, infoNotes, pass, contacts, theme]);
 
   // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
   // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
@@ -139,49 +244,136 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     }
   };
 
-  const handleSave = () => {
+  // mp-sspn: set a field-scoped error, then focus + scroll its input so the
+  // message is visible at its cause. Returns false so callers can `return
+  // failField(...)` in one line. The public-info fields aren't validated
+  // here, so failField only targets the four basics that are.
+  const failField = (field, message) => {
+    setError(message);
+    setErrorField(field);
+    const ref = fieldRefs[field];
+    if (ref && ref.current) {
+      try { ref.current.focus({ preventScroll: true }); } catch (_e) { ref.current.focus(); }
+      // Respect reduced-motion: smooth scroll is motion the user may have opted out of.
+      const reduce = typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      ref.current.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+    }
+    return false;
+  };
+
+  const handleSave = async () => {
+    if (savingRef.current) return; // synchronous re-entry guard (see savingRef)
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
     // raw `name` — so " Tournament " on the wire would round-trip to the
     // backend's trim and produce a canonical "Tournament" that diverges
     // from what the user sees in the input until next refresh.
     const trimmedName = name.trim();
-    if (!trimmedName) { setError("Tournament name is required."); return; }
+    if (!trimmedName) return failField("name", "Tournament name is required.");
     const { norm, error: dateError } = validateAndNormalizeDate(date);
-    if (dateError) { setError(dateError); return; }
+    if (dateError) return failField("date", dateError);
     if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > MAX_TOURNAMENT_DURATION_DAYS) {
-      setError(`Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
-      return;
+      return failField("durationDays", `Number of days must be a whole number between 1 and ${MAX_TOURNAMENT_DURATION_DAYS}.`);
     }
-    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) { setError(`Number of courts must be a whole number between 1 and ${MAX_COURTS}.`); return; }
-    if ((checkInStart && !checkInEnd) || (!checkInStart && checkInEnd)) { setError("Both check-in start and end must be set together, or both must be empty."); return; }
-    if (checkInStart && checkInEnd && checkInStart >= checkInEnd) { setError("Check-in start must be before check-in end."); return; }
-
-    onSave({
-      name: trimmedName,
-      venue: venue.trim(),
-      date: norm,
-      durationDays,
-      password: pass || undefined,
-      courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
-      checkInWindowStart: checkInStart || undefined,
-      checkInWindowEnd: checkInEnd || undefined
-    });
+    if (!Number.isInteger(courts) || courts < 1 || courts > MAX_COURTS) {
+      return failField("courts", `Number of courts must be a whole number between 1 and ${MAX_COURTS}.`);
+    }
+    setError("");
+    setErrorField(null);
+    savingRef.current = true; // latch set synchronously, before the first await
+    setSaving(true);
+    try {
+      await onSave({
+        name: trimmedName,
+        venue: venue.trim(),
+        date: norm,
+        durationDays,
+        password: pass || undefined,
+        courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
+        openingBlock: openingBlock.trim() || undefined,
+        lunchBlock: lunchBlock.trim() || undefined,
+        closingBlock: closingBlock.trim() || undefined,
+        publicURL: publicURL.trim() || undefined,
+        venueAddress: venueAddress.trim() || undefined,
+        venueMapURL: venueMapURL.trim() || undefined,
+        openingTime: openingTime.trim() || undefined,
+        closingTime: closingTime.trim() || undefined,
+        rulesURL: rulesURL.trim() || undefined,
+        awardsNote: awardsNote.trim() || undefined,
+        infoNotes: infoNotes.trim() || undefined,
+        contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
+        theme: theme || undefined,
+      });
+    } finally {
+      // Release the latch so a failed save can be retried. On success onSave
+      // navigates away (this view unmounts); the mountedRef guard skips the
+      // setState, but the ref reset is harmless either way.
+      savingRef.current = false;
+      if (mountedRef.current) setSaving(false);
+    }
   };
+
+  // mp-sspn: guard navigation away from unsaved edits AND while a save is in
+  // flight. The Cancel button is disabled via `saving`, but Esc and the
+  // breadcrumb back-link bypass that — block them too so the user can't
+  // navigate away mid-PUT and contradict the disabled affordance.
+  const handleCancel = () => {
+    if (savingRef.current) return;
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    onCancel();
+  };
+
+  // mp-sspn: keyboard accelerators — Cmd/Ctrl+S saves, Esc cancels. Latest
+  // handlers are read through refs so the once-bound listener never calls a
+  // stale closure (handleSave/handleCancel close over current form state).
+  const handleSaveRef = useRefA(handleSave);
+  handleSaveRef.current = handleSave;
+  const handleCancelRef = useRefA(handleCancel);
+  handleCancelRef.current = handleCancel;
+  useEffectA(() => {
+    const onKey = (e) => {
+      // Ignore IME composition keys (CJK input, accented chars). Without this
+      // the Escape used to cancel composition would also fire the discard
+      // confirm — silent loss of edits is the failure mode.
+      if (e.isComposing || e.keyCode === 229) return;
+      if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        handleSaveRef.current();
+      } else if (e.key === "Escape") {
+        // Escape is widely used by editable controls to dismiss their own UI
+        // (date picker calendar, native select dropdown, color picker, the
+        // address-bar autocomplete). When focus is in such a control, leave
+        // the key to the control rather than hijacking it to confirm-cancel
+        // the whole form. defaultPrevented also covers controls that have
+        // already handled the key.
+        if (e.defaultPrevented) return;
+        const t = e.target;
+        if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || "") || t.isContentEditable)) return;
+        handleCancelRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page" style={{ maxWidth: 720 }}>
         <Breadcrumbs items={[
-          { label: tournament.name, onClick: onCancel },
+          { label: tournament.name, onClick: handleCancel },
           { label: "Edit details" }
         ]} />
         <div className="page-head"><h1 className="page-head__title">Edit tournament details</h1></div>
-        {error && <div className="auth__error" style={{ marginBottom: 16 }}>{error}</div>}
+        {/* mp-sspn: top banner is only for general (non-field) errors; field- */}
+        {/* scoped validation renders inline beside its input instead. */}
+        {error && !errorField && <div className="auth__error" role="alert" style={{ marginBottom: 16 }}>{error}</div>}
+        <div className="edit-stack">
         <div className="card card--pad-lg">
+          <div className="card__head"><div className="card__title">Tournament details</div></div>
+          <div className="field"><label className="field__label">Name</label><input ref={nameRef} className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />{errorField === "name" && error && <div className="field__error" role="alert">{error}</div>}</div>
           <div className="row">
-            <div className="field"><label className="field__label">Name</label><input className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} /></div>
             <div className="field">
               <label className="field__label">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
@@ -189,14 +381,16 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {/* that validateAndNormalizeDate enforces at handleSave — */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
+              <input ref={dateRef} className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
               <div className="field__hint">Pick the first day of the tournament.</div>
+              {errorField === "date" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
             <div className="field">
               <label className="field__label">Number of days</label>
               {/* decideNumericUpdate stores NaN for cleared input so render */}
               {/* side can use Number.isFinite check (same pattern as courts). */}
               <input
+                ref={daysRef}
                 className="input"
                 type="number"
                 min="1"
@@ -207,34 +401,39 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 style={{ maxWidth: 100 }}
               />
               <div className="field__hint">{`Duration in days (1–${MAX_TOURNAMENT_DURATION_DAYS}). Multi-day tournaments constrain competitions to their day.`}</div>
+              {errorField === "durationDays" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
           </div>
-          <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
-          <div className="field">
-            <label className="field__label">Number of Shiaijo (courts)</label>
-            {/* decideNumericUpdate stores NaN for an empty input; render */}
-            {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
-            {/* attribute") and the cleared input stays visually empty. */}
-            {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
-            {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
-            {/* click can't push an invalid value to onSave. MAX_COURTS */}
-            {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
-            <input
-              className="input"
-              type="number"
-              min="1"
-              max={MAX_COURTS}
-              step="1"
-              value={Number.isFinite(courts) ? courts : ""}
-              onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
-            />
-            <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+          <div className="row">
+            <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
+            <div className="field">
+              <label className="field__label">Number of Shiaijo (courts)</label>
+              {/* decideNumericUpdate stores NaN for an empty input; render */}
+              {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
+              {/* attribute") and the cleared input stays visually empty. */}
+              {/* handleSave's Number.isInteger(courts) && courts >= 1 && */}
+              {/* courts <= MAX_COURTS guard catches NaN, so the explicit Save */}
+              {/* click can't push an invalid value to onSave. MAX_COURTS */}
+              {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
+              <input
+                ref={courtsRef}
+                className="input"
+                type="number"
+                min="1"
+                max={MAX_COURTS}
+                step="1"
+                value={Number.isFinite(courts) ? courts : ""}
+                onChange={(e) => { setCourts(decideNumericUpdate(e.target.value, 1).value); setError(""); }}
+              />
+              <div className="field__hint">{`Enter a number (1-${MAX_COURTS}). Courts will be automatically labeled A, B, C, etc.`}</div>
+              {errorField === "courts" && error && <div className="field__error" role="alert">{error}</div>}
+            </div>
           </div>
           {/* Tournament type (mp-7h7): read-only after creation. Displayed
               for information — it affects the auth boundary (officiated:
               main password gates everything; self-run: only destructive
               actions require a password). Never submitted on PUT. */}
-          <div className="field" style={{ marginTop: 16 }}>
+          <div className="field" style={{ marginBottom: 0 }}>
             <label className="field__label">Tournament type</label>
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
@@ -244,47 +443,157 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
-          <div className="row" style={{ marginTop: 16 }}>
-            <div className="field">
-              <label className="field__label">Check-in start (HH:MM)</label>
-              <input className="input" type="time" value={checkInStart} onChange={(e) => setCheckInStart(e.target.value)} />
-            </div>
-            <div className="field">
-              <label className="field__label">Check-in end (HH:MM)</label>
-              <input className="input" type="time" value={checkInEnd} onChange={(e) => setCheckInEnd(e.target.value)} />
+        </div>
+        {/* mp-zoh Phase 5: ceremony block duration inputs. These feed the */}
+        {/* schedule estimator (backend Tournament.OpeningBlock etc.). */}
+        {/* Duration strings like "30m", "1h", "1h30m". Leave blank to omit. */}
+        <div className="card card--pad-lg">
+          <div className="card__head">
+            <div>
+              <div className="card__title">Schedule blocks</div>
+              <div className="card__sub">Durations feed the schedule estimator. Leave blank to omit a block.</div>
             </div>
           </div>
+          <div className="row-3" style={{ marginBottom: 0 }}>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h").</div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
+              <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m").</div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
+              <div className="field__hint">Duration of the closing ceremony block.</div>
+            </div>
+          </div>
+        </div>
+        {/* mp-ef3: Tournament Information (Public) */}
+        {/* mp-sspn: collapsible — all fields here are optional, so the section */}
+        {/* is a disclosure that opens by default only when data already exists. */}
+        <div className="card card--pad-lg">
+          <button
+            type="button"
+            className="disclosure"
+            aria-expanded={publicOpen}
+            onClick={() => setPublicOpen((o) => !o)}
+          >
+            <span className="disclosure__text">
+              <span className="card__title">Public information</span>
+              <span className="card__sub">Shown to attendees on the public tournament page.{!publicOpen && hasPublicInfo ? " Configured." : ""}</span>
+            </span>
+            <span className="disclosure__toggle" aria-hidden="true">{publicOpen ? "−" : "+"}</span>
+          </button>
+          {publicOpen && (
+          <div style={{ marginTop: 16 }}>
+            {/* mp-s1gl: Public URL — single source of truth for externally-shareable links */}
+            <div className="field">
+              <label className="field__label">Public URL</label>
+              <input
+                className="input"
+                value={publicURL}
+                onChange={(e) => setPublicURL(e.target.value)}
+                placeholder="https://my-tournament.example.com"
+              />
+              <div className="field__hint">The address participants reach this tournament at — used for QR codes and share links. Leave blank to use the current browser address.</div>
+              {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
+                <div className="field__hint" style={{ color: "var(--red)", marginTop: 4 }}>
+                  {(() => {
+                    const o = window.location.origin;
+                    const label = (!o || o === "null") ? "an unknown local address" : o;
+                    return `Links will use this device's address (${label}), which may not be reachable by remote attendees. Set a Public URL to fix this.`;
+                  })()}
+                </div>
+              )}
+            </div>
+            <div className="field">
+              <label className="field__label">Venue address</label>
+              <input className="input" value={venueAddress} onChange={(e) => setVenueAddress(e.target.value)} placeholder="123 Sport Centre Dr, City" />
+            </div>
+            <div className="field">
+              <label className="field__label">Map link</label>
+              <input className="input" value={venueMapURL} onChange={(e) => setVenueMapURL(e.target.value)} placeholder="https://maps.google.com/..." />
+              <div className="field__hint">Link to venue on Google Maps or similar.</div>
+            </div>
+            <div className="row">
+              <div className="field">
+                <label className="field__label">Opening time</label>
+                <input className="input" type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} />
+                <div className="field__hint">Doors open / spectator arrival time.</div>
+              </div>
+              <div className="field">
+                <label className="field__label">Closing time</label>
+                <input className="input" type="time" value={closingTime} onChange={(e) => setClosingTime(e.target.value)} />
+                <div className="field__hint">Expected end time for the day.</div>
+              </div>
+            </div>
+            <div className="field">
+              <label className="field__label">Rules link</label>
+              <input className="input" value={rulesURL} onChange={(e) => setRulesURL(e.target.value)} placeholder="https://..." />
+              <div className="field__hint">Link to tournament rules document or PDF.</div>
+            </div>
+            <div className="field">
+              <label className="field__label">Awards</label>
+              <textarea className="input" rows={2} value={awardsNote} onChange={(e) => setAwardsNote(e.target.value)} placeholder="Gold, Silver, Bronze per competition" />
+            </div>
+            <div className="field">
+              <label className="field__label">Notes</label>
+              <textarea className="input" rows={3} value={infoNotes} onChange={(e) => setInfoNotes(e.target.value)} placeholder="General information for attendees" />
+            </div>
+            <div className="field">
+              <label className="field__label">Contacts</label>
+              <div className="field__hint" style={{ marginBottom: 8 }}>Add contact methods for attendees (max 10).</div>
+              {contacts.map((ct, i) => (
+                <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                  <input className="input" style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
+                  <input className="input" style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
+                  <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
+                </div>
+              ))}
+              {contacts.length < 10 && (
+                <button type="button" className="btn" style={{ fontSize: 12, marginTop: 4 }} onClick={() => setContacts([...contacts, { label: "", value: "", _key: nextKeyRef.current++ }])}>+ Add contact</button>
+              )}
+            </div>
+          </div>
+          )}
+        </div>
+        <div className="card card--pad-lg">
+          <div className="card__head"><div className="card__title">Access &amp; security</div></div>
           {locked ? (
             <div className="field">
-              <label className="field__label">Admin Password</label>
+              <label className="field__label">Admin password</label>
               <div className="field__hint" style={{ marginTop: 4 }}>
                 This server is in locked mode. The admin password comes from <code>TOURNAMENT_PASSWORD_HASH</code> and can only be rotated by restarting the server with a new hash.
               </div>
             </div>
           ) : (
             <div className="field">
-              <label className="field__label">Admin Password</label>
+              <label className="field__label">Admin password</label>
               <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
             </div>
           )}
           {/* Elevated (destructive-ops) password — spec 004 / mp-e21. */}
           {locked ? (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Destructive-ops password</label>
               <div className="field__hint" style={{ marginTop: 4 }}>
                 This server is in locked mode. The destructive-ops password comes from <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> and can only be changed by restarting the server with a new hash. If unset, destructive actions (delete competition, discard draw, roster changes, import) return 503.
               </div>
             </div>
           ) : (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
               {elevatedConfigured && (
                 <input className="input" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
               )}
               <div style={{ display: "flex", gap: 8 }}>
                 <input className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
-                <button className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
+                <button type="button" className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
                   {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
                 </button>
               </div>
@@ -293,22 +602,63 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               </div>
             </div>
           )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn btn--primary" onClick={handleSave}>Save changes</button>
+        </div>
+        {/* mp-scf: branding (colors + logo). Appears before sponsors so the
+            brand-identity section leads the page. onThemeChange propagates
+            color changes back to this component's theme state so they are
+            included in the tournament PUT payload when Save is clicked.
+            Sits above the action bar because the colors/title it edits ARE
+            committed by "Save changes"; the logo self-saves on upload. */}
+        {window.BrandingManager && (
+          <window.BrandingManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+            onThemeChange={setTheme}
+          />
+        )}
+        {/* mp-c38: sponsor management lives on the same edit page so admins
+            don't need to navigate elsewhere. SponsorsManager owns its own
+            sponsors list (seeded from the tournament prop, updated locally
+            from the API response on upload/delete) so unsaved edits in the
+            tournament form above survive a sponsor change — no page reload. */}
+        {window.SponsorsManager && (
+          <window.SponsorsManager
+            tournament={tournament}
+            password={password}
+            showToast={showToast}
+          />
+        )}
+        {/* Action bar is the page's final commit, sitting below every card it
+            (partly) persists. Branding colors + main password ride along on
+            this Save; logo, sponsors and the destructive-ops password
+            self-save via their own buttons. */}
+        <div className="edit-actions">
+          {/* mp-sspn: make the split persistence model explicit so the single */}
+          {/* Save button's scope isn't a guess. */}
+          <div className="edit-actions__note">
+            Saves the tournament details, schedule blocks, public information, branding colors, and admin password.
+            The logo, sponsors, and destructive-ops password save on their own buttons.
+          </div>
+          <div className="edit-actions__buttons">
+            {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}
+            <button type="button" className="btn" onClick={handleCancel} disabled={saving}>Cancel</button>
+            <button type="button" className="btn btn--primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
           </div>
         </div>
-
-        <div className="page-head" style={{ marginTop: 32 }}><h1 className="page-head__title">Broadcast announcement</h1></div>
-        <div className="card card--pad-lg">
-          <window.AnnouncementComposer password={password} showToast={showToast} />
         </div>
       </div>
     </div>
   );
 }
 
-function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode }) {
+// Minimum gap (minutes) stacked after the previous competition when defaulting
+// a new competition's start time. Before a competition has a roster its
+// schedule estimate is ~0, so this floor keeps successive competitions visibly
+// stacked; once a roster exists the real estimate takes over if it is larger.
+const MIN_STACK_BLOCK_MIN = 30;
+
+function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
   const [kind, setKind] = useStateA("individual");
   const [gender, setGender] = useStateA("M"); // for individual: M/F/X
@@ -319,8 +669,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // (neighbour-only) is the new option for league-sized fields where a
   // full round-robin would not fit in the day's schedule.
   const [poolFormat, setPoolFormat] = useStateA("full");
-  const [useSample, setUseSample] = useStateA(false);
-  const [sampleSize, setSampleSize] = useStateA("medium");
   const [poolMode, setPoolMode] = useStateA("max");
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
@@ -329,14 +677,54 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // matches the example in spec.md US13. Only used when format=swiss.
   const [swissRounds, setSwissRounds] = useStateA(4);
   const [startTime, setStartTime] = useStateA("09:00");
+  // Once the operator types a start time, stop auto-stacking it (see the
+  // effect below) so we never clobber a deliberate choice.
+  const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
   const [teamSize, setTeamSize] = useStateA(5);
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
-  const [selectedCourts, setSelectedCourts] = useStateA(tournament.courts.slice(0, Math.min(2, tournament.courts.length)));
+  const safeCourts = window.normalizeCourts(tournament.courts);
+  const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
+  const prevCourtsRef = useRefA(tournament.courts);
+  useEffectA(() => {
+    const prev = Array.isArray(prevCourtsRef.current) ? prevCourtsRef.current : [];
+    const curr = Array.isArray(tournament.courts) ? tournament.courts : [];
+    if (prev.length === 0 && curr.length > 0) {
+      setSelectedCourts(curr.slice(0, Math.min(2, curr.length)));
+    }
+    prevCourtsRef.current = tournament.courts;
+  }, [tournament.courts]);
   const [error, setError] = useStateA("");
+
+  // Auto-stack the default start time after the previous competition on the
+  // same day. We take the latest-STARTING same-day competition and add its
+  // estimated duration (≈0 until it has a roster) floored at MIN_STACK_BLOCK_MIN,
+  // so back-to-back creates lay out sequentially. Behaviour:
+  //  - Recomputes when the operator switches days BEFORE editing the start
+  //    time (each day has its own predecessor).
+  //  - Once the operator types a start time, startTimeEditedRef latches and
+  //    this effect short-circuits — a deliberate manual choice survives
+  //    subsequent day changes rather than being silently overwritten.
+  useEffectA(() => {
+    if (startTimeEditedRef.current) return;
+    // latest.startTime is guaranteed parseable (pickStackPredecessor filters on
+    // timeToMinutes !== null), so addMinutes() below never emits "NaN:NaN".
+    const latest = pickStackPredecessor(tournament.competitions, date);
+    if (!latest) return; // no usable predecessor → keep the 09:00 default
+    const controller = new AbortController();
+    const applyStacked = (durMin) => {
+      if (controller.signal.aborted || startTimeEditedRef.current) return;
+      const block = Math.max(Math.round(durMin || 0), MIN_STACK_BLOCK_MIN);
+      setStartTime(window.addMinutes(latest.startTime, block));
+    };
+    window.API.estimateCompetitionSchedule(latest.id, password, controller.signal)
+      .then((est) => applyStacked(est?.totalDurationMinutes))
+      .catch(() => { if (!controller.signal.aborted) applyStacked(0); });
+    return () => { controller.abort(); };
+  }, [date, tournament.competitions, password]);
 
   const toggleCourt = (cc) => setSelectedCourts((sc) => sc.includes(cc) ? sc.filter((c) => c !== cc) : [...sc, cc].sort());
 
@@ -385,8 +773,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // when kind=team. (Individual competitions don't expose this field;
     // teamSize=0 is the canonical value there.)
     if (kind === "team") {
-      if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > MAX_TEAM_SIZE) {
-        setError(`Team size must be a whole number between 1 and ${MAX_TEAM_SIZE}.`);
+      if (!Number.isInteger(teamSize)) {
+        setError('Team size must be a whole number.');
+        return;
+      }
+      if (teamSize < 2 || teamSize > MAX_TEAM_SIZE) {
+        setError(`A team needs at least 2 members (max ${MAX_TEAM_SIZE}).`);
         return;
       }
     }
@@ -420,12 +812,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       name: finalName,
       kind, gender,
       format,
-      sampleRoster: useSample ? sampleSize : null,
+      // New competitions start with an empty roster — participants (or a
+      // sample roster) are added in the Participants view, not here.
+      sampleRoster: null,
       seedCount: 0, status: "setup",
       startTime,
       date: normDate,
       teamSize: kind === "team" ? teamSize : 0,
-      courts: selectedCourts.length ? selectedCourts : [tournament.courts[0]],
+      courts: selectedCourts.length ? selectedCourts : [safeCourts[0] || "A"],
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
       withZekkenName: kind === "individual" ? withZekken : false,
@@ -496,7 +890,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
             <div className="field">
               <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
             </div>
           </div>
 
@@ -587,24 +981,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="checkbox field__label" style={{ display: "inline-flex" }}>
-              <input type="checkbox" checked={useSample} onChange={(e) => setUseSample(e.target.checked)} />
-              Pre-fill with sample roster
-            </label>
-            {useSample && (
-              <div className="radio-group" style={{ marginTop: 8 }}>
-                <button className={`radio-pill ${sampleSize === "small" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("small")}>Small (8)</button>
-                <button className={`radio-pill ${sampleSize === "medium" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("medium")}>Medium (16)</button>
-                <button className={`radio-pill ${sampleSize === "large" ? "is-active" : ""}`} type="button" onClick={() => setSampleSize("large")}>Large (32)</button>
-              </div>
-            )}
-            <div className="field__hint">Leave off to add real participants in the next step.</div>
-          </div>
-
-          <div className="field">
             <label className="field__label">Assigned shiaijo (courts)</label>
             <div className="radio-group">
-              {tournament.courts.map((cc) => (
+              {safeCourts.map((cc) => (
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
               ))}
             </div>
@@ -691,8 +1070,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-            <button className="btn" onClick={onCancel}>Cancel</button>
-            <button className="btn btn--primary" onClick={create}>Create & continue →</button>
+            <button type="button" className="btn" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn--primary" onClick={create}>Create & continue →</button>
           </div>
         </div>
       </div>
@@ -750,8 +1129,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
 
   const doImport = async () => {
     if (!files.length) return;
-    if (!confirm("Are you sure you want to import these competitions? This will add new competitions to the tournament.")) return;
-    const admin = window.promptAdminPassword();
+    if (!(await window.confirmDialog({ message: "Are you sure you want to import these competitions? This will add new competitions to the tournament.", confirmLabel: "Import competitions" }))) return;
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setLoading(true);
     setError(null);
@@ -803,7 +1182,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
       <div className="page">
         <Breadcrumbs items={[{ label: tournament?.name || "Tournament", onClick: onBack }, { label: "Import competitions" }]} />
-        <h2 style={{ margin: "0 0 16px" }}>Import competitions</h2>
+        <div className="page-head"><h1 className="page-head__title">Import competitions</h1></div>
 
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card__title">Select files</div>
@@ -813,8 +1192,8 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
               The manifest must list competitions with their CSV file names.
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-              <button className="btn btn--primary" onClick={() => folderRef.current?.click()}>Select folder</button>
-              <button className="btn" onClick={() => filesRef.current?.click()}>Select files individually</button>
+              <button type="button" className="btn btn--primary" onClick={() => folderRef.current?.click()}>Select folder</button>
+              <button type="button" className="btn" onClick={() => filesRef.current?.click()}>Select files individually</button>
             </div>
             <input ref={folderRef} type="file" style={{ display: "none" }} webkitdirectory="true" multiple onChange={e => collectFiles(e.target.files)} />
             <input ref={filesRef} type="file" style={{ display: "none" }} multiple accept=".yaml,.yml,.json,.csv,.txt" onChange={e => collectFiles(e.target.files)} />
@@ -878,10 +1257,10 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
         )}
 
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn btn--primary" onClick={doImport} disabled={!manifestFile || loading}>
+          <button type="button" className="btn btn--primary" onClick={doImport} disabled={!manifestFile || loading}>
             {loading ? "Importing…" : "Import"}
           </button>
-          <button className="btn" onClick={onBack}>Cancel</button>
+          <button type="button" className="btn" onClick={onBack}>Cancel</button>
         </div>
       </div>
     </div>
@@ -897,4 +1276,4 @@ window.AdminImportPage = AdminImportPage;
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the
 // AnnouncementComposer component they drive (mp-djc).
-export { deriveCompetitionName, validatePoolSettings, validateSwissSettings };
+export { deriveCompetitionName, validatePoolSettings, validateSwissSettings, pickStackPredecessor };

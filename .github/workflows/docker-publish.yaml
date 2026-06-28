@@ -1,36 +1,139 @@
+---
 name: Publish latest Docker image
 
-on:
+"on":
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  push_to_registry:
-    name: Push Docker image to GitHub Packages
-    runs-on: ubuntu-latest
+  build-and-push:
+    name: Build and push ${{ matrix.image.name }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        image:
+          - name: bracket-creator
+            file: Dockerfile
+            tag_suffix: ""
+          - name: bracket-creator-mobile
+            file: Dockerfile.mobile
+            tag_suffix: "-mobile"
+          - name: bracket-creator-mobile-pdf
+            file: Dockerfile.mobile-pdf
+            tag_suffix: "-mobile-pdf"
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+        with:
+          # Need tags + full history so `git describe` produces a real version
+          # for the build args below (the binary embeds these via go generate).
+          fetch-depth: 0
+
+      - name: Compute build metadata
+        id: meta
+        run: |
+          echo "version=$(git describe --tags --always --dirty 2>/dev/null \
+            || echo dev)" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          BUILD_DATE="$(date -u +'%Y-%m-%d %H:%M:%S %z')"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          # Derive the target platform from the runner arch
+          case "${{ runner.arch }}" in
+            ARM64) echo "platform=linux/arm64" >> "$GITHUB_OUTPUT" ;;
+            *)     echo "platform=linux/amd64" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Docker Registry
-        uses: docker/login-action@v4 
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
+      - name: Build and push image digest (${{ steps.meta.outputs.platform }})
+        id: build
+        uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.image.file }}
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          platforms: ${{ steps.meta.outputs.platform }}
+          # Push by digest only; the merge job assembles the manifest list.
+          # Keep this on ONE line: a YAML folded scalar would inject stray
+          # spaces into the CSV, which buildx rejects.
+          outputs: type=image,name=ghcr.io/${{ github.repository }}${{ matrix.image.tag_suffix }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ steps.meta.outputs.commit }}
+            BUILD_DATE=${{ steps.meta.outputs.build_date }}
 
-      - name: Build and push Mobile Docker image
-        uses: docker/build-push-action@v7
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v7
         with:
-          context: .
-          file: Dockerfile.mobile
-          push: true
-          tags: ghcr.io/${{ github.repository }}-mobile:latest
+          name: digest-${{ matrix.image.name }}-${{ runner.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge-manifests:
+    name: Merge manifests for ${{ matrix.image.name }}
+    runs-on: ubuntu-24.04
+    needs: build-and-push
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: bracket-creator
+            tag_suffix: ""
+          - name: bracket-creator-mobile
+            tag_suffix: "-mobile"
+          - name: bracket-creator-mobile-pdf
+            tag_suffix: "-mobile-pdf"
+    steps:
+      - name: Download AMD64 digest
+        uses: actions/download-artifact@v8
+        with:
+          name: digest-${{ matrix.image.name }}-X64
+          path: /tmp/digests
+
+      - name: Download ARM64 digest
+        uses: actions/download-artifact@v8
+        with:
+          name: digest-${{ matrix.image.name }}-ARM64
+          path: /tmp/digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        working-directory: /tmp/digests
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}${{ matrix.image.tag_suffix }}"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)

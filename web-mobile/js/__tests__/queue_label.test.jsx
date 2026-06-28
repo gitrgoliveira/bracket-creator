@@ -104,7 +104,7 @@ describe('queueLabelCompact (pill form)', () => {
     expect(queueLabelCompact({ status: 'scheduled', queuePosition: 99 })).toBe('#99');
   });
 
-  it('returns null for running matches (no pill on live row)', () => {
+  it('returns null for running matches (no pill on running row)', () => {
     expect(queueLabelCompact({ status: 'running', queuePosition: 1 })).toBeNull();
   });
 

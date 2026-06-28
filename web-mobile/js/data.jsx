@@ -209,7 +209,6 @@ function poolWinners(pools) {
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
   const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
-  console.log("buildCompetition: args", args);
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
   return {
@@ -233,7 +232,6 @@ function buildEmptyCompetition(args) {
 
 function applyFormat(c) {
   if (c.status === "setup") return c;
-  console.log("buildCompetition: c before pools/bracket", c);
   if (c.format === "mixed") {
     c.pools = buildPools(c.players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
     if (c.status === "pools") {
@@ -310,23 +308,51 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "ek25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ek25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
+      buildCompetition({ id: "ako25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
     ];
-    return buildTournament({ id: "european-2025", name: "European Kendo Championships 2025", date: "2025-11-08", venue: "Paris Bercy", courts, status: "completed", competitions: comps });
+    return buildTournament({ id: "autumn-open-2025", name: "Autumn Kendo Open 2025", date: "2025-11-08", venue: "City Arena", courts, status: "completed", competitions: comps });
   })(),
 ];
 
-const PARTICIPANT_TAGS = new Set(["manual", "registered", "transfer"]);
+const REGISTRATION_SOURCES = new Set(["manual", "registered", "transfer"]);
+
+// canonicalRegistrationSource mirrors Go's helper.CanonicalRegistrationSource:
+// trim + lower-case, and alias the legacy "reserved" token to "manual" so an
+// older CSV row round-trips consistently with the backend.
+function canonicalRegistrationSource(s) {
+  const c = (s || "").trim().toLowerCase();
+  return c === "reserved" ? "manual" : c;
+}
+
+// normalizeParticipantName applies the shared normalization used by the
+// duplicate-detection system (Tier-1 dedup key and Tier-2 near-dup signals).
+//
+// Mirrors Go's NormalizeParticipantName exactly so fixture tests can assert
+// byte-identical output from both sides:
+//   1. NFD decompose, strip combining marks U+0300–U+036F only
+//      (Latin diacriticals: Müller→muller, Ï→i)
+//      Japanese dakuten U+3099 is OUTSIDE the range and is preserved (が→が).
+//   2. Re-NFC
+//   3. Lowercase, trim, collapse internal whitespace.
+function normalizeParticipantName(s) {
+  if (!s) return '';
+  // Step 1: NFD decompose → strip combining marks U+0300..U+036F.
+  // Explicit \u escapes (not literal combining glyphs) so the range is
+  // readable and editor-safe. Step 2: re-NFC.
+  const stripped = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC');
+  // Step 3
+  return stripped.toLowerCase().trim().replace(/\s+/g, ' ');
+}
 
 // parseParticipantLines parses an array of non-empty CSV lines into player objects.
-// Used by both AdminParticipants.apply() and the live parse preview.
+// Used by both AdminParticipants.apply() and the active parse preview.
 function parseParticipantLines(lines, withZekken) {
   return lines.map((line) => {
     const parts = line.split(",").map((s) => s.trim());
     const name = parts[0] || "";
-    let displayName = "", dojo = "", danGrade = "", tag = "";
+    let displayName = "", dojo = "", danGrade = "", source = "";
     let checkedIn = false;
 
     // Detect trailing checked_in column — mirrors Go's column-based check (len > 2).
@@ -336,10 +362,12 @@ function parseParticipantLines(lines, withZekken) {
       parts.pop();
     }
 
-    // Detect trailing tag column (must be a known tag string, not a number)
-    const last = parts[parts.length - 1]?.toLowerCase();
-    if (PARTICIPANT_TAGS.has(last)) {
-      tag = last;
+    // Detect trailing source column (must be a known registration source string, not a number).
+    // Canonicalize first so the legacy "reserved" alias is recognized (→ "manual"),
+    // mirroring the Go parser.
+    const canonLast = canonicalRegistrationSource(parts[parts.length - 1]);
+    if (REGISTRATION_SOURCES.has(canonLast)) {
+      source = canonLast;
       parts.pop();
     }
 
@@ -351,7 +379,7 @@ function parseParticipantLines(lines, withZekken) {
       dojo = parts[1] || "";
       danGrade = parts[2] || "";
     }
-    return { name, displayName, dojo, danGrade, tag, checkedIn };
+    return { name, displayName, dojo, danGrade, source, checkedIn };
   });
 }
 
@@ -361,13 +389,25 @@ function arraysEqual(a, b) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+// checkinPid builds the server-bound participant identifier for the check-in,
+// uncheck, bulk check-in, and edit endpoints. Modern rows carry a stable UUID;
+// legacy UUID-less rosters (a participants.csv never re-saved through the app)
+// have no id, so we fall back to the composite "name|dojo" key the server
+// resolves on (pidPairKey / resolveParticipantIndex in
+// internal/state/participants.go). The dojo is included because (name, dojo) —
+// not name alone — is the uniqueness invariant: the same name at a different
+// dojo is two distinct people. Keep in sync with the Go resolver.
+function checkinPid(p) {
+  return p.id ?? `${p.name}|${p.dojo ?? ""}`;
+}
+
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
   buildPools, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch
+  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid
 };
 
 if (typeof window !== 'undefined') {
@@ -382,8 +422,10 @@ if (typeof window !== 'undefined') {
   window.standardSeedOrder = standardSeedOrder; window.nextPow2 = nextPow2;
   window.poolWinners = poolWinners;
   window.parseParticipantLines = parseParticipantLines;
+  window.normalizeParticipantName = normalizeParticipantName;
   window.mergeMatchPatch = mergeMatchPatch;
   window.addMinutes = addMinutes;
   window.diffMinutes = diffMinutes;
   window.arraysEqual = arraysEqual;
+  window.checkinPid = checkinPid;
 }

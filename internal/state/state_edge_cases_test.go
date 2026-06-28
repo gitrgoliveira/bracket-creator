@@ -273,8 +273,10 @@ func TestUpdateTournamentChanged_ParseFailureFallback(t *testing.T) {
 }
 
 // TestSetTeamLineup_BracketParseErrorFromRoundCheck verifies that a malformed
-// bracket.json causes setTeamLineupLocked to propagate the parse error from
-// roundHasLiveOrCompletedMatchLocked rather than silently succeeding.
+// bracket.json propagates as error from roundHasRunningOrCompletedMatchLocked
+// when the write CHANGES an already-recorded position (triggering the bracket
+// parse). A NEW lineup (no prior entry) skips the bracket check entirely —
+// the parse error is only triggered on a change-to-recorded path.
 func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -282,13 +284,19 @@ func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 	compID := "lineup-bad-bracket"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
 
+	// Seed an initial (valid) lineup first, then corrupt the bracket.json.
+	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
+
 	// Write malformed bracket.json so parseBracketFile fails.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "competitions", compID, "bracket.json"),
 		[]byte("{not valid json"), 0o600))
 
-	err = store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5)
-	assert.Error(t, err, "malformed bracket.json must propagate as error from SetTeamLineup")
+	// Now try to CHANGE a recorded position — this triggers the bracket parse.
+	changed := fiveStarter("team-alpha", 0)
+	changed.Positions[domain.PosJiho] = "p2-changed"
+	err = store.SetTeamLineup(compID, changed, 5)
+	assert.Error(t, err, "malformed bracket.json must propagate as error when changing a recorded position")
 }
 
 // TestLoadTeamLineups_MalformedYAML covers the loadCached error path in

@@ -38,7 +38,7 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	// Admin group — AuthMiddleware gates all writes
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterLineupHandlers(admin, store, store, store)
+	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{})
 
 	return r, store, dir
 }
@@ -95,6 +95,69 @@ func TestPublicLineupGET_NoAuthRequired(t *testing.T) {
 		assert.Equal(t, "teamA", got.TeamID)
 		assert.Equal(t, 1, got.Round)
 	})
+}
+
+// TestPublicLineupGET_RedactsChangeReason is the regression test for the
+// public-projection leak: ChangeReason is operator-only audit free-text (it can
+// name competitors / carry medical detail, e.g. "Substitution: injury to jiho")
+// and must never reach the unauthenticated GET endpoints. Both the round-scoped
+// and match-scoped reads must strip it; the field stays persisted for the audit
+// trail.
+func TestPublicLineupGET_RedactsChangeReason(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	const secret = "Substitution: injury to jiho"
+	positions := map[domain.Position]string{
+		domain.PosSenpo:   "p1",
+		domain.PosJiho:    "p2",
+		domain.PosChuken:  "p3",
+		domain.PosFukusho: "p4",
+		domain.PosTaisho:  "p5",
+	}
+	// Round-scoped lineup (drives /lineups/:round) and a match-scoped lineup
+	// (drives /match-lineups/:matchId) — different storage keys. Force path is
+	// how production persists a ChangeReason.
+	require.NoError(t, store.SetTeamLineupForce("c1", domain.TeamLineup{
+		TeamID: "teamA", CompetitionID: "c1", Round: 1, ChangeReason: secret, Positions: positions,
+	}, 5))
+	require.NoError(t, store.SetTeamLineupForce("c1", domain.TeamLineup{
+		TeamID: "teamA", CompetitionID: "c1", Round: 1, MatchID: "Pool A-0", ChangeReason: secret, Positions: positions,
+	}, 5))
+
+	// Sanity: both are persisted WITH the reason (so the GET strip, not a
+	// missing write, is what keeps it out of the response).
+	stored, err := store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	var withReason int
+	for _, l := range stored {
+		if l.ChangeReason == secret {
+			withReason++
+		}
+	}
+	require.Equal(t, 2, withReason, "both lineups should persist the audit reason")
+
+	for _, path := range []string{
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		"/api/competitions/c1/teams/teamA/match-lineups/Pool%20A-0",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			assert.NotContains(t, w.Body.String(), secret, "ChangeReason leaked to public GET")
+			assert.NotContains(t, w.Body.String(), "changeReason", "changeReason key present in public payload")
+
+			var got domain.TeamLineup
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			assert.Empty(t, got.ChangeReason)
+			assert.Equal(t, "teamA", got.TeamID) // payload otherwise intact
+		})
+	}
 }
 
 // TestLineupPUT_RequiresAuth confirms that PUT /lineups/:round remains on the
@@ -268,20 +331,19 @@ func TestLineupPUT_ZeroTeamSize(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// TestLineupPUT_ValidationError verifies that a PUT with an invalid lineup
-// (missing senpo for a 5-person team) returns 400.
+// TestLineupPUT_ValidationError verifies that a PUT with an invalid position
+// KEY (not a recognised FIK name) returns 400. Note: a partial lineup with
+// only valid keys (e.g. only jiho set, senpo missing) is accepted —
+// completeness is a non-blocking UI warning, not a write-time gate.
 func TestLineupPUT_ValidationError(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
-	// Submit 5 positions but missing senpo — should fail domain validation.
+	// "chudan" is not a valid FIK position name for a 5-person team — key validation must reject it.
 	body, _ := json.Marshal(map[string]any{
 		"positions": map[string]string{
-			"jiho":    "p2",
-			"chuken":  "p3",
-			"fukusho": "p4",
-			"taisho":  "p5",
+			"chudan": "p1",
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,

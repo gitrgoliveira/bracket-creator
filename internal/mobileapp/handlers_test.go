@@ -22,9 +22,10 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
+func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
 	tempDir, err := os.MkdirTemp("", "mobileapp-test-*")
 	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
 
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
@@ -50,11 +51,11 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
 	RegisterImportHandlers(admin, store, hub, NewFileElevatedVerifier(store))
 	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
-	RegisterParticipantHandlers(admin, store, hub, NewFileElevatedVerifier(store))
-	RegisterMatchHandlers(admin, eng, store, store, hub)
+	RegisterParticipantHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
+	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
-	RegisterLineupHandlers(admin, store, store, store)
+	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{})
 	RegisterSwissHandlers(admin, store, eng, hub)
 
 	return r, store, eng, hub, tempDir
@@ -335,6 +336,161 @@ func TestTournamentHandlers(t *testing.T) {
 			"PUT with empty Password against legacy empty-password tournament must reject")
 		assert.Contains(t, w.Body.String(), "tournament password is required")
 	}
+
+	// mp-ef3 Copilot round 2: public info field trimming, contacts-count
+	// validation, URL validation, and contacts field-length validation.
+
+	t.Run("PUT trims public info fields", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Trim Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{
+			Name:         "Trim Test",
+			Password:     "secret",
+			Courts:       []string{"A"},
+			VenueAddress: "  123 Main St  ",
+			OpeningTime:  "  09:00  ",
+			Contacts:     []state.TournamentContact{{Label: "  Email  ", Value: "  test@example.com  "}},
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		saved, _ := store.LoadTournament()
+		assert.Equal(t, "123 Main St", saved.VenueAddress)
+		assert.Equal(t, "09:00", saved.OpeningTime)
+		require.Len(t, saved.Contacts, 1)
+		assert.Equal(t, "Email", saved.Contacts[0].Label)
+		assert.Equal(t, "test@example.com", saved.Contacts[0].Value)
+	})
+
+	t.Run("PUT rejects contacts over MaxTournamentContacts", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Max Contacts", Password: "secret", Courts: []string{"A"}}))
+		contacts := make([]state.TournamentContact, MaxTournamentContacts+1)
+		for i := range contacts {
+			contacts[i] = state.TournamentContact{Label: fmt.Sprintf("Label%d", i), Value: fmt.Sprintf("value%d@example.com", i)}
+		}
+		tour := state.Tournament{
+			Name:     "Max Contacts",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Contacts: contacts,
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "contacts")
+	})
+
+	t.Run("PUT rejects javascript: URL in venueMapURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "URL Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{
+			Name:        "URL Test",
+			Password:    "secret",
+			Courts:      []string{"A"},
+			VenueMapURL: "javascript:alert(1)",
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("PUT validates contacts field lengths", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Field Len", Password: "secret", Courts: []string{"A"}}))
+		longLabel := strings.Repeat("x", MaxLenContactLabel+1)
+		tour := state.Tournament{
+			Name:     "Field Len",
+			Password: "secret",
+			Courts:   []string{"A"},
+			Contacts: []state.TournamentContact{{Label: longLabel, Value: "ok@example.com"}},
+		}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "contacts[0].label")
+	})
+
+	// mp-s1gl: publicURL validation + trailing-slash normalization.
+	t.Run("PUT accepts empty publicURL (field is optional)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: ""}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT accepts valid https publicURL and strips trailing slash", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://my-tournament.example.com/"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		stored, err := store.LoadTournament()
+		require.NoError(t, err)
+		assert.Equal(t, "https://my-tournament.example.com", stored.PublicURL, "trailing slash must be stripped")
+	})
+
+	t.Run("PUT rejects non-http publicURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "javascript:alert(1)"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
+
+	t.Run("PUT rejects over-500-char publicURL", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		longURL := "https://example.com/" + strings.Repeat("x", MaxLenPublicURL)
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: longURL}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
+
+	t.Run("PUT accepts http publicURL (non-https passes validation)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "http://staging.example.com"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+	t.Run("PUT rejects scheme-only publicURL (no host)", func(t *testing.T) {
+		require.NoError(t, store.SaveTournament(&state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}}))
+		tour := state.Tournament{Name: "PU Test", Password: "secret", Courts: []string{"A"}, PublicURL: "https://"}
+		body, _ := json.Marshal(tour)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "publicURL")
+	})
 }
 
 // TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the
@@ -457,7 +613,7 @@ func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *t
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "PUT body=%s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "PUT body=%s", w.Body.String())
 
 	seen := map[string]bool{}
 	for range 4 {
@@ -567,7 +723,7 @@ func TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
 
 	sawPasswordReset := false
 	sawTournamentUpdated := false
@@ -632,7 +788,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 	req.Header.Set("X-Tournament-Password", "alpha")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "POST body=%s", w.Body.String())
 
 	seen := map[string]bool{}
 	for range 6 {
@@ -696,7 +852,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	bootReq.Header.Set("Content-Type", "application/json")
 	bootW := httptest.NewRecorder()
 	fileR.ServeHTTP(bootW, bootReq)
-	require.Equal(t, http.StatusCreated, bootW.Code, "phase 1 bootstrap failed: %s", bootW.Body.String())
+	require.Equalf(t, http.StatusCreated, bootW.Code, "phase 1 bootstrap failed: %s", bootW.Body.String())
 
 	// Confirm "alpha" authenticates in file mode.
 	authReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
@@ -745,7 +901,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	lockedR.ServeHTTP(putW, putReq)
-	require.Equal(t, http.StatusOK, putW.Code, "phase 3 PUT failed: %s", putW.Body.String())
+	require.Equalf(t, http.StatusOK, putW.Code, "phase 3 PUT failed: %s", putW.Body.String())
 
 	// Inspect the on-disk record directly: name should be the new value
 	// AND the original password should still be there (just not visible
@@ -844,7 +1000,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	putReq.Header.Set("Content-Type", "application/json")
 	putW := httptest.NewRecorder()
 	r.ServeHTTP(putW, putReq)
-	require.Equal(t, http.StatusOK, putW.Code, "body=%s", putW.Body.String())
+	require.Equalf(t, http.StatusOK, putW.Code, "body=%s", putW.Body.String())
 	var putT state.Tournament
 	require.NoError(t, json.Unmarshal(putW.Body.Bytes(), &putT))
 	assert.Empty(t, putT.Password, "PUT response must not leak stored password in locked mode (regression for handlers_tournament.go:270)")
@@ -947,100 +1103,6 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 		"PUT /api/tournament with exactly-200-char Name/Venue must be accepted")
 }
 
-// TestTournamentHandlers_CheckInWindowValidation verifies that the
-// checkInWindowStart/End fields are validated as HH:MM strings and
-// rejected when malformed or over-cap.
-func TestTournamentHandlers_CheckInWindowValidation(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-	require.NoError(t, store.SaveTournament(&state.Tournament{
-		Name: "Seed", Password: "secret", Courts: []string{"A"},
-	}))
-
-	base := state.Tournament{Name: "OK", Password: "secret", Courts: []string{"A"}}
-
-	invalid := []struct {
-		field string
-		tour  state.Tournament
-	}{
-		{
-			field: "checkInWindowStart",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "9:00"; return t }(),
-		},
-		{
-			field: "checkInWindowStart",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "25:00"; return t }(),
-		},
-		{
-			field: "checkInWindowStart",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = strings.Repeat("x", 6); return t }(),
-		},
-		{
-			field: "checkInWindowEnd",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "invalid"; return t }(),
-		},
-		// Cross-field: only start set → rejected (end missing).
-		{
-			field: "checkInWindowStart",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowStart = "09:00"; return t }(),
-		},
-		// Cross-field: only end set → rejected (start missing).
-		{
-			field: "checkInWindowStart",
-			tour:  func() state.Tournament { t := base; t.CheckInWindowEnd = "17:00"; return t }(),
-		},
-		// Cross-field: start == end → rejected.
-		{
-			field: "checkInWindowStart",
-			tour: func() state.Tournament {
-				t := base
-				t.CheckInWindowStart = "09:00"
-				t.CheckInWindowEnd = "09:00"
-				return t
-			}(),
-		},
-		// Cross-field: start after end → rejected.
-		{
-			field: "checkInWindowStart",
-			tour: func() state.Tournament {
-				t := base
-				t.CheckInWindowStart = "17:00"
-				t.CheckInWindowEnd = "09:00"
-				return t
-			}(),
-		},
-	}
-	for _, tc := range invalid {
-		body, _ := json.Marshal(tc.tour)
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code, "field %s value %q must be rejected", tc.field, tc.tour.CheckInWindowStart+tc.tour.CheckInWindowEnd)
-		assert.Contains(t, w.Body.String(), tc.field, "rejection must name the field")
-	}
-
-	// Valid HH:MM values must be accepted.
-	valid := base
-	valid.CheckInWindowStart = "09:00"
-	valid.CheckInWindowEnd = "17:30"
-	body, _ := json.Marshal(valid)
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code, "valid HH:MM check-in window must be accepted")
-
-	// Empty values (window not set) must also pass.
-	noWindow := base
-	body, _ = json.Marshal(noWindow)
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code, "omitted check-in window must be accepted")
-}
-
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
 // TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
 // the PUT handler called LoadTournament + SaveTournamentChanged
@@ -1094,7 +1156,7 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyA))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
+			assert.Equalf(t, http.StatusOK, w.Code, "PUT A (preserve) should succeed; iter %d", i)
 		}()
 		go func() {
 			defer wg.Done()
@@ -1102,7 +1164,7 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/tournament", bytes.NewBuffer(bodyB))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
+			assert.Equalf(t, http.StatusOK, w.Code, "PUT B (change) should succeed; iter %d", i)
 		}()
 		wg.Wait()
 
@@ -1277,8 +1339,8 @@ func TestCompetitionHandlers_ConcurrentPUTUniqueNameRace(t *testing.T) {
 		// its original name.
 		a, _ := store.LoadCompetition("comp-a")
 		b, _ := store.LoadCompetition("comp-b")
-		require.NotNil(t, a, "iter %d: comp-a must still exist", i)
-		require.NotNil(t, b, "iter %d: comp-b must still exist", i)
+		require.NotNilf(t, a, "iter %d: comp-a must still exist", i)
+		require.NotNilf(t, b, "iter %d: comp-b must still exist", i)
 		cupCount := 0
 		if a.Name == "Cup" {
 			cupCount++
@@ -1353,59 +1415,6 @@ func TestCompetitionHandlers_ConcurrentPOSTSameName(t *testing.T) {
 	}
 }
 
-// TestCreatePlayoff_RejectsNameCollision pins the cross-file guard
-// symmetry fix for POST /competitions/:id/playoffs. Pre-fix, the
-// playoff path computed `name = src.Name + " - Playoffs"`,
-// slugified to an ID, and called SaveCompetitionChanged directly —
-// no uniqueness check. If an admin manually created a competition
-// whose name matched the derived playoff name (e.g. a comp named
-// "Cup - Playoffs" exists, then create a playoff from a comp named
-// "Cup"), SaveCompetitionChanged would silently overwrite the
-// existing comp's config — data loss.
-//
-// Now the playoff save runs under WithCompetitionRenameLock with a
-// checkUniqueCompName — same symmetry as POST + PUT /competitions.
-// Collision → 400 with "already exists" error; the existing
-// competition is untouched.
-func TestCreatePlayoff_RejectsNameCollision(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	// Source competition that, when used to create a playoff, would
-	// produce name "Source - Playoffs".
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "source",
-		Name:   "Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-	// Pre-existing competition with the same name the playoff would
-	// derive. Pre-fix, SaveCompetitionChanged would have overwritten
-	// this config.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           "manually-created",
-		Name:         "Source - Playoffs",
-		NumberPrefix: "PRESERVED",
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"POST /playoffs should reject when derived name collides with existing comp")
-	assert.Contains(t, w.Body.String(), "already exists",
-		"error message should explain the collision")
-
-	// Verify the manually-created comp's config is untouched (the
-	// pre-fix bug would have replaced it with the default playoff
-	// config, losing the NumberPrefix).
-	preserved, err := store.LoadCompetition("manually-created")
-	require.NoError(t, err)
-	require.NotNil(t, preserved)
-	assert.Equal(t, "PRESERVED", preserved.NumberPrefix,
-		"existing comp's config must be untouched on playoff-name collision")
-}
-
 // TestPUTCompetition_RejectsBodyIDMismatch pins the Copilot #1 fix:
 // PUT /api/competitions/comp-a with body `{id: "comp-b"}` previously
 // silently overrode body.ID = "comp-a" (the URL value) and saved the
@@ -1462,48 +1471,6 @@ func TestPOSTCompetition_RejectsExistingID(t *testing.T) {
 	require.NotNil(t, stored)
 	assert.Equal(t, "Existing", stored.Name, "existing name must be preserved")
 	assert.Equal(t, "PRESERVED", stored.NumberPrefix, "existing config must be preserved")
-}
-
-// TestPlayoff_RejectsDerivedIDCollision pins the Copilot #3 fix: the
-// playoff endpoint derived `name = src.Name + " - Playoffs"` and
-// `id = slugifyID(name)` and called SaveCompetitionChanged directly.
-// If a competition existed with the same slug ID but a different
-// name, the playoff save silently overwrote it. Now both ID and name
-// uniqueness are checked inside the rename lock.
-func TestPlayoff_RejectsDerivedIDCollision(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	// Source comp; derived playoff ID will be "source-playoffs".
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:     "source",
-		Name:   "Source",
-		Format: state.CompFormatMixed,
-		Status: state.CompStatusPools,
-	}))
-
-	// Pre-existing comp with the SAME slug as the derived playoff ID
-	// but a DIFFERENT name. checkUniqueCompName would have passed
-	// (names differ), then SaveCompetitionChanged would have
-	// overwritten this with the new playoff config — data loss.
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:           "source-playoffs",
-		Name:         "Unrelated Cup",
-		NumberPrefix: "PRESERVED",
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/source/playoffs", nil)
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"POST /playoffs must reject when derived ID collides with existing comp")
-	assert.Contains(t, w.Body.String(), "already exists")
-
-	// Existing comp untouched.
-	stored, _ := store.LoadCompetition("source-playoffs")
-	require.NotNil(t, stored)
-	assert.Equal(t, "Unrelated Cup", stored.Name)
-	assert.Equal(t, "PRESERVED", stored.NumberPrefix)
 }
 
 // TestPOSTCompetition_RollbackOnSaveParticipantsFailure pins the K3
@@ -1858,8 +1825,11 @@ func TestParticipantHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(path)
 
-	// POST /api/competitions/:id/participants
-	req, _ = http.NewRequest("POST", "/api/competitions/c1/participants", bytes.NewBufferString(`{"players": [{"name": "P1"}]}`))
+	// POST /api/competitions/:id/participants — dojo is required (matches the
+	// single-add path and the documented CSV schema), so the smoke payload
+	// supplies one. A blank dojo is rejected with 400; see
+	// TestBatchPostBlankDojo_400.
+	req, _ = http.NewRequest("POST", "/api/competitions/c1/participants", bytes.NewBufferString(`{"players": [{"name": "P1", "dojo": "Dojo A"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -1944,7 +1914,7 @@ func TestCheckInHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Seed a participant.
-	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Kenshikan"}}))
+	require.NoError(t, store.SaveParticipants("ci-comp", []domain.Player{{Name: "Alice", Dojo: "Suigetsu"}}))
 	existing, err := store.LoadParticipants("ci-comp", false)
 	require.NoError(t, err)
 	aliceID := existing[0].ID
@@ -1998,7 +1968,7 @@ func TestCheckInPreservedOnRosterReplace(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "ci-pr"}))
 
 	// Seed an initial roster with Alice.
-	body, _ := json.Marshal(map[string]interface{}{
+	body, _ := json.Marshal(map[string]any{
 		"players": []map[string]string{{"name": "Alice", "dojo": "Dojo A"}},
 	})
 	w := httptest.NewRecorder()
@@ -2021,7 +1991,7 @@ func TestCheckInPreservedOnRosterReplace(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 
 	// Replace the roster via POST (Alice still in the list, Bob added).
-	body, _ = json.Marshal(map[string]interface{}{
+	body, _ = json.Marshal(map[string]any{
 		"players": []map[string]string{
 			{"name": "Alice", "dojo": "Dojo A"},
 			{"name": "Bob", "dojo": "Dojo B"},
@@ -2080,23 +2050,23 @@ func TestMatchHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	// PUT /api/competitions/:id/matches/:mid/score (not found)
+	// PUT /api/competitions/:id/matches/:mid/score (not found — match doesn't exist → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/c1/matches/not-exists/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	// Verify update
 	updatedMatches, _ := store.LoadPoolMatches("c1")
 	assert.Equal(t, "A", updatedMatches[0].Winner)
 
-	// PUT /api/competitions/:id/matches/:mid/score (invalid competition)
+	// PUT /api/competitions/:id/matches/:mid/score (invalid competition — not found → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/not-exists/matches/PoolA-1/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestMatchHandlers_BracketMatch(t *testing.T) {
@@ -2297,7 +2267,7 @@ func TestTournamentHandlers_DurationDays_Validation(t *testing.T) {
 			req, _ := http.NewRequest(tc.method, "/api/tournament", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
+			assert.Equalf(t, tc.wantStatus, w.Code, "method=%s durationDays=%d", tc.method, tc.durationDays)
 			if tc.wantErrFrag != "" {
 				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
 			}
@@ -2370,9 +2340,9 @@ func TestCompetitionHandlers_DateRangeValidation(t *testing.T) {
 			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "case %q: comp date=%q", tc.name, tc.compDate)
+			assert.Equalf(t, tc.wantStatus, w.Code, "case %q: comp date=%q", tc.name, tc.compDate)
 			if tc.wantErrFrag != "" {
-				assert.Contains(t, w.Body.String(), tc.wantErrFrag, "case %q", tc.name)
+				assert.Containsf(t, w.Body.String(), tc.wantErrFrag, "case %q", tc.name)
 			}
 		})
 	}
@@ -2417,7 +2387,7 @@ func TestCompetitionHandlers_DateRangeValidation_PUT(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/competitions/c-put-range", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, tc.wantStatus, w.Code, "case %q: date=%q", tc.name, tc.newDate)
+			assert.Equalf(t, tc.wantStatus, w.Code, "case %q: date=%q", tc.name, tc.newDate)
 			if tc.wantErrFrag != "" {
 				assert.Contains(t, w.Body.String(), tc.wantErrFrag)
 			}

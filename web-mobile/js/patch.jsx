@@ -27,7 +27,7 @@
 // by competitionId, but defensive identity-preservation here is cheap).
 //
 // FR-025 hook (queue-position recompute): listeners that need to react
-// to status transitions (live/scheduled → completed) can compose with
+// to status transitions (running/scheduled → completed) can compose with
 // applyPatch by reading the merged result and recomputing derived
 // fields. Slice 1's T049 will add a queue-position invalidator that
 // runs on the same event before applyPatch returns.
@@ -255,32 +255,67 @@ function recomputeBracketQueuePositions(bracket) {
 // mutate `state.lastSeq` so multiple `applyPatchOrdered` calls share
 // a single counter. Decoupling from a module-level singleton makes the
 // helper safe to reuse across multiple competitions or test fixtures.
+
+// checkSeqGap — pure seq bookkeeping extracted from applyPatchOrdered.
+// Handles only the monotonic-seq tracking without touching the patch
+// payload. Consumers MUST call this on every SSE event that carries a
+// numeric `seq` so the counter advances accurately — otherwise an
+// untracked seq'd event makes the next patched event falsely look like a
+// gap. It is safe (and a no-op) to call on events WITHOUT a numeric seq —
+// heartbeats and other non-seq frames early-return without mutating state,
+// so callers can pass every event through unconditionally rather than
+// special-casing them out (and risk filtering a real event by mistake).
+// Heartbeats do NOT advance the seq counter.
+//
+// Returns:
+//   { duplicate: false, gap: false } — normal forward or first event
+//   { duplicate: true,  gap: false } — seq <= lastSeq (replay/dup)
+//   { gap: true,  duplicate: false } — seq jumped, onGap fired
+//
+// `seq` not a number → treat as no-seq event; state is not mutated.
+// `state.lastSeq === 0` (or absent) → first event; accepted, no gap check.
+function checkSeqGap(state, seq, onGap) {
+    if (typeof seq !== "number") return { duplicate: false, gap: false };
+    // Null-safe: without a state object there's nothing to track against and the
+    // `state.lastSeq = seq` writes below would throw. Callers always pass one;
+    // this guards misuse / a future caller that doesn't.
+    if (!state) return { duplicate: false, gap: false };
+    const last = (typeof state.lastSeq === "number") ? state.lastSeq : 0;
+    if (last > 0 && seq <= last) {
+        // Duplicate / replay — do NOT advance lastSeq.
+        return { duplicate: true, gap: false };
+    }
+    if (last > 0 && seq > last + 1) {
+        // Gap. Fire the callback with the missing range.
+        if (typeof onGap === "function") {
+            try {
+                onGap({ from: last + 1, to: seq - 1 });
+            } catch (err) {
+                // Intentional: a thrown callback shouldn't break SSE processing.
+                console.error("SSE gap callback failed:", err);
+            }
+        }
+        state.lastSeq = seq;
+        return { gap: true, duplicate: false };
+    }
+    // Normal forward progress (or first event).
+    state.lastSeq = seq;
+    return { gap: false, duplicate: false };
+}
+
 function applyPatchOrdered(prev, event, state, onGap) {
     if (!event || typeof event !== "object") return applyPatch(prev, event);
     const incoming = typeof event.seq === "number" ? event.seq : null;
     if (state && incoming != null) {
-        const last = typeof state.lastSeq === "number" ? state.lastSeq : 0;
-        if (last > 0 && incoming <= last) {
+        const result = checkSeqGap(state, incoming, onGap);
+        if (result.duplicate) {
             // Duplicate / replay — drop silently. We've already
             // merged this seq's patch into `prev`; re-applying would
             // be harmless but wastes a render.
             return prev;
         }
-        if (last > 0 && incoming > last + 1) {
-            // Gap. Fire the callback with the missing range so the
-            // caller can refetch. Still apply the current patch so
-            // the user sees the latest known state immediately.
-            if (typeof onGap === "function") {
-                try {
-                    onGap({ from: last + 1, to: incoming - 1 });
-                } catch (err) {
-                    // The console.error here is intentional: a thrown
-                    // callback shouldn't break SSE processing.
-                    console.error("SSE gap callback failed:", err);
-                }
-            }
-        }
-        state.lastSeq = incoming;
+        // gap:true or gap:false (normal) — fall through to applyPatch.
+        // checkSeqGap already advanced state.lastSeq and fired onGap.
     }
     return applyPatch(prev, event);
 }
@@ -394,4 +429,4 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-export { applyPatch, applyPatchOrdered, recomputeQueuePositions, recomputeBracketQueuePositions };
+export { applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions };

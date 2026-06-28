@@ -116,6 +116,46 @@ func TestCreatePlayersWithMetadata(t *testing.T) {
 	}
 }
 
+func TestCreatePlayersSourceColumn(t *testing.T) {
+	// A recognized registration source in the last column is parsed onto Source
+	// (canonical lower-case), not Metadata.
+	players, err := CreatePlayers([]string{"John Smith, Tokyo, registered"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if players[0].Source != "registered" {
+		t.Errorf("Source = %q, want registered", players[0].Source)
+	}
+	if len(players[0].Metadata) != 0 {
+		t.Errorf("Metadata = %v, want empty (source consumed)", players[0].Metadata)
+	}
+
+	// Legacy "reserved" alias migrates to "manual" on parse — it must NOT shift
+	// into Metadata (which marshalParticipantsCSV would then drop).
+	legacy, err := CreatePlayers([]string{"Jane Doe, Osaka, reserved"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if legacy[0].Source != "manual" {
+		t.Errorf("legacy reserved Source = %q, want manual", legacy[0].Source)
+	}
+	if len(legacy[0].Metadata) != 0 {
+		t.Errorf("legacy reserved Metadata = %v, want empty (migrated to Source)", legacy[0].Metadata)
+	}
+
+	// An UNKNOWN trailing token stays in Metadata (not treated as a source).
+	unknown, err := CreatePlayers([]string{"Bob Lee, Kyoto, vip"}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if unknown[0].Source != "" {
+		t.Errorf("unknown Source = %q, want empty", unknown[0].Source)
+	}
+	if len(unknown[0].Metadata) != 1 || unknown[0].Metadata[0] != "vip" {
+		t.Errorf("unknown Metadata = %v, want [vip]", unknown[0].Metadata)
+	}
+}
+
 func TestCreatePlayersDuplicates(t *testing.T) {
 	// Case 1: Identical entries (Duplicate Name + Dojo/Zekken)
 	entries := []string{
@@ -362,10 +402,18 @@ func TestCreatePools(t *testing.T) {
 			},
 		},
 		{
-			name:      "panics when pool size is zero",
-			players:   createPlayers(4, 4),
-			poolSize:  0,
-			wantPanic: true,
+			// mp-ebgz: poolSize=0 used to divide-by-zero panic; it now
+			// returns a clean error so every caller is panic-proof.
+			name:     "errors (no panic) when pool size is zero",
+			players:  createPlayers(4, 4),
+			poolSize: 0,
+			wantErr:  true,
+		},
+		{
+			name:     "errors (no panic) when pool size is negative",
+			players:  createPlayers(4, 4),
+			poolSize: -1,
+			wantErr:  true,
 		},
 		{
 			name:     "errors when pool size larger than player count",

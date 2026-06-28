@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.26.3
+GO_VERSION := 1.26.4
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -12,6 +12,9 @@ EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+# BUILD_DATE matches the format embedded by get_build_info.sh (git %ci style:
+# "2006-01-02 15:04:05 -0700") so docker/build stamps the version page correctly.
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%d %H:%M:%S %z")
 
 # OS detection
 UNAME_S := $(shell uname -s)
@@ -24,7 +27,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -34,7 +37,7 @@ clean: ## Clean build artifacts
 	rm -rf dist/
 	@echo "Done!"
 
-local/deps: ## Install project dependencies
+local/deps: hooks/install ## Install project dependencies
 	@echo "Installing dependencies..."
 	go mod tidy
 	go install github.com/spf13/cobra-cli@v1.3.0
@@ -45,6 +48,11 @@ local/deps: ## Install project dependencies
 	python3 -m pip install -r docs/requirements.txt
 	@cd web-mobile && npm install
 	@cd web && npm install
+
+hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone
+	@chmod +x scripts/hooks/*
+	@git config core.hooksPath scripts/hooks
+	@echo "Git hooks: core.hooksPath=$$(git config --get core.hooksPath)"
 
 go/fmt: ## Format Go code
 	@echo "Formatting Go code..."
@@ -82,10 +90,14 @@ js/security: js/sec ## Run all Javascript security checks
 
 js/test: ## Run JavaScript unit tests
 	@echo "Running JavaScript tests..."
-	@cd web-mobile && npm test
-	@cd web && npm test
+	@cd web-mobile && NODE_NO_WARNINGS=1 npm test
+	@cd web && NODE_NO_WARNINGS=1 npm test
 
-js/validate: js/lint js/security js/test ## Run all Javascript checks
+js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split modules)
+	@echo "Checking cross-module imports..."
+	@node web-mobile/check-imports.mjs
+
+js/validate: js/lint js/security js/check-imports js/test ## Run all Javascript checks
 
 go/test: go/lint go/security js/validate ## Run tests
 	@echo "Running tests..."
@@ -150,6 +162,7 @@ docker/build: ## Build Docker image
 		--build-arg GO_VERSION=$(GO_VERSION) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg GIT_COMMIT=$(COMMIT) \
+		--build-arg "BUILD_DATE=$(BUILD_DATE)" \
 		-t $(IMAGE_NAME):latest \
 		-t $(IMAGE_NAME):$(VERSION) \
 		.

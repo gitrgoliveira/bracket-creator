@@ -4,6 +4,7 @@
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
+const EmptyState = window.EmptyState;
 
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
@@ -94,8 +95,10 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 // Build the participants list to save by reconciling existing players
 // against a newly-parsed roster. Returns { np, added, updatedCount }.
 //
-// - Existing players (matched by lowercase name) keep their stable id
-//   and seed.
+// - Existing players (matched by normalized name+dojo) keep their stable
+//   id and seed. The key is (name, dojo) — NOT name alone — because Tier-1
+//   dedup allows two same-named competitors from different dojos; keying on
+//   name only would cross-associate their id/seed/check-in.
 // - New players get the next free `${compID}-pN` slot, skipping any id
 //   already in use by an existing player who is still in the parsed
 //   list (two-pass: pre-populate usedIds before minting, so visible row
@@ -106,34 +109,40 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 //
 // Exported for tests in __tests__/admin_participants.test.jsx.
 function mintParticipantIds(compID, existingPlayers, parsed) {
-  const existingMap = new Map((existingPlayers || []).map(p => [p.name.toLowerCase(), p]));
-  const parsedKeys = new Set(parsed.map(p => p.name.toLowerCase()));
+  const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
+  const idKey = (name, dojo) => norm(name) + '|' + norm(dojo);
+  const existingMap = new Map((existingPlayers || []).map(p => [idKey(p.name, p.dojo), p]));
+  const parsedKeys = new Set(parsed.map(p => idKey(p.name, p.dojo)));
   const usedIds = new Set();
   (existingPlayers || []).forEach(p => {
-    if (parsedKeys.has(p.name.toLowerCase())) usedIds.add(p.id);
+    if (parsedKeys.has(idKey(p.name, p.dojo))) usedIds.add(p.id);
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, tag, checkedIn: parsedCheckedIn }) => {
-    const existing = existingMap.get(name.toLowerCase());
+  const np = parsed.map(({ name, displayName, dojo, danGrade, source, checkedIn: parsedCheckedIn }) => {
+    const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
       // Preserve existing check-in state; CSV token takes precedence if explicitly set.
       const checkedIn = parsedCheckedIn || existing.checkedIn || false;
-      return { id: existing.id, name, displayName, dojo, danGrade, tag, seed: existing.seed || null, checkedIn };
+      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null, checkedIn };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, tag, seed: null, checkedIn: parsedCheckedIn || false };
+    return { id, name, displayName, dojo, danGrade, source, seed: null, checkedIn: parsedCheckedIn || false };
   });
   return { np, added, updatedCount };
 }
 
 function levenshtein(a, b) {
-  const m = a.length, n = b.length;
+  // Operate on Unicode code points (not UTF-16 code units) so non-BMP
+  // characters count as one edit and the distance stays consistent with
+  // Go's rune-based implementation.
+  const ra = [...a], rb = [...b];
+  const m = ra.length, n = rb.length;
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
@@ -141,57 +150,68 @@ function levenshtein(a, b) {
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++)
-      curr[j] = a[i - 1] === b[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      curr[j] = ra[i - 1] === rb[j - 1] ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
     [prev, curr] = [curr, prev];
   }
   return prev[n];
 }
 
-function CheckInBanner({ tournament, players }) {
-  const [nowStr, setNowStr] = useStateA(() => {
-    const d = new Date();
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
-
-  useEffectA(() => {
-    const timer = setInterval(() => {
-      const d = new Date();
-      setNowStr(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!tournament?.checkInWindowStart || !tournament?.checkInWindowEnd) return null;
-  const start = tournament.checkInWindowStart;
-  const end = tournament.checkInWindowEnd;
-
-  const diffStart = window.diffMinutes(start, nowStr);
-  const diffEnd = window.diffMinutes(end, nowStr);
-
-  if (diffStart > 0) {
-    return (
-      <div className="alert alert--info" style={{ marginBottom: 12 }}>
-        🕒 Check-in window starts at {start} (in {diffStart}m)
-      </div>
-    );
-  }
-  if (diffEnd > 0) {
-    return (
-      <div className="alert alert--success" style={{ marginBottom: 12 }}>
-        ✅ Check-in window is OPEN: {start}–{end} (closes in {diffEnd}m)
-      </div>
-    );
-  }
-
-  const uncheckeds = (players || []).filter(p => !p.checkedIn).length;
-  return (
-    <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-      ⌛ Check-in CLOSED — {uncheckeds > 0 ? `${uncheckeds} participants did not check in` : "all participants checked in"}
-    </div>
-  );
+function generateRosterText(playersList, withZekkenName) {
+  return (playersList || []).map((p) => {
+    if (withZekkenName) {
+      // Fall back to uppercase last name ONLY when displayName is absent
+      // (null/undefined) — `??` not `||`, so an intentional empty zekken
+      // (displayName: "") is preserved verbatim. Without that, a saved
+      // empty-zekken row would re-render with a synthetic last-name, making
+      // the rosterDirty diff flip true on every reload. The fallback covers
+      // the sample roster from makePlayer (which never sets displayName);
+      // without it, the line would have only two columns and
+      // parseParticipantLines(withZekken=true) would misread dojo into the
+      // zekken slot and leave dojo blank. Tokenise on whitespace and filter
+      // empties so a trailing-space name like "Alice " still derives "ALICE".
+      const tokens = (p.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const fallback = tokens.length ? tokens[tokens.length - 1].toUpperCase() : "";
+      const zekken = p.displayName ?? fallback;
+      const base = `${p.name ?? ""}, ${zekken}, ${p.dojo ?? ""}`;
+      return p.danGrade ? `${base}, ${p.danGrade}` : base;
+    }
+    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
+    return p.danGrade ? `${base}, ${p.danGrade}` : base;
+  }).join("\n");
 }
 
-function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSection }) {
+// validateRosterRows checks parsed roster rows for the required columns
+// before they are sent to the server. Name and dojo are mandatory for every
+// competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
+// are. In a zekken competition the expected three-column format is
+// Name, Zekken, Dojo — a two-column "Name, Dojo" paste is misparsed into
+// {displayName: dojo, dojo: ""}, so an empty dojo on a zekken competition is
+// the tell-tale of that misparse rather than a missing zekken value, and the
+// reason text surfaces the expected format as a hint.
+// Returns an array of { index, name, reason } for each offending row (empty
+// when the roster is valid). The stored `name` is the TRIMMED value (not the
+// raw input), so whitespace-only names render as the falsy "line N" branch in
+// the apply() toast rather than a literal "   " label.
+function validateRosterRows(parsed, withZekkenName) {
+  const problems = [];
+  (parsed || []).forEach((p, i) => {
+    const name = (p.name || "").trim();
+    const dojo = (p.dojo || "").trim();
+    if (!name) {
+      problems.push({ index: i, name, reason: "missing name" });
+      return;
+    }
+    if (!dojo) {
+      const reason = withZekkenName
+        ? "missing dojo (zekken competitions use Name, Zekken, Dojo)"
+        : "missing dojo";
+      problems.push({ index: i, name, reason });
+    }
+  });
+  return problems;
+}
+
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
   const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
@@ -205,17 +225,20 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const [replaceDojo, setReplaceDojo] = useStateA("");
   const [replaceDanGrade, setReplaceDanGrade] = useStateA("");
   const [replaceZekken, setReplaceZekken] = useStateA("");
+  // nearDupPending holds {pairs} when the server returned Tier-2 near-dup
+  // warnings on the roster save. The save has already committed (warnings are
+  // non-blocking); this drives a post-save informational banner.
+  const [nearDupPending, setNearDupPending] = useStateA(null);
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
-  const [text, setText] = useStateA(() => (c.players || []).map((p) => {
-    if (c.withZekkenName && p.displayName) {
-      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
-      return p.danGrade ? `${base}, ${p.danGrade}` : base;
-    }
-    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
-    return p.danGrade ? `${base}, ${p.danGrade}` : base;
-  }).join("\n"));
+  // Initialise from the SAME generator that rosterDirty diffs against
+  // (generateRosterText), not the old inline 3-col-only-when-displayName
+  // logic. Otherwise a zekken competition whose players lack a displayName
+  // starts with "Name, Dojo" while rosterDirty computes "Name, LASTNAME,
+  // Dojo" → a false "Unsaved changes" flash on mount before the
+  // c.players/withZekkenName effect re-syncs text.
+  const [text, setText] = useStateA(() => generateRosterText(c.players || [], c.withZekkenName));
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
@@ -229,14 +252,17 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const textFocusRef = useRefA(false);
 
-  const generateText = (playersList) => (playersList || []).map((p) => {
-    if (c.withZekkenName && p.displayName) {
-      const base = `${p.name ?? ""}, ${p.displayName ?? ""}, ${p.dojo ?? ""}`;
-      return p.danGrade ? `${base}, ${p.danGrade}` : base;
-    }
-    const base = `${p.name ?? ""}, ${p.dojo ?? ""}`;
-    return p.danGrade ? `${base}, ${p.danGrade}` : base;
-  }).join("\n");
+  const generateText = (playersList) => generateRosterText(playersList, c.withZekkenName);
+
+  // Fill the roster textarea with a generated sample roster of `count`
+  // competitors. This lives in the Participants view (not the create form)
+  // so a sample is a starting point you review and edit before clicking
+  // "Apply changes" — it reuses the whole parse/validate/save path. The
+  // generated ids are placeholders; apply() assigns `${compId}-pN` ids.
+  const fillSample = (count) => {
+    const sample = window.makeCompetitors(count, c.kind, c.id, 0, c.gender || "M");
+    setText(generateText(sample));
+  };
 
   useEffectA(() => {
     if (!textFocusRef.current) {
@@ -357,30 +383,64 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     reader.readAsText(file);
   };
 
-  const [tagFilter, setTagFilter] = useStateA(null);
+  const [sourceFilter, setSourceFilter] = useStateA(null);
   const [searchQuery, setSearchQuery] = useStateA("");
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
+  // Unsaved-roster detection: the textarea has edits not yet committed via
+  // "Apply changes". Compare against the saved roster's canonical rendering,
+  // ignoring blank-line / trailing-whitespace noise so re-typing the same
+  // roster doesn't read as dirty. Mirrors the Settings unsaved indicator.
+  const rosterDirty = useMemoA(() => {
+    const norm = (s) => s.split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
+    return norm(text) !== norm(generateText(c.players || []));
+  }, [text, c.players, c.withZekkenName]);
   const players = useMemoA(() => c.players || [], [c.players]);
-  const allTags = useMemoA(() => [...new Set(players.map(p => p.tag).filter(Boolean))], [players]);
+  // First-run: with no participants yet there is nothing to seed or check in,
+  // so the seeding panel is premature. Collapse it and let the roster-input
+  // panel fill the width — adding names is the only task at this point.
+  const emptyRoster = players.length === 0;
+
+  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
+  // The draw assigns the final, pool-interleaved numbers (player.number);
+  // before that there is none. We surface a stable registration-order number
+  // (numberPrefix + position in c.players) so operators can call competitors
+  // by number during check-in. Keyed off the unfiltered roster so the number
+  // doesn't jump when the list is searched/sorted. Rendered as provisional
+  // (muted, dotted) since the final numbers may differ after the draw.
+  const provisionalNumberById = useMemoA(() => {
+    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
+    // a participant named "__proto__" or "constructor" against a plain `{}` map
+    // could pollute the prototype chain or return inherited values on lookup.
+    // `Object.create(null)` removes both risks and keeps the `map[key]` /
+    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
+    const map = Object.create(null);
+    if (c.numberPrefix) {
+      (c.players || []).forEach((p, i) => {
+        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
+      });
+    }
+    return map;
+  }, [c.players, c.numberPrefix]);
+  const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
-    players.forEach(p => { map.set(p.id ?? p.name, participantSearchTarget(p)); });
+    players.forEach(p => { map.set(window.checkinPid(p), participantSearchTarget(p)); });
     return map;
   }, [players]);
   const visiblePlayers = useMemoA(() => {
     const q = trimmedSearch.toLowerCase();
     let out = players;
-    if (tagFilter) out = out.filter(p => p.tag === tagFilter);
+    if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
     if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
-    if (q) out = out.filter(p => playerSearchTargets.get(p.id ?? p.name)?.includes(q));
+    if (q) out = out.filter(p => playerSearchTargets.get(window.checkinPid(p))?.includes(q));
     return out;
-  }, [players, tagFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
+  }, [players, sourceFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
   const dojoFirstRowSet = useMemoA(() => {
     const seen = new Set();
     const first = new Set();
     visiblePlayers.forEach((p) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(p.id ?? p.name); }
+      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(window.checkinPid(p)); }
     });
     return first;
   }, [visiblePlayers]);
@@ -499,9 +559,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const targets = (c.players || []).filter(p => p.dojo === dojo && !p.checkedIn);
     if (targets.length === 0) return;
 
-    if (!confirm(`Mark all ${targets.length} participants from ${dojo} as checked-in?`)) return;
+    if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
 
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -515,7 +575,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
   const bulkCheckInAll = async () => {
     const targets = (c.players || []).filter(p => !p.checkedIn);
     if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, p.id ?? p.name, true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -529,7 +589,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const name = addName.trim(), dojo = addDojo.trim(), danGrade = addDanGrade.trim();
     const zekken = addZekken.trim();
     if (!name || !dojo) { showToast("Name and dojo are required", "error"); return; }
-    const admin = window.promptAdminPassword();
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setAddLoading(true);
     try {
@@ -559,9 +619,9 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
     const oldName = replaceTarget.name;
-    const targetId = replaceTarget.id;
-    const targetTag = replaceTarget.tag || "";
-    const admin = window.promptAdminPassword();
+    const targetPid = window.checkinPid(replaceTarget);
+    const targetSource = replaceTarget.source || "";
+    const admin = await window.promptAdminPassword();
     if (admin === null) return;
     setReplaceLoading(true);
     try {
@@ -576,12 +636,18 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       // ALWAYS send "" — otherwise stale "A. SMITH" from the replaced slot
       // would carry over and corrupt the 3-column CSV row.
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
-      const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", tag: targetTag };
+      const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", source: targetSource };
       if (metadata !== undefined) payload.metadata = metadata;
-      const updated = await window.API.replaceParticipant(c.id, targetId, payload, password, admin);
+      const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password, admin);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
       showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
+      if (updated.warnings && updated.warnings.length > 0) {
+        updated.warnings.forEach(w => showToast(`Warning: ${w}`, "error"));
+      }
+      if (updated.cascadeError) {
+        showToast(`Draw update failed: ${updated.cascadeError}`, "error");
+      }
     } catch (err) {
       if (!mountedRef.current) return;
       showToast(err.message, "error");
@@ -605,19 +671,45 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       const withZekken = c.withZekkenName;
       const parsed = window.parseParticipantLines(lines, withZekken);
 
-      // Duplicate detection (case-insensitive)
-      const nameSeen = new Map();
-      const dupes = [];
-      parsed.forEach(({ name }) => {
-        const key = name.toLowerCase();
-        if (nameSeen.has(key)) { if (!dupes.includes(name)) dupes.push(name); }
-        else nameSeen.set(key, true);
-      });
-      if (dupes.length > 0) {
-        showToast(`Duplicate names detected: ${dupes.join(", ")}`, "error");
+      // Reject rows missing a required column before sending. Catches a
+      // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
+      // competition, parsed as {displayName: dojo, dojo: ""}) up front with an
+      // actionable message, instead of relying on the server 400 round-trip.
+      const rowProblems = validateRosterRows(parsed, withZekken);
+      if (rowProblems.length > 0) {
+        const first = rowProblems[0];
+        const label = first.name ? `"${first.name}"` : `line ${first.index + 1}`;
+        const more = rowProblems.length > 1 ? ` (and ${rowProblems.length - 1} more)` : "";
+        showToast(`Cannot save: ${label} ${first.reason}${more}`, "error");
         return;
       }
 
+      // Tier-1: Duplicate detection — reject on perfect (normalizedName,
+      // normalizedDojo) collision.  Uses name+dojo so two people from
+      // different clubs with the same name are allowed.
+      // Fallback mirrors the shared normalizer (lower → trim → collapse
+      // internal whitespace) and guards undefined, so a missing
+      // window.normalizeParticipantName can't miss dups or throw.
+      const norm = window.normalizeParticipantName || (s => (s || '').toLowerCase().trim().replace(/\s+/g, ' '));
+      const keySeen = new Map();
+      const dupes = [];
+      parsed.forEach(({ name, dojo }) => {
+        const key = norm(name) + '|' + norm(dojo || '');
+        // Label with name + dojo: identical names at different dojos are
+        // allowed, so a name-only message can't show which line collided.
+        const label = dojo ? `${name} (${dojo})` : name;
+        if (keySeen.has(key)) { if (!dupes.includes(label)) dupes.push(label); }
+        else keySeen.set(key, true);
+      });
+      if (dupes.length > 0) {
+        showToast(`Duplicate participants detected: ${dupes.join(", ")}`, "error");
+        return;
+      }
+
+      // Tier-2 near-duplicate warnings are computed server-side and returned
+      // by the roster PUT (see doSave) so Go is the single source of truth —
+      // the client no longer runs its own fuzzy pass (which would drift from
+      // Go's algorithm).
       ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
     } catch (err) {
       // Local errors: parseParticipantLines throws on malformed input
@@ -628,14 +720,31 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       return;
     }
 
+    await doSave(np, added, updatedCount);
+  };
+
+  // doSave performs the PUT and shows the success toast. The roster PUT
+  // returns server-authoritative near-duplicate warnings; the save has
+  // already committed (warnings are non-blocking), so we surface them in a
+  // post-save informational banner the operator can review and dismiss.
+  const doSave = async (np, added, updatedCount) => {
+    // Clear any stale banner from a previous import up front, so a cancelled
+    // or failed save can't leave a misleading "Saved — …" banner on screen.
+    setNearDupPending(null);
     try {
-      await onUpdate({ ...c, players: np });
+      const warnings = await onUpdate({ ...c, players: np });
 
       // Bail if we unmounted during the in-flight PUT — see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still
       // mounted on logout-free navigation), but setImportSummary targets
       // this component's local state.
       if (!mountedRef.current) return;
+
+      // updateCompetition returns undefined when it short-circuited without
+      // saving (e.g. the elevated-password prompt was cancelled). Don't show
+      // a "Saved" toast for a PUT that never happened. A real save returns the
+      // warnings array (possibly empty).
+      if (warnings === undefined) return;
 
       const label = c.kind === "team" ? "team" : "participant";
       let msg = `Saved ${pluralize(np.length, label)}`;
@@ -644,6 +753,12 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
       }
       showToast(msg);
       setImportSummary(null);
+      const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
+      setNearDupPending(hasWarnings ? { pairs: warnings } : null);
+      // Return to the dashboard after a clean apply so the operator lands back
+      // on the competition list. When the save surfaced near-duplicate warnings,
+      // stay put so they can review the banner before navigating away.
+      if (!hasWarnings && onBack) onBack();
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -678,8 +793,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
     const content = c.kind === "team"
       ? "Team Name, Dojo\nTora A, Tora Dojo London\n"
       : c.withZekkenName
-        ? "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Mumeishi, 3\n"
-        : "Name, Dojo, Dan\nAkira Tanaka, Mumeishi, 3\n";
+        ? "Name, Zekken, Dojo, Dan\nAkira Tanaka, TANAKA, Gyokusen, 3\n"
+        : "Name, Dojo, Dan\nAkira Tanaka, Gyokusen, 3\n";
     const blob = new Blob([content], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -697,39 +812,73 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
 
   return (
     <>
-      {c.checkInEnabled && <CheckInBanner tournament={tournament} players={players} />}
       {isDrawReady && (
-        <div className="notice notice--info" style={{ marginBottom: 12 }}>
-          Draw pending — participant edits are locked. Discard the draw to make changes.
+        <div className="alert alert--warn" style={{ marginBottom: 12 }}>
+          Draw generated — the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
         </div>
       )}
       {isStarted && (
         <div style={{ marginBottom: 16, display: "flex", justifyContent: "flex-end" }}>
-          <button className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
+          <button type="button" className="btn btn--primary" onClick={() => onSection("scores")}>Go to Scoring →</button>
         </div>
       )}
-      <div className="row" style={{ alignItems: "start" }}>
+      {/* Setup next-step cue: connects this landing page to the rest of the
+          preparation flow. Adding the roster here doesn't tell the operator
+          what comes next (the Generate draw button lives in the page header,
+          the full checklist on Overview), so state it explicitly. */}
+      {isSetup && (
+        <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div className="card__title" style={{ marginBottom: 2 }}>
+              {players.length >= 2 ? "Roster ready — next: generate the draw" : "Add your roster to begin"}
+            </div>
+            <div className="card__sub">
+              {players.length >= 2
+                ? `${players.length} ${c.kind === "team" ? "teams" : "participants"} added. Optionally assign seeds, then continue to Overview to generate the draw.`
+                : `Add at least 2 ${c.kind === "team" ? "teams" : "participants"}, then you can generate the draw.`}
+            </div>
+          </div>
+          {/* When the roster is ready the next action is generating the draw,
+              which lives on the Overview page. Make that a primary CTA so the
+              next step is obvious; before the roster is ready, keep a low-key
+              link to the full setup checklist. */}
+          <button
+            type="button"
+            className={players.length >= 2 ? "btn btn--primary" : "btn"}
+            onClick={() => onSection("overview")}
+          >
+            {players.length >= 2 ? "Continue to draw setup →" : "View setup steps →"}
+          </button>
+        </div>
+      )}
+      <div className="row" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
+        {!emptyRoster && (
         <div className="card">
           <div className="card__head">
             <div>
-              <div className="card__title">Check-in & Seeding</div>
+              <div className="card__title">{c.checkInEnabled ? "Check-in & Seeding" : "Seeding"}</div>
               <div className="card__sub">
                 {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{players.filter((p) => p.seed).length} seeded
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {/* Attendance cluster: only present when check-in tracking is on. */}
               {c.checkInEnabled && (
-                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
+                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" aria-pressed={showOnlyUnchecked} onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
                   {showOnlyUnchecked ? "Show all" : "Show unchecked"}
                 </button>
               )}
               {c.checkInEnabled && (
                 <button className="btn btn--sm" type="button" onClick={bulkCheckInAll} disabled={players.length === 0} title="Mark all as checked in">Check in all</button>
               )}
-              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0} title="Shuffle unseeded players">Shuffle unseeded</button>
-              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0} title={players.length === 0 ? "Add participants first" : undefined}>Import Seeds CSV</button>
+              {/* Divider between the attendance and seeding clusters. */}
+              {c.checkInEnabled && <span aria-hidden="true" style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 2px" }} />}
+              {/* Seeding cluster. draw-ready lock: seed mutations disabled until the draw is discarded. */}
+              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to shuffle seeds" : "Shuffle unseeded players"}>Shuffle unseeded</button>
+              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import seeds (CSV)</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
-              <button className="btn btn--sm" type="button" onClick={clearAllSeeds}>Clear seeds</button>
+              {/* Lone destructive action: ghost-danger, set apart from the constructive seeding buttons. */}
+              <button className="btn btn--sm btn--ghost btn--danger" type="button" onClick={clearAllSeeds} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to clear seeds" : "Remove all seed ranks"}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>
@@ -780,14 +929,14 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                   </ul>
                 </div>
               )}
-              <button className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
+              <button type="button" className="btn btn--sm" style={{ marginTop: 4 }} onClick={() => setSeedImportResult(null)}>Dismiss</button>
             </div>
           )}
-          {allTags.length > 0 && (
+          {allSources.length > 0 && (
             <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button className={`radio-pill ${!tagFilter ? "is-active" : ""}`} onClick={() => setTagFilter(null)}>All</button>
-              {allTags.map(t => (
-                <button key={t} className={`radio-pill ${tagFilter === t ? "is-active" : ""}`} onClick={() => setTagFilter(tagFilter === t ? null : t)}>{t}</button>
+              <button type="button" aria-pressed={!sourceFilter} className={`radio-pill ${!sourceFilter ? "is-active" : ""}`} onClick={() => setSourceFilter(null)}>All</button>
+              {allSources.map(t => (
+                <button type="button" key={t} aria-pressed={sourceFilter === t} className={`radio-pill ${sourceFilter === t ? "is-active" : ""}`} onClick={() => setSourceFilter(sourceFilter === t ? null : t)}>{t}</button>
               ))}
             </div>
           )}
@@ -815,10 +964,10 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                     <div className="field__label" style={{ fontSize: 11 }}>Dan grade</div>
                     <input className="input" style={{ width: 100 }} value={addDanGrade} onChange={e => setAddDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <button className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
+                  <button type="button" className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
                     {addLoading ? "Adding…" : "Add"}
                   </button>
-                  <button className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); }}>Cancel</button>
+                  <button type="button" className="btn btn--sm" onClick={() => { setShowAddForm(false); setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); }}>Cancel</button>
                 </div>
               )}
             </div>
@@ -849,8 +998,8 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                   </div>
                   <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
-                    <button className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
+                    <button type="button" className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
+                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
                       {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -859,43 +1008,44 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
             </div>
           )}
           {players.length === 0 ? (
-            <div className="empty" style={{ padding: 24 }}>
-              <div className="icon">🌱</div>
-              <h3>No participants yet</h3>
-              <div style={{ fontSize: 12 }}>Add names on the right, then "Apply".</div>
-            </div>
+            <EmptyState icon="🌱" title="No participants yet" message={'Add names on the right, then "Apply".'} style={{ padding: 24 }} />
           ) : (
             <div className="seed-list">
-              {/* When a tag filter is active, reorder controls would operate on */}
+              {/* When a source filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered — so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(tagFilter || showOnlyUnchecked || trimmedSearch) && (
+              {(sourceFilter || showOnlyUnchecked || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
                   {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
-              {visiblePlayers.length === 0 && (trimmedSearch || tagFilter || showOnlyUnchecked) && (
+              {visiblePlayers.length === 0 && (trimmedSearch || sourceFilter || showOnlyUnchecked) && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
-                  {(tagFilter || showOnlyUnchecked)
+                  {(sourceFilter || showOnlyUnchecked)
                     ? "No participants match current filters."
                     : `No match for "${trimmedSearch}".`}
                 </div>
               )}
               {visiblePlayers.map((p) => {
                 const i = players.indexOf(p);
-                const reorderDisabled = !!tagFilter || showOnlyUnchecked || !!trimmedSearch;
+                // draw-ready lock: reordering (and all seed mutations) disabled until the draw is discarded.
+                // Filter-active check is kept separate so both reasons can coexist.
+                const reorderDisabled = !!sourceFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
                 return (
                   <div
-                    key={p.id ?? p.name}
+                    key={window.checkinPid(p)}
                     className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
-                    onDragStart={() => { dragIdxRef.current = i; }}
+                    onDragStart={() => { if (reorderDisabled) return; dragIdxRef.current = i; }}
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
-                      if (reorderDisabled) return;
-                      moveSeedRow(dragIdxRef.current, i);
+                      // Clear both refs on disabled path — if the row went
+                      // disabled mid-drag (e.g. draw-ready via SSE) a stale
+                      // dragIdxRef would corrupt the next legitimate drop.
+                      if (reorderDisabled) { dragIdxRef.current = null; setDragOverIdx(null); return; }
+                      if (dragIdxRef.current !== null) moveSeedRow(dragIdxRef.current, i);
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
@@ -909,23 +1059,30 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          onChange={(e) => toggleCheckIn(p.id ?? p.name, e.target.checked)}
+                          onChange={(e) => toggleCheckIn(window.checkinPid(p), e.target.checked)}
                           style={{ width: 18, height: 18, cursor: "pointer" }}
                           aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
                         />
                       </div>
                     )}
-                    <span className="seed-row__handle" title={reorderDisabled ? "Clear all filters to reorder" : "Drag to reorder"}>⠿</span>
+                    <span className="seed-row__handle" title={isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                        <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>{p.name}</div>
-                        {p.tag && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.tag}</span>}
+                        <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
+                          {p.number ? (
+                            <span className="num-prefix">{p.number}</span>
+                          ) : provisionalNumberById[window.checkinPid(p)] ? (
+                            <span className="num-prefix num-prefix--provisional" title="Provisional number — the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
+                          ) : null}
+                          {p.name}
+                        </div>
+                        {p.source && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.source}</span>}
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}
-                        {c.checkInEnabled && dojoFirstRowSet.has(p.id ?? p.name) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
-                          <button
+                        {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
+                          <button type="button"
                             className="btn--link"
                             style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
                             onClick={() => bulkCheckInDojo(p.dojo)}
@@ -936,10 +1093,11 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                       </div>
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
-                      <button className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
+                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                      {/* draw-ready lock: edit is setup-only; editing participants requires discarding the draw first */}
                       {isSetup && (
-                        <button className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(c.withZekkenName ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput
@@ -949,6 +1107,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
+                        disabled={isDrawReady}
                       />
                   </div>
                 );
@@ -957,59 +1116,95 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
             </div>
           )}
         </div>
+        )}
         <div className="card">
           <div className="card__head">
             <div>
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
-                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Mumeishi, 3</span>
+                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: Alice Smith, Gyokusen, 3</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: "{c.kind === "team" ? "Team name, Dojo" : c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]"}"
                 <br />* Dan = kendo grade (optional)
-                <br /><button className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
+                <br /><button type="button" className="btn--link" style={{ padding: 0, fontSize: 11, fontWeight: 600 }} onClick={downloadTemplate}>Download CSV template</button>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} title="Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV">Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps}>Apply changes</button>
+            {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+              <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
             <div
-              className={`dropzone ${dragOver ? "dropzone--active" : ""}`}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              className={`dropzone ${dragOver ? "dropzone--active" : ""} ${isDrawReady ? "dropzone--disabled" : ""}`}
+              onClick={() => { if (!isDrawReady) fileRef.current?.click(); }}
+              onDragOver={(e) => { if (isDrawReady) return; e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
-              onDrop={onDrop}
-              style={{ flex: 1, height: 80, minHeight: 80 }}
+              onDrop={(e) => { if (isDrawReady) { e.preventDefault(); setDragOver(false); return; } onDrop(e); }}
+              style={{ flex: 1, height: 80, minHeight: 80, cursor: isDrawReady ? "not-allowed" : undefined, opacity: isDrawReady ? 0.5 : undefined }}
             >
               <div className="dropzone__icon">📥</div>
               <div>
                 <div className="dropzone__title">{dragOver ? "Drop CSV to import" : "Click or drop CSV to import participants"}</div>
                 <div className="dropzone__sub">
-                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Mumeishi, 3)"}
+                  {c.withZekkenName ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade] (e.g. Alice Smith, Gyokusen, 3)"}
                 </div>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
             </div>
           </div>
 
-          {importSummary && (
-            <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
-              <button className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
+          {/* Sample roster: only offered while the box is empty so it can't
+              clobber an in-progress list. Fills the textarea for review; the
+              operator still clicks "Apply changes" to save. */}
+          {!isDrawReady && lines.length === 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <span className="field__hint" style={{ margin: 0 }}>
+                No list yet? Fill with a sample {c.kind === "team" ? "team " : ""}roster:
+              </span>
+              <div className="radio-group" style={{ gap: 6 }}>
+                <button type="button" className="radio-pill" onClick={() => fillSample(8)}>Small (8)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(16)}>Medium (16)</button>
+                <button type="button" className="radio-pill" onClick={() => fillSample(32)}>Large (32)</button>
+              </div>
             </div>
           )}
 
+          {importSummary && (
+            <div className="alert alert--success" style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>✔ Loaded <strong>{importSummary.newCount}</strong> entries. {importSummary.existingCount > 0 ? `This will replace ${importSummary.existingCount} existing ${c.kind === "team" ? "teams" : "players"} on Apply.` : ""}</span>
+              <button type="button" className="btn btn--sm btn--ghost" onClick={() => setImportSummary(null)}>Dismiss</button>
+            </div>
+          )}
+
+          {nearDupPending && (
+            <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
+              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved — but these entries look like possible duplicates. Review them:</div>
+              <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
+                {nearDupPending.pairs.map((w, i) => (
+                  <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
+                ))}
+              </ul>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button"
+                  className="btn btn--sm"
+                  data-testid="near-dup-dismiss"
+                  onClick={() => setNearDupPending(null)}
+                >Dismiss</button>
+              </div>
+            </div>
+          )}
           <LinedTextarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onFocus={() => { textFocusRef.current = true; }}
             onBlur={() => { textFocusRef.current = false; }}
             rows={14}
-            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Mumeishi" : "Akira Tanaka, Mumeishi"}
+            placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
           <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
           {lines.length > 0 && (() => {
@@ -1032,7 +1227,7 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                   <div className="field__hint">Preview of {Math.min(lines.length, previewLimit)} of {lines.length} rows</div>
                   {lines.length > 10 && (
-                    <button className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
+                    <button type="button" className="btn btn--ghost btn--sm" style={{ color: "var(--accent)", padding: "2px 6px" }} onClick={() => setShowAllPreview(!showAllPreview)}>
                       {showAllPreview ? "Show less" : "Show all"}
                     </button>
                   )}
@@ -1040,6 +1235,15 @@ function AdminParticipants({ c, tournament, onUpdate, password, showToast, onSec
               </div>
             );
           })()}
+          {/* Repeat Apply at the bottom so the operator doesn't have to scroll
+              back up after pasting/reviewing a long roster. Same handler and
+              disabled rules as the top button. */}
+          {lines.length > 0 && (
+            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={hasGaps || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -1054,4 +1258,4 @@ window.AdminParticipants = AdminParticipants;
 
 // ES export for the vitest suite — pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
-export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget };
+export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows };

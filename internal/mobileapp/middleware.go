@@ -45,7 +45,28 @@ const (
 	// to disk. 64 MB is sized for a worst-case full-roster CSV plus
 	// metadata; raise here if real tournaments outgrow it.
 	MaxImportBodyBytes int64 = 64 << 20 // 64 MB
+
+	// SponsorMaxBodyBytes caps POST /api/sponsors (multipart logo upload).
+	// The sponsor logo file itself is capped at 1 MB by in-handler check;
+	// this envelope cap (2 MB) gives generous headroom for the multipart
+	// boundary, form-field overhead, and the optional link/name fields
+	// without letting a client stream gigabytes through the parser.
+	SponsorMaxBodyBytes int64 = 2 << 20 // 2 MB
+
+	// BrandingMaxBodyBytes caps POST /api/branding/logo (tournament logo
+	// upload, mp-scf). Same rationale and size as SponsorMaxBodyBytes.
+	BrandingMaxBodyBytes int64 = 2 << 20 // 2 MB
 )
+
+// SponsorMaxFileBytes is the in-handler cap on the sponsor logo file itself
+// (the multipart `file` field), distinct from the envelope cap above.
+// See mp-c38 plan.
+const SponsorMaxFileBytes int64 = 1 << 20 // 1 MB
+
+// BrandingMaxFileBytes is the in-handler cap on the tournament branding
+// logo file itself. Kept separate from SponsorMaxFileBytes so the two
+// limits can evolve independently.
+const BrandingMaxFileBytes int64 = 1 << 20 // 1 MB
 
 // MaxBodyBytes returns a Gin middleware that rejects requests whose
 // body exceeds n bytes. Two checks, in order of cost:
@@ -207,29 +228,35 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
-		http.MethodPost + " /api/tournament",                                           // Fix 3329416167: re-bootstrap overwrite when tournament already exists
-		http.MethodPut + " /api/tournament",                                            // tournament name/password/courts/check-in windows
-		http.MethodPost + " /api/competitions",                                         // create a competition (category) — setup
-		http.MethodPut + " /api/competitions/:id",                                      // edit competition config — setup
-		http.MethodPost + " /api/tournament/announce",                                  // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements/:id",                                  // Fix 3329416176: organiser config, not operational play
-		http.MethodDelete + " /api/announcements",                                      // Fix 3329416176: organiser config, not operational play
-		http.MethodPut + " /api/auth/admin-password",                                   // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
-		http.MethodPut + " /api/competitions/:id/schedule",                             // Fix 3330063192: organiser schedule setup, not operational play
-		http.MethodPost + " /api/competitions/:id/playoffs",                            // Fix 3330063192: organiser playoff seeding, not operational play
-		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner",         // Fix 3330080949: result correction — organiser, not participant play
-		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",          // Fix 3330080949: standings correction — organiser, not participant play
-		http.MethodPost + " /api/competitions/:id/competitor-status",                   // Fix 3331033814: eligibility mutation — organiser decision, not operational play
-		http.MethodGet + " /api/competitions/:id/export",                               // Fix 3332740291: xlsx export — admin/CPU-heavy, not operational play
-		http.MethodPut + " /api/competitions/:id/matches/:mid/court",                   // court assignment — organiser coordination
-		http.MethodPut + " /api/competitions/:id/matches/:mid/time",                    // match time — organiser coordination
-		http.MethodPut + " /api/competitions/:id/seeds",                                // seeding — organiser pre-draw setup
-		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",          // kiken-injury reinstatement — organiser decision
+		http.MethodPost + " /api/tournament",                                   // Fix 3329416167: re-bootstrap overwrite when tournament already exists
+		http.MethodPut + " /api/tournament",                                    // tournament name/password/courts/check-in windows
+		http.MethodPost + " /api/competitions",                                 // create a competition (category) — setup
+		http.MethodPut + " /api/competitions/:id",                              // edit competition config — setup
+		http.MethodPost + " /api/tournament/announce",                          // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements/:id",                          // Fix 3329416176: organiser config, not operational play
+		http.MethodDelete + " /api/announcements",                              // Fix 3329416176: organiser config, not operational play
+		http.MethodPut + " /api/auth/admin-password",                           // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
+		http.MethodPut + " /api/competitions/:id/schedule",                     // Fix 3330063192: organiser schedule setup, not operational play
+		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner", // Fix 3330080949: result correction — organiser, not participant play
+		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",  // Fix 3330080949: standings correction — organiser, not participant play
+		http.MethodPost + " /api/competitions/:id/competitor-status",           // Fix 3331033814: eligibility mutation — organiser decision, not operational play
+		http.MethodGet + " /api/competitions/:id/export",                       // Fix 3332740291: xlsx export — admin/CPU-heavy, not operational play
+		http.MethodPut + " /api/competitions/:id/matches/:mid/court",           // court assignment — organiser coordination
+		http.MethodPut + " /api/competitions/:id/matches/:mid/time",            // match time — organiser coordination
+		http.MethodPut + " /api/competitions/:id/seeds",                        // seeding — organiser pre-draw setup
+		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",  // kiken-injury reinstatement — organiser decision
+		// Forward check-in (single PUT + bulk POST /checkin-bulk) is intentionally ungated —
+		// participants and desk staff can check in without the main admin password.
+		// Only reversal (DELETE) requires it.
 		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin",         // check-in reversal — organiser correction
 		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management — organiser
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management — organiser
 		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup — organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId": // team match lineup — organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup — organiser
+		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
+		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload — organiser setup, not operational play
+		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion — organiser setup, not operational play
+		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export — admin/CPU-heavy, not operational play
 		return true
 	default:
 		return false

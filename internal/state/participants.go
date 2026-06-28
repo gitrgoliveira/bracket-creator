@@ -15,12 +15,13 @@ import (
 // ErrParticipantNotFound is returned by UpdateParticipant when the pid is not in the roster.
 var ErrParticipantNotFound = errors.New("participant not found")
 
-// ErrDuplicateName is returned by AddParticipant and UpdateParticipant when
-// the supplied Player.Name collides with another participant in the same
-// roster (excluding the participant being edited, for the update path). The
-// comparison is case-insensitive (strings.EqualFold) to match the on-disk
-// canonicalization applied by helper.CreatePlayers.
-var ErrDuplicateName = errors.New("participant name already exists")
+// ErrDuplicateName is returned by AddParticipant, UpdateParticipant, and the
+// bulk write path when the supplied (Player.Name, Player.Dojo) pair collides
+// with another participant in the same roster (excluding the participant being
+// edited, for the update path). The comparison is on the normalized
+// (name, dojo) key — the SAME name at a DIFFERENT dojo is allowed (two real
+// people at different clubs), so the message names both fields.
+var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
 // (Store.AddParticipant and Store.ReplaceParticipant — both call
@@ -35,6 +36,12 @@ var ErrDuplicateName = errors.New("participant name already exists")
 // only write paths should call requireSetupLocked under the same lock as
 // AddParticipant/ReplaceParticipant do.
 var ErrCompetitionNotInSetup = errors.New("competition has already started")
+
+// ErrReservedName is returned by the participant write paths when a name
+// matches an internal bracket-placeholder pattern (e.g. "Pool A-1st",
+// "Winner of r1-m3").  Such names would be silently misclassified as
+// unresolved bracket slots, making knockout matches permanently unscoreable.
+var ErrReservedName = errors.New("participant name collides with a reserved bracket-placeholder pattern")
 
 // LoadParticipantsOpts controls optional behavior in LoadParticipants.
 type LoadParticipantsOpts struct {
@@ -338,6 +345,56 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	return comp.WithZekkenName, nil
 }
 
+// participantPairKey is the (normalizedName, normalizedDojo) identity key used
+// to resolve a participant when no stable UUID is available. It mirrors the
+// Tier-1 dedup key (NormalizeParticipantName on both halves joined by "|"), so
+// the pair is unique across a roster by construction — name alone is NOT unique
+// (same name at a different dojo is allowed). Keep in sync with checkInKey in
+// handlers_participants.go and checkinPid in web-mobile/js/data.jsx.
+func participantPairKey(name, dojo string) string {
+	return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
+}
+
+// pidPairKey derives the (normalizedName, normalizedDojo) key from a composite
+// "name|dojo" pid sent by the client for legacy UUID-less rows. The raw pid is
+// split on the FIRST "|" and each half normalized separately — splitting before
+// normalizing trims whitespace around the delimiter, which normalizing the whole
+// string would not. A pid with no "|" resolves as a name with an empty dojo.
+func pidPairKey(pid string) string {
+	name, dojo, _ := strings.Cut(pid, "|")
+	return participantPairKey(name, dojo)
+}
+
+// resolveParticipantIndex finds the index of the participant addressed by pid.
+// It matches a stable UUID first; failing that — legacy participants.csv files
+// loaded without a UUID column have empty IDs (loadParticipantsNoLock mints
+// none; the first write via saveParticipantsNoLock migrates those rows to UUIDs
+// because marshalParticipantsCSV backfills empty IDs) — it falls back to
+// matching the composite "name|dojo" key the client sends for ID-less rows. The
+// fallback is restricted to ID-less rows (UUID rows are only addressable by
+// their id) and the (name, dojo) pair is unique per roster, so resolution is
+// unambiguous. Returns -1 when no participant matches.
+func resolveParticipantIndex(players []domain.Player, pid string) int {
+	if pid == "" {
+		return -1
+	}
+	for i := range players {
+		if players[i].ID != "" && players[i].ID == pid {
+			return i
+		}
+	}
+	want := pidPairKey(pid)
+	for i := range players {
+		if players[i].ID != "" {
+			continue
+		}
+		if participantPairKey(players[i].Name, players[i].Dojo) == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // BulkCheckInResult carries the outcome of a BulkCheckIn call.
 type BulkCheckInResult struct {
 	CheckedIn        int      `json:"checkedIn"`
@@ -364,29 +421,44 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 		return BulkCheckInResult{}, err
 	}
 
-	byPID := make(map[string]int, len(players))
+	// Two lookup maps so resolution matches resolveParticipantIndex: UUID rows
+	// by their stable id, legacy UUID-less rows by their (name, dojo) pair key.
+	byID := make(map[string]int, len(players))
+	byKey := make(map[string]int, len(players))
 	for i := range players {
 		if players[i].ID != "" {
-			byPID[players[i].ID] = i
+			byID[players[i].ID] = i
+		} else {
+			byKey[participantPairKey(players[i].Name, players[i].Dojo)] = i
 		}
 	}
 
-	seen := make(map[string]struct{}, len(pids))
+	// Deduplicate by resolved participant index so that semantically equivalent
+	// pids (same normalized name|dojo with different whitespace/case) don't count
+	// the same participant twice. NotFound pids are deduped by raw string because
+	// there is no index to compare against.
+	seenIdx := make(map[int]struct{}, len(pids))
+	seenNotFound := make(map[string]struct{})
 	result := BulkCheckInResult{NotFound: []string{}}
 	for _, pid := range pids {
 		if pid == "" {
 			continue
 		}
-		if _, dup := seen[pid]; dup {
-			continue
-		}
-		seen[pid] = struct{}{}
-
-		idx, ok := byPID[pid]
+		idx, ok := byID[pid]
 		if !ok {
-			result.NotFound = append(result.NotFound, pid)
+			idx, ok = byKey[pidPairKey(pid)]
+		}
+		if !ok {
+			if _, dup := seenNotFound[pid]; !dup {
+				result.NotFound = append(result.NotFound, pid)
+				seenNotFound[pid] = struct{}{}
+			}
 			continue
 		}
+		if _, dup := seenIdx[idx]; dup {
+			continue
+		}
+		seenIdx[idx] = struct{}{}
 		if players[idx].CheckedIn {
 			result.AlreadyCheckedIn++
 		} else {
@@ -426,14 +498,9 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	foundIdx := -1
-	for i := range players {
-		if players[i].ID == pid {
-			foundIdx = i
-			break
-		}
-	}
-
+	// Resolve by stable UUID, falling back to the composite "name|dojo" key for
+	// legacy UUID-less rosters (see resolveParticipantIndex).
+	foundIdx := resolveParticipantIndex(players, pid)
 	if foundIdx == -1 {
 		return nil, ErrParticipantNotFound
 	}
@@ -443,26 +510,46 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	if err := transform(&players[foundIdx]); err != nil {
 		return nil, err
 	}
+
+	// Reserved-name check before TitleCase, but ONLY when the name actually
+	// changed.  Check-in transforms leave the name untouched; running the
+	// guard unconditionally would break check-in for any participant whose
+	// stored name happens to match the reserved pattern (however unlikely).
+	// When the name DID change, check the raw pre-TitleCase value: TitleCase
+	// alters ordinal suffixes ("3rd"→"3Rd") so the post-TitleCase form would
+	// never match the reserved regex.
+	// Detect rename by comparing raw values (before TrimSpace) so that a
+	// stored name like "Alice" is never spuriously considered changed by a
+	// check-in transform that doesn't touch Name at all.  TrimSpace is only
+	// for the regex match, not for change detection.
+	if players[foundIdx].Name != oldName {
+		trimmedName := strings.TrimSpace(players[foundIdx].Name)
+		if helper.IsReservedParticipantName(trimmedName) {
+			return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
+		}
+	}
+
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
 	// so participants.csv and seeds.csv store the same form that will be read
 	// back — otherwise a rename to "alice cooper" would be read as "Alice Cooper"
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
-	// Duplicate-name guard: when the transform renames the participant,
-	// reject if any OTHER participant already has that name. Trim both
-	// sides — LoadParticipants canonicalises via helper.CreatePlayers
-	// (TrimSpace + cases.Title), so "Alice " collapses to "Alice" on
-	// the next load and would reintroduce ambiguous name-keyed lookups.
-	if players[foundIdx].Name != oldName {
-		newTrimmed := strings.TrimSpace(players[foundIdx].Name)
-		for i := range players {
-			if i == foundIdx {
-				continue
-			}
-			if strings.EqualFold(strings.TrimSpace(players[i].Name), newTrimmed) {
-				return nil, ErrDuplicateName
-			}
+	// Duplicate guard: reject if any OTHER participant already has the same
+	// (normalizedName, normalizedDojo) pair. This runs unconditionally — even
+	// for check-in-only transforms that don't rename — which is harmless
+	// because the participant being edited is skipped (i == foundIdx) and a
+	// no-op edit can't collide with itself. Using both fields allows same-named
+	// competitors from different clubs while rejecting diacritic/casing variants.
+	newNormName := helper.NormalizeParticipantName(players[foundIdx].Name)
+	newNormDojo := helper.NormalizeParticipantName(players[foundIdx].Dojo)
+	for i := range players {
+		if i == foundIdx {
+			continue
+		}
+		if helper.NormalizeParticipantName(players[i].Name) == newNormName &&
+			helper.NormalizeParticipantName(players[i].Dojo) == newNormDojo {
+			return nil, ErrDuplicateName
 		}
 	}
 
@@ -549,12 +636,12 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 //
 // withZekkenName MUST match the value the next LoadParticipants will use.
 // The on-disk column layout differs between the two modes:
-//   - non-zekken: [id, Name, Dojo, ...Metadata, Tag?, "checked_in"?]
-//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Tag?, "checked_in"?]
+//   - non-zekken: [id, Name, Dojo, ...Metadata, Source?, "checked_in"?]
+//   - zekken:    [id, Name, DisplayName, Dojo, ...Metadata, Source?, "checked_in"?]
 //
 // Pre-fix the function tried to be clever by writing the 2-column form (id,
 // Name, Dojo) when DisplayName was empty or auto-derivable. That broke zekken
-// reloads as soon as Tag or Metadata were present — e.g. the manual-tag
+// reloads as soon as Source or Metadata were present — e.g. the manual-source
 // default added by the single-add endpoint produced [id, Name, Dojo, "manual"]
 // for zekken comps, which CreatePlayersFromRecords(_, true) then read as
 // Name=Name, DisplayName=Dojo, Dojo="manual" (corrupted). Branch on
@@ -573,7 +660,7 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 			// Always include the DisplayName column so a subsequent
 			// LoadParticipants(_, true) reads [Name, DisplayName, Dojo, ...]
 			// — even when DisplayName equals SanitizeName(Name) and even when
-			// Tag/Metadata are present.
+			// Source/Metadata are present.
 			dn := p.DisplayName
 			if dn == "" {
 				dn = helper.SanitizeName(p.Name)
@@ -583,8 +670,15 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 			record = []string{id, p.Name, p.Dojo}
 		}
 		record = append(record, p.Metadata...)
-		if p.Tag != "" {
-			record = append(record, p.Tag)
+		// Canonicalize (trim + lower-case) at the write chokepoint so participants.csv
+		// is always normalized regardless of which handler built the Player — keeps
+		// the loader from shifting a stray-cased value into Metadata and avoids
+		// split filter buckets. Only persist a RECOGNIZED source: an unknown value
+		// (set by some internal caller bypassing the API validator) would otherwise
+		// be written as a column and reloaded as Metadata — a lossy round-trip — so
+		// drop it instead.
+		if src := helper.CanonicalRegistrationSource(p.Source); helper.IsRegistrationSource(src) {
+			record = append(record, src)
 		}
 		if p.CheckedIn {
 			record = append(record, "checked_in")
@@ -642,16 +736,25 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 		return nil, err
 	}
 
-	// Duplicate-name guard (per bead acceptance criteria): the admin
-	// UI accepts the same name twice without warning otherwise, and
-	// the rest of the roster identifies competitors by display name.
-	// Trim both sides: LoadParticipants canonicalises via SanitizeName
-	// (TrimSpace + Title), so a trailing-space variant like "Alice "
-	// collapses to "Alice" on the next load — reject it up front.
+	// Duplicate-name guard: reject when (normalizedName, normalizedDojo)
+	// matches an existing entry. Using both name and dojo means that two
+	// real people at different clubs with the same name are allowed, while
+	// diacritic / casing variants ("Müller/Wakaba" vs "muller/wakaba") are
+	// correctly rejected.
 	for _, existing := range players {
-		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(p.Name)) {
+		if helper.NormalizeParticipantName(existing.Name) == helper.NormalizeParticipantName(strings.TrimSpace(p.Name)) &&
+			helper.NormalizeParticipantName(existing.Dojo) == helper.NormalizeParticipantName(strings.TrimSpace(p.Dojo)) {
 			return nil, ErrDuplicateName
 		}
+	}
+
+	// Reserved-name check before TitleCase so the error fires on the raw input
+	// ("Pool B-3rd") even though TitleCase would transform the ordinal suffix to
+	// a non-matching form ("Pool B-3Rd"). The bulk SaveParticipants path skips
+	// TitleCase, so saveParticipantsNoLock also carries this guard for that path.
+	trimmedName := strings.TrimSpace(p.Name)
+	if helper.IsReservedParticipantName(trimmedName) {
+		return nil, fmt.Errorf("%w: %q", ErrReservedName, trimmedName)
 	}
 
 	p.Name = helper.TitleCaseName(p.Name)
@@ -689,6 +792,31 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 }
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
+	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
+	// persistence path — the bulk PUT /competitions/:id roster import (the
+	// SPA's primary flow), single add/edit, and any future caller — rejects
+	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
+	// only in the handlers would leave the guard bypassable, the same reason
+	// the elevated-password gate is inline on the roster PUT path.
+	entries := make([][2]string, len(players))
+	for i, p := range players {
+		entries[i] = [2]string{p.Name, p.Dojo}
+	}
+	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
+	// Reserved-name guard: names arriving via the bulk SaveParticipants path
+	// may be raw (neither TitleCased nor trimmed), so trim before matching to
+	// catch inputs like " Pool A-1st " that would otherwise slip through.
+	// AddParticipant and updateParticipantNoLock apply their own pre-TitleCase
+	// checks before reaching here; for those paths the guard is defence-in-depth.
+	for _, p := range players {
+		if trimmed := strings.TrimSpace(p.Name); helper.IsReservedParticipantName(trimmed) {
+			return fmt.Errorf("%w: %q", ErrReservedName, trimmed)
+		}
+	}
+
 	path := s.compPath(compID, "participants.csv")
 
 	data, err := marshalParticipantsCSV(players, withZekkenName)

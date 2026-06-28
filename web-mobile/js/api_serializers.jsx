@@ -52,9 +52,32 @@ function toBackendMatchResult(patch, match) {
         decision: isHikiwake(score.type) ? "hikiwake" : "",
         status: toBackendStatus(patch.status || "scheduled"),
     };
+    // Carry the winner's participant id so a SAME-NAME head-to-head (the winner
+    // NAME matches both sides) is unambiguous on the backend. Without it, when
+    // the scoreline is tied (e.g. a hantei decision — equal ippon counts) the
+    // backend can't infer the winning side and leaves WinnerID empty, and the
+    // league matrix then marks BOTH same-name rows as winners. The scoring modal
+    // sets patch.winner to the winning SIDE object (m.sideA/m.sideB), so its id
+    // is available directly; fall back to deriving it from the match sides by
+    // name only when the names are distinct (unambiguous).
+    let winnerId = "";
+    if (patch.winner && typeof patch.winner === "object" && patch.winner.id) {
+        winnerId = patch.winner.id;
+    } else if (winnerName) {
+        const aId = (typeof match?.sideA === "object" ? match.sideA.id : null);
+        const bId = (typeof match?.sideB === "object" ? match.sideB.id : null);
+        if (winnerName === sideAName && winnerName !== sideBName) winnerId = aId || "";
+        else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
+    }
+    if (winnerId) result.winnerId = winnerId;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
+    // mp-62vr: rep-player names for a team daihyosen/tiebreaker rep bout. Only
+    // forward non-empty values — the engine preserves a prior pick on empty
+    // (backfillMatchIdentity), so omitting an unset side never wipes it.
+    if (patch.repPlayerA) result.repPlayerA = patch.repPlayerA;
+    if (patch.repPlayerB) result.repPlayerB = patch.repPlayerB;
     // FR-033: encho metadata round-trips so the (E) suffix persists. The
     // backend in Slice 1 (T039) accepts the field passively — Slice 3 wires
     // the decision/kiken/fusenpai semantics, but we already keep the
@@ -79,23 +102,42 @@ function toBackendMatchResult(patch, match) {
 function normalizeMatch(m, playerMap) {
     if (!m) return m;
     const norm = { ...m };
-    // Normalize sideA/sideB from string to {id, name}
+    // Normalize sideA/sideB/winner from name-string to {id, name}.
+    //
+    // playerMap is keyed by NAME, which collapses same-name participants
+    // (e.g. two "Tanaka Kenji" from different dojos — the duplicate check
+    // only rejects same-name AND same-dojo) onto a single id. When the
+    // server provides an explicit per-side id (m.sideAId / m.sideBId /
+    // m.winnerId — populated from pool-matches.csv), it is the authoritative
+    // identity and overrides the name-collapsed lookup. We clone the
+    // playerMap entry before stamping the id so the shared map object isn't
+    // mutated across matches.
+    const resolveSide = (name, flatId) => {
+        // Prefer the id-keyed entry: it carries the CORRECT dojo/number even for
+        // same-name participants. The name-keyed entry collapses same-name
+        // players onto one identity, so only trust it when its id matches the
+        // server's flat id — otherwise we'd attach the wrong dojo to this side.
+        let p = flatId ? playerMap?.[flatId] : null;
+        if (!p) {
+            const byName = playerMap?.[name];
+            if (byName && (!flatId || byName.id === flatId)) p = byName;
+        }
+        const base = p ? { ...p } : { id: flatId || name, name };
+        if (flatId) base.id = flatId;
+        return base;
+    };
     if (typeof norm.sideA === "string" && norm.sideA) {
-        const p = playerMap?.[norm.sideA];
-        norm.sideA = p || { id: norm.sideA, name: norm.sideA };
+        norm.sideA = resolveSide(norm.sideA, m.sideAId);
     } else if (!norm.sideA) {
         norm.sideA = { id: "", name: "" };
     }
     if (typeof norm.sideB === "string" && norm.sideB) {
-        const p = playerMap?.[norm.sideB];
-        norm.sideB = p || { id: norm.sideB, name: norm.sideB };
+        norm.sideB = resolveSide(norm.sideB, m.sideBId);
     } else if (!norm.sideB) {
         norm.sideB = { id: "", name: "" };
     }
-    // Normalize winner from string to object
     if (typeof norm.winner === "string" && norm.winner) {
-        const p = playerMap?.[norm.winner];
-        norm.winner = p || { id: norm.winner, name: norm.winner };
+        norm.winner = resolveSide(norm.winner, m.winnerId);
     }
     // Build score object from flat scoreA/scoreB if needed (bracket matches)
     if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
@@ -112,6 +154,15 @@ function normalizeMatch(m, playerMap) {
         const cleanA = stripHansoku(norm.scoreA);
         const cleanB = stripHansoku(norm.scoreB);
         const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        // Recover BOTH sides' waza letters into the per-side ippon arrays (when
+        // the server didn't send them for bracket matches). scoreA/scoreB are
+        // each formatScore(IpponsA/B) on the server — i.e. both sides' letters —
+        // so this is loss-free, unlike score.ippons which keeps only the
+        // winner's. Populating these means formatIpponsScore renders technique
+        // letters for BOTH competitors ("MK–D"), never the numeric fallback.
+        // Only fill when absent so server-provided arrays always win.
+        if (!norm.ipponsA?.length && cleanA) norm.ipponsA = cleanA.split("");
+        if (!norm.ipponsB?.length && cleanB) norm.ipponsB = cleanB.split("");
         norm.score = {
             type: "ippon",
             winnerPts: aWin ? cleanA.length : cleanB.length,
@@ -137,7 +188,30 @@ function buildPlayerMap(comp) {
     const map = {};
     const add = (p) => {
         const norm = normalizePlayer(p);
-        if (norm.name) map[norm.name] = { id: norm.name, name: norm.name, dojo: norm.dojo || "", seed: norm.seed ?? 0 };
+        if (!norm.name) return;
+        // Carry the FULL competitor identity so bracket/match sides resolved by
+        // name (e.g. a pool finisher seeded into the knockout) show the same
+        // details — dojo, zekken display name, and assigned number (e.g. "K1") —
+        // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
+        // carried, so a qualifier lost their number and zekken in the bracket.
+        const entry = {
+            id: norm.id || norm.name,
+            name: norm.name,
+            dojo: norm.dojo || "",
+            seed: norm.seed ?? 0,
+            displayName: norm.displayName || "",
+            number: norm.number || "",
+            source: norm.source || "",
+            danGrade: norm.danGrade || "",
+        };
+        map[norm.name] = entry;
+        // ALSO key by participant id. The name key collapses same-name
+        // participants (two "Tanaka Kenji" from different dojos) onto whichever
+        // was added last, so a name-only lookup can attach the WRONG dojo/number
+        // to a side. A distinct id key preserves each one's correct metadata,
+        // letting normalizeMatch resolve by the server's authoritative side id.
+        // (UUID id keys never collide with display-name keys.)
+        if (norm.id) map[norm.id] = entry;
     };
     if (comp?.config?.players) comp.config.players.forEach(add);
     if (comp?.players) comp.players.forEach(add);
@@ -179,9 +253,9 @@ function normalizePlayer(p) {
     // Include the full metadata array so updateCompetition/replaceParticipant
     // can preserve metadata[1+] slots (e.g. a second dan-grade notation or
     // other extra CSV columns beyond the grade) when the player round-trips
-    // through the JS layer. Note: "registered"/"manual"/"transfer" are Tags,
-    // not metadata — they are mapped to p.Tag above.
-    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", tag: p.Tag || "", danGrade, metadata: p.Metadata || [] };
+    // through the JS layer. Note: "registered"/"manual"/"transfer" are registration
+    // sources, not metadata — they are mapped to p.Source above.
+    return { name: p.Name || "", displayName: p.DisplayName || "", dojo: p.Dojo || "", seed: p.Seed || 0, number: p.Number || "", source: p.Source || "", danGrade, metadata: p.Metadata || [] };
 }
 
 // Normalize an entire competition detail response from the viewer API.

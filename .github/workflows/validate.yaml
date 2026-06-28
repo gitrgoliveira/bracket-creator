@@ -17,12 +17,12 @@ jobs:
       GO111MODULE: on
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.3"
+          go-version: "1.26.4"
 
       - name: Init project
         run: |
@@ -98,12 +98,12 @@ jobs:
             timeout: 10m
     steps:
       - name: Checkout Source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26.3"
+          go-version: "1.26.4"
           cache: true
 
       - name: Init project
@@ -115,9 +115,92 @@ jobs:
         run: go test ${{ matrix.packages.path }} -timeout=${{ matrix.packages.timeout }} -race -coverprofile=coverage-${{ matrix.packages.name }}.txt -covermode=atomic
 
       - name: Upload coverage to Codecov (${{ matrix.packages.name }})
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage-${{ matrix.packages.name }}.txt
           flags: ${{ matrix.packages.name }}
+          fail_ci_if_error: true
+          use_oidc: true
+
+  #      _ ____    _____         _
+  #     | / ___|  |_   _|__  ___| |_
+  #  _  | \___ \    | |/ _ \/ __| __|
+  # | |_| |___) |   | |  __/\__ \ |_
+  #  \___/|____/    |_|\___||___/\__|
+  #
+  # Runs the web-mobile vitest suite (unit + render projects) so missing
+  # window.* references in component render paths are caught in CI.
+  test-js:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web-mobile/package-lock.json
+
+      - name: Install JS dependencies
+        run: cd web-mobile && npm ci
+
+      - name: Run JS tests (unit + render)
+        run: cd web-mobile && npm test
+
+  #   ____  ____  _____   _____         _
+  #  |  _ \|  _ \|  ___| |_   _|__  ___| |_
+  #  | |_) | | | | |_      | |/ _ \/ __| __|
+  #  |  __/| |_| |  _|     | |  __/\__ \ |_
+  #  |_|   |____/|_|        |_|\___||___/\__|
+  #
+  # Runs the PDF-dependent tests (internal/pdf/...) that skip themselves when
+  # LibreOffice is absent. The regular "test" matrix above covers everything
+  # else; this job only adds the soffice codepath. It runs on every PR and push
+  # to main, matching the cadence of the main test matrix.
+  test-pdf:
+    permissions:
+      contents: read
+      id-token: write # for codecov/codecov-action
+    runs-on: ubuntu-latest
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+          cache: true
+
+      - name: Install LibreOffice headless
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-nogui \
+            default-jre-headless \
+            fonts-liberation
+
+      - name: Init project
+        run: |
+          go mod tidy
+          go generate ./...
+
+      - name: Generate example workbooks (required by PDF pipeline tests)
+        run: make examples
+
+      - name: Run PDF tests (with soffice)
+        run: go test ./internal/pdf/... -timeout=10m -coverprofile=coverage-pdf.txt -covermode=atomic
+
+      - name: Upload coverage to Codecov (pdf)
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage-pdf.txt
+          flags: pdf
           fail_ci_if_error: true
           use_oidc: true

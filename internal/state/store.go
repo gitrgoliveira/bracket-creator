@@ -38,6 +38,13 @@ type Store struct {
 	// remain concurrent across competitions.
 	compRenameMu sync.Mutex
 
+	// courtCheckMu serializes the "cross-comp court-busy check + per-comp
+	// match write" sequence so two concurrent match-starts in different
+	// competitions on the same court can't both pass the cross-comp check
+	// before either commits (TOCTOU). Same pattern as compRenameMu.
+	// Lock ordering: courtCheckMu is always acquired BEFORE any per-comp lock.
+	courtCheckMu sync.Mutex
+
 	// cache for tournament configuration to avoid redundant disk I/O.
 	tournamentMu sync.RWMutex
 	cachedTourn  *Tournament
@@ -177,6 +184,20 @@ func (s *Store) GetFolder() string {
 func (s *Store) WithCompetitionRenameLock(fn func() error) error {
 	s.compRenameMu.Lock()
 	defer s.compRenameMu.Unlock()
+	return fn()
+}
+
+// WithCourtExclusivityLock runs fn while holding the store's court-exclusivity
+// mutex. Use this to wrap a cross-competition court-busy check followed by a
+// per-competition WithTransaction call, so two concurrent match-starts on the
+// same court in different competitions can't both pass the check before either
+// commits (TOCTOU).
+//
+// Lock ordering: courtCheckMu is acquired BEFORE any per-comp lock.
+// fn MUST NOT recursively call WithCourtExclusivityLock — non-reentrant.
+func (s *Store) WithCourtExclusivityLock(fn func() error) error {
+	s.courtCheckMu.Lock()
+	defer s.courtCheckMu.Unlock()
 	return fn()
 }
 

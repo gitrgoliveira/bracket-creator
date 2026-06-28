@@ -20,7 +20,7 @@ make go/test-race      # Lint + tests with race detection (slow)
 make go/lint           # golangci-lint only
 make run               # Build and start web server (localhost:8080)
 PORT=8081 make run      # Use alternate port (also works direct: PORT=8081 ./bin/bracket-creator serve)
-make run-mobile        # Build and start the mobile/live app (localhost:8080, ./tournament-data)
+make run-mobile        # Build and start the mobile app (localhost:8080, ./tournament-data)
 PORT=8082 make run-mobile   # Use alternate port (also works direct: PORT=8082 ./bin/bracket-creator mobile-app)
 TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder (also works without make: TOURNAMENT_DATA_DIR=/path ./bin/bracket-creator mobile-app)
 make examples          # Generate example Excel files from mock data
@@ -47,7 +47,7 @@ go test -cover ./internal/helper/...
 - **`internal/excel/`** — Excel file lifecycle (`Client`), sheet operations (`SheetManager`), style definitions.
 - **`internal/service/`** — Service layer abstraction over helper logic.
 - **`internal/resources/`** — Embedded file management. Resources flow: `main.go` embeds → `resources.NewResources()` → `cmd.ExecuteWithResources()`.
-- **`internal/mobileapp/`** — Gin HTTP handlers for the live tournament app (`mobile-app` command). Routes: `handlers_competition.go` (including `generate-draw` [status `draw-ready`], `discard-draw`), `handlers_match.go` (bulk-score), `handlers_participants.go` (including single participant PUT updates, individual/bulk check-ins `POST /api/competitions/:id/participants/checkin-bulk`), `handlers_tournament.go`, `handlers_swiss.go` (`generate-round`, `standings`), `handlers_decision.go` (kiken/fusenpai/daihyosen), `handlers_eligibility.go` (competitor statuses, `/reinstate` for injury), `handlers_lineup.go` (team lineups), `handlers_schedule.go` (`GET /schedule/estimate`, public), `handlers_reset.go` (`POST /tournament/reset`), `handlers_auth_config.go` (`GET /auth-config`). Real-time push via SSE (`hub.go`) with events: `match_updated`, `competitor_status_updated`, `competition_completed`, `swiss_round_generated`, etc. Auth via `X-Tournament-Password` header (`middleware.go`), with two modes: **file mode** (default — plaintext compare against `tournament.md`) or **locked mode** (`--lock-password` flag + env var bcrypt compare, disabling the reset API).
+- **`internal/mobileapp/`** — Gin HTTP handlers for the tournament app (`mobile-app` command). Routes: `handlers_competition.go` (including `generate-draw` [status `draw-ready`], `discard-draw`), `handlers_match.go`, `handlers_participants.go` (including single participant PUT updates, individual/bulk check-ins `POST /api/competitions/:id/participants/checkin-bulk`), `handlers_tournament.go`, `handlers_swiss.go` (`generate-round`, `standings`), `handlers_decision.go` (kiken/fusenpai/daihyosen — `POST /matches/:mid/decision`), `handlers_eligibility.go` (`/competitor-status`), `handlers_lineup.go` (team lineups), `handlers_schedule.go` (`GET /schedule/estimate`, public), `handlers_reset.go` (`POST /tournament/reset`, public — for forgotten admin passwords; 404s in locked mode), `handlers_auth_config.go` (`GET /auth-config`, public — reports auth mode to the SPA). Real-time push via SSE (`hub.go`) with events: `match_updated`, `competitor_status_updated`, `competition_completed`, `swiss_round_generated`, etc. Auth via `X-Tournament-Password` header (`middleware.go`), with two modes selected at startup by a `PasswordVerifier` (`auth_source.go`): **file mode** (default — plaintext compare against `tournament.md`) or **locked mode** (`--lock-password` flag + `TOURNAMENT_PASSWORD_HASH` env var — bcrypt compare, `POST /api/tournament/reset` returns 404; the SPA `/reset` page still renders an operator-disabled message). Consumer-boundary interfaces live in `deps.go` (NFR-002).
 - **`internal/state/`** — File-backed state store for the mobile app. Tournament and competition config lives in `tournament-data/tournament.md` and `tournament-data/competitions/<id>/config.md` (YAML front-matter). Participants are in `participants.csv` alongside each config.
 - **`internal/engine/`** — Thin adapter that drives `internal/helper` pool/bracket generation from a `state.Competition`. Called by the `POST /api/competitions/:id/start` handler.
 - **`web-mobile/`** — Preact/JSX frontend for the mobile app, served embedded in the binary. Entry point: `web-mobile/index.html`. JS modules in `web-mobile/js/`: shared/viewer modules (`app.jsx`, `viewer.jsx`, `api_client.jsx`, `api_serializers.jsx`, `bracket.jsx`, `data.jsx`, `display.jsx`, `glossary.jsx`, `patch.jsx`, `reset.jsx`, `router.jsx`, `ui.jsx`) and eleven admin modules (`admin.jsx`, `admin_announcement.jsx`, `admin_competition.jsx`, `admin_helpers.jsx`, `admin_lineup.jsx`, `admin_participants.jsx` [containing `LinedTextarea` gutter participant paste box and check-in filter list], `admin_pools.jsx`, `admin_schedule.jsx`, `admin_scoring_modal.jsx`, `admin_setup.jsx`, `admin_shell.jsx`). CSS in `web-mobile/css/styles.css`. Pre-compiled to `web-mobile/dist/` by esbuild (run automatically as part of `make go/build`).
@@ -110,7 +110,7 @@ Production-hardening defaults applied in the `mobile-app` command. Constants liv
 | `MaxHeaderBytes` | 1 MB | — | Header-bomb defense |
 | Body cap (admin JSON) | 1 MB | `DefaultMaxBodyBytes` const | `c.BindJSON` payloads are tiny in practice; cap is enforced by `MaxBodyBytes` middleware (returns 413) |
 | Body cap (`/tournament/import`) | 64 MB | `MaxImportBodyBytes` const | Matches `ParseMultipartForm` already in the handler |
-| SSE subscribers | 1000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation |
+| SSE subscribers | 5000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation (~4–10 KB resident per client); raised from 1000 → 5000 by mp-9afd for large-scale events (1000+ viewers); real hardware load test still required |
 | Graceful shutdown | 30s | `httpShutdownTimeout` const | `Hub.Close` is wired via `srv.RegisterOnShutdown` so SSE goroutines exit before the deadline |
 
 **`safeGo` convention.** Any goroutine spawned inside a request handler MUST use the `safeGo` helper in [internal/mobileapp/safego.go](internal/mobileapp/safego.go). Gin's Recovery middleware only catches panics on the request goroutine — a panic in a spawned goroutine crashes the entire process. The helper guarantees `wg.Done()` on panic and captures the recovered value into a shared `atomic.Pointer[recoveredPanic]` so the handler can return a single HTTP 500 without leaking internals. Pattern:
@@ -142,19 +142,19 @@ See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
 
 **With UUIDs (new format)** — first field is a UUID v4 (lowercase hex):
 ```
-<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+<uuid>, Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 ```
 
 **Without UUIDs (legacy format)** — detected automatically when first field is not a UUID:
 ```
-Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
+Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 ```
 
 - The zekken/display-name column is only present when `withZekkenName=true` for the competition.
 - `DanGrade` is optional; omit or leave empty.
-- `tag` is the last column when present and must be one of: `manual`, `registered`, `transfer`.
+- `source` is the last column when present and must be one of: `manual`, `registered`, `transfer`. This is the registration provenance (admin-only). It is distinct from the competitor's "tag" (their assigned competitor number, which is the `Number`/`number` field, optionally prefixed via `numberPrefix` — e.g. "A1").
 - Seeds are stored separately in `seeds.csv` and merged at load time — do **not** include seed ranks in `participants.csv`.
-- The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.js:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
+- The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.jsx:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
 
 ## Common Pitfalls
 
@@ -165,6 +165,43 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, tag]
 - Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect — the files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
 - Chained match navigation in the admin score editor (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the current match's shiaijo — operators run matches per-court, so hopping courts mid-flow breaks the workflow. See `AdminScoreEditor` in `web-mobile/js/admin_schedule.jsx`: filter to `(m.court || "") === (openMatch.court || "")` so empty/undefined courts share one "unassigned" bucket.
+
+## PR Workflow
+
+- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section — `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binaries). Push the PNG to the `pr-assets` branch (never merged to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. A real browser/MCP screenshot is MANDATORY for any UI change — there is NO textual/DOM/geometry substitute. If you have not captured one, the PR is not review-ready: capture it first, then fill the Screenshots section. Full verified recipe: the `/pr-screenshots` skill. **Capture only via the browser/MCP screenshot tools — NEVER a desktop or full-screen grab (`screencapture`, `scrot`, OS shortcuts), which exposes the user's private screen.**
+- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
+- **Keep the bead `in_progress` until the PR actually merges.** A green review is not a merge. Only `bd close <id>` after the merge lands, with a reason referencing the merge commit/PR.
+- **After a merge, run the full `/cleanup` sequence** (close bead → fast-forward main → remove worktree → delete local + remote branch → prune). Don't wait to be asked for each step. See the `/cleanup` skill.
+- **Verify the worktree/branch before any edit.** This repo uses a git worktree per PR; edits applied to the wrong worktree (or directly to the `main` checkout) force patch-and-revert recovery. When there is any ambiguity, confirm with `pwd` and `git branch --show-current` before the first Edit/Write, and never edit the main checkout directly — always work inside a worktree.
+
+## Code Review (Copilot)
+
+- **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero. The `/review-loop` skill encodes the full loop.
+- **Re-request Copilot via the GraphQL `requestReviews` mutation with the bot node id** — both `gh pr edit --add-reviewer Copilot` (lowercases the login, fails) and REST `POST .../requested_reviewers -f "reviewers[]=Copilot"` (silently no-ops; that array is users-only and Copilot is a Bot) are broken. Full recipe + verification step in the `/review-loop` skill (rule 4).
+- Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
+
+## Testing & Verification
+
+- **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
+- **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
+- **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
+- Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
+- **Diagnose failures from evidence, never fabricate a cause.** When a test, build, or CI step fails (Codecov, GPG, lint, etc.), read the actual logs before explaining it. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround — if the root cause isn't established, say so and keep investigating.
+- **Test coverage gate: every package that has test files must maintain ≥85% statement coverage.** Verify before any PR with:
+  ```bash
+  go test -race -cover . ./cmd/... ./internal/... ./tests/...
+  ```
+  Packages below 85% must be brought up before merging. New packages must include test files covering their public API. Tracked in bead mp-3abe.
+  **Intentionally untested:** `internal/domain/internal/glossarygen` is a `go generate` code-generator (emits `glossary_data.js`); it has no exported API and is excluded from the gate. `internal/helper/bracket`, `internal/helper/csv`, and `internal/helper/seeding` are empty stub packages (no exported symbols yet) and are likewise excluded.
+
+## Merge & Rebase
+
+When rebasing or resolving conflicts, watch for these recurring breakages:
+- Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
+- UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- Missed call sites when removing or renaming a symbol — `grep -r` the name across **all** packages **including `_test.go` files** before committing; a refactor that compiles can still leave stale test references or skip-test code pointing at dead paths.
+- Re-run `make go/test` after every rebase; a clean rebase that compiles must not be semantically broken.
 
 
 # Validation

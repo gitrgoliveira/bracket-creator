@@ -39,7 +39,7 @@ describe('API Utils', () => {
     });
 
     it('forwards decidedByHantei on the wire payload', () => {
-      // mp-6di: judges' decision flag must round-trip so the HT suffix
+      // mp-6di: judges' decision flag must round-trip so the Ht suffix
       // persists in the viewer and bracket DecidedByHantei mirror.
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({
@@ -114,6 +114,35 @@ describe('API Utils', () => {
       // No key — server-side omitempty drops it from the persisted record.
       expect('decidedByHantei' in result).toBe(false);
     });
+
+    // mp-jvzy: forward the winner's participant id so a same-name head-to-head
+    // is unambiguous on the backend. Without it, a tied/hantei scoreline leaves
+    // the backend unable to pick a side and the league matrix marks BOTH rows
+    // as winners. The scoring modal sets patch.winner to the winning SIDE object.
+    it('forwards winnerId from the winning side object', () => {
+      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const result = toBackendMatchResult({ winner: { id: 'id-a', name: 'Player A' }, status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.winnerId).toBe('id-a');
+    });
+
+    it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
+      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      // Mumeishi won — even on a tied scoreline the id disambiguates the side.
+      const result = toBackendMatchResult({ winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' }, status: 'complete', ipponsA: ['M'], ipponsB: ['M'], score: { type: 'ippon' }, decidedByHantei: true }, match);
+      expect(result.winnerId).toBe('id-mumeishi');
+    });
+
+    it('omits winnerId when same-name and the winner is a bare name (ambiguous)', () => {
+      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: ['M'] }, match);
+      expect('winnerId' in result).toBe(false); // backend infers from scoreline / name fallback
+    });
+
+    it('derives winnerId from the match sides for a distinct-name bare-name winner', () => {
+      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
+      expect(result.winnerId).toBe('id-b');
+    });
   });
 
   describe('isHikiwake', () => {
@@ -138,6 +167,27 @@ describe('API Utils', () => {
       
       expect(norm.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A' });
       expect(norm.sideB).toEqual({ id: 'Bob', name: 'Bob' }); // Fallback if not in map
+    });
+
+    // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants
+    // (allowed when dojos differ) collapse onto one id. When the server sends
+    // explicit per-side ids (sideAId/sideBId/winnerId from pool-matches.csv),
+    // those are authoritative and must override the collapsed lookup — without
+    // this the league matrix renders the same-name head-to-head inverted.
+    it('overrides name-collapsed ids with server sideAId/sideBId/winnerId', () => {
+      // Both "Tanaka Kenji" — name-keyed map holds only the last-added id.
+      const playerMap = { 'Tanaka Kenji': { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' } };
+      const match = {
+        sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
+        sideAId: 'uuid-kenshikan', sideBId: 'uuid-mumeishi', winnerId: 'uuid-kenshikan',
+        status: 'completed', ipponsA: ['M'], ipponsB: [],
+      };
+      const norm = normalizeMatch(match, playerMap);
+      expect(norm.sideA.id).toBe('uuid-kenshikan'); // flat id wins over collapsed map id
+      expect(norm.sideB.id).toBe('uuid-mumeishi');
+      expect(norm.winner.id).toBe('uuid-kenshikan');
+      // The shared playerMap object must NOT be mutated by the id stamp.
+      expect(playerMap['Tanaka Kenji'].id).toBe('uuid-mumeishi');
     });
 
     it('should build score object from ippons for pool matches', () => {
@@ -173,6 +223,34 @@ describe('API Utils', () => {
         loserPts: 1,
         ippons: ['M', 'K'],
       });
+      // Both sides' waza letters recovered into per-side arrays (loss-free),
+      // so the schedule/bracket render technique letters for BOTH competitors
+      // ("MK–M") rather than the numeric fallback. Hansoku suffix stripped.
+      expect(norm.ipponsA).toEqual(['M', 'K']);
+      expect(norm.ipponsB).toEqual(['M']);
+    });
+
+    it('recovers BOTH sides waza letters into ipponsA/ipponsB from bracket scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK', scoreB: 'D',
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.ipponsA).toEqual(['M', 'K']);
+      expect(norm.ipponsB).toEqual(['D']);
+    });
+
+    it('does not overwrite server-provided ipponsA/ipponsB with scoreA/scoreB', () => {
+      const match = {
+        sideA: 'A', sideB: 'B', winner: 'A',
+        status: 'completed',
+        scoreA: 'MK', scoreB: 'D',
+        ipponsA: ['K', 'M'], ipponsB: ['T'], // server arrays must win
+      };
+      const norm = normalizeMatch(match, {});
+      expect(norm.ipponsA).toEqual(['K', 'M']);
+      expect(norm.ipponsB).toEqual(['T']);
     });
 
     it('strips no-space "(HN)" suffix from bracket scoreA/scoreB too', () => {
@@ -198,8 +276,76 @@ describe('API Utils', () => {
         ]
       };
       const map = buildPlayerMap(comp);
-      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1 });
-      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0 });
+      // The map carries the full competitor identity (incl. displayName/number)
+      // so bracket sides resolved by name show zekken + number as players qualify.
+      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
+    });
+
+    it('carries displayName and number into the map (qualifier identity in bracket)', () => {
+      const comp = {
+        players: [
+          { Name: 'Carol', DisplayName: 'CAROL', Dojo: 'Dojo C', Number: 'K3', Seed: 0 },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      expect(map['Carol'].displayName).toBe('CAROL');
+      expect(map['Carol'].number).toBe('K3');
+    });
+
+    it('preserves UUID id when player has one (camelCase input)', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-aaa', name: 'Alice', dojo: 'Dojo A', seed: 1 },
+          { id: 'uuid-bbb', name: 'Bob', dojo: 'Dojo B' }
+        ]
+      };
+      const map = buildPlayerMap(comp);
+      expect(map['Alice'].id).toBe('uuid-aaa');
+      expect(map['Bob'].id).toBe('uuid-bbb');
+    });
+
+    // mp-jvzy: two same-name participants (different dojos) collapse onto one
+    // NAME key — last-added wins. An additional id key per participant keeps
+    // each one's correct dojo/number, so normalizeMatch can resolve each side
+    // by the server's authoritative id and never show the wrong dojo.
+    it('keys by participant id so same-name players keep distinct dojo/number', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-kenshikan', name: 'Tanaka Kenji', dojo: 'Kenshikan', number: 'K1' },
+          { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi', number: 'K2' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      // Name key collapses to the last-added (Mumeishi).
+      expect(map['Tanaka Kenji'].dojo).toBe('Mumeishi');
+      // But each id key carries the correct, distinct metadata.
+      expect(map['uuid-kenshikan']).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan', number: 'K1' });
+      expect(map['uuid-mumeishi']).toMatchObject({ id: 'uuid-mumeishi', dojo: 'Mumeishi', number: 'K2' });
+    });
+
+    it('normalizeMatch attaches the CORRECT dojo to each same-name side via flat ids', () => {
+      const comp = {
+        players: [
+          { id: 'uuid-kenshikan', name: 'Tanaka Kenji', dojo: 'Kenshikan' },
+          { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      const m = normalizeMatch({
+        sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
+        sideAId: 'uuid-kenshikan', sideBId: 'uuid-mumeishi', winnerId: 'uuid-kenshikan',
+        status: 'completed', ipponsA: ['M'], ipponsB: [],
+      }, map);
+      expect(m.sideA).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
+      expect(m.sideB).toMatchObject({ id: 'uuid-mumeishi', dojo: 'Mumeishi' });
+      expect(m.winner).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
+    });
+
+    it('falls back to name as id when no id field', () => {
+      const comp = { players: [{ name: 'Carol', dojo: 'Dojo C' }] };
+      const map = buildPlayerMap(comp);
+      expect(map['Carol'].id).toBe('Carol');
     });
   });
 
@@ -212,14 +358,14 @@ describe('API Utils', () => {
         dojo: 'Dojo A',
         seed: 2,
         number: '',
-        tag: '',
+        source: '',
         danGrade: '',
         metadata: [],
       });
     });
 
     it('maps Go Metadata[0] → danGrade on PascalCase input and preserves full metadata array', () => {
-      const p = { Name: 'Bob', Dojo: 'Kenshikan', Seed: 0, Metadata: ['3d', 'registered'] };
+      const p = { Name: 'Bob', Dojo: 'Suigetsu', Seed: 0, Metadata: ['3d', 'registered'] };
       const norm = normalizePlayer(p);
       expect(norm.danGrade).toBe('3d');
       expect(norm.metadata).toEqual(['3d', 'registered']);
@@ -231,12 +377,12 @@ describe('API Utils', () => {
     });
 
     it('leaves danGrade unchanged when already set on camelCase input', () => {
-      const p = { name: 'Dave', dojo: 'Mumeishi', seed: 0, danGrade: '4d' };
+      const p = { name: 'Dave', dojo: 'Gyokusen', seed: 0, danGrade: '4d' };
       expect(normalizePlayer(p).danGrade).toBe('4d');
     });
 
     it('returns empty danGrade when no metadata', () => {
-      const p = { Name: 'Eve', Dojo: 'Mumeishi', Seed: 0 };
+      const p = { Name: 'Eve', Dojo: 'Gyokusen', Seed: 0 };
       expect(normalizePlayer(p).danGrade).toBe('');
     });
   });
@@ -754,6 +900,116 @@ describe('API Utils', () => {
       });
     });
 
+    describe('estimateCompetitionSchedule', () => {
+      it('GETs /api/competitions/:id/schedule/estimate', async () => {
+        const payload = { totalDurationMinutes: 120, perCourtMinutes: [60, 60], ceremonyMinutes: 30 };
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        const result = await API.estimateCompetitionSchedule('comp-abc', 'pw');
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/schedule/estimate',
+          expect.objectContaining({
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'pw' }),
+          })
+        );
+      });
+
+      it('sends X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 90, perCourtMinutes: [90], ceremonyMinutes: 0 }),
+        });
+        await API.estimateCompetitionSchedule('c1', 'secret-pw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      });
+
+      it('forwards AbortSignal to fetch', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ totalDurationMinutes: 45, perCourtMinutes: [45], ceremonyMinutes: 0 }),
+        });
+        const controller = new AbortController();
+        await API.estimateCompetitionSchedule('c1', 'pw', controller.signal);
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('throws with server error message on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.estimateCompetitionSchedule('bad-id', 'pw'))
+          .rejects.toThrow('competition not found');
+      });
+
+      it('throws default message if json parse fails on error response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.estimateCompetitionSchedule('c1', 'pw'))
+          .rejects.toThrow('Failed to estimate schedule');
+      });
+    });
+
+    describe('getScheduleClashes', () => {
+      it('GETs /api/competitions/:id/schedule/clashes and returns the clash array', async () => {
+        const payload = [
+          { otherCompId: 'b', otherCompName: 'Bravo', date: '01-07-2026', sharedCourts: ['A'], overlapStart: '09:15', overlapEnd: '09:30' },
+        ];
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => payload });
+        const result = await API.getScheduleClashes('comp-abc', 'pw');
+        expect(result).toEqual(payload);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-abc/schedule/clashes',
+          expect.objectContaining({
+            headers: expect.objectContaining({ 'X-Tournament-Password': 'pw' }),
+          })
+        );
+      });
+
+      it('returns an empty array when there are no clashes', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        const result = await API.getScheduleClashes('c1', 'pw');
+        expect(result).toEqual([]);
+      });
+
+      it('sends X-Tournament-Password header', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        await API.getScheduleClashes('c1', 'secret-pw');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.headers['X-Tournament-Password']).toBe('secret-pw');
+      });
+
+      it('forwards AbortSignal to fetch', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => [] });
+        const controller = new AbortController();
+        await API.getScheduleClashes('c1', 'pw', controller.signal);
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(opts.signal).toBe(controller.signal);
+      });
+
+      it('throws with server error message on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.getScheduleClashes('bad-id', 'pw'))
+          .rejects.toThrow('competition not found');
+      });
+
+      it('throws default message if json parse fails on error response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          json: async () => { throw new Error('parse error'); },
+        });
+        await expect(API.getScheduleClashes('c1', 'pw'))
+          .rejects.toThrow('Failed to check schedule clashes');
+      });
+    });
+
     describe('estimateSchedule', () => {
       it('GETs /api/schedule/estimate with required params in query string', async () => {
         global.fetch = vi.fn().mockResolvedValue({
@@ -864,16 +1120,16 @@ describe('API Utils', () => {
         });
         const players = [
           // grade + extra slot: preserve both
-          { name: 'Alice', dojo: 'Senbukan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
+          { name: 'Alice', dojo: 'Raizan', danGrade: '3 Dan', metadata: ['3 Dan', 'registered'] },
           // grade, no extra slot
-          { name: 'Bob', dojo: 'Kenshikan', danGrade: '2 Dan', metadata: ['2 Dan'] },
+          { name: 'Bob', dojo: 'Suigetsu', danGrade: '2 Dan', metadata: ['2 Dan'] },
           // no grade, no metadata: metadata field must be omitted entirely
           { name: 'Carol', dojo: 'Yoshinkan', danGrade: '', metadata: [] },
           // no grade but has extra slot: emit ["", ...rest] to preserve slot
           { name: 'Dave', dojo: 'Yoshinkan', danGrade: '', metadata: ['', 'registered'] },
           // Go-sourced player (no danGrade key at all): pass through unchanged
           // so metadata[0] (the grade) is NOT dropped
-          { name: 'Eve', dojo: 'Kenshikan', metadata: ['1 Dan'] },
+          { name: 'Eve', dojo: 'Suigetsu', metadata: ['1 Dan'] },
         ];
         await API.updateCompetition('c1', { players }, 'pw');
         expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);

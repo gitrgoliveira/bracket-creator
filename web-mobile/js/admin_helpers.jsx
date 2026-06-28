@@ -4,7 +4,7 @@
 // sideA/sideB can be a string (raw backend shape), an object with .name
 // (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
 // or null. Return the participant's display name, or "" when no real side is
-// present. Used by compMatchStats and AdminTopbar's live-strip filter, so the
+// present. Used by compMatchStats and AdminTopbar's running-strip filter, so the
 // two stay in lockstep about what "has a real side" means.
 function sideName(side) {
   if (!side) return "";
@@ -28,26 +28,47 @@ function sideName(side) {
 // name that happens to start with "Winner of " — a legitimate
 // participant named "Winner of the 2025 Cup" should still pass.
 // (See web-mobile/js/viewer.jsx for the consumer.)
+//
+// Mixed-comp pool-origin caveat: before a pool finishes seeding, knockout
+// bracket leaves carry pool-origin placeholder labels like "Pool A-1st",
+// "Pool B-2nd" (format produced by helper.GenerateFinals / engine/knockout.go).
+// These look like real strings to sideName() but are not real participants.
+// Mirrors the Go regex poolFinalistPlaceholderRE = `^Pool .+-\d+(st|nd|rd|th)$`.
 const BRACKET_PLACEHOLDER_RE = /^Winner of r\d+-m\d+$/;
+const POOL_ORIGIN_PLACEHOLDER_RE = /^Pool .+-\d+(st|nd|rd|th)$/;
 function hasBothSides(m) {
   if (!m) return false;
   const a = sideName(m.sideA);
   const b = sideName(m.sideB);
   if (!a || !b) return false;
   if (BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b)) return false;
+  if (POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b)) return false;
   return true;
 }
 
-// Returns { total, done, live } match counts for a single competition object.
+// hasPoolOriginPlaceholder reports whether a bracket match still has a pool-origin
+// "Pool A-1st" side (a mixed comp whose feeder pool hasn't finished). Unlike
+// !hasBothSides, this is TRUE only for pool placeholders — NOT for normal
+// "Winner of rX-mY" feeders or structural byes — so the "Knockout filling in"
+// banner shows ONLY for an incomplete mixed knockout, not standalone playoffs or
+// bye-containing brackets.
+function hasPoolOriginPlaceholder(m) {
+  if (!m) return false;
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  return POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b);
+}
+
+// Returns { total, done, running } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
 //   - structured `pools[].matches` from GET /api/viewer/competitions/:id (detail endpoint)
 // The admin-side GET /api/competitions/:id returns only config; use the viewer
 // endpoints when match counts are needed.
 function compMatchStats(c) {
-  let total = 0, done = 0, live = 0;
+  let total = 0, done = 0, running = 0;
   // Use hasBothSides() — the canonical cross-file predicate — so admin
-  // dashboard / overview / live-strip stats can't drift from viewer-side
+  // dashboard / overview / running-strip stats can't drift from viewer-side
   // filtering. Inline `sideName(m.sideA) && sideName(m.sideB)` was almost
   // right (skips byes / normalizeMatch's empty-side substitute) but missed
   // bracket placeholders like "Winner of r0-m1" — those have truthy
@@ -57,7 +78,7 @@ function compMatchStats(c) {
     if (!hasBothSides(m)) return;
     total++;
     if (m.status === "completed") done++;
-    if (m.status === "running") live++;
+    if (m.status === "running") running++;
   };
   if (Array.isArray(c.poolMatches)) {
     c.poolMatches.forEach(count);
@@ -67,7 +88,7 @@ function compMatchStats(c) {
   if (c.bracket && c.bracket.rounds) {
     c.bracket.rounds.forEach((r) => (r || []).forEach(count));
   }
-  return { total, done, live };
+  return { total, done, running };
 }
 
 // Canonical numeric bounds. The year range is shared by every date
@@ -286,11 +307,35 @@ function deriveTournamentDays(startDate, durationDays) {
   return days;
 }
 
+// Normalizes a courts array. Fallback to ["A"] if missing or empty,
+// preventing crashes and ensuring a consistent default court selection UI.
+function normalizeCourts(courts) {
+  return (Array.isArray(courts) && courts.length > 0) ? courts : ["A"];
+}
+
+// Returns the count of courts, safely falling back to the normalized minimum of 1.
+// Used for displaying counts in the UI where "0 courts" is semantically invalid.
+function courtCount(courts) {
+  return normalizeCourts(courts).length;
+}
+
+// Resolves the 0-based round index from a match object. Bracket matches
+// carry m.roundIndex (stamped by compMatches/viewer.jsx); fall back to a
+// non-negative numeric m.round for any older shapes.
+// Returns 0 for pool matches (no per-round lineup).
+function resolveRoundIndex(match) {
+  if (typeof match.roundIndex === "number" && match.roundIndex >= 0) return match.roundIndex;
+  if (typeof match.round === "number" && match.round >= 0) return match.round;
+  return 0;
+}
+
 // Guard window assignments so this file stays safely importable in
 // non-browser test environments (matches the pattern in data.jsx / ui.jsx).
 if (typeof window !== "undefined") {
+  window.resolveRoundIndex = resolveRoundIndex;
   window.sideName = sideName;
   window.hasBothSides = hasBothSides;
+  window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
   window.compMatchStats = compMatchStats;
   window.normalizeDate = normalizeDate;
   window.dmyToIso = dmyToIso;
@@ -312,6 +357,8 @@ if (typeof window !== "undefined") {
   window.setCachedAuthConfig = setCachedAuthConfig;
   window.getCachedAuthConfig = getCachedAuthConfig;
   window.promptAdminPassword = promptAdminPassword;
+  window.normalizeCourts = normalizeCourts;
+  window.courtCount = courtCount;
 }
 
 // --- Elevated (destructive-ops) password prompt (spec 004 / mp-e21) ---
@@ -350,11 +397,15 @@ function getCachedAuthConfig() {
 //     the typed value, or null if the operator cancels or submits empty
 //     (the caller aborts).
 //
-// Caller contract: `const a = promptAdminPassword(); if (a === null) return;`
+// Caller contract (now async): `const a = await promptAdminPassword(); if (a === null) return;`
 // then pass `a` as the trailing adminPassword arg to the API method. A wrong
 // password surfaces as the API's 401 error (caught/toasted by the caller);
 // the operator simply retries the action, which re-prompts.
-function promptAdminPassword(message) {
+//
+// Returns a Promise so the password is collected via the app's themed,
+// accessible promptDialog (masked input) instead of window.prompt, which
+// renders the password in plaintext in some browsers and can't be styled.
+async function promptAdminPassword(message) {
   const cfg = getCachedAuthConfig();
   if (!cfg || !cfg.elevatedRequired) return "";
   if (cfg.elevatedConfigured === false) {
@@ -364,7 +415,12 @@ function promptAdminPassword(message) {
     );
     return null;
   }
-  const pw = window.prompt(message || "This action requires the admin (destructive-ops) password:");
+  const pw = await window.promptDialog({
+    title: "Admin password required",
+    message: message || "This action requires the admin (destructive-ops) password:",
+    password: true,
+    confirmLabel: "Confirm",
+  });
   return pw ? pw : null;
 }
 
@@ -374,6 +430,7 @@ export {
   promptAdminPassword,
   sideName,
   hasBothSides,
+  hasPoolOriginPlaceholder,
   compMatchStats,
   normalizeDate,
   dmyToIso,
@@ -392,4 +449,7 @@ export {
   MAX_RANK,
   MAX_TOURNAMENT_DURATION_DAYS,
   deriveTournamentDays,
+  normalizeCourts,
+  courtCount,
+  resolveRoundIndex,
 };

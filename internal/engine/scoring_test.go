@@ -215,6 +215,59 @@ func TestScoreSummary_Team(t *testing.T) {
 	assert.Equal(t, "W:0 L:1 D:0 | IV:1 IL:2 IT:0 | PW:0 PL:0", teamB.ScoreSummary)
 }
 
+func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-empty-sub-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "empty-sub-draw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Team", TeamSize: 3,
+		Format: state.CompFormatLeague, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+			Winner: "", Decision: "hikiwake",
+			Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, Winner: "TeamA"},
+				{Position: 2, Winner: "TeamB"},
+				{Position: 3, Winner: ""},
+			},
+		},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	pool := standings["PoolA"]
+	require.Len(t, pool, 2)
+
+	var teamA, teamB state.PlayerStanding
+	for _, s := range pool {
+		switch s.Player.Name {
+		case "TeamA":
+			teamA = s
+		case "TeamB":
+			teamB = s
+		}
+	}
+	assert.Equal(t, 1, teamA.IndividualWins, "sub with Winner=TeamA → IV for A")
+	assert.Equal(t, 1, teamA.IndividualLosses, "sub with Winner=TeamB → IL for A")
+	assert.Equal(t, 1, teamA.IndividualDraws, "sub with empty Winner+empty SideA → draw, not false win")
+
+	assert.Equal(t, 1, teamB.IndividualWins)
+	assert.Equal(t, 1, teamB.IndividualLosses)
+	assert.Equal(t, 1, teamB.IndividualDraws, "sub with empty Winner+empty SideB → draw, not false win")
+}
+
 func TestMaybeAutoCompletePools(t *testing.T) {
 	dir, err := os.MkdirTemp("", "engine-autocomplete-*")
 	require.NoError(t, err)
@@ -224,9 +277,12 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	require.NoError(t, err)
 	eng := New(store)
 
+	// Use league format — league auto-completes after all pool matches.
+	// Mixed format no longer auto-completes: it stays in pools status until
+	// pool finishers are seeded into the knockout incrementally as pools complete.
 	compID := "auto-complete"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Auto", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+		ID: compID, Name: "Auto", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 
 	t.Run("no transition while a pool match is still scheduled", func(t *testing.T) {
@@ -274,12 +330,17 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
 	})
 
+	// (Mixed-format MaybeAutoCompletePools behavior is covered in
+	// knockout_test.go: TestMaybeAutoCompletePools_MixedFormat_StaysInPools_WhileScheduled
+	// and TestMaybeAutoCompletePools_MixedFormat_AutoStartsKnockout — auto-start
+	// fires when pools are clean, no transition while a match is pending.)
+
 	t.Run("transitions when there are zero pool matches", func(t *testing.T) {
-		// e.g. a single-participant pools comp where no match was generated.
+		// e.g. a single-participant league comp where no match was generated.
 		// Without this branch the competition would be stuck in `pools` forever.
 		emptyID := "auto-complete-empty"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: emptyID, Name: "Empty", Format: state.CompFormatMixed, Status: state.CompStatusPools,
+			ID: emptyID, Name: "Empty", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SavePoolMatches(emptyID, []state.MatchResult{}))
 		outcome, err := eng.MaybeAutoCompletePools(emptyID)
@@ -360,6 +421,89 @@ func TestRecordMatchResult_PreservesCourtAndScheduledAt(t *testing.T) {
 	})
 }
 
+// TestRecordMatchResult_RejectsSideRewrite pins the match-identity guard:
+// a score payload may carry the result but must never rewrite WHO is in the
+// match. A payload naming a different competitor is rejected with
+// ErrMatchSideMismatch and the stored pairing is left untouched. This is the
+// guard against the cross-pool corruption vector (a stored bout overwritten
+// with competitors from another pool).
+func TestRecordMatchResult_RejectsSideRewrite(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-sidemismatch-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "mismatch-test"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Mismatch"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool E-0", SideA: "Benjamin Evans", SideB: "Sebastian Allen", Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	t.Run("payload with foreign competitors is rejected and stored pairing preserved", func(t *testing.T) {
+		bad := &state.MatchResult{
+			SideA:   "Arthur Conan",    // from another pool
+			SideB:   "Herman Melville", // from another pool
+			Winner:  "Arthur Conan",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		}
+		err := eng.RecordMatchResult(compID, "Pool E-0", bad)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrMatchSideMismatch)
+
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+		// Identity untouched; the bogus result was not persisted.
+		assert.Equal(t, "Benjamin Evans", stored[0].SideA)
+		assert.Equal(t, "Sebastian Allen", stored[0].SideB)
+		assert.Equal(t, state.MatchStatusScheduled, stored[0].Status)
+		assert.Empty(t, stored[0].Winner)
+	})
+
+	t.Run("payload that omits sides backfills from the stored pairing and scores", func(t *testing.T) {
+		patch := &state.MatchResult{
+			Winner:  "Benjamin Evans",
+			IpponsA: []string{"M"},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "Pool E-0", patch))
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Benjamin Evans", stored[0].SideA)
+		assert.Equal(t, "Sebastian Allen", stored[0].SideB)
+		assert.Equal(t, "Benjamin Evans", stored[0].Winner)
+		assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	})
+
+	t.Run("payload echoing the correct sides scores normally", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "Pool E-1", SideA: "Benjamin Evans", SideB: "Kurt Vonnegut", Status: state.MatchStatusScheduled},
+		}))
+		patch := &state.MatchResult{
+			SideA:   "Benjamin Evans",
+			SideB:   "Kurt Vonnegut",
+			Winner:  "Kurt Vonnegut",
+			IpponsB: []string{"K"},
+			Status:  state.MatchStatusCompleted,
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, "Pool E-1", patch))
+		stored, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		var m1 state.MatchResult
+		for _, s := range stored {
+			if s.ID == "Pool E-1" {
+				m1 = s
+			}
+		}
+		assert.Equal(t, "Kurt Vonnegut", m1.Winner)
+		assert.Equal(t, state.MatchStatusCompleted, m1.Status)
+	})
+}
+
 // TestRecordMatchResult_ConcurrentScoresNotLost pins the TOCTOU fix for
 // the live-scoring path. Pre-atomic-primitive, withPoolMatch did
 // LoadPoolMatches → mutate target match → SavePoolMatches sequentially
@@ -410,7 +554,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-1", res)
-			assert.NoError(t, err, "iter %d: Pool-1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-1 score should succeed", i)
 		}()
 
 		// Operator on Court B scores Pool-2: Dave wins.
@@ -422,7 +566,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "Pool-2", res)
-			assert.NoError(t, err, "iter %d: Pool-2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: Pool-2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -434,7 +578,7 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 		// (scheduled, no-winner) state.
 		stored, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
-		require.Len(t, stored, 2, "iter %d: both pool matches must still exist", i)
+		require.Lenf(t, stored, 2, "iter %d: both pool matches must still exist", i)
 
 		var p1, p2 *state.MatchResult
 		for idx := range stored {
@@ -445,12 +589,12 @@ func TestRecordMatchResult_ConcurrentScoresNotLost(t *testing.T) {
 				p2 = &stored[idx]
 			}
 		}
-		require.NotNil(t, p1, "iter %d: Pool-1 must exist on disk", i)
-		require.NotNil(t, p2, "iter %d: Pool-2 must exist on disk", i)
-		assert.Equal(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
-		assert.Equal(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
-		assert.Equal(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
+		require.NotNilf(t, p1, "iter %d: Pool-1 must exist on disk", i)
+		require.NotNilf(t, p2, "iter %d: Pool-2 must exist on disk", i)
+		assert.Equalf(t, "Alice", p1.Winner, "iter %d: Pool-1 winner must be Alice (Operator A's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p1.Status, "iter %d: Pool-1 must be completed", i)
+		assert.Equalf(t, "Dave", p2.Winner, "iter %d: Pool-2 winner must be Dave (Operator B's score)", i)
+		assert.Equalf(t, state.MatchStatusCompleted, p2.Status, "iter %d: Pool-2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
 }
@@ -492,7 +636,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF1", res)
-			assert.NoError(t, err, "iter %d: QF1 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF1 score should succeed", i)
 		}()
 		go func() {
 			defer wg.Done()
@@ -502,7 +646,7 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				Status:  state.MatchStatusCompleted,
 			}
 			err := eng.RecordMatchResult(compID, "QF2", res)
-			assert.NoError(t, err, "iter %d: QF2 score should succeed", i)
+			assert.NoErrorf(t, err, "iter %d: QF2 score should succeed", i)
 		}()
 		wg.Wait()
 
@@ -520,14 +664,45 @@ func TestRecordMatchResult_ConcurrentBracketScoresNotLost(t *testing.T) {
 				qf2 = &stored.Rounds[0][idx]
 			}
 		}
-		require.NotNil(t, qf1, "iter %d: QF1 must exist", i)
-		require.NotNil(t, qf2, "iter %d: QF2 must exist", i)
-		assert.Equal(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
-		assert.Equal(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
-		assert.Equal(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
+		require.NotNilf(t, qf1, "iter %d: QF1 must exist", i)
+		require.NotNilf(t, qf2, "iter %d: QF2 must exist", i)
+		assert.Equalf(t, "Alice", qf1.Winner, "iter %d: QF1 winner must be Alice", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf1.Status, "iter %d: QF1 must be completed", i)
+		assert.Equalf(t, "Dave", qf2.Winner, "iter %d: QF2 winner must be Dave", i)
+		assert.Equalf(t, state.MatchStatusCompleted, qf2.Status, "iter %d: QF2 must be completed", i)
 		// Cleanup registered via t.Cleanup at iteration start.
 	}
+}
+
+func TestRecordMatchResult_BracketResultSourcePropagated(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-bracket-resultsource-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "rs-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "RS Bracket"}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "SF1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled}},
+		},
+	}))
+
+	err = eng.RecordMatchResult(compID, "SF1", &state.MatchResult{
+		Winner:       "Alice",
+		IpponsA:      []string{"M", "K"},
+		Status:       state.MatchStatusCompleted,
+		ResultSource: "self-reported",
+	})
+	require.NoError(t, err)
+
+	stored, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, stored.Rounds[0], 1)
+	assert.Equal(t, "self-reported", stored.Rounds[0][0].ResultSource)
 }
 
 // TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost pins the
@@ -556,9 +731,11 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		eng := New(store)
 
 		compID := "auto-vs-invalidate"
+		// Use league format: league auto-completes after all pool matches.
+		// Mixed format does not auto-complete after pools; the knockout fills in incrementally.
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Auto vs Invalidate",
-			Format: state.CompFormatMixed, Status: state.CompStatusPools,
+			Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		}))
 		// All matches already completed — auto-complete is eligible.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -589,7 +766,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			outcome, err := eng.MaybeAutoCompletePools(compID)
-			assert.NoError(t, err, "iter %d: MaybeAutoCompletePools error", i)
+			assert.NoErrorf(t, err, "iter %d: MaybeAutoCompletePools error", i)
 			autoCompleted = outcome == AutoCompleteTransitioned
 		}()
 		go func() {
@@ -603,7 +780,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 				current.Status = state.CompStatusInvalid
 				return current, nil
 			})
-			assert.NoError(t, err, "iter %d: invalidate error", i)
+			assert.NoErrorf(t, err, "iter %d: invalidate error", i)
 			invalidated = c
 		}()
 		wg.Wait()
@@ -1091,4 +1268,187 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "TeamB", saved.Rounds[0][0].Winner, "r0m0 winner must be TeamB")
 	assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA, "TeamB must propagate to next round")
+}
+
+// TestPreviewBracket_RejectsAllMutations verifies that all bracket mutation
+// paths (scoring, override, court/time reassignment) return an error when
+// bracket.Preview is true (mp-9dz). The UI disables scoring for preview
+// brackets, but server-side enforcement prevents direct API calls or stale
+// cached clients from persisting bogus winners/scores into bracket.json.
+// TestUnresolvedKnockoutMatch_ScoringGated verifies the per-match playability
+// gate that replaced the old bracket-wide Preview gate: a knockout match whose
+// sides are still pool-origin placeholders cannot be SCORED or have its winner
+// OVERRIDDEN, but CAN still be rescheduled (court/time) so operators can
+// pre-arrange the draw before the feeder pools finish.
+func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-unresolved-ko-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "unresolved-ko"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Unresolved KO"}))
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p"}))
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Pool A-1st", SideB: "Pool B-2nd", Status: state.MatchStatusScheduled},
+		}},
+	}))
+
+	result := &state.MatchResult{Winner: "Pool A-1st", Status: state.MatchStatusCompleted}
+
+	t.Run("RecordMatchResult rejected (not ready)", func(t *testing.T) {
+		err := eng.RecordMatchResult(compID, "m-r1-0", result)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ready to score")
+	})
+
+	t.Run("RecordMatchResultWithIneligibility rejected (not ready)", func(t *testing.T) {
+		_, err := eng.RecordMatchResultWithIneligibility(compID, "m-r1-0", result)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ready to score")
+	})
+
+	t.Run("OverrideBracketWinner rejected (not ready)", func(t *testing.T) {
+		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not ready to override")
+	})
+
+	// Scheduling a not-yet-resolved match IS allowed — operators may pre-assign
+	// courts/times before the feeder pools finish.
+	t.Run("UpdateMatchCourt allowed on unresolved match", func(t *testing.T) {
+		require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B"))
+	})
+	t.Run("UpdateMatchTime allowed on unresolved match", func(t *testing.T) {
+		require.NoError(t, eng.UpdateMatchTime(compID, "m-r1-0", "10:00"))
+	})
+
+	// The match must NOT have been scored, but the scheduling edits must have
+	// landed.
+	loaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, loaded.Rounds[0][0].Status, "match must not have been scored")
+	assert.Empty(t, loaded.Rounds[0][0].Winner, "winner must not have been set")
+	assert.Equal(t, "B", loaded.Rounds[0][0].Court, "court reschedule must have landed")
+	assert.Equal(t, "10:00", loaded.Rounds[0][0].ScheduledAt, "time reschedule must have landed")
+}
+
+// TestBackfillMatchIdentity directly exercises backfillMatchIdentity, in
+// particular the same-name-head-to-head scoreline-inference branch that the
+// admin score editor relies on (it picks a winner by NAME, sending no
+// WinnerSide hint). The two pre-existing PreservesSideIDs tests both set
+// WinnerSide:"A", so this branch — and the equal-count "leave WinnerID empty"
+// tie — were previously uncovered (mp-jvzy tri-review finding).
+func TestBackfillMatchIdentity(t *testing.T) {
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+
+	tests := []struct {
+		name       string
+		result     state.MatchResult
+		wantWinner string
+	}{
+		{
+			name:       "WinnerSide A hint wins over everything",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "A"},
+			wantWinner: idA,
+		},
+		{
+			name:       "WinnerSide B hint",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerSide: "B"},
+			wantWinner: idB,
+		},
+		{
+			name:       "unambiguous name match resolves to SideA",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
+			wantWinner: idA,
+		},
+		{
+			name:       "unambiguous name match resolves to SideB",
+			result:     state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: SideA has more ippons",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "same-name head-to-head: SideB has more ippons (symmetry)",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"D"}, IpponsB: []string{"M", "K"}},
+			wantWinner: idB,
+		},
+		{
+			name:       "same-name head-to-head: equal ippons is undecidable, WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M"}, IpponsB: []string{"D"}},
+			wantWinner: "",
+		},
+		{
+			name:       "scoreline count ignores the • placeholder",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "Tanaka Kenji", IpponsA: []string{"M", "•"}, IpponsB: []string{"•"}},
+			wantWinner: idA,
+		},
+		{
+			name:       "explicit WinnerID preserved (early return, no inference)",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "explicit-id", IpponsA: []string{"M", "K"}},
+			wantWinner: "explicit-id",
+		},
+		{
+			name:       "draw (empty Winner) leaves WinnerID empty",
+			result:     state.MatchResult{SideA: "Tanaka Kenji", SideB: "Tanaka Kenji", Winner: "", IpponsA: []string{"M"}, IpponsB: []string{"M"}},
+			wantWinner: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.result
+			// `stored` carries the generation-time ids; `result` (the incoming
+			// score) starts without them — mirrors the real write path.
+			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
+			backfillMatchIdentity(&result, stored)
+
+			assert.Equal(t, tc.wantWinner, result.WinnerID, "WinnerID")
+			// Side ids are always backfilled from `stored` (runs before the
+			// WinnerID early-return), even in the explicit-WinnerID case.
+			assert.Equal(t, idA, result.SideAID, "SideAID backfilled")
+			assert.Equal(t, idB, result.SideBID, "SideBID backfilled")
+		})
+	}
+}
+
+// TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
+// on-empty rule (mp-62vr): a score write that omits the rep players must NOT
+// wipe a previously-recorded pick, but an explicit value always overrides.
+func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
+	t.Run("empty result preserves stored rep players", func(t *testing.T) {
+		result := state.MatchResult{} // a re-score that only re-sends the ippons
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Sato Ren", result.RepPlayerA, "preserved on empty")
+		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "preserved on empty")
+	})
+
+	t.Run("explicit rep players override stored", func(t *testing.T) {
+		result := state.MatchResult{RepPlayerA: "Ito Kenji", RepPlayerB: "Mori Aki"}
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Ito Kenji", result.RepPlayerA, "operator change wins")
+		assert.Equal(t, "Mori Aki", result.RepPlayerB, "operator change wins")
+	})
+
+	t.Run("one side set, other preserved", func(t *testing.T) {
+		result := state.MatchResult{RepPlayerA: "Ito Kenji"} // only Aka changed
+		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
+		backfillMatchIdentity(&result, stored)
+		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
+		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
+	})
 }

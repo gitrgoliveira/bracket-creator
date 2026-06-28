@@ -78,7 +78,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterMatchHandlers(admin, eng, store, store, hub)
+	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
 	// Goroutines all fire concurrently — each scores a different match
 	// so the per-comp lock is contended on every step (LoadCompetition
@@ -98,7 +98,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+poolMatchID(idx)+"/score", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusOK, w.Code, "match %d returned %d: %s", idx, w.Code, w.Body.String())
+			assert.Equalf(t, http.StatusOK, w.Code, "match %d returned %d: %s", idx, w.Code, w.Body.String())
 		}(i)
 	}
 
@@ -184,9 +184,9 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	prev := int64(0)
 	seen := make(map[int64]bool, len(collected))
 	for i, e := range collected {
-		require.False(t, seen[e.Seq], "duplicate seq %d at index %d (event %+v)", e.Seq, i, e)
+		require.Falsef(t, seen[e.Seq], "duplicate seq %d at index %d (event %+v)", e.Seq, i, e)
 		seen[e.Seq] = true
-		require.Greater(t, e.Seq, prev, "seq %d at index %d not strictly greater than previous %d", e.Seq, i, prev)
+		require.Greaterf(t, e.Seq, prev, "seq %d at index %d not strictly greater than previous %d", e.Seq, i, prev)
 		prev = e.Seq
 	}
 
@@ -201,7 +201,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 		}
 	}
 	for i := range N {
-		assert.True(t, updatedMatches[poolMatchID(i)], "no match_updated event captured for match %s", poolMatchID(i))
+		assert.Truef(t, updatedMatches[poolMatchID(i)], "no match_updated event captured for match %s", poolMatchID(i))
 	}
 
 	// Assertion 3: on-disk state matches what each goroutine sent.
@@ -213,10 +213,10 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 		for _, m := range final {
 			if m.ID == poolMatchID(i) {
 				found = true
-				assert.Equal(t, nameFor("A", i), m.Winner, "match %d on-disk winner mismatch", i)
-				assert.Equal(t, state.MatchStatusCompleted, m.Status, "match %d on-disk status mismatch", i)
+				assert.Equalf(t, nameFor("A", i), m.Winner, "match %d on-disk winner mismatch", i)
+				assert.Equalf(t, state.MatchStatusCompleted, m.Status, "match %d on-disk status mismatch", i)
 			}
 		}
-		assert.True(t, found, "match %d missing from on-disk read", i)
+		assert.Truef(t, found, "match %d missing from on-disk read", i)
 	}
 }

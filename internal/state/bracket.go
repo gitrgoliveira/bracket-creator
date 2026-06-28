@@ -52,19 +52,23 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		return nil
 	}
 	res := &Bracket{
-		Rounds: make([][]BracketMatch, len(b.Rounds)),
+		Rounds:  make([][]BracketMatch, len(b.Rounds)),
+		Preview: b.Preview,
 	}
 	for i, round := range b.Rounds {
 		res.Rounds[i] = make([]BracketMatch, len(round))
 		copy(res.Rounds[i], round)
-		// The shallow copy above aliases the Encho pointer and SubResults
-		// slice (and its nested IpponsA/B/Encho) with the cached bracket, so
-		// a caller mutating a returned match could corrupt cached state
-		// without going through SaveBracket/UpdateBracket. Deep-copy them to
-		// match the pool match copy path (copyMatchResults).
+		// The shallow copy above aliases the Encho pointer, SubResults slice
+		// (and its nested IpponsA/B/Encho), and the Feeders slice with the
+		// cached bracket, so a caller mutating a returned match could corrupt
+		// cached state without going through SaveBracket/UpdateBracket.
+		// Deep-copy them to match the pool match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
 			res.Rounds[i][j].Encho = round[j].Encho.Clone()
 			res.Rounds[i][j].SubResults = cloneSubResults(round[j].SubResults)
+			if round[j].Feeders != nil {
+				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
+			}
 		}
 	}
 	return res

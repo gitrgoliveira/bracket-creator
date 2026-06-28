@@ -27,7 +27,7 @@ func elevatedHandlerRouter(t *testing.T, store *state.Store, verifier PasswordVe
 	api := r.Group("/api")
 	RegisterTournamentHandlers(api, store, hub, verifier)
 	RegisterAdminPasswordHandler(api, store, ev)
-	RegisterAuthConfigHandlers(api, verifier, ev)
+	RegisterAuthConfigHandlers(api, verifier, ev, false)
 	return r, ev
 }
 

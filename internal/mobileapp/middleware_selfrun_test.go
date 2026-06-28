@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,7 +42,8 @@ func setupSelfRunRouter(t *testing.T, store *state.Store, verifier PasswordVerif
 		"web-mobile/index.html": {Data: []byte("<html>test</html>")},
 	}
 	res := resources.NewResources(nil, mockFS)
-	r, _ := NewRouterWithHub(store, eng, res, verifier, NewHub())
+	r, _, limiter := NewRouterWithHub(store, eng, res, verifier, NewHub(), false)
+	t.Cleanup(limiter.Close)
 	return r
 }
 
@@ -525,7 +527,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	req := jsonReq(http.MethodPost, "/api/tournament", postBody)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "officiated POST must succeed: %s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "officiated POST must succeed: %s", w.Body.String())
 
 	// GET the tournament and verify mode = officiated.
 	req2 := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
@@ -559,7 +561,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	req3 := jsonReq(http.MethodPost, "/api/tournament", postSelfRun)
 	w3 := httptest.NewRecorder()
 	r2.ServeHTTP(w3, req3)
-	require.Equal(t, http.StatusCreated, w3.Code, "self-run POST must succeed: %s", w3.Body.String())
+	require.Equalf(t, http.StatusCreated, w3.Code, "self-run POST must succeed: %s", w3.Body.String())
 
 	// GET the tournament and verify mode = self-run.
 	// GET /api/tournament is main-gated in self-run (file-mode password leak
@@ -618,7 +620,7 @@ func TestSelfRun_Immutability_PUT_OmittingModePreservesIt(t *testing.T) {
 	req.Header.Set("X-Tournament-Password", "main-pw")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "PUT omitting mode must succeed: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "PUT omitting mode must succeed: %s", w.Body.String())
 
 	// Reload and verify mode is still self-run.
 	t2, err := store.LoadTournament()
@@ -671,9 +673,9 @@ func TestValidateTournamentMode(t *testing.T) {
 		t.Run(fmt.Sprintf("mode=%q", tc.mode), func(t *testing.T) {
 			err := state.ValidateTournamentMode(tc.mode)
 			if tc.valid {
-				assert.NoError(t, err, "expected %q to be valid", tc.mode)
+				assert.NoErrorf(t, err, "expected %q to be valid", tc.mode)
 			} else {
-				assert.Error(t, err, "expected %q to be invalid", tc.mode)
+				assert.Errorf(t, err, "expected %q to be invalid", tc.mode)
 			}
 		})
 	}
@@ -896,11 +898,70 @@ func TestSelfRun_POST_NoMode_DefaultsToOfficiated(t *testing.T) {
 	req := jsonReq(http.MethodPost, "/api/tournament", body)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "POST without mode must succeed: %s", w.Body.String())
+	require.Equalf(t, http.StatusCreated, w.Code, "POST without mode must succeed: %s", w.Body.String())
 
 	t2, err := store.LoadTournament()
 	require.NoError(t, err)
 	require.NotNil(t, t2)
 	assert.Equal(t, state.TournamentModeOfficiated, t2.Mode,
 		"missing mode must default to officiated")
+}
+
+// ---------------------------------------------------------------------------
+// §sponsors: Self-run auth gate for sponsor management (mp-c38)
+// ---------------------------------------------------------------------------
+//
+// Sponsor POST/DELETE are organiser-owned setup routes (like PUT /api/tournament)
+// and must NOT become anonymously writable in self-run mode. Both are added to
+// isSelfRunMainGatedConfigRoute. This test pins that contract in the centralised
+// self-run auth matrix (the dedicated handler tests in handlers_sponsors_test.go
+// cover the full authentication story; these tests ensure the middleware-level
+// carve-out wiring is correct for self-run mode specifically).
+
+func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store, "admin-pw")
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+
+	buildMultipart := func() (*bytes.Buffer, string) {
+		buf := &bytes.Buffer{}
+		mw := multipart.NewWriter(buf)
+		require.NoError(t, mw.WriteField("name", "Acme Corp"))
+		fw, err := mw.CreateFormFile("file", "logo.png")
+		require.NoError(t, err)
+		_, err = fw.Write(tinyPNG) // reuse tinyPNG defined in handlers_sponsors_test.go
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
+		return buf, mw.FormDataContentType()
+	}
+
+	t.Run("POST_without_password_returns_401", func(t *testing.T) {
+		body, ct := buildMultipart()
+		req := httptest.NewRequest(http.MethodPost, "/api/sponsors", body)
+		req.Header.Set("Content-Type", ct)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"POST /api/sponsors must be main-gated in self-run mode")
+	})
+
+	t.Run("DELETE_without_password_returns_401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/api/sponsors/0", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code,
+			"DELETE /api/sponsors/:index must be main-gated in self-run mode")
+	})
+
+	t.Run("GET_sponsor_logo_is_public", func(t *testing.T) {
+		// GET /api/sponsors/:file is a public asset endpoint (serves logo to
+		// viewer/TV/lobby). It must NOT require authentication in self-run mode.
+		// A 400 (invalid filename) is fine — the route is reachable without a
+		// password.
+		req := httptest.NewRequest(http.MethodGet, "/api/sponsors/abcdef0123456789.png", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.NotEqual(t, http.StatusUnauthorized, w.Code,
+			"GET /api/sponsors/:file must be public — logo is served to unauthenticated viewer/TV surfaces")
+	})
 }

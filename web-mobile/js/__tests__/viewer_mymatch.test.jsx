@@ -133,9 +133,9 @@ describe('mymatchQueueLabel', () => {
     expect(mymatchQueueLabel({ status: 'scheduled', queuePosition: 99 })).toBe('98 before yours');
   });
 
-  it('returns null when status === "running" (round label already shows LIVE NOW)', () => {
-    // The my-match__round element appends " · LIVE NOW" for running matches, so
-    // the Queue chip must not duplicate it.
+  it('returns null when status === "running" (running state shown by .my-match--running ring)', () => {
+    // WatchHeroCard signals the running state via the .my-match--running CSS ring
+    // and label change ("Your match") — the Queue chip must not add a redundant label.
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running' })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 3 })).toBeNull();

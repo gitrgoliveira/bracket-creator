@@ -44,7 +44,7 @@ func loadWebSourceConcat(t *testing.T) string {
 	sb.WriteString("\n")
 	for _, p := range jsPaths {
 		b, err := os.ReadFile(p)
-		require.NoError(t, err, "read %s", p)
+		require.NoErrorf(t, err, "read %s", p)
 		sb.Write(b)
 		sb.WriteString("\n")
 	}
@@ -496,13 +496,14 @@ func TestRouterCreateEndpoint_PoolsSuccess(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	router.ServeHTTP(w, req)
 
-	// Template file may not be available, so either success or template error is acceptable
+	// Workbook generation may fail on the input, so either success or a 400
+	// (generation failures are reported as bad request) is acceptable.
 	if w.Code == http.StatusOK {
 		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
 		assert.Contains(t, w.Header().Get("Content-Disposition"), "pools-")
 		assert.Greater(t, w.Body.Len(), 0)
 	} else {
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	}
 }
 
@@ -650,6 +651,18 @@ func TestServeOptionsRun(t *testing.T) {
 
 	assert.Equal(t, "localhost", o.bindAddress)
 	assert.Equal(t, 8080, o.port)
+}
+
+// TestServeOptionsRun_InvalidPort exercises the run() code path by asking gin
+// to bind on an invalid port (>65535). gin delegates to net.Listen which fails
+// immediately, so run() returns an error without blocking.
+func TestServeOptionsRun_InvalidPort(t *testing.T) {
+	o := &serveOptions{
+		bindAddress: "localhost",
+		port:        99999, // > 65535, causes net.Listen to fail immediately
+	}
+	err := o.run(nil, nil)
+	assert.Error(t, err)
 }
 
 func boolPtr(v bool) *bool {

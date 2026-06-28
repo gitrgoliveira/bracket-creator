@@ -343,7 +343,7 @@ function updateZekkenHints() {
         renderFormatGuide(
             ['Name', 'ZekkenName', 'Dojo'],
             'Headerless CSV with three columns. Column 2 becomes the display name shown on the zekken.',
-            'Jane Doe, ジェーン, Mushin Dojo'
+            'Jane Doe, ジェーン, Enzan Dojo'
         );
     } else {
         playerListTextarea.placeholder = defaultPlayerListPlaceholder;
@@ -351,7 +351,7 @@ function updateZekkenHints() {
         renderFormatGuide(
             ['Name', 'Dojo'],
             'Headerless CSV with two columns. Column 2 is used to help separate same-dojo participants in pools.',
-            'Jane Doe, Mushin Dojo'
+            'Jane Doe, Enzan Dojo'
         );
     }
 }

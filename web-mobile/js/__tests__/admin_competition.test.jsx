@@ -1,19 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildLiveIpponResult,
+  buildRunningIpponResult,
   loadScoreboardPoints,
   swissRoundIDPrefix,
   filterSwissRoundMatches,
   isSwissRoundComplete,
   canGenerateNextSwissRound,
   isSwissCompetitionComplete,
+  formatCompMinutes,
 } from '../admin_competition.jsx';
 
-// Copilot finding on PR #103: LiveMatchPanel's scoreboard mode supports
+// Copilot finding on PR #103: RunningMatchPanel's scoreboard mode supports
 // 2-ippon wins (and 2-1 with loser points), but the old recordWinner
 // only ever recorded a 1-ippon result (winnerPts=1, single-letter
 // array). The fix lifts the result-building logic into the pure
-// buildLiveIpponResult helper and consumes the full points arrays.
+// buildRunningIpponResult helper, which consumes the full points arrays.
 //
 // Kendo win conditions covered:
 //   - 2 ippons (sansoo)             — automatic win
@@ -28,10 +29,10 @@ import {
 const SIDE_A = { id: "a1", name: "Akira", dojo: "Tora" };
 const SIDE_B = { id: "b1", name: "Hiroshi", dojo: "Tora" };
 
-describe('buildLiveIpponResult', () => {
+describe('buildRunningIpponResult', () => {
   describe('1-ippon win (tap / card mode contract)', () => {
     it('side A win, no letters passed → defaults to ["M"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B);
       expect(r.winner).toBe(SIDE_A);
       expect(r.status).toBe("completed");
       expect(r.ipponsA).toEqual(["M"]);
@@ -46,7 +47,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B win, no letters passed → defaults to ["M"]', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["M"]);
@@ -55,7 +56,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side A win with explicit single letter ["K"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["K"]);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["K"]);
       expect(r.ipponsA).toEqual(["K"]);
       expect(r.ipponsB).toEqual([]);
       expect(r.score.winnerPts).toBe(1);
@@ -66,13 +67,13 @@ describe('buildLiveIpponResult', () => {
       // [] is empty/falsy-by-length so the helper substitutes ["M"].
       // Keeps the tap-mode "no letter at all" path working when a
       // caller accidentally hands in [] instead of undefined.
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, []);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.score.winnerPts).toBe(1);
     });
 
     it('null winnerIppons → falls back to ["M"]', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, null);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, null);
       expect(r.ipponsA).toEqual(["M"]);
     });
 
@@ -84,7 +85,7 @@ describe('buildLiveIpponResult', () => {
     // pins it explicitly so a future refactor that changes the default
     // doesn't silently break the most common scoreboard flow.
     it('side A scoreboard 1-0 (time-up): explicit empty loser array', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M"], []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M"], []);
       expect(r.winner).toBe(SIDE_A);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.ipponsB).toEqual([]);
@@ -93,7 +94,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B scoreboard 1-0 (time-up): symmetric to side A', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["D"], []);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["D"], []);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["D"]);
@@ -104,7 +105,7 @@ describe('buildLiveIpponResult', () => {
 
   describe('2-ippon win (the Copilot finding)', () => {
     it('side A 2-0 win: ipponsA has both letters, ipponsB is empty', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], []);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], []);
       expect(r.winner).toBe(SIDE_A);
       expect(r.ipponsA).toEqual(["M", "K"]);
       expect(r.ipponsB).toEqual([]);
@@ -114,7 +115,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B 2-0 win: ipponsB has both letters', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["D", "T"], []);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["D", "T"], []);
       expect(r.winner).toBe(SIDE_B);
       expect(r.ipponsA).toEqual([]);
       expect(r.ipponsB).toEqual(["D", "T"]);
@@ -127,7 +128,7 @@ describe('buildLiveIpponResult', () => {
       // winner's first letter survived. The 2-1 case is the most likely
       // place where the truncation matters: the user entered detail for
       // both sides, but only the winner's first letter persisted.
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], ["D"]);
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"], ["D"]);
       expect(r.ipponsA).toEqual(["M", "K"]);
       expect(r.ipponsB).toEqual(["D"]);
       expect(r.score.winnerPts).toBe(2);
@@ -135,7 +136,7 @@ describe('buildLiveIpponResult', () => {
     });
 
     it('side B 2-1 win: symmetric — loser letters land in ipponsA', () => {
-      const r = buildLiveIpponResult("b", SIDE_A, SIDE_B, ["K", "T"], ["M"]);
+      const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["K", "T"], ["M"]);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.ipponsB).toEqual(["K", "T"]);
       expect(r.score.winnerPts).toBe(2);
@@ -144,9 +145,9 @@ describe('buildLiveIpponResult', () => {
   });
 
   describe('schema invariants', () => {
-    it('always sets status="completed" (live panel never schedules)', () => {
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).status).toBe("completed");
-      expect(buildLiveIpponResult("b", SIDE_A, SIDE_B, ["M", "K"]).status).toBe("completed");
+    it('always sets status="completed" (running panel never schedules)', () => {
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).status).toBe("completed");
+      expect(buildRunningIpponResult("b", SIDE_A, SIDE_B, ["M", "K"]).status).toBe("completed");
     });
 
     it('always sets type="ippon" (hikiwake/hantei not supported here)', () => {
@@ -154,27 +155,27 @@ describe('buildLiveIpponResult', () => {
       // hikiwake toggle. Hantei wins go through the card-mode hantei
       // button → onRecord("a"|"b", "hantei") path which doesn't hit
       // recordWinner's ippon builder at all.
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).score.type).toBe("ippon");
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).score.type).toBe("ippon");
     });
 
-    it('fouls always zero (live panel doesn\'t expose hansoku)', () => {
-      const r = buildLiveIpponResult("a", SIDE_A, SIDE_B, ["M", "K"]);
+    it('fouls always zero (running panel doesn\'t expose hansoku)', () => {
+      const r = buildRunningIpponResult("a", SIDE_A, SIDE_B, ["M", "K"]);
       expect(r.score.fouls).toEqual({ a: 0, b: 0 });
     });
 
     it('winner field is the correct side object', () => {
-      expect(buildLiveIpponResult("a", SIDE_A, SIDE_B).winner).toBe(SIDE_A);
-      expect(buildLiveIpponResult("b", SIDE_A, SIDE_B).winner).toBe(SIDE_B);
+      expect(buildRunningIpponResult("a", SIDE_A, SIDE_B).winner).toBe(SIDE_A);
+      expect(buildRunningIpponResult("b", SIDE_A, SIDE_B).winner).toBe(SIDE_B);
     });
   });
 });
 
 describe('loadScoreboardPoints', () => {
   // Companion bug to the 2-ippon truncation Copilot found. The previous
-  // LiveMatchPanel useEffect loaded aPoints/bPoints from
+  // RunningMatchPanel useEffect loaded aPoints/bPoints from
   // `match.score.ippons` (winner-only) gated by `winner.id === sideX.id`,
   // which silently dropped the LOSER's letters on every render. Once
-  // buildLiveIpponResult started writing 2-1 wins correctly (loser's
+  // buildRunningIpponResult started writing 2-1 wins correctly (loser's
   // single ippon preserved), the loader's truncation surfaced — a 2-1
   // win came back as 2-0 and re-submission re-truncated it.
   //
@@ -200,9 +201,9 @@ describe('loadScoreboardPoints', () => {
     });
   });
 
-  describe('ippon-mode reads (the read side of buildLiveIpponResult writes)', () => {
+  describe('ippon-mode reads (the read side of buildRunningIpponResult writes)', () => {
     it('1-0 side A win round-trip: aPoints=["M"], bPoints=[]', () => {
-      // buildLiveIpponResult("a", A, B, ["M"], []) wrote ipponsA=["M"], ipponsB=[].
+      // buildRunningIpponResult("a", A, B, ["M"], []) wrote ipponsA=["M"], ipponsB=[].
       // loadScoreboardPoints should read it back identically.
       const r = loadScoreboardPoints({
         ipponsA: ["M"],
@@ -275,7 +276,7 @@ describe('loadScoreboardPoints', () => {
   describe('placeholder filtering', () => {
     it('filters out "•" empty-slot placeholders (matches scoring modal pattern)', () => {
       // The full editor uses "•" to mark empty slots in its 2-element
-      // ippon arrays. Live panel never writes "•" but data may round-trip
+      // ippon arrays. Running panel never writes "•" but data may round-trip
       // through the full editor — filtering defensively keeps the
       // scoreboard display clean.
       const r = loadScoreboardPoints({
@@ -366,7 +367,7 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
 
   it('useEffect deps include every field rendered via local.*', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
 
@@ -447,6 +448,14 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     'naginata',
     // mp-6nq: per-competition check-in tracking flag.
     'checkInEnabled',
+    // Phase 3b (mp-8rc9): league tie-breaker config. Only meaningful for
+    // team-league competitions; safe to include for all formats because
+    // the backend PUT allowlist ignores unknown fields.
+    'leagueTiebreakTopN',
+    'leagueTwoThirdPlaces',
+    // Round-tripped (no UI control) to avoid clobbering a kachinuki
+    // competition's value to "" on a settings save.
+    'teamMatchType',
   ]);
   // Fields that MUST NOT appear in the PUT body — pinning the
   // negative invariant explicitly so a careless re-add is caught.
@@ -454,7 +463,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 
   it('finalNext contains only allowlisted settings keys', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
 
@@ -494,7 +503,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // usable positive integer.
   it('finalNext numeric fields are wrapped in safeInt fallback', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
     const fnMatch = src.match(/const finalNext = \{([\s\S]*?)\n\s*\};/);
@@ -518,7 +527,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // fractional-clobber dimension.
   it('safeInt helper guards isFinite + isInteger + >= 1', () => {
     const src = readFileSync(
-      resolve(__dirname, '..', 'admin_competition.jsx'),
+      resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
     );
     const safeIntMatch = src.match(/const safeInt = \(v, fallback\) =>\s*([^;]+);/);
@@ -541,25 +550,42 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 //   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
 //   2. saveNow builds an `effective` object by overlaying `localRef.current`
 //      values onto `cRef.current` for each field in `editedFieldsRef`.
-//   3. update / updateNow / updateNumber call `editedFieldsRef.current.add(k)`
+//   3. update / updateNumber call `editedFieldsRef.current.add(k)`
 //      before scheduling the save.
 //
 // Behavioral tests for the full lifecycle are blocked by vitest.setup's
 // stubbed React hooks; structural tests are the durable mechanism.
 describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
   const src = readFileSync(
-    resolve(__dirname, '..', 'admin_competition.jsx'),
+    resolve(__dirname, '..', 'admin_competition_settings.jsx'),
     'utf8'
   );
 
-  it('saveLater takes no snapshot argument', () => {
-    // Pre-fix: `const saveLater = (next) => { ... saveNow(next); }`
-    // Post-fix: `const saveLater = () => { ... saveNow(); }`
-    // The argument-less form proves the timer reads refs at fire time
-    // instead of capturing a snapshot.
-    const m = src.match(/const saveLater = \(([^)]*)\) =>/);
-    expect(m, 'expected `const saveLater = (...) =>` declaration').not.toBeNull();
-    expect(m[1].trim()).toBe('');
+  // Non-vacuity guard (mp-hpe3): AdminSettings was split into
+  // admin_competition_settings.jsx. If this path ever points at a module that
+  // doesn't contain AdminSettings, the source-introspection regexes below would
+  // match nothing and could pass trivially — fail loudly instead.
+  it('reads the module that actually defines AdminSettings', () => {
+    expect(src).toContain('function AdminSettings');
+  });
+
+  it('uses manual save — no debounced autosave timer (mp-3xn6)', () => {
+    // Competition Settings was converted from debounced autosave to explicit
+    // "Save changes" (matching the Tournament Edit-details page). The old
+    // `saveLater` debounce must be gone, and saveNow must be reachable from an
+    // explicit Save button rather than fired from the edit handlers.
+    expect(src).not.toContain('saveLater');
+    expect(src).not.toContain('debounceRef');
+    // An explicit Save control wired to saveNow.
+    expect(src).toMatch(/onClick=\{saveNow\}/);
+    // The edit handlers must NOT auto-persist: no save call inside update/
+    // updateNumber bodies.
+    for (const handler of ['update', 'updateNumber']) {
+      const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
+      const m = src.match(re);
+      expect(m, `expected \`const ${handler} = (...) => { ... };\``).not.toBeNull();
+      expect(m[2], `${handler} must not save automatically`).not.toContain('saveNow(');
+    }
   });
 
   it('saveNow builds effective from cRef + editedFieldsRef overlay', () => {
@@ -573,11 +599,25 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     expect(body).toContain('editedFieldsRef.current.forEach');
   });
 
+  it('clears a persisted field only if its staged value is unchanged (re-edit race)', () => {
+    // Copilot finding (PR #320): a name-only Set snapshot couldn't tell an
+    // in-flight-persisted field from one RE-EDITED during the save, so the
+    // unconditional `persistingFields.forEach(delete)` would drop the user's
+    // latest change and let the SSE sync effect overwrite it. The fix snapshots
+    // VALUES and clears conditionally on value equality. These tokens are unique
+    // to saveNow, so file-level assertions are robust without carving the body.
+    expect(src).toContain('persistingValues');
+    // The fragile name-only Set snapshot must be gone.
+    expect(src).not.toContain('new Set(editedFieldsRef.current)');
+    // Conditional clear: only delete when the staged value still matches.
+    expect(src).toMatch(/if\s*\(localRef\.current\[k\]\s*===\s*persistingValues\[k\]\)\s*editedFieldsRef\.current\.delete\(k\)/);
+  });
+
   it('user-edit handlers mark fields via editedFieldsRef.add', () => {
     // Each handler that mutates `local` must mark the edited field
     // BEFORE scheduling the save, so the sync effect preserves it
     // when SSE arrives during the debounce window.
-    for (const handler of ['update', 'updateNow', 'updateNumber']) {
+    for (const handler of ['update', 'updateNumber']) {
       const re = new RegExp(`const ${handler} = \\(([^)]*)\\) => \\{([\\s\\S]*?)\\n {2}\\};`);
       const m = src.match(re);
       expect(m, `expected \`const ${handler} = (...) => { ... };\` declaration`).not.toBeNull();
@@ -585,7 +625,37 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
         m[2],
         `${handler} must call editedFieldsRef.current.add(...) so the sync effect preserves the user's edit during the debounce window`
       ).toContain('editedFieldsRef.current.add');
+      // Copilot finding (PR #320 round 4): saveNow reads localRef.current at
+      // click time. The useEffect that syncs localRef from `local` is async,
+      // so a rapid edit-then-Save click can land before the effect runs and
+      // miss the latest edit. Each handler must therefore write localRef.current
+      // synchronously inside the setLocal updater.
+      expect(
+        m[2],
+        `${handler} must write localRef.current = next inside its setLocal updater so saveNow sees the latest staged value even when the operator clicks Save immediately after editing`
+      ).toContain('localRef.current = next');
+      // Copilot finding (PR #320 round 4): the post-save clash banner says the
+      // change "was saved" — it goes stale the moment new edits are staged (the
+      // edit may even resolve the clash). Each staging handler must clear it.
+      expect(
+        m[2],
+        `${handler} must clear clashWarnings on edit so the stale "saved" clash banner isn't shown while the form is dirty`
+      ).toContain('setClashWarnings(null)');
     }
+  });
+
+  it('toggleCourt computes from localRef.current.courts, not the stale render closure', () => {
+    // Copilot finding (PR #320 round 4): deriving nextCourts from the render-
+    // closure `local.courts` drops a toggle when the operator clicks faster than
+    // React commits. localRef.current is kept authoritative by update().
+    const m = src.match(/const toggleCourt = \(cc\) => \{([\s\S]*?)\n {2}\};/);
+    expect(m, 'expected `const toggleCourt = (cc) => { ... };` block').not.toBeNull();
+    const body = m[1];
+    expect(body).toContain('localRef.current.courts');
+    // The stale-closure compute patterns must be gone (match on CODE, not the
+    // comment that quotes `local.courts` for explanation).
+    expect(body).not.toMatch(/local\.courts\.(includes|filter)/);
+    expect(body).not.toMatch(/\[\.\.\.local\.courts/);
   });
 
   it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {
@@ -689,7 +759,7 @@ describe('isSwissRoundComplete', () => {
     ])).toBe(false);
   });
 
-  it('false when any match is running (live)', () => {
+  it('false when any match is running', () => {
     expect(isSwissRoundComplete([
       { status: 'completed' },
       { status: 'running' },
@@ -786,5 +856,44 @@ describe('isSwissCompetitionComplete', () => {
 
   it('false when format !== swiss', () => {
     expect(isSwissCompetitionComplete(mkComp({ format: 'mixed' }), completedR4)).toBe(false);
+  });
+});
+
+// mp-zoh Phase 4: inline schedule estimate formatting helper.
+// formatCompMinutes converts a total-minutes integer to a human-readable
+// string like "2h 03m". It is extracted as a pure export so it can be
+// unit-tested without mounting the AdminSettings component.
+describe('formatCompMinutes (mp-zoh)', () => {
+  it('returns null for 0 (no estimate)', () => {
+    expect(formatCompMinutes(0)).toBeNull();
+  });
+
+  it('returns null for negative values', () => {
+    expect(formatCompMinutes(-1)).toBeNull();
+  });
+
+  it('returns null for non-finite values (NaN, Infinity)', () => {
+    expect(formatCompMinutes(NaN)).toBeNull();
+    expect(formatCompMinutes(Infinity)).toBeNull();
+  });
+
+  it('formats minutes-only (< 60 min)', () => {
+    expect(formatCompMinutes(30)).toBe('30m');
+    expect(formatCompMinutes(1)).toBe('1m');
+    expect(formatCompMinutes(59)).toBe('59m');
+  });
+
+  it('formats exactly 1 hour as "1h 00m"', () => {
+    expect(formatCompMinutes(60)).toBe('1h 00m');
+  });
+
+  it('pads single-digit minutes with leading zero', () => {
+    expect(formatCompMinutes(63)).toBe('1h 03m');
+    expect(formatCompMinutes(125)).toBe('2h 05m');
+  });
+
+  it('formats typical tournament durations', () => {
+    expect(formatCompMinutes(120)).toBe('2h 00m');
+    expect(formatCompMinutes(183)).toBe('3h 03m');
   });
 });

@@ -37,7 +37,7 @@ func setupResetTest(t *testing.T, verifier PasswordVerifier) (*state.Store, *gin
 	r := gin.New()
 	api := r.Group("/api")
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier, defaultElevatedVerifier(verifier, store))
+	RegisterAuthConfigHandlers(api, verifier, defaultElevatedVerifier(verifier, store), false)
 
 	return store, r, hub
 }
@@ -325,7 +325,7 @@ func TestReset_OriginMalformed_Rejected(t *testing.T) {
 			req.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusForbidden, w.Code, "malformed Origin %q must be rejected", origin)
+			assert.Equalf(t, http.StatusForbidden, w.Code, "malformed Origin %q must be rejected", origin)
 		})
 	}
 }

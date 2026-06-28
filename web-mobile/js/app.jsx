@@ -1,8 +1,9 @@
 // Main App — single tournament per app/url. Tournament has multiple Competitions
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
-import { applyPatch as patchCompetitionData } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
+import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -20,9 +21,63 @@ const THEME = {
   "cardVariant": 1
 };
 
+// Darken a #rrggbb hex toward black by `amount` (0..1). Used to derive the
+// filled-button hover shade (--accent-strong) from a runtime Branding accent
+// so the hover tracks the configured colour instead of a hard-coded navy
+// (mp-nubo). Returns null on malformed input so callers fall back to the CSS
+// default token.
+function darkenHex(hex, amount) {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const f = 1 - amount;
+  const r = Math.round(((n >> 16) & 255) * f);
+  const g = Math.round(((n >> 8) & 255) * f);
+  const b = Math.round((n & 255) * f);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
+// mp-scf: apply tournament-configured CSS custom properties. Called once
+// after tournament load and again on tournament_updated. Removes overrides
+// when the theme field is absent so the CSS defaults take over.
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme && theme.primaryColor) {
+    root.style.setProperty("--accent", theme.primaryColor);
+    // mp-nubo: keep the button hover shade in sync with the custom accent.
+    const strong = darkenHex(theme.primaryColor, 0.2);
+    if (strong) root.style.setProperty("--accent-strong", strong);
+    else root.style.removeProperty("--accent-strong");
+  } else {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-strong");
+  }
+  if (theme && theme.accentSoftColor) {
+    root.style.setProperty("--accent-soft", theme.accentSoftColor);
+  } else {
+    root.style.removeProperty("--accent-soft");
+  }
+  document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
+}
+// Expose globally so BrandingManager (loaded as a separate module) can call
+// window.applyTheme() for real-time previews without duplicating the logic.
+window.applyTheme = applyTheme;
+
 // Pure helper: parse the current pathname into the App's view state.
 // Extracted so it remains unit-testable; previously inlined as a
 // closure in App() which prevented both reuse and isolated testing.
+// decodeURIComponent throws on malformed percent-encoding (e.g. "%E0").
+// parsePath runs in the popstate handler with no try/catch, so a crafted
+// or truncated URL would otherwise crash back/forward navigation. Fall
+// back to the raw segment rather than throwing.
+function safeDecode(s) {
+    try {
+        return decodeURIComponent(s);
+    } catch (_e) {
+        return s;
+    }
+}
+
 function parsePath(path) {
     if (path.startsWith("/admin")) {
       const parts = path.split("/").filter(Boolean);
@@ -32,6 +87,9 @@ function parsePath(path) {
       if (parts[1] === "import") return { mode: "admin", admin: { kind: "import" } };
       if (parts[1] === "edit-tournament") return { mode: "admin", admin: { kind: "editTournament" } };
       if (parts[1] === "create-competition") return { mode: "admin", admin: { kind: "createComp" } };
+      if (parts[1] === "shiaijo" && parts[2]) {
+        return { mode: "admin", admin: { kind: "shiaijo", court: safeDecode(parts[2]) } };
+      }
       if (parts[1] === "competition" && parts[2]) {
         return { mode: "admin", admin: { kind: "competition", id: parts[2], section: parts[3] || "overview" } };
       }
@@ -48,11 +106,24 @@ function parsePath(path) {
       return { mode: "display" };
     }
     if (path.startsWith("/competition/")) {
-      const id = path.split("/")[2];
-      return { mode: "viewer", viewerCompId: id };
+      const parts = path.split("/").filter(Boolean);
+      const id = parts[1];
+      // mp-tidg: the 3rd segment encodes the active tab so browser
+      // back/forward navigates across tabs. Decode defensively (same
+      // safeDecode pattern as the shiaijo court segment above). Normalize
+      // the default tab to null — the rest of the app treats "overview" as
+      // the nullish default (selectTab/pathFromState), so /competition/:id
+      // and /competition/:id/overview must both parse to viewerTab=null and
+      // never carry two representations of the same state.
+      let tab = parts[2] ? safeDecode(parts[2]) : null;
+      if (tab === "overview") tab = null;
+      return { mode: "viewer", viewerCompId: id, viewerTab: tab };
     }
     if (path === "/schedule") {
       return { mode: "viewer", viewerScreen: "schedule" };
+    }
+    if (path === "/results") {
+      return { mode: "viewer", viewerScreen: "results" };
     }
     // U1: /glossary — the kendo-term reference page (rendered by
     // GlossaryPage from glossary.jsx). Public, no auth required;
@@ -68,11 +139,18 @@ function parsePath(path) {
     if (path === "/reset") {
       return { mode: "viewer", viewerScreen: "reset" };
     }
+    if (path.startsWith("/register/")) {
+      const compId = path.split("/")[2] || "";
+      if (compId) return { mode: "viewer", viewerScreen: "register", viewerCompId: compId };
+    }
     return { mode: "viewer", viewerScreen: "home" };
 }
 
 // Pure helper: render the App's view state back into a URL pathname.
-function pathFromState(m, vs, vcid, av) {
+// mp-tidg: `vt` is the viewer competition tab ("overview", "bracket", …).
+// overview is the default and is NOT emitted in the URL (clean root path).
+// register takes precedence over vcid alone and must NOT get a tab suffix.
+function pathFromState(m, vs, vcid, av, vt) {
     if (m === "admin") {
       if (av.kind === "dashboard") return "/admin";
       if (av.kind === "schedule") return "/admin/schedule";
@@ -80,6 +158,7 @@ function pathFromState(m, vs, vcid, av) {
       if (av.kind === "import") return "/admin/import";
       if (av.kind === "editTournament") return "/admin/edit-tournament";
       if (av.kind === "createComp") return "/admin/create-competition";
+      if (av.kind === "shiaijo") return av.court ? `/admin/shiaijo/${encodeURIComponent(av.court)}` : "/admin";
       if (av.kind === "competition") {
         let url = `/admin/competition/${av.id}`;
         if (av.section && av.section !== "overview") url += `/${av.section}`;
@@ -87,10 +166,20 @@ function pathFromState(m, vs, vcid, av) {
       }
       return "/admin";
     }
-    if (vcid) return `/competition/${vcid}`;
+    if (vs === "register" && vcid) return `/register/${vcid}`;
+    if (vcid) {
+      // Omit the tab segment for overview (default) so the canonical URL
+      // stays clean and parsePath(pathFromState(…)) round-trips correctly.
+      // encodeURIComponent mirrors the safeDecode on the parse side (and the
+      // shiaijo-court segment above) so the encode/decode round-trip stays
+      // symmetric even if a future tab id carries a URL-special character.
+      if (vt && vt !== "overview") return `/competition/${vcid}/${encodeURIComponent(vt)}`;
+      return `/competition/${vcid}`;
+    }
     if (vs === "schedule") return "/schedule";
     if (vs === "glossary") return "/glossary";
     if (vs === "reset") return "/reset";
+    if (vs === "results") return "/results";
     return "/";
 }
 
@@ -128,6 +217,29 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// mp-4fd: Generic notification helper. Guards: Notification API available +
+// permission granted + localStorage opt-in on. The document.hidden check is
+// intentionally NOT here — callers gate on it when needed (announcements) but
+// the match-alert path fires even when the tab is focused (the banner + title
+// provide the in-tab surface; the Notification is for backgrounded tabs).
+// Exported for unit testing. NOT pure — side-effecting.
+export function fireNotification(title, body, { tag } = {}) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  let enabled = false;
+  try {
+    enabled = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true";
+  } catch (_e) { /* storage unavailable */ }
+  if (!enabled) return;
+  try {
+    new Notification(title, {
+      tag: tag || "",
+      body: body || "",
+      icon: "/favicon.jpeg",
+    });
+  } catch (_e) { /* Notification constructor can throw in some envs */ }
+}
+
 // mp-cw1: Fire browser Notification for each newly-added announcement.
 // Guards: Notification API available + permission granted + document hidden
 // + localStorage toggle on. Uses tag:id to coalesce duplicate fires.
@@ -135,21 +247,10 @@ class ErrorBoundary extends React.Component {
 // and constructs Notification instances. Exported for unit testing (tests stub
 // those globals). Callers must treat it as side-effecting.
 export function fireBrowserNotifications(additions) {
-  if (typeof Notification === "undefined") return;
-  if (Notification.permission !== "granted") return;
   if (!document.hidden) return;
-  let enabled = false;
-  try {
-    enabled = window.localStorage.getItem("viewer.notifications.enabled") === "true";
-  } catch (_e) { /* storage unavailable */ }
-  if (!enabled) return;
   for (const a of additions) {
     if (!a || !a.id) continue;
-    new Notification("Tournament Announcement", {
-      tag: a.id,
-      body: a.message || "",
-      icon: "/favicon.jpeg",
-    });
+    fireNotification("Tournament Announcement", a.message || "", { tag: a.id });
   }
 }
 
@@ -185,7 +286,7 @@ export function diffAnnouncementSnapshot(seenRef, list) {
 }
 
 function App() {
-  const [tournament, setTournament] = useS(null);
+  const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
   const [announcements, setAnnouncements] = useS([]);
   // Hydrate the route state from the URL synchronously, BEFORE the first
@@ -234,8 +335,48 @@ function App() {
   });
   const [authPrompt, setAuthPrompt] = useS(false);
   const [viewerCompId, setViewerCompId] = useS(initialRoute.viewerCompId || null);
-  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset
+  // mp-tidg: tab is lifted here (not inside ViewerCompetition) so that
+  // browser back/forward across tabs works — each tab push/pop is a
+  // history entry owned by App, making this the single source of truth.
+  const [viewerTab, setViewerTab] = useS(initialRoute.viewerTab || null);
+  // When the next state→URL sync should replaceState instead of pushState.
+  // A correction (an invalid/non-canonical tab rewritten to its canonical
+  // path) must REPLACE the bad entry, otherwise Back returns to the invalid
+  // URL which re-corrects and re-pushes — a back/forward trap (PR #307
+  // review). It is armed for (a) a non-canonical landing URL — e.g.
+  // /competition/:id/overview, which parsePath normalizes to viewerTab=null
+  // so the initial sync rewrites to the bare path — and (b) the clamp in
+  // ViewerCompetition (via handleTabChange's replace arg). Genuine tab
+  // navigations leave it false and push normally. Consumed (reset to false)
+  // by the sync effect only when it actually rewrites the URL.
+  const replaceNextUrlSync = useR(
+    typeof window !== "undefined" &&
+      initialRoute.mode !== "display" &&
+      window.location.pathname !==
+        pathFromState(
+          initialRoute.mode || "viewer",
+          initialRoute.viewerScreen || "home",
+          initialRoute.viewerCompId || null,
+          initialRoute.admin || { kind: "dashboard" },
+          initialRoute.viewerTab || null,
+        ),
+  );
+  // Controlled-tab writer for ViewerCompetition. `replace` is true when the
+  // change is a correction (clamped invalid/unavailable tab) so the URL sync
+  // replaces rather than pushes; tab clicks pass false. Set explicitly on
+  // every call so the flag never leaks across navigations.
+  const handleTabChange = useC((tab, replace = false) => {
+    replaceNextUrlSync.current = replace;
+    setViewerTab(tab);
+  }, []);
+  const [viewerScreen, setViewerScreen] = useS(initialRoute.viewerScreen || "home"); // home | schedule | glossary | reset | results
   const [adminView, setAdminView] = useS(initialRoute.admin || { kind: "dashboard" });
+  // Mirror adminView into a ref so the long-lived SSE handler (deps
+  // [viewerCompId, mode]) can read the CURRENT admin view without being
+  // recreated on every navigation. Used to skip the per-event aggregate
+  // refetch while the shiaijo operator console is active (mp-9h1f).
+  const adminViewRef = useR(adminView);
+  useE(() => { adminViewRef.current = adminView; }, [adminView]);
   const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
@@ -284,7 +425,7 @@ function App() {
   // and omit X-Tournament-Password on the bootstrap POST. The
   // useEffect below always resolves the null state (success or
   // fail-open) within one HTTP round-trip.
-  const [authConfig, setAuthConfig] = useS(null);
+  const [authConfig, setAuthConfig] = useS(undefined);
   const authPromptRef = React.useRef(false);
 
   const showToast = (message, type = 'success') => {
@@ -318,15 +459,21 @@ function App() {
     // on its own. Skip URL syncing here to avoid stripping the
     // query string (pathFromState only emits the path, not the query).
     if (mode === "display") return;
-    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView);
+    const url = pathFromState(mode, viewerScreen, viewerCompId, adminView, viewerTab);
     if (window.location.pathname !== url) {
+      // Consume the replace flag only when we actually rewrite, so a no-op
+      // pass (e.g. the mount render before a clamp resolves) doesn't drop it.
+      const replace = replaceNextUrlSync.current;
+      replaceNextUrlSync.current = false;
       if (AppRouter && AppRouter.route) {
-        AppRouter.route(url);
+        AppRouter.route(url, replace);
+      } else if (replace) {
+        history.replaceState(null, "", url);
       } else {
         history.pushState(null, "", url);
       }
     }
-  }, [mode, viewerScreen, viewerCompId, adminView]);
+  }, [mode, viewerScreen, viewerCompId, adminView, viewerTab]);
 
   // The popstate handler is preserved as a fallback for back/forward
   // navigation. preact-router would also fire its own listeners on
@@ -345,6 +492,7 @@ function App() {
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
+        setViewerTab(route.viewerTab || null);
         setViewerScreen(route.viewerScreen || "home");
       }
     };
@@ -382,15 +530,36 @@ function App() {
         const comps = await window.API.fetchCompetitions();
         t.competitions = comps;
         setTournament(t);
+        applyTheme(t.theme); // mp-scf: apply custom colors
       }
     } catch (e) {
       console.error("Failed to load tournament", e);
+      setTournament(null); // Explicitly transition from undefined to null so the gate opens
     } finally {
       setLoading(false);
     }
   };
 
   useE(() => { load(); }, []);
+
+  // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
+  // view) the SSE handler skips its per-event aggregate refetch — the console
+  // keeps itself live via its own court-scoped feed, so the operator's tablet
+  // stops re-downloading every court on every score. Catch the aggregate back up
+  // whenever we LEAVE that console state, by ANY path: navigating to another
+  // admin view (adminView.kind change) OR switching out of admin mode entirely
+  // (logout, Public-viewer, popstate to a viewer route — all change `mode` while
+  // adminView.kind can stay "shiaijo"). Tracking the combined boolean and
+  // depending on both `mode` and `adminView.kind` closes the mode-change gap. It
+  // does not fire on mount (was===is on the first run) — the unconditional
+  // load() above covers initial load.
+  const wasAdminShiaijoRef = useR(mode === "admin" && adminView.kind === "shiaijo");
+  useE(() => {
+    const isAdminShiaijo = mode === "admin" && adminView.kind === "shiaijo";
+    const leftConsole = wasAdminShiaijoRef.current && !isAdminShiaijo;
+    wasAdminShiaijoRef.current = isAdminShiaijo;
+    if (leftConsole) load();
+  }, [adminView.kind, mode]);
 
   useE(() => {
     window.API.fetchAnnouncements()
@@ -484,10 +653,94 @@ function App() {
         return id;
     };
 
+    // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
+    // console is the active admin view, skip it: the console sources its
+    // cross-competition court view from its own GET /api/viewer/court/:court/matches
+    // feed and refreshes itself, so re-pulling the whole-tournament aggregate
+    // here would re-download every other court on the operator's tablet on every
+    // score for no benefit (mp-9h1f). `mode` is fresh (effect dep); the active
+    // admin view is read from the ref so this closure need not be recreated on
+    // navigation. Every other mode/view loads exactly as before.
+    const maybeLoad = () => {
+        if (mode === "admin" && adminViewRef.current && adminViewRef.current.kind === "shiaijo") return;
+        load();
+    };
+
+    // F6b: per-subscription seq tracker. Allocated once per effect run so
+    // it resets on viewerCompId/mode changes alongside the SSE reconnect.
+    const sseSeq = { lastSeq: 0 };
+
+    // F8: resync on tab resume. When the tab becomes visible again after
+    // being backgrounded, reconnect SSE (clears any stale connection) and
+    // refresh data so the UI is current. Defined inside the effect so the
+    // closure captures jitteredTimeout, maybeLoad and viewerCompId; removed
+    // in the effect cleanup alongside unsub() to avoid duplicate handlers
+    // across re-renders.
+    const onVisibilityChange = () => {
+        if (document.hidden) return;
+        window.API.reconnectEvents();
+        maybeLoad();
+        if (viewerCompId) {
+            jitteredTimeout(
+                () => window.API.fetchCompetitionDetails(viewerCompId)
+                    .then(setSelectedCompData)
+                    .catch(err => console.error('tab-resume refresh failed:', err)),
+                Math.random() * 500
+            );
+        }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     const unsub = window.API.subscribeToEvents((event) => {
-        const jitter = Math.random() * 500;
+        // F6b — heartbeat: liveness only, do not patch or advance seq.
+        if (event.type === 'heartbeat') return;
+
+        // F6b — resync_required: server restarted or replay was unsatisfiable.
+        // Reset our seq counter to the server's head and do a full refetch.
+        if (event.type === 'resync_required') {
+            sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
+            maybeLoad();
+            if (viewerCompId) {
+                jitteredTimeout(
+                    () => window.API.fetchCompetitionDetails(viewerCompId)
+                        .then(setSelectedCompData)
+                        .catch(err => console.error('resync refresh failed:', err)),
+                    Math.random() * 500
+                );
+            }
+            return;
+        }
+
+        // F6b — gap detection: run on every event so the seq counter advances
+        // accurately even for events that don't patch state (e.g. lineup_updated,
+        // announcement). On a gap, trigger the same scoped refetch the per-type
+        // branches below use, so we converge without waiting for the next event.
+        const seqResult = checkSeqGap(sseSeq, event.seq, () => {
+            maybeLoad();
+            if (viewerCompId) {
+                jitteredTimeout(
+                    () => window.API.fetchCompetitionDetails(viewerCompId)
+                        .then(setSelectedCompData)
+                        .catch(err => console.error('gap refetch failed:', err)),
+                    Math.random() * 500
+                );
+            }
+        });
+        if (seqResult.duplicate) return;
+
+        // P1/P4 (mp-9afd): two jitter windows.
+        //   detailJitter — tight (0–500ms) for per-competition detail fetches
+        //     that target a single competition. Each event targets one comp,
+        //     and each viewer does O(1) work when it's viewing that comp.
+        //   listJitter — wider (0–2000ms) for full-list fetches (display mode
+        //     and genuine list-level transitions, e.g. competition_started,
+        //     draw_generated, schedule_updated, participants_updated, etc.).
+        //     These are infrequent and the wider window staggers 1000+ display
+        //     walls so they don't simultaneously storm GET /api/viewer/competitions.
+        const detailJitter = Math.random() * 500;
+        const listJitter = Math.random() * 2000;
         if (event.type === "tournament_updated") {
-            if (!authPromptRef.current) jitteredTimeout(load, jitter);
+            if (!authPromptRef.current) jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "password_reset") {
             // The admin password was rotated by someone hitting
             // POST /api/tournament/reset. Any logged-in admin's
@@ -515,6 +768,10 @@ function App() {
             if (authedRef.current) {
                 setAuthed(false);
                 setPassword("");
+                // Security: drop the offline write queue too, so the old
+                // plaintext password doesn't linger in localStorage past the
+                // reset (clearQueue self-guards its own storage access).
+                if (window.API && window.API.clearQueue) window.API.clearQueue();
                 try {
                     localStorage.removeItem("bc_authed");
                     localStorage.removeItem("bc_password");
@@ -536,9 +793,11 @@ function App() {
             // for any view that caches its own derived state.
             if (viewerCompId === event.data?.competitionId) {
                 setSelectedCompData(prev => patchCompetitionData(prev, event));
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            // competitor_status_updated is a list-level event (eligibility
+            // badges on the lobby): always refresh the full list.
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "competition_started" || event.type === "match_updated" || event.type === "competition_completed") {
             // Display mode (T060) reads the full tournament tree
             // (every competition's poolMatches + bracket) and needs a
@@ -550,57 +809,80 @@ function App() {
             // thundering the server when many displays are mounted on
             // the same venue LAN.
             if (mode === "display") {
-                jitteredTimeout(load, jitter);
-            } else if (viewerCompId === event.data.competitionId) {
+                jitteredTimeout(maybeLoad, listJitter);
+            } else if (viewerCompId === event.data?.competitionId) {
                 // Apply partial update immediately (match_updated only —
                 // competition_completed has no per-match payload)
                 if (event.type === "match_updated") {
                     setSelectedCompData(prev => patchCompetitionData(prev, event));
                 }
-                // Refresh current competition (jittered) — the backend has
-                // already persisted the new status before broadcasting, so
+                // Refresh current competition detail (jittered) — the backend
+                // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            // Also refresh tournament list for status updates
-            jitteredTimeout(load, jitter);
+            // P1 (mp-9afd): fire a full-list refetch for list-level
+            // transitions (competition_started / competition_completed change
+            // status badges), AND for match_updated when the viewer is on
+            // the home/schedule screen (viewerCompId is null). Home-screen
+            // widgets (running-match counters, progress bars, watchlist, followed-player
+            // matches) derive from tournament.competitions and need the
+            // updated match state. Viewers inside a specific competition
+            // skip the list refetch for match_updated only (the per-comp
+            // detail fetch above covers it) — that skip is the dominant
+            // scaling win. competition_started/completed still fire a list
+            // refetch for all non-display viewers so status badges update.
+            // Display mode is excluded because it already fires load() in the
+            // `mode === "display"` block earlier in this same event handler.
+            if (mode !== "display" && (event.type === "competition_started" || event.type === "competition_completed" || (event.type === "match_updated" && !viewerCompId))) {
+                jitteredTimeout(maybeLoad, listJitter);
+            }
         } else if (event.type === "schedule_updated") {
             // Court/time move: no competitionId in payload, so refresh the
             // currently selected competition (if any) and the tournament list.
             if (viewerCompId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "draw_generated" || event.type === "draw_discarded") {
             // Draw generated/discarded: refresh the selected competition's
             // details (new pools/bracket data or cleared state) and the
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
             // T192 (US13 — FR-050d): a new Swiss round's matches have been
             // generated. The payload carries competitionId + swissCurrentRound
             // (see handlers_swiss.go) but the viewer needs the freshly-saved
             // poolMatches + the updated comp.swissCurrentRound on the
-            // tournament list, so we refetch both. Mirrors the match_updated
-            // path's jittered fetchCompetitionDetails + load pattern.
-            if (mode === "display") {
-                jitteredTimeout(load, jitter);
-            } else if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+            // tournament list, so we refetch both. Mirrors the draw_generated
+            // / participants_updated pattern — no separate display-mode branch
+            // needed because the unconditional load() at the end covers it.
+            if (viewerCompId === event.data?.competitionId) {
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            // swiss_round_generated updates the tournament list (swissCurrentRound
+            // counter): always do one list refresh — covers display mode, home-
+            // screen viewers, and per-comp viewers alike.
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "participants_updated") {
             // Check-in toggle: viewer-side badges (checked-in indicator) need
             // the updated player list. Refetch the selected competition when the
             // event targets it; also refresh the tournament list so participant
             // counts stay accurate.
             if (viewerCompId === event.data?.competitionId) {
-                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), jitter);
+                jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(setSelectedCompData).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
             }
-            jitteredTimeout(load, jitter);
+            jitteredTimeout(maybeLoad, listJitter);
+        } else if (event.type === "lineup_updated") {
+            // A team lineup was saved or deleted by an operator. The lineup
+            // data is not part of the competition object, so patchCompetitionData
+            // / setSelectedCompData won't help — instead we dispatch a window
+            // CustomEvent that useTeamLineups hooks can subscribe to directly
+            // (same pattern as competitor-status-updated in patch.jsx).
+            window.dispatchEvent(new CustomEvent("lineup-updated", { detail: event.data }));
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];
@@ -626,27 +908,32 @@ function App() {
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
     });
-    return () => { unsub(); pendingTimers.forEach(clearTimeout); };
+    return () => { unsub(); pendingTimers.forEach(clearTimeout); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);
 
   useE(() => {
-    if (viewerCompId) {
+    if (viewerCompId && viewerScreen !== "register") {
+      let cancelled = false;
       setLoading(true);
       window.API.fetchCompetitionDetails(viewerCompId)
         .then(data => {
+          if (cancelled) return;
           setSelectedCompData(data);
           setLoading(false);
         })
         .catch(err => {
+          if (cancelled) return;
           console.error(err);
           setLoading(false);
         });
+      return () => { cancelled = true; };
     } else {
       setSelectedCompData(null);
+      setLoading(false);
     }
-  }, [viewerCompId]);
+  }, [viewerCompId, viewerScreen]);
 
   const requestAdmin = () => {
     if (authed) {
@@ -660,6 +947,9 @@ function App() {
     setAuthed(false);
     setMode("viewer");
     setPassword("");
+    // Security: clear the offline write queue so the stale plaintext password
+    // and any pending writes don't survive logout in localStorage.
+    if (window.API && window.API.clearQueue) window.API.clearQueue();
     localStorage.removeItem("bc_authed");
     localStorage.removeItem("bc_password");
   };
@@ -679,18 +969,28 @@ function App() {
     setAnnouncements(prev => prev.filter(a => a.id !== id));
   }, []);
 
-  if (loading && !selectedCompData) return <div className="loading">Loading...</div>;
-  if (!tournament) return (
-    <CreateTournament
-      authConfig={authConfig}
-      onCreated={(t, p) => {
-        setTournament(t);
-        setAuthed(true);
-        setMode("admin");
-        setPassword(p);
-      }}
-    />
-  );
+  if (loading && !selectedCompData) return <window.LoadingSpinner text="Loading..." />;
+
+  // Gate ALL rendering on the initial data load. The spinner stays visible
+  // until both fetchTournament and fetchAuthConfig have resolved (setting
+  // their respective state variables from undefined to their loaded values).
+  if (tournament === undefined || authConfig === undefined) {
+    return <window.LoadingSpinner text="Loading..." />;
+  }
+
+  if (tournament === null) {
+    return (
+      <CreateTournament
+        authConfig={authConfig}
+        onCreated={(t, p) => {
+          setTournament(t);
+          setAuthed(true);
+          setMode("admin");
+          setPassword(p);
+        }}
+      />
+    );
+  }
 
   // T060: /display family — public, read-only TV / lobby / overlay
   // surfaces. Short-circuit before viewer/admin so no auth prompt is
@@ -745,16 +1045,13 @@ function App() {
           onDismiss={handleDismissAnnouncement}
         />
       )}
-      {selectedCompData ? (
+      {selectedCompData && viewerScreen !== "register" ? (
         <window.ViewerCompetition
-          // key on the competition id so switching comps (notably the
-          // mp-rrd pools<->playoffs cross-link, which calls
-          // onSelectCompetition without unmounting) remounts the
-          // component and resets its per-comp UI state (active tab,
-          // open match modal, bracket scroll target). Otherwise a tab
-          // that doesn't exist in the destination comp (e.g. "pools"
-          // when navigating to a playoffs comp) would leave the body
-          // rendering empty.
+          // key on the competition id so switching comps remounts the
+          // component and resets its internal per-comp UI state (open match
+          // modal, bracket scroll target). The active tab is NOT reset by the
+          // remount — it is controlled App state (viewerTab); the onBack /
+          // onSelectCompetition handlers clear it explicitly.
           key={selectedCompData.config.id}
           tournament={tournament}
           competition={selectedCompData.config}
@@ -762,10 +1059,13 @@ function App() {
           poolMatches={selectedCompData.poolMatches}
           standings={selectedCompData.standings}
           bracket={selectedCompData.bracket}
-          onBack={() => setViewerCompId(null)}
-          onSelectCompetition={setViewerCompId}
+          onBack={() => { setViewerCompId(null); setViewerTab(null); }}
           onAdminClick={requestAdmin}
+          authed={authed}
+          onEditCompetition={(id) => { setMode("admin"); setAdminView({ kind: "competition", id, section: "settings" }); }}
           tweaks={THEME}
+          activeTab={viewerTab || "overview"}
+          onTabChange={handleTabChange}
         />
       ) : viewerScreen === "schedule" ? (
         <window.ViewerSchedule
@@ -779,7 +1079,7 @@ function App() {
         // the app.jsx render tree doesn't need a static import.
         window.GlossaryPage
           ? <window.GlossaryPage onBack={() => setViewerScreen("home")} />
-          : <div className="loading">Loading glossary…</div>
+          : <window.LoadingSpinner text="Loading glossary…" />
       ) : viewerScreen === "reset" ? (
         // Password reset surface. Lives in reset.jsx; mounted through
         // window.ResetPasswordForm following the per-screen-file
@@ -798,13 +1098,40 @@ function App() {
                 setMode("admin");
               }}
             />
-          : <div className="loading">Loading…</div>
+          : <window.LoadingSpinner text="Loading…" />
+      ) : viewerScreen === "register" ? (
+        window.RegistrationForm
+          ? <window.RegistrationForm
+              compId={viewerCompId}
+              onBack={() => {
+                setViewerScreen("home");
+                setViewerCompId(null);
+                setViewerTab(null);
+              }}
+            />
+          : <window.LoadingSpinner text="Loading…" />
+      ) : viewerScreen === "results" ? (
+        // mp-koqh: public results summary — all competition placings.
+        window.AllWinnersView
+          ? <window.AllWinnersView
+              tournament={tournament}
+              onBack={() => setViewerScreen("home")}
+              tweaks={THEME}
+            />
+          : <window.LoadingSpinner text="Loading…" />
       ) : (
         <window.ViewerHome
           tournament={tournament}
-          onSelectCompetition={setViewerCompId}
+          onSelectCompetition={(compId) => { setViewerCompId(compId); setViewerTab(null); }}
           onOpenSchedule={() => setViewerScreen("schedule")}
           onAdminClick={requestAdmin}
+          onRegister={(compId) => {
+            setViewerCompId(compId);
+            setViewerTab(null);
+            setViewerScreen("register");
+          }}
+          onOpenResults={() => setViewerScreen("results")}
+          sseConnected={sseConnected}
         />
       )}
       {authPrompt && (
@@ -828,6 +1155,7 @@ function App() {
             // any other viewer route uses.
             if (mode === "admin") setMode("viewer");
             setViewerCompId(null);
+            setViewerTab(null);
             setViewerScreen("reset");
           }}
           onClose={() => {
@@ -894,9 +1222,9 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
     // dialog could be obscured by chrome or by announcement cards.
     <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }}>
       <div className="modal auth" onClick={(e) => e.stopPropagation()}>
-        <img src="/logo.jpeg" alt="Kendo Tournament Logo" className="auth__logo" decoding="async" />
+        <img src="/api/branding/logo" onError={(e) => { e.target.onerror = null; e.target.src = "/logo.jpeg"; }} alt="Tournament logo" className="auth__logo" decoding="async" />
         <div className="auth__title">Admin sign in</div>
-        <div className="auth__sub">Enter the tournament password to manage brackets, schedules and live results.</div>
+        <div className="auth__sub">Enter the tournament password to manage brackets, schedules and results.</div>
         <form onSubmit={submit}>
           <div className="field">
             <label className="field__label">Password</label>
@@ -920,12 +1248,12 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled }) {
             <button
               type="button"
               className="btn btn--ghost btn--sm"
-              onClick={() => {
+              onClick={async () => {
                 // Confirm intent: reset is global (everyone's
                 // re-authenticated) — see resetPassword's tournament
                 // broadcast. Cheaper to ask twice than to surprise an
                 // operator who clicked the wrong link.
-                if (window.confirm("Reset the tournament password? This will sign out all other admins.")) {
+                if (await window.confirmDialog({ message: "Reset the tournament password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
                   onForgotPassword();
                 }
               }}
@@ -1080,6 +1408,10 @@ function CreateTournament({ onCreated, authConfig }) {
   // which loads before app.js per index.html.
   const decideNumericUpdate = window.decideNumericUpdate;
 
+  if (saving) {
+    return <window.LoadingSpinner text="Creating tournament..." />;
+  }
+
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
@@ -1182,28 +1514,92 @@ function CreateTournament({ onCreated, authConfig }) {
               </div>
             </div>
           )}
-          {/* Disable submit until authConfig is known (null = loading) so a
-              locked-mode deployment doesn't submit without X-Tournament-Password.
-              The null window lasts at most one HTTP round-trip on startup. */}
-          <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={saving || authConfig === null} style={{ marginTop: 16 }}>
-            {saving ? "Creating…" : authConfig === null ? "Loading…" : "Create Tournament"}
+          <button type="submit" className="btn btn--primary btn--lg btn--full" style={{ marginTop: 16 }}>
+            Create Tournament
           </button>
         </form>
       </div>
+      <VersionFooter />
     </div>
   );
+}
+
+
+export function VersionFooter() {
+  const [info, setInfo] = React.useState(window.appVersionInfo || null);
+
+  React.useEffect(() => {
+    // window.appVersionInfo is either:
+    //   undefined — fetch not yet started/completed
+    //   false     — fetch done, no data (null result or network error)
+    //   object    — fetch done with version data
+    if (window.appVersionInfo !== undefined) {
+      setInfo(window.appVersionInfo || null);
+      return;
+    }
+
+    if (!window.API?.fetchVersion) return;
+
+    if (!window.versionPromise) {
+      window.versionPromise = window.API.fetchVersion().then((res) => {
+        // `false` = fetch done, no data; distinguishes from `undefined` = not yet fetched.
+        window.appVersionInfo = res ?? false;
+        return res ?? false;
+      });
+    }
+
+    let cancelled = false;
+    window.versionPromise.then((res) => {
+      if (!cancelled) setInfo(res || null);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (!info || !info.version) return null;
+  const versionStr = info.version;
+  const isSemver = /^v?\d+\.\d+\.\d+/.test(versionStr);
+  const commitShort = info.gitCommit ? info.gitCommit.slice(0, 7) : '';
+  const parts = [];
+  if (commitShort) parts.push(commitShort);
+  if (info.buildDate) parts.push(info.buildDate);
+
+  const versionText = isSemver ? versionStr : parts.join(' · ');
+
+  return (
+    <div className="app-version-footer" data-testid="app-version-footer">
+      {versionText}
+      {" · "}
+      <a href="https://github.com/gitrgoliveira/bracket-creator" target="_blank" rel="noopener noreferrer" className="app-version-link">
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+          <path d="M9 18c-4.51 2-5-2-7-2" />
+        </svg>
+        GitHub
+      </a>
+    </div>
+  );
+}
+
+if (typeof window !== 'undefined') {
+  window.VersionFooter = VersionFooter;
 }
 
 window.App = App;
 window.ErrorBoundary = ErrorBoundary;
 window.parsePath = parsePath;
 window.pathFromState = pathFromState;
+// mp-4fd: expose generic notification helper for viewer.jsx (separate bundle).
+window.fireNotification = fireNotification;
 
 // Mount the App inside an ErrorBoundary so any uncaught render exception
 // renders a recoverable banner instead of a blank screen. Per NFR-008.
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <App />
+    {/* Single host for confirmDialog()/promptDialog() — sibling to App so it
+        is always mounted exactly once, on every screen (incl. the pre-auth
+        login screen's "Forgot password?" confirm). */}
+    <window.DialogHost />
   </ErrorBoundary>
 );
 

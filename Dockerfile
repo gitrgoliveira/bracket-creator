@@ -1,5 +1,5 @@
 # Build stage
-ARG GO_VERSION=1.26.3
+ARG GO_VERSION=1.26.4
 
 # Build stage
 FROM golang:${GO_VERSION} AS builder
@@ -7,6 +7,15 @@ FROM golang:${GO_VERSION} AS builder
 
 ARG GIT_COMMIT
 ARG VERSION
+ARG BUILD_DATE
+
+# Promote the build args to env vars so `make go/build` -> `go generate` ->
+# get_build_info.sh stamps them into the //go:embed version files. .git is
+# excluded via .dockerignore, so without these the binary would report
+# version "dev" / commit "unknown".
+ENV VERSION=${VERSION} \
+    GIT_COMMIT=${GIT_COMMIT} \
+    BUILD_DATE=${BUILD_DATE}
 
 ENV CGO_ENABLED=0
 

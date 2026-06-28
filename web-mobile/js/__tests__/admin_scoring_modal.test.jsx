@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveDecisionPassword,
+  assertRunningWritePersisted,
   buildDecisionBody,
   submitDecisionRequest,
   shouldShowEnchoMaxBanner,
@@ -20,7 +21,14 @@ import {
   applyFusenshoToggle,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  teamResultLabel,
+  isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
+import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+// teamEncounterHasResult is a module-internal helper of admin_scoring_team.jsx
+// (not part of the thin-entry consumer barrel), imported directly like the
+// resolveMatchLineup tests do.
+import { teamEncounterHasResult, resolveKachinukiBoutSides, subBoutHasBeenPlayed } from '../admin_scoring_team.jsx';
 import { isKikenDecision } from '../api_serializers.jsx';
 
 window.isKikenDecision = isKikenDecision;
@@ -45,6 +53,36 @@ describe('resolveDecisionPassword', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
     expect(resolveDecisionPassword(null)).toBe('');
+  });
+});
+
+describe('assertRunningWritePersisted (daihyosen pre-save prerequisite guard)', () => {
+  // recordScore returns a discriminated { queued: true } when a running write
+  // could only be enqueued (offline / retryable 5xx), NOT server-confirmed.
+  // Actions with a hard prerequisite on persistence (the daihyosen pre-save)
+  // must abort on that case rather than proceed against stale server state.
+  it('throws "score_not_synced" when the write was only queued', () => {
+    expect(() => assertRunningWritePersisted({ queued: true })).toThrow('score_not_synced');
+  });
+
+  it('does not throw for a server-confirmed MatchResult', () => {
+    expect(() => assertRunningWritePersisted({ id: 'm1', status: 'running' })).not.toThrow();
+  });
+
+  it('does not throw for a same-session stale 200 (server already holds equal-or-newer state)', () => {
+    // A { stale: true } result means the server no-op'd an out-of-order write
+    // because it already has an equal-or-newer state — dependent reads are safe,
+    // so daihyosen should proceed, not abort.
+    expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
+  });
+
+  it('does not throw for null/undefined (no result to inspect)', () => {
+    expect(() => assertRunningWritePersisted(null)).not.toThrow();
+    expect(() => assertRunningWritePersisted(undefined)).not.toThrow();
+  });
+
+  it('does not throw when queued is falsy', () => {
+    expect(() => assertRunningWritePersisted({ queued: false })).not.toThrow();
   });
 });
 
@@ -254,10 +292,10 @@ describe('prevEnchoPeriod (the − button)', () => {
 });
 
 describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
-  // Regression: a hantei-decided daihyosen persists encho on the rep-bout
-  // sub (wire position -1), NOT the top-level match. On re-open the count
-  // must be restored from the sub — else decidedByHantei replays without
-  // encho and the backend rejects the next save.
+  // Regression: a daihyosen that went to overtime persists encho on the
+  // rep-bout sub (wire position -1), NOT the top-level match. On re-open the
+  // count must be restored from the sub so the overtime history survives a
+  // re-save (encho is independent of the hantei decision).
 
   it('reads encho from the daihyosen sub when one exists', () => {
     const m = {
@@ -290,9 +328,10 @@ describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
 });
 
 describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
-  // Backend invariant (validation.go validateSubBout): hantei is rejected
-  // without encho.periodCount > 0. The builder must mirror that so a
-  // reduced-to-0 counter never replays a now-invalid decidedByHantei.
+  // Encho is decoupled from hantei (validation.go validateSubBout): a tied
+  // daihyosen may be decided by judges with or without overtime. The builder
+  // emits the two fields independently — encho when the counter is > 0,
+  // decidedByHantei when armed on a tied scoreline.
 
   it('emits encho + decidedByHantei when armed and encho > 0', () => {
     expect(daihyosenEnchoFields({ enchoPeriodCount: 2, daihyosenTied: true, daihyosenHantei: 'a' }))
@@ -306,16 +345,22 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
       .toEqual({ encho: { periodCount: 1 } });
   });
 
-  it('emits NEITHER field when encho is reduced to 0 even with hantei armed', () => {
-    // The regression: operator arms hantei, then drops the counter to 0.
-    // decidedByHantei must NOT survive — the backend would 400 it.
+  it('emits hantei WITHOUT encho when armed on a tied bout and no overtime', () => {
+    // Decoupled: a tied daihyosen taken straight to a judges' decision with
+    // no overtime sends decidedByHantei alone — the backend accepts it.
     expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a' }))
-      .toEqual({});
+      .toEqual({ decidedByHantei: true });
   });
 
-  it('emits nothing for negative/NaN encho (defensive)', () => {
-    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
-    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' })).toEqual({});
+  it('omits encho but keeps hantei for negative/NaN encho (defensive)', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: -1, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ decidedByHantei: true });
+    expect(daihyosenEnchoFields({ enchoPeriodCount: NaN, daihyosenTied: true, daihyosenHantei: 'a' }))
+      .toEqual({ decidedByHantei: true });
+  });
+
+  it('emits nothing when no encho and hantei not armed', () => {
+    expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: false, daihyosenHantei: '' })).toEqual({});
   });
 });
 
@@ -804,7 +849,7 @@ describe('applyFusenshoToggle', () => {
     const prev = { aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "" };
     const next = applyFusenshoToggle(prev, "a");
     expect(next).toEqual({
-      aPts: ['M', 'M'],
+      aPts: ['○', '○'],
       bPts: [],
       aFouls: 0,
       bFouls: 0,
@@ -818,7 +863,7 @@ describe('applyFusenshoToggle', () => {
     const next = applyFusenshoToggle(prev, "b");
     expect(next).toEqual({
       aPts: [],
-      bPts: ['M', 'M'],
+      bPts: ['○', '○'],
       aFouls: 0,
       bFouls: 0,
       fusensho: "b",
@@ -854,7 +899,7 @@ describe('applyFusenshoToggle', () => {
     const afterSwitch = applyFusenshoToggle(afterA, "b");
     expect(afterSwitch.fusensho).toBe("b");
     expect(afterSwitch.aPts).toEqual([]);
-    expect(afterSwitch.bPts).toEqual(['M', 'M']);
+    expect(afterSwitch.bPts).toEqual(['○', '○']);
     // Snapshot stays anchored to the genuine pre-fusensho state.
     expect(afterSwitch._preFusensho).toEqual({ aPts: ['M'], bPts: [], aFouls: 0, bFouls: 0 });
 
@@ -871,7 +916,7 @@ describe('applyFusenshoToggle', () => {
 
   it('fresh-match round-trip: zeros → toggle → untoggle returns to zeros', () => {
     const afterOn = applyFusenshoToggle(clean(), "a");
-    expect(afterOn.aPts).toEqual(['M', 'M']);
+    expect(afterOn.aPts).toEqual(['○', '○']);
     expect(afterOn._preFusensho).toEqual({ aPts: [], bPts: [], aFouls: 0, bFouls: 0 });
     const afterOff = applyFusenshoToggle(afterOn, "a");
     expect(afterOff).toEqual({
@@ -889,10 +934,10 @@ describe('applyFusenshoToggle', () => {
     // from the backend payload and lights up the button, but does NOT
     // round-trip the snapshot. Untoggling in that state must not crash;
     // it falls through to clearing the flag and leaving the score alone.
-    const prev = { aPts: ['M', 'M'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
+    const prev = { aPts: ['○', '○'], bPts: [], aFouls: 0, bFouls: 0, fusensho: "a" };
     const next = applyFusenshoToggle(prev, "a");
     expect(next).toEqual({
-      aPts: ['M', 'M'],
+      aPts: ['○', '○'],
       bPts: [],
       aFouls: 0,
       bFouls: 0,
@@ -1062,5 +1107,237 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // Because shouldBlockScoringKeys only inspects decidedByHantei — not key
   // identity — it cannot selectively suppress Enter; that invariant is
   // enforced by source ordering, not by a predicate we can unit-test here.
+});
+
+describe('teamResultLabel (no draw in a knockout)', () => {
+  it('names the winning side regardless of phase', () => {
+    expect(teamResultLabel({ teamWinner: 'a', isKnockoutPhase: true, hasAnyScore: true })).toBe('AKA WIN');
+    expect(teamResultLabel({ teamWinner: 'b', isKnockoutPhase: false, hasAnyScore: true })).toBe('SHIRO WIN');
+  });
+
+  it('a tied POOL encounter is a true draw', () => {
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: true })).toBe('DRAW');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('DRAW');
+  });
+
+  it('a tied KNOCKOUT encounter is never a draw — it needs a daihyosen', () => {
+    // Scored tie in a bracket match → resolve by representative bout.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
+    // Nothing scored yet in a bracket match → pending, still not a draw.
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe('—');
+  });
+});
+
+describe('teamEncounterHasResult (folds 0–0 draws into the scored-tie signal)', () => {
+  it('is true when IV/PW totals are non-zero', () => {
+    expect(teamEncounterHasResult({ ivA: 1, ivB: 0, pwA: 0, pwB: 0, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 2, subTotals: [], daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is true for a KO encounter tied solely on 0–0 hikiwake draws (the bug fix)', () => {
+    // All counting bouts drawn 0–0: no IV, no PW, but a real tie to break.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(true);
+  });
+
+  it('is false before any bout lands (no totals, no draws)', () => {
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: -1 })).toBe(false);
+  });
+
+  it('ignores a drawn daihyosen row (it is the tiebreaker, not a counting bout)', () => {
+    // Only the daihyosen (index 1) is marked draw; nothing else has landed.
+    const subTotals = [
+      { aTotal: 0, bTotal: 0, winner: null, draw: false },
+      { aTotal: 0, bTotal: 0, winner: null, draw: true },
+    ];
+    expect(teamEncounterHasResult({ ivA: 0, ivB: 0, pwA: 0, pwB: 0, subTotals, daihyosenIdx: 1 })).toBe(false);
+  });
+});
+
+describe('resolveKachinukiBoutSides (per-competitor identity for kachinuki bouts)', () => {
+  it('uses player names for sides and the winning player as winner', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Senpo', bName: 'B-Senpo', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: 'A-Senpo', sideB: 'B-Senpo', winner: 'A-Senpo' });
+  });
+
+  it('attributes the winner to side B when wKey is "b"', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Jiho', bName: 'B-Jiho', wKey: 'b', teamWinnerName: 'Team B' });
+    expect(r.winner).toBe('B-Jiho');
+  });
+
+  it('leaves sides empty and falls the winner back to the team name when the lineup is unknown', () => {
+    // Matches the backend quick-score contract: sub-bout sides empty when unknown.
+    const r = resolveKachinukiBoutSides({ aName: '', bName: '', wKey: 'a', teamWinnerName: 'Team A' });
+    expect(r).toEqual({ sideA: '', sideB: '', winner: 'Team A' });
+  });
+
+  it('returns an empty winner for a drawn bout (no wKey)', () => {
+    const r = resolveKachinukiBoutSides({ aName: 'A-Chuken', bName: 'B-Chuken', wKey: null, teamWinnerName: '' });
+    expect(r).toEqual({ sideA: 'A-Chuken', sideB: 'B-Chuken', winner: '' });
+  });
+});
+
+describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
+  it('is false for an untouched 0–0 bout', () => {
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(false);
+  });
+
+  it('is true once any ippon, foul, fusensho, or explicit draw is present', () => {
+    expect(subBoutHasBeenPlayed({ aPts: ["M"], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: ["K"], aFouls: 0, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], aFouls: 1, bFouls: 0 })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], fusensho: "a" })).toBe(true);
+    expect(subBoutHasBeenPlayed({ aPts: [], bPts: [], draw: true })).toBe(true);
+  });
+
+  it('is false for null/undefined', () => {
+    expect(subBoutHasBeenPlayed(null)).toBe(false);
+    expect(subBoutHasBeenPlayed(undefined)).toBe(false);
+  });
+});
+
+// Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
+// so the next match on the same court is started without an extra operator tap.
+describe('item 7 — non-points decisions advance to next match', () => {
+  // submitHantei is component-internal, but the routing logic
+  //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit`
+  // is a pure predicate we can test directly.
+  it('routes hantei to onSubmitAndNext when provided and match is not a correction', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = vi.fn();
+    const isComplete = false; // live match, not a correction
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmitAndNext).toHaveBeenCalledWith(patch);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('routes hantei to onSubmit (not onSubmitAndNext) when correcting a completed match', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = vi.fn();
+    const isComplete = true; // correction — do not auto-advance
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmit).toHaveBeenCalledWith(patch);
+    expect(onSubmitAndNext).not.toHaveBeenCalled();
+  });
+
+  it('routes hantei to onSubmit when onSubmitAndNext is not provided', () => {
+    const onSubmit = vi.fn();
+    const onSubmitAndNext = undefined;
+    const isComplete = false;
+    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
+    const patch = { winner: { id: 'p2', name: 'Mori' }, decidedByHantei: true, status: 'completed' };
+    submitFn(patch);
+    expect(onSubmit).toHaveBeenCalledWith(patch);
+  });
+
+  // makeSubmitDecision: onAfterDecision is called for fusenpai when provided
+  // and the match is not complete.
+  describe('makeSubmitDecision with onAfterDecision', () => {
+    let savedAPI;
+    beforeEach(() => {
+      savedAPI = window.API;
+      window.API = {
+        recordDecision: vi.fn().mockResolvedValue({
+          winner: 'Shiro Fighter', sideA: 'Aka Fighter', sideB: 'Shiro Fighter',
+        }),
+      };
+    });
+    afterEach(() => { window.API = savedAPI; });
+
+    const makeMatch = (id) => ({
+      compId: 'c1', id,
+      sideA: { id: 'pa', name: 'Aka Fighter' },
+      sideB: { id: 'pb', name: 'Shiro Fighter' },
+    });
+    const makeSetters = () => ({
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr: vi.fn(),
+      setWithdrawnPlayer: vi.fn(),
+      setDecisionPromptKind: vi.fn(),
+    });
+
+    it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: false,
+        entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onAfterDecision).toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('falls back to onClose for fusenpai when onAfterDecision is not set', async () => {
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m2'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, isComplete: false, entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onClose).toHaveBeenCalled();
+    });
+
+    it('does NOT call onAfterDecision for a correction (isComplete=true)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m3'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose, onAfterDecision, isComplete: true,
+        entityLabel: 'competitors',
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      // Correction: must close rather than advance
+      expect(onClose).toHaveBeenCalled();
+      expect(onAfterDecision).not.toHaveBeenCalled();
+    });
+
+    it('does NOT call onAfterDecision for a kiken decision (modal stays open for RemainingMatchesPanel)', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const onClose = vi.fn();
+      const setWithdrawnPlayer = vi.fn();
+      const submit = makeSubmitDecision({
+        match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), setWithdrawnPlayer, onClose, onAfterDecision, isComplete: false,
+        entityLabel: 'competitors',
+      });
+      await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
+      // Kiken neither advances nor closes — it parks on RemainingMatchesPanel.
+      expect(onAfterDecision).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(setWithdrawnPlayer).toHaveBeenCalled();
+    });
+  });
+});
+
+describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
+  it('blocks Finish on a tied, unfinished knockout encounter', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: null, isComplete: false })).toBe(true);
+  });
+
+  it('does not block once a winner exists (e.g. daihyosen decided)', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: 'a', isComplete: false })).toBe(false);
+  });
+
+  it('never blocks a pool encounter — a pool draw is finishable', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: false, teamWinner: null, isComplete: false })).toBe(false);
+  });
+
+  it('never blocks an already-completed match (correction flow)', () => {
+    expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: null, isComplete: true })).toBe(false);
+  });
 });
 

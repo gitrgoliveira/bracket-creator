@@ -108,14 +108,35 @@ func validateCourts(courts []string) error {
 
 // validateCompetitionCourts is the looser competition-level check:
 // 0..helper.MaxCourts entries, each (when present) a single non-empty
-// character. Empty is allowed because the engine defaults a
-// competition with no Courts to 1 court — this matches the existing
-// import handler's `if len(comp.Courts) == 0 { comp.Courts = []string{"A"} }`
-// fallback semantics and the engine generators' `if numCourts == 0 { numCourts = 1 }`
-// behavior. The label and cap invariants from validateCourtLabels
-// still apply when courts are explicitly provided.
+// character. Empty is allowed at validation time because all three write
+// paths (POST /competitions, PUT settings, and the manifest importer)
+// resolve empty courts to the tournament's courts via
+// resolveCompetitionCourts immediately after this check — so a persisted
+// competition always carries >=1 court. The label and cap invariants from
+// validateCourtLabels still apply when courts are explicitly provided.
 func validateCompetitionCourts(courts []string) error {
 	return validateCourtLabels(courts)
+}
+
+// resolveCompetitionCourts guarantees a competition resolves to at least one
+// court. Empty competition courts have always *meant* "fall back to the
+// tournament-wide courts" (see validateCourtLabels's doc), but that fallback
+// was never materialized: bracket/pool generation left such matches with an
+// empty Court (engine bracket.go only assigns a label when len(comp.Courts)>0),
+// which the per-court Shiaijo operator view (/admin/shiaijo/:court) filters on
+// and therefore cannot surface — the matches become invisible. Inheriting the
+// tournament's courts makes every match carry a real label and distribute
+// across the venue's courts so each court's operator view is populated.
+// Tournaments always have >=1 court (validateCourts rejects empty); the
+// ["A"] return is pure defense for the no-tournament-yet bootstrap edge.
+func resolveCompetitionCourts(compCourts []string, tourn *state.Tournament) []string {
+	if len(compCourts) > 0 {
+		return compCourts
+	}
+	if tourn != nil && len(tourn.Courts) > 0 {
+		return append([]string(nil), tourn.Courts...)
+	}
+	return []string{"A"}
 }
 
 // errPasswordRequired is the sentinel the PUT /tournament transform
@@ -154,6 +175,33 @@ var errModeImmutable = errors.New("tournament mode cannot be changed after creat
 // require X-Admin-Password. (mp-7h7 fail-open fix)
 var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
 
+// trimPublicInfoFields trims all optional public tournament info string fields
+// and normalises the Contacts slice: each entry's Label/Value is trimmed and
+// all-empty entries are dropped. Called identically by the PUT and POST
+// /tournament handlers. Count validation (>MaxTournamentContacts) is enforced
+// by validateTournamentLengths as a 400 error rather than silently truncating.
+func trimPublicInfoFields(t *state.Tournament) {
+	t.PublicURL = strings.TrimSpace(t.PublicURL)
+	t.VenueAddress = strings.TrimSpace(t.VenueAddress)
+	t.VenueMapURL = strings.TrimSpace(t.VenueMapURL)
+	t.OpeningTime = strings.TrimSpace(t.OpeningTime)
+	t.ClosingTime = strings.TrimSpace(t.ClosingTime)
+	t.RulesURL = strings.TrimSpace(t.RulesURL)
+	t.AwardsNote = strings.TrimSpace(t.AwardsNote)
+	t.InfoNotes = strings.TrimSpace(t.InfoNotes)
+	if len(t.Contacts) > 0 {
+		filtered := make([]state.TournamentContact, 0, len(t.Contacts))
+		for _, ct := range t.Contacts {
+			ct.Label = strings.TrimSpace(ct.Label)
+			ct.Value = strings.TrimSpace(ct.Value)
+			if ct.Value != "" {
+				filtered = append(filtered, ct)
+			}
+		}
+		t.Contacts = filtered
+	}
+}
+
 // validateTournamentLengths enforces the persisted-string caps from
 // validation.go on every string field of t. Called after trim and
 // after the required-field checks so error messages report the
@@ -181,20 +229,62 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
-	if err := validateCheckInWindow("checkInWindowStart", t.CheckInWindowStart); err != nil {
+	// mp-s1gl: publicURL — externally-shareable base URL for QR codes / share links.
+	if err := validateMaxLen("publicURL", t.PublicURL, MaxLenPublicURL); err != nil {
 		return err
 	}
-	if err := validateCheckInWindow("checkInWindowEnd", t.CheckInWindowEnd); err != nil {
+	if err := validateHTTPURL("publicURL", t.PublicURL); err != nil {
 		return err
 	}
-	// Cross-field invariants: both fields must be set together, and start < end.
-	hasStart := t.CheckInWindowStart != ""
-	hasEnd := t.CheckInWindowEnd != ""
-	if hasStart != hasEnd {
-		return &ValidationError{Field: "checkInWindowStart", Message: "checkInWindowStart and checkInWindowEnd must both be set or both be empty"}
+	if err := validateURLHasHost("publicURL", t.PublicURL); err != nil {
+		return err
 	}
-	if hasStart && hasEnd && t.CheckInWindowStart >= t.CheckInWindowEnd {
-		return &ValidationError{Field: "checkInWindowStart", Message: "checkInWindowStart must be before checkInWindowEnd"}
+	// Normalize trailing slash so callers can always append "/path" without
+	// worrying about double slashes. Done post-validation to keep the error
+	// message on the pre-trim value.
+	t.PublicURL = strings.TrimRight(t.PublicURL, "/")
+	// mp-ef3: public tournament info fields.
+	if err := validateMaxLen("venueAddress", t.VenueAddress, MaxLenVenueAddress); err != nil {
+		return err
+	}
+	if err := validateMaxLen("venueMapURL", t.VenueMapURL, MaxLenVenueMapURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("venueMapURL", t.VenueMapURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("openingTime", t.OpeningTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("closingTime", t.ClosingTime, MaxLenDisplayTime); err != nil {
+		return err
+	}
+	if err := validateMaxLen("rulesURL", t.RulesURL, MaxLenRulesURL); err != nil {
+		return err
+	}
+	if err := validateHTTPURL("rulesURL", t.RulesURL); err != nil {
+		return err
+	}
+	if err := validateMaxLen("awardsNote", t.AwardsNote, MaxLenAwardsNote); err != nil {
+		return err
+	}
+	if err := validateMaxLen("infoNotes", t.InfoNotes, MaxLenInfoNotes); err != nil {
+		return err
+	}
+	if len(t.Contacts) > MaxTournamentContacts {
+		return &ValidationError{
+			Field:   "contacts",
+			Message: fmt.Sprintf("must contain <= %d entries", MaxTournamentContacts),
+		}
+	}
+	for i, ct := range t.Contacts {
+		prefix := fmt.Sprintf("contacts[%d]", i)
+		if err := validateMaxLen(prefix+".label", ct.Label, MaxLenContactLabel); err != nil {
+			return err
+		}
+		if err := validateMaxLen(prefix+".value", ct.Value, MaxLenContactValue); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -242,6 +332,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		trimPublicInfoFields(&t)
 
 		// Reject non-empty Date that doesn't match the canonical DD-MM-YYYY
 		// shape (or semantically invalid days like Feb 31). The frontend
@@ -268,6 +359,25 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		if err := validateTournamentLengths(&t); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme (no colors, no title set by the
+		// client) so tournament.md stays clean and the UI doesn't treat an
+		// unintentional "theme: {}" as "branding is configured".
+		// LogoPath is excluded: it has json:"-" and is never set via this path.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
+		}
+
+		// Validate hex color fields on the optional theme block (mp-scf).
+		if err := state.ValidateTheme(t.Theme); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -345,6 +455,20 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// via PUT /api/auth/admin-password, never here.
 			if current != nil {
 				desired.AdminPassword = current.AdminPassword
+			}
+
+			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
+			// bound body never carries it. The logo is managed via
+			// POST/DELETE /api/branding/logo; this PUT must not clear it.
+			// Also preserve the entire Theme when the client omits it (nil)
+			// so a routine name/venue save doesn't wipe configured colors.
+			if current != nil && current.Theme != nil {
+				if desired.Theme == nil {
+					desired.Theme = &state.Theme{}
+					*desired.Theme = *current.Theme
+				} else {
+					desired.Theme.LogoPath = current.Theme.LogoPath
+				}
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
@@ -515,6 +639,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		t.Name = strings.TrimSpace(t.Name)
 		t.Venue = strings.TrimSpace(t.Venue)
 		t.Date = strings.TrimSpace(t.Date)
+		trimPublicInfoFields(&t)
 
 		// Same empty-after-trim guard as the PUT handler.
 		if t.Name == "" {
@@ -556,6 +681,21 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if t.Mode == "" {
 			t.Mode = state.TournamentModeOfficiated
+		}
+
+		// Trim windowTitle so whitespace-only input doesn't persist as an
+		// effectively-blank browser title instead of falling back to the default.
+		// Also nil-out a fully-empty Theme so tournament.md stays clean.
+		if t.Theme != nil {
+			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+				t.Theme = nil
+			}
+		}
+
+		if err := state.ValidateTheme(t.Theme); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
 		}
 
 		// Reject empty Password on POST (initial setup) in file mode.

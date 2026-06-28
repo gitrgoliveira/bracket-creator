@@ -43,6 +43,15 @@ web-mobile/dist/*
 !web-mobile/vendor/
 web-mobile/vendor/*
 !web-mobile/vendor/keep
+# Self-hosted fonts (Anton + Archivo, SIL OFL 1.1) for the Aka/Shiro system.
+# Explicitly unignored so they are embedded via go:embed at build time.
+!web-mobile/vendor/fonts/
+!web-mobile/vendor/fonts/anton/
+!web-mobile/vendor/fonts/anton/anton-latin.woff2
+!web-mobile/vendor/fonts/anton/OFL.txt
+!web-mobile/vendor/fonts/archivo/
+!web-mobile/vendor/fonts/archivo/archivo-latin.woff2
+!web-mobile/vendor/fonts/archivo/OFL.txt
 Thumbs.db
 *.tmp
 *.swp
@@ -54,6 +63,9 @@ Thumbs.db
 !web/package.json
 !web/package-lock.json
 node_modules/
+# worktree convenience symlink (web-mobile/node_modules -> main repo); the
+# bare node_modules/ rule above matches real dirs, not the symlink.
+web-mobile/node_modules
 specs/*
 specs/*/*
 !specs/openapi.yaml
@@ -83,3 +95,25 @@ bracket-creator-webapp*
 bracket-creator-*
 bracket-creator-*/*
 mp-*/
+
+# Session/process state (Claude Code) — never commit
+.claude/scheduled_tasks.lock
+.claude/*.lock
+.impeccable/
+
+# Terraform local state (provider binaries, lock files from terraform init)
+**/.terraform/
+**/.terraform.lock.hcl
+
+# Terraform state and variable files — may contain secrets (e.g. password
+# hashes) in plaintext; never commit them.
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+!**/*.tfvars.example
+
+.antigravitycli
+.gemini/worktrees/
+.github/skills
+
+*.pdf

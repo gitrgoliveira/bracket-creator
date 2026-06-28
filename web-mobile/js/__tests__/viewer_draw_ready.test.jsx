@@ -8,28 +8,16 @@ function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  if (typeof node.type === 'function') {
+    try {
+      const p = { ...(node.props || {}) };
+      if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
+      return collectText(node.type(p));
+    } catch { /* fall through */ }
+  }
   if (node.children) return collectText(node.children);
   if (node.props?.children) return collectText(node.props.children);
   return '';
-}
-
-// Depth-first search for the first vnode matching predicate.
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
 }
 
 // Collect every vnode whose `type` is the named child component reference.
@@ -48,10 +36,11 @@ function findAllByType(node, typeRef, acc = []) {
   return acc;
 }
 
-// mp-rrd Phase 1 + 2: the public viewer must expose Pools + Bracket tabs at
+// mp-rrd Phase 1: the public viewer must expose Pools + Bracket tabs at
 // draw-ready (the draw is published but no match has been called), keep
-// "not started" for setup, keep Swiss excluded from pools/bracket, never
-// treat draw-ready as live, and link a pools comp to its playoffs comp.
+// "not started" for setup, keep Swiss excluded from pools/bracket, and
+// never treat draw-ready as running. (Phase 2 split-comp cross-links removed
+// in mp-turx — mixed comps are now a single competition.)
 describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   const realReact = global.React;
   let runtime;
@@ -63,7 +52,8 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     'StatusBadge', 'formatDate', 'formatLabel', 'pluralize', 'Term',
     'BracketTree', 'buildBracket', 'roundLabel', 'formatIpponsScore',
     'ipponsFromScore', 'isHikiwake', 'hasBothSides', 'compareDmy',
-    'queueLabel', 'queueLabelCompact',
+    'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
+    'EmptyState',
   ];
 
   // A minimal mixed pools comp at draw-ready with one populated pool and a
@@ -99,12 +89,17 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     global.window.StatusBadge = function StatusBadge() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (s) => s || '';
     global.window.pluralize = (n, a, b) => `${n} ${n === 1 ? a : b}`;
     global.window.buildBracket = () => sampleBracket.rounds;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     global.window.isHikiwake = () => false;
     global.window.hasBothSides = (m) => !!(m && m.sideA && m.sideB);
@@ -187,48 +182,6 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     expect(labels.some(l => l.includes('Standings'))).toBe(true);
   });
 
-  it('links a pools comp to its playoffs comp and navigates on click', () => {
-    const playoffs = { id: 'po-1', name: 'Mixed Playoffs', sourceCompID: 'pools-1', status: 'setup', courts: ['A'], players: [], format: 'playoffs', kind: 'individual', teamSize: 0, startTime: '11:00' };
-    const onSelect = vi.fn();
-    const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [mkPoolsComp(), playoffs] },
-      competition: mkPoolsComp(),
-      pools: samplePools,
-      poolMatches: [],
-      standings: [],
-      bracket: sampleBracket,
-      onBack: () => {},
-      onSelectCompetition: onSelect,
-      tweaks: {},
-    });
-    const text = collectText(tree);
-    expect(text).toContain('View the playoffs bracket');
-    expect(text).toContain('Mixed Playoffs');
-    // Find the cross-link button (carries the linked comp name) and click it.
-    const linkBtn = findInTree(tree, n => n?.type === 'button' && collectText(n).includes('Mixed Playoffs'));
-    expect(linkBtn).toBeTruthy();
-    linkBtn.props.onClick();
-    expect(onSelect).toHaveBeenCalledWith('po-1');
-  });
-
-  it('links a playoffs comp back to its source pools comp', () => {
-    const pools = mkPoolsComp();
-    const playoffs = { id: 'po-1', name: 'Mixed Playoffs', sourceCompID: 'pools-1', status: 'draw-ready', courts: ['A'], players: [], format: 'playoffs', kind: 'individual', teamSize: 0, startTime: '11:00', poolWinners: 0 };
-    const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [pools, playoffs] },
-      competition: playoffs,
-      pools: [],
-      poolMatches: [],
-      standings: [],
-      bracket: sampleBracket,
-      onBack: () => {},
-      onSelectCompetition: () => {},
-      tweaks: {},
-    });
-    const text = collectText(tree);
-    expect(text).toContain('View the pools');
-    expect(text).toContain('Mixed Pools Cup');
-  });
 });
 
 // mp-rrd: the Overview tab body. draw-ready must show a "Draw is ready"
@@ -240,7 +193,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   let runtime;
   let ViewerOverview;
   const savedGlobals = {};
-  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore'];
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'EmptyState'];
 
   beforeEach(async () => {
     runtime = makeReactive();
@@ -252,8 +205,13 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
         : { had: false };
     });
     global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.EmptyState = function EmptyState(props) { return { type: 'div', props: { className: 'empty', ...props }, children: [props.icon, props.title, props.message, props.cta].filter(Boolean) }; };
     global.window.isHikiwake = () => false;
     global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
     global.window.ipponsFromScore = () => [];
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));
@@ -270,7 +228,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     vi.resetModules();
   });
 
-  const baseProps = { myPlayer: null, myUpcoming: null, currentMatch: null, liveMatches: [], upcomingMatches: [], recentMatches: [], tweaks: {} };
+  const baseProps = { myPlayer: null, myUpcoming: null, currentMatch: null, runningMatches: [], upcomingMatches: [], recentMatches: [], tweaks: {} };
 
   it('draw-ready shows "Draw is ready" and points to the tabs, not "Not started yet"', () => {
     const tree = runtime.mount(ViewerOverview, { c: { status: 'draw-ready', startTime: '09:00' }, ...baseProps });
@@ -298,12 +256,12 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
   });
 });
 
-// mp-rrd: the home page must NOT treat a draw-ready comp as live. liveCompIds
-// (the set gating LIVE NOW / Up-next / live dot) is derived purely from
+// mp-rrd: the home page must NOT treat a draw-ready comp as running. runningCompIds
+// (the set gating NOW / Up-next / running dot) is derived purely from
 // competition status, so we can pin the exclusion behaviour through the
 // exported helpers + a direct status filter without mounting ViewerHome
 // (which uses localStorage-backed hooks the static React stub can't drive).
-describe('draw-ready is not live (mp-rrd)', () => {
+describe('draw-ready is not running (mp-rrd)', () => {
   it('tournamentMatches excludes setup but includes draw-ready structure', async () => {
     vi.resetModules();
     global.window = global.window || {};
@@ -337,12 +295,12 @@ describe('draw-ready is not live (mp-rrd)', () => {
     }
   });
 
-  it('the live-comp filter (status-based) excludes both setup and draw-ready', () => {
-    // Mirrors the liveCompIds predicate in ViewerHome verbatim.
-    const isLiveComp = c => !!(c.status && c.status !== 'setup' && c.status !== 'draw-ready');
-    expect(isLiveComp({ status: 'setup' })).toBe(false);
-    expect(isLiveComp({ status: 'draw-ready' })).toBe(false);
-    expect(isLiveComp({ status: 'pools' })).toBe(true);
-    expect(isLiveComp({ status: 'started' })).toBe(true);
+  it('the running-comp filter (status-based) excludes both setup and draw-ready', () => {
+    // Mirrors the runningCompIds predicate in ViewerHome verbatim.
+    const isRunningComp = c => !!(c.status && c.status !== 'setup' && c.status !== 'draw-ready');
+    expect(isRunningComp({ status: 'setup' })).toBe(false);
+    expect(isRunningComp({ status: 'draw-ready' })).toBe(false);
+    expect(isRunningComp({ status: 'pools' })).toBe(true);
+    expect(isRunningComp({ status: 'started' })).toBe(true);
   });
 });

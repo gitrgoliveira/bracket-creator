@@ -45,6 +45,7 @@ type MatchWinner struct {
 type Match struct {
 	SideA *Player `json:"sideA"`
 	SideB *Player `json:"sideB"`
+	Round int     `json:"round"`
 }
 
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
@@ -124,9 +125,13 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 				player.Dojo = line[2]
 				if len(line) > 3 {
 					meta := line[3:]
-					if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-						player.Tag = meta[len(meta)-1]
-						meta = meta[:len(meta)-1]
+					// Canonicalize first so the legacy "reserved" alias is detected as a
+					// source (→ "manual") instead of being left in Metadata.
+					if len(meta) > 0 {
+						if src := CanonicalRegistrationSource(meta[len(meta)-1]); IsRegistrationSource(src) {
+							player.Source = src
+							meta = meta[:len(meta)-1]
+						}
 					}
 					if len(meta) > 0 {
 						player.Metadata = meta
@@ -142,9 +147,13 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 			}
 			if len(line) > 2 {
 				meta := line[2:]
-				if len(meta) > 0 && isParticipantTag(meta[len(meta)-1]) {
-					player.Tag = meta[len(meta)-1]
-					meta = meta[:len(meta)-1]
+				// Canonicalize first so the legacy "reserved" alias is detected as a
+				// source (→ "manual") instead of being left in Metadata.
+				if len(meta) > 0 {
+					if src := CanonicalRegistrationSource(meta[len(meta)-1]); IsRegistrationSource(src) {
+						player.Source = src
+						meta = meta[:len(meta)-1]
+					}
 				}
 				if len(meta) > 0 {
 					player.Metadata = meta
@@ -167,12 +176,31 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 	return players, nil
 }
 
-func isParticipantTag(s string) bool {
-	switch strings.ToLower(s) {
-	case "manual", "registered", "transfer", "reserved":
+// IsRegistrationSource reports whether s is a recognised participant
+// registration source (case-insensitive): manual / registered / transfer.
+// Exported so the API boundary validator can reject unknown values before they
+// are persisted — the CSV loader only recognises these tokens, so an unexpected
+// value would otherwise shift into Metadata on reload.
+func IsRegistrationSource(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "manual", "registered", "transfer":
 		return true
 	}
 	return false
+}
+
+// CanonicalRegistrationSource returns the canonical stored form of a
+// registration source: trimmed + lower-case. Keeps filter buckets from
+// splitting on whitespace/casing ("Manual" vs "manual"). The legacy "reserved"
+// token (an unused value in the old participant-tag enum) is aliased to
+// "manual" so any hand-edited/older CSV row reloads as a recognised source
+// instead of silently shifting into Metadata.
+func CanonicalRegistrationSource(s string) string {
+	c := strings.ToLower(strings.TrimSpace(s))
+	if c == "reserved" {
+		return "manual"
+	}
+	return c
 }
 
 // TitleCaseName applies the same Unicode Title-casing that CreatePlayers uses
@@ -211,6 +239,14 @@ func SanitizeName(name string) string {
 }
 
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+	// Guard before the division below: poolSize is the divisor in both the
+	// "max" and fixed-size branches, so a zero/negative value panics with an
+	// integer divide-by-zero. Reject it here — the lowest shared point — so
+	// every caller (engine draw, schedule estimator, CLI) is panic-proof
+	// regardless of how PoolSize reached it. (mp-ebgz)
+	if poolSize <= 0 {
+		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
+	}
 	var totalPools int
 	if isMax {
 		totalPools = (len(players) + poolSize - 1) / poolSize
@@ -388,6 +424,32 @@ func CreatePoolMatches(pools []Pool) {
 	}
 }
 
+// playerIndex returns the position of p in players by pointer identity, or -1.
+func playerIndex(players []Player, p *Player) int {
+	for i := range players {
+		if &players[i] == p {
+			return i
+		}
+	}
+	return -1
+}
+
+// buildRoundLookup converts a CircleMethodRounds (or PathGraphRounds) result
+// into a map from normalised IntPair (A < B) to round index.
+func buildRoundLookup(rounds [][]IntPair) map[IntPair]int {
+	lookup := make(map[IntPair]int)
+	for r, pairs := range rounds {
+		for _, p := range pairs {
+			a, b := p.A, p.B
+			if a > b {
+				a, b = b, a
+			}
+			lookup[IntPair{A: a, B: b}] = r
+		}
+	}
+	return lookup
+}
+
 func CreatePoolRoundRobinMatches(pools []Pool) {
 
 	for poolN, pool := range pools {
@@ -403,7 +465,6 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
 				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[2]},
 			)
-			continue
 		case 4:
 			currentPool.Matches = append(currentPool.Matches,
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[1]},
@@ -413,40 +474,53 @@ func CreatePoolRoundRobinMatches(pools []Pool) {
 				Match{SideA: &currentPool.Players[0], SideB: &currentPool.Players[2]},
 				Match{SideA: &currentPool.Players[1], SideB: &currentPool.Players[3]},
 			)
-			continue
-		}
+		default:
+			for i := 1; i < size; i++ {
+				for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
+					sideA := &currentPool.Players[j]
+					sideB := &currentPool.Players[k]
 
-		for i := 1; i < size; i++ {
-			for k, j := i, 0; j < size-i; j, k = j+1, k+1 {
-				sideA := &currentPool.Players[j]
-				sideB := &currentPool.Players[k]
+					if len(currentPool.Matches) > 0 {
+						prev := currentPool.Matches[len(currentPool.Matches)-1]
+						prevSide := func(match Match, player *Player) int {
+							if match.SideA == player {
+								return 1
+							}
+							if match.SideB == player {
+								return 2
+							}
+							return 0
+						}
 
-				if len(currentPool.Matches) > 0 {
-					prev := currentPool.Matches[len(currentPool.Matches)-1]
-					prevSide := func(match Match, player *Player) int {
-						if match.SideA == player {
-							return 1
+						sideAStatus := prevSide(prev, sideA)
+						sideBStatus := prevSide(prev, sideB)
+						if sideAStatus == 2 || sideBStatus == 1 {
+							sideA, sideB = sideB, sideA
 						}
-						if match.SideB == player {
-							return 2
-						}
-						return 0
 					}
 
-					sideAStatus := prevSide(prev, sideA)
-					sideBStatus := prevSide(prev, sideB)
-					if sideAStatus == 2 || sideBStatus == 1 {
-						sideA, sideB = sideB, sideA
-					}
+					currentPool.Matches = append(currentPool.Matches, Match{
+						SideA: sideA,
+						SideB: sideB,
+					})
 				}
-
-				currentPool.Matches = append(currentPool.Matches, Match{
-					SideA: sideA,
-					SideB: sideB,
-				})
 			}
 		}
 
+		// Assign Round indices using the circle-method schedule.
+		roundLookup := buildRoundLookup(CircleMethodRounds(size))
+		for mi := range currentPool.Matches {
+			m := &currentPool.Matches[mi]
+			idxA := playerIndex(currentPool.Players, m.SideA)
+			idxB := playerIndex(currentPool.Players, m.SideB)
+			a, b := idxA, idxB
+			if a > b {
+				a, b = b, a
+			}
+			if r, ok := roundLookup[IntPair{A: a, B: b}]; ok {
+				m.Round = r
+			}
+		}
 	}
 
 }

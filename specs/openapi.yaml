@@ -6,13 +6,13 @@ info:
 
     This spec covers two servers:
     - **Bracket Generator** (`serve` command): Stateless, form-based bracket generation.
-    - **Mobile/Admin API** (`mobile-app` command): Stateful REST API for live tournament management.
+    - **Mobile/Admin API** (`mobile-app` command): Stateful REST API for real-time tournament management.
 
     The Mobile/Admin API routes under `/api/` (excluding `/api/viewer/`) require the
     `X-Tournament-Password` header for authentication, with several public exceptions:
 
     - **`GET /api/events`** — SSE stream; always public so viewers and spectator screens
-      can receive live updates without an admin credential.
+      can receive real-time updates without an admin credential.
     - **`GET /api/auth-config`** — always public; carries no secret material.
     - **`POST /api/tournament/reset`** — public in file mode (the recovery path for a
       forgotten password); returns `404` in locked mode (`--lock-password`).
@@ -492,6 +492,13 @@ paths:
                       Whether the destructive-ops password can be set via
                       PUT /api/auth/admin-password. True in file mode; false in locked
                       mode (the credential is the TOURNAMENT_ADMIN_PASSWORD_HASH env var).
+                  scheduleEnabled:
+                    type: boolean
+                    description: |
+                      Whether the admin tournament-schedule view is enabled. Controlled
+                      by the ENABLE_TOURNAMENT_SCHEDULE env var on the mobile-app server
+                      (default false). When false, the SPA hides the dashboard's
+                      "Tournament schedule" entry.
 
   /api/auth/admin-password:
     put:
@@ -615,6 +622,135 @@ paths:
                             `parse participants: ...`. Empty when the row
                             imported successfully.
 
+  # ── Sponsors ───────────────────────────────────────────────────────────────
+
+  /api/sponsors/{file}:
+    get:
+      tags: [tournament]
+      summary: Serve a sponsor logo file
+      description: |
+        Public (no auth). Returns the raw PNG or JPEG bytes for a previously
+        uploaded sponsor logo. The filename is server-generated (16 random hex
+        chars + `.png`, `.jpg`, or `.jpeg`). Requests whose `file` parameter
+        reaches the handler but does not match the expected pattern return `400`;
+        multi-segment paths (e.g. containing `/`) do not match the route at all
+        and receive a router-level `404`.
+
+        Response carries `Cache-Control: public, max-age=31536000, immutable`
+        because the filename is unique per upload — the bytes at a given URL
+        never change.
+      parameters:
+        - in: path
+          name: file
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{16}\.(png|jpe?g)$'
+          description: Server-generated sponsor logo filename (16 hex chars + .png/.jpg/.jpeg).
+      responses:
+        '200':
+          description: Sponsor logo image bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Filename reached the handler but does not match the expected pattern (not 16 hex chars + .png/.jpg/.jpeg).
+        '404':
+          description: File not found, or path did not match the route.
+
+  /api/sponsors:
+    post:
+      tags: [tournament]
+      summary: Upload a sponsor logo
+      description: |
+        Admin-gated (`X-Tournament-Password`). Accepts `multipart/form-data`
+        with fields `name` (required, ≤80 chars), `link` (optional, must be
+        an `http(s)://` URL with no user-info), and `file` (required PNG or
+        JPEG, ≤1 MB detected by content sniff — not the `Content-Type` header).
+
+        Up to **6** sponsors per tournament. The server generates the on-disk
+        filename from `crypto/rand` hex; the client-supplied filename is ignored.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, file]
+              properties:
+                name:
+                  type: string
+                  maxLength: 80
+                  description: Sponsor name (used as alt text on logo images).
+                link:
+                  type: string
+                  format: uri
+                  maxLength: 500
+                  description: Optional clickable URL (must be http or https, no user-info).
+                file:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG logo, ≤1 MB.
+      responses:
+        '201':
+          description: Sponsor created. Returns the Sponsor object including the server-generated filename.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sponsor'
+        '400':
+          description: Validation error (name missing/too long, link invalid, cap reached).
+        '401':
+          description: Missing or incorrect tournament password.
+        '413':
+          description: Logo file exceeds 1 MB.
+        '415':
+          description: Unsupported media type (only PNG and JPEG accepted).
+
+  /api/sponsors/{index}:
+    delete:
+      tags: [tournament]
+      summary: Delete a sponsor logo
+      description: |
+        Admin-gated (`X-Tournament-Password`). Removes the sponsor at the given
+        zero-based index from `tournament.sponsors` and unlinks the on-disk file
+        (file unlink is skipped if the stored filename does not match the
+        server-generated pattern, guarding against corrupt YAML).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - in: path
+          name: index
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Zero-based index into the tournament's sponsors array.
+      responses:
+        '200':
+          description: Sponsor removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed:
+                    $ref: '#/components/schemas/Sponsor'
+        '400':
+          description: Invalid index (negative or non-integer).
+        '401':
+          description: Missing or incorrect tournament password.
+        '404':
+          description: Index out of range or tournament not initialized.
+
   # ── Announcements ──────────────────────────────────────────────────────────
 
   /api/tournament/announcement:
@@ -722,6 +858,12 @@ paths:
         - When `id` is omitted AND `name` slugs to empty (no alphanumerics)
           → 400 (`competition ID is required (could not derive one from name)`).
         - Provided `id` must match the path-parameter pattern (see CompetitionId).
+        - `teamSize` must be >= 0 and not equal to 1 (1 is always
+          rejected regardless of `kind`; use 0 for individual, >= 2 for teams).
+        - When `kind` is `"team"`, `teamSize` must be >= 2
+          (`team competitions require teamSize >= 2`).
+        - When `kind` is not `"team"` (including omitted or `"individual"`),
+          `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
@@ -775,8 +917,12 @@ paths:
         `kind`, `mirror`. String fields are trimmed server-side.
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
-        or if `date` is non-empty and not in canonical `DD-MM-YYYY`
-        format.
+        if `date` is non-empty and not in canonical `DD-MM-YYYY`
+        format, if `teamSize` is negative or equals 1 (1 is always
+        invalid regardless of `kind`), if `kind` is `"team"` and
+        `teamSize` < 2 (`team competitions require teamSize >= 2`),
+        or if `kind` is not `"team"` (including omitted or `"individual"`)
+        and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
 
         **Roster-save (body INCLUDES `players`, even an empty array):**
         The server writes `participants.csv` (and clears or extracts
@@ -827,6 +973,17 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            Conflict. Output-affecting settings (format, courts, pool
+            size/winners/mode, pool format, round-robin, mirror, team size,
+            kind, number prefix, zekken display) were changed while the
+            competition is in `draw-ready` state — discard the draw first.
+            Duplicate name/number-prefix violations are returned as 400.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
@@ -954,6 +1111,12 @@ paths:
         and the competition transitions directly to `pools` or `playoffs`. When in
         `setup` status the draw is generated first then the competition transitions
         (backward-compatible one-click path).
+
+        **Mixed (Pools + Knockout) competitions** start in `pools`. There is no
+        separate "start knockout" step: as each pool finishes, its finishers are
+        seeded into the (already-scheduled) knockout bracket automatically, and a
+        knockout match becomes scoreable as soon as both its feeder pools are done.
+        The competition moves to `playoffs` once the final pool has been seeded.
       security:
         - TournamentPassword: []
       parameters:
@@ -982,40 +1145,6 @@ paths:
       responses:
         '200':
           description: Competition marked as completed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Competition'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/competitions/{id}/playoffs:
-    post:
-      tags: [competitions]
-      summary: Create linked playoff competition
-      description: |
-        Creates a new `playoffs`-format competition linked to this mixed
-        (Pools + Knockout) competition. The server:
-        - Derives a name (`<source name> - Playoffs`) and ID.
-        - Records a `sourceCompID` link back to this competition.
-
-        The playoff starts with an EMPTY roster. Its participants are resolved
-        from the source competition's pool winners when the playoff is started
-        (`POST /start`) — the source pools must be final by then. No placeholder
-        participants are created.
-
-        Returns 400 if the source competition is not in `mixed` format.
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-      responses:
-        '201':
-          description: Playoff competition created and linked.
           content:
             application/json:
               schema:
@@ -1066,6 +1195,50 @@ paths:
         '204':
           description: Overrides reset.
 
+
+  /api/competitions/{id}/awards:
+    put:
+      tags: [competitions]
+      summary: Set fighting-spirit awards
+      description: |
+        Replaces the full list of fighting-spirit (敢闘賞) awards for the competition.
+        Awards are independent of the auto-derived placement podium and may be set at
+        any competition status. Passing an empty array clears all awards.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active
+        (see the AdminPassword security scheme); 503 if locked mode is active
+        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+      security:
+        - TournamentPassword: []
+          AdminPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fightingSpiritAwards]
+              properties:
+                fightingSpiritAwards:
+                  type: array
+                  maxItems: 20
+                  items:
+                    $ref: '#/components/schemas/FightingSpiritAward'
+      responses:
+        '200':
+          description: Awards saved; returns updated competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Competition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/schedule:
     put:
@@ -1163,7 +1336,7 @@ paths:
                 players:
                   type: array
                   items:
-                    $ref: '#/components/schemas/Participant'
+                    $ref: '#/components/schemas/ParticipantInput'
       responses:
         '200':
           description: Participants successfully updated.
@@ -1192,10 +1365,23 @@ paths:
         description: Participant/Player ID (UUID).
     put:
       tags: [participants]
-      summary: Update single participant details
-      description: Updates the details (name, dojo, etc.) for a single participant.
+      summary: Update a participant
+      description: |
+        Updates an individual participant's name, dojo, displayName, danGrade, metadata, and source.
+
+        Allowed in `setup` state (no draw yet) and `draw-ready` state (draw generated
+        but not started). In draw-ready state the change **cascades** through draw
+        artifacts: `pools.csv`, `bracket.json`, and `pool-matches.csv` are updated
+        in place — the draw structure (pool assignments, elimination bracket) is
+        preserved. Seeds are renamed automatically by the participant update.
+
+        Returns the updated player. When the cascade detects dojo conflicts,
+        a `warnings` array is included alongside the player fields.
+
+        Also requires `X-Admin-Password` when the destructive-ops gate is active.
       security:
         - TournamentPassword: []
+          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -1207,44 +1393,67 @@ paths:
                 name:
                   type: string
                   maxLength: 100
-                displayName:
-                  type: string
-                  maxLength: 50
+                  description: Participant's full name (trimmed; must not be blank).
                 dojo:
                   type: string
                   maxLength: 100
+                  description: Participant's dojo (trimmed; must not be blank).
+                displayName:
+                  type: string
+                  maxLength: 50
+                  description: Bib/zekken display name (only persisted for zekken-enabled competitions).
+                danGrade:
+                  type: string
+                  maxLength: 200
+                  description: Dan grade string (e.g. "3 Dan"). Stored in Metadata[0] when Metadata is absent.
                 metadata:
                   type: array
                   maxItems: 16
                   items:
                     type: string
                     maxLength: 200
-                danGrade:
+                source:
                   type: string
                   maxLength: 200
-                  description: Dan grade; persisted as a metadata entry.
-                tag:
-                  type: string
-                  maxLength: 200
+                  enum: [manual, registered, transfer, reserved]
+                  description: Registration source / provenance (case-insensitive; stored lower-case). Renamed from the former `tag` field. The legacy value `reserved` is accepted and normalized to `manual` on write; responses always emit `manual`.
       responses:
         '200':
-          description: Participant updated successfully.
+          description: |
+            Participant updated. When the competition is in `draw-ready` state and
+            the cascade detects dojo conflicts, a `warnings` array is included in
+            the response alongside the standard player fields. If the draw cascade
+            itself fails (e.g. an I/O error after pools were already updated), the
+            participant update is still persisted and the response includes a
+            `cascadeError` string; any warnings collected before the failure are
+            also included.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Player'
+                allOf:
+                  - $ref: '#/components/schemas/Player'
+                  - type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items:
+                          type: string
+                        description: |
+                          Non-fatal advisory messages from the draw cascade (e.g. dojo
+                          conflict). Present only when at least one warning was
+                          generated; absent in setup state.
+                      cascadeError:
+                        type: string
+                        description: |
+                          Present when the participant update succeeded but the draw
+                          cascade failed (e.g. I/O error updating bracket artifacts).
+                          The operator should review and may need to re-generate the draw.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Name collision or competition in invalid state.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/InternalError'
+          $ref: '#/components/responses/Forbidden'
 
   /api/competitions/{id}/participants/{pid}/checkin:
     parameters:
@@ -1388,11 +1597,97 @@ paths:
               $ref: '#/components/schemas/MatchResult'
       responses:
         '200':
-          description: Result recorded.
+          description: |
+            Result recorded. On a normal write the body is the updated MatchResult.
+            When a running-write autosave is a no-op the body is `{"stale":true}`
+            (the `stale` field set, all other MatchResult fields absent). This
+            happens in two cases: (a) the rev-guard drops it as a same-session
+            out-of-order delivery (a lower rev than one already applied for that
+            client session, e.g. a reconnect flush), or (b) the match is already
+            completed, so a running write must not revert the final result.
+            Different client sessions are concurrent operators — the server
+            applies those last-write-wins, never stale.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                # anyOf, not oneOf: MatchResult is an open schema (no required
+                # fields, no additionalProperties:false), so `{"stale":true}`
+                # also validates against it. oneOf demands exactly one match and
+                # would flag that as ambiguous in most JSON-Schema tooling. The
+                # stale branch pins additionalProperties:false so a stale marker
+                # is unambiguous; a real result still matches the MatchResult
+                # branch.
+                anyOf:
+                  - $ref: '#/components/schemas/MatchResult'
+                  - type: object
+                    additionalProperties: false
+                    properties:
+                      stale:
+                        type: boolean
+                        description: >
+                          true when a running-write autosave was a no-op — either
+                          dropped by the rev-guard as a same-session out-of-order
+                          delivery, or rejected because the match is already
+                          completed. Omitted on normal responses.
+                    required: [stale]
+        '409':
+          description: |
+            Conflict — one of six codes returned in the `error` field:
+            - `court_busy`: court already has a running match in this or another competition.
+              Extra fields: `court`, `matchId`, `compId`, `message`.
+            - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match).
+              Extra fields: `playerId`, `reason`, `reasonHuman`.
+            - `already_ineligible`: participant was already marked ineligible before this match.
+              Extra fields: `playerId`, `matchId`, `reason`, `reasonHuman`.
+            - `result_finalized`: the match result is already locked (self-reported only).
+              Extra fields: `message`.
+            - `side_mismatch`: the submitted winner does not match either side of the match.
+              Extra fields: `message`.
+            - `downstream_knockout_scored`: a downstream elimination match was already scored.
+              Extra fields: `pool`, `finisher`, `matchId`, `message`.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - court_busy
+                      - ineligible_competitor
+                      - already_ineligible
+                      - result_finalized
+                      - side_mismatch
+                      - downstream_knockout_scored
+                    description: Machine-readable conflict code.
+                  court:
+                    type: string
+                    description: Court label (court_busy only).
+                  matchId:
+                    type: string
+                    description: Conflicting match ID (court_busy, already_ineligible, downstream_knockout_scored).
+                  compId:
+                    type: string
+                    description: Conflicting competition ID (court_busy only).
+                  message:
+                    type: string
+                    description: Human-readable detail (court_busy, result_finalized, side_mismatch, downstream_knockout_scored).
+                  playerId:
+                    type: string
+                    description: Ineligible participant ID (ineligible_competitor / already_ineligible).
+                  reason:
+                    type: string
+                    description: Decision that caused ineligibility (ineligible_competitor / already_ineligible).
+                  reasonHuman:
+                    type: string
+                    description: Human-readable reason (ineligible_competitor / already_ineligible).
+                  pool:
+                    type: string
+                    description: Pool ID containing the scored downstream match (downstream_knockout_scored only).
+                  finisher:
+                    type: string
+                    description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
 
   /api/competitions/{id}/matches/{mid}/court:
     put:
@@ -1856,6 +2151,139 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/competitions/{id}/league-tiebreak/candidates:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    get:
+      tags: [competitions]
+      summary: List consequential league tie-breaker tied groups
+      description: >
+        Returns the consequential tied groups for a team-league competition —
+        groups of teams tied on all official criteria whose finishing positions
+        fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
+        `leagueTwoThirdPlaces`). Public read (no auth): derived from the
+        already-public standings. Returns an empty list for non-team-league
+        competitions and once shared ranks have been finalised.
+      security: []
+      responses:
+        '200':
+          description: Tied groups plus the finalized flag.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LeagueTiebreakCandidateGroup'
+                  finalized:
+                    type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/competitions/{id}/league-tiebreak:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [competitions]
+      summary: Generate a league tie-breaker for a tied group
+      description: >
+        Generates the round-robin daihyosen (representative-bout) matches for one
+        consequential tied group. Admin-gated. `teamNames` must match exactly one
+        group from `GET .../league-tiebreak/candidates` (order-independent, no
+        duplicates).
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeagueTiebreakRequest'
+      responses:
+        '201':
+          description: The generated tie-breaker matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Tie-breaker matches for this group already exist.
+    delete:
+      tags: [competitions]
+      summary: Remove unscored league tie-breaker matches for a group
+      description: >
+        Removes the unscored daihyosen matches for one tied group. Admin-gated.
+        `teamNames` must cover a complete tie-breaker group (no duplicates, no
+        partial selection).
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeagueTiebreakRequest'
+      responses:
+        '200':
+          description: Number of matches deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          description: No tie-breaker matches found for the group.
+        '409':
+          description: One or more matches are in progress or already scored.
+
+  /api/competitions/{id}/league-tiebreak/finalize:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+    post:
+      tags: [competitions]
+      summary: Accept shared league ranks without a tie-breaker
+      description: >
+        Marks the league's consequential ties as final without a tie-breaker
+        (`leagueTiebreakFinalized = true`) and attempts to complete the
+        competition. Admin-gated.
+      security:
+        - TournamentPassword: []
+      responses:
+        '200':
+          description: Finalized.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  finalized:
+                    type: boolean
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Competition is already complete.
+
   /api/schedule/estimate:
     get:
       tags: [viewer]
@@ -1982,11 +2410,15 @@ paths:
                 items:
                   $ref: '#/components/schemas/ScheduleEntry'
 
-  /api/viewer/court/{court}/live:
+  /api/viewer/court/{court}/current:
     get:
       tags: [viewer]
-      summary: Get current and upcoming matches for a court
-      description: Court-live display feed. Returns the in-progress match and a queue of upcoming matches for the given court.
+      summary: Get the current running match on a court
+      description: >
+        One-shot polled view for non-browser streaming integrations (vMix, OBS,
+        scoreboards). Returns the single currently-running match on the court in
+        an overlay-friendly shape, or status "idle" when nothing is running.
+        Public, no auth; sent with Cache-Control no-store.
       parameters:
         - in: path
           name: court
@@ -1996,23 +2428,102 @@ paths:
           description: Court label (e.g. "A").
       responses:
         '200':
-          description: Court live state.
+          description: >
+            The running match (status "current") or status "idle". The match
+            fields are present only on the "current" branch.
           content:
             application/json:
               schema:
                 type: object
-                required: [court, current, upcoming]
+                required: [court, status]
                 properties:
                   court:
                     type: string
-                  current:
-                    nullable: true
-                    allOf:
-                      - $ref: '#/components/schemas/MatchResult'
-                  upcoming:
+                  status:
+                    type: string
+                    enum: [current, idle]
+                  competition:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                  phase:
+                    type: string
+                    description: Pool name or round label derived from the match ID.
+                  sideA:
+                    $ref: '#/components/schemas/CourtMatchSide'
+                  sideB:
+                    $ref: '#/components/schemas/CourtMatchSide'
+                  ipponsA:
+                    type: array
+                    items: { type: string }
+                  ipponsB:
+                    type: array
+                    items: { type: string }
+                  hansokuA: { type: integer }
+                  hansokuB: { type: integer }
+                  repPlayerA:
+                    type: string
+                    description: Representative fighter for a pool daihyosen bout (team names in sideA/sideB); empty otherwise.
+                  repPlayerB:
+                    type: string
+        '404':
+          description: Unknown court.
+        '503':
+          description: No active tournament loaded.
+
+  /api/viewer/court/{court}/matches:
+    get:
+      tags: [viewer]
+      summary: Court-scoped match feed for the operator console
+      description: >
+        Returns the same per-competition payload as GET /api/viewer/competitions
+        (config + poolMatches + bracket), but ONLY for competitions that have at
+        least one real (both-sides-resolved) match — pool or non-preview bracket
+        — physically placed on the given court right now. Keyed on actual match
+        placement (not competition court config) so the feed stays correct after
+        an operator moves a match to another shiaijo. Per-competition match data
+        is full (not court-filtered) so client-side derivations like pool
+        "Match N of M" counts stay correct; the right-sizing is by competition
+        count (only comps on this court). Public, no auth.
+      parameters:
+        - in: path
+          name: court
+          required: true
+          schema:
+            type: string
+          description: Court label (e.g. "A").
+      responses:
+        '200':
+          description: Competitions with a match on the court, full match data each.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [court, competitions]
+                properties:
+                  court:
+                    type: string
+                  competitions:
                     type: array
                     items:
-                      $ref: '#/components/schemas/MatchResult'
+                      type: object
+                      required: [config, poolMatches, bracket]
+                      properties:
+                        config:
+                          $ref: '#/components/schemas/Competition'
+                        poolMatches:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/MatchResult'
+                        bracket:
+                          anyOf:
+                            - $ref: '#/components/schemas/Bracket'
+                            - type: "null"
+        '404':
+          description: Unknown court.
+        '503':
+          description: No active tournament loaded.
 
 components:
 
@@ -2165,6 +2676,26 @@ components:
       properties:
         error:
           type: string
+
+    Sponsor:
+      type: object
+      description: A single sponsor logo entry in the tournament's sponsor list (mp-c38).
+      required: [name, file]
+      properties:
+        name:
+          type: string
+          maxLength: 80
+          description: Sponsor name used as alt text on logo images.
+          example: "Acme Corp"
+        file:
+          type: string
+          description: Server-generated filename (16 random hex chars + .png, .jpg, or .jpeg). Serves as the path component in GET /api/sponsors/{file}.
+          example: "69a33e3dd2ebe03b.jpg"
+        link:
+          type: string
+          format: uri
+          description: Optional clickable URL shown on the viewer surface. Absent when not set (omitempty). Must be http(s) with no user-info.
+          example: "https://acme.example"
 
     Announcement:
       type: object
@@ -2361,7 +2892,14 @@ components:
           enum: [playoffs, mixed, league, swiss]
         teamSize:
           type: integer
-          description: Number of members per team (0 for individual).
+          minimum: 0
+          not:
+            enum: [1]
+          description: >
+            Number of members per team. 0 for individual competitions;
+            >= 2 for team competitions. The value 1 is always rejected
+            (regardless of kind) because engine code uses TeamSize > 0
+            to detect team competitions, making 1 ambiguous.
         poolSize:
           type: integer
         poolSizeMode:
@@ -2398,10 +2936,13 @@ components:
           description: >
             Lifecycle state. Set by the server — do not supply on create/update.
             `setup` → not yet started; `draw-ready` → draw generated and available
-            for preview, not yet started; `pools` → pools phase active;
-            `playoffs` → knockout phase active; `completed` → finished;
-            `invalid` → operator-declared invalid, prerequisite for deleting
-            an already-started competition.
+            for preview, not yet started; `pools` → pools phase active (for a
+            mixed competition the knockout bracket is already filling in
+            incrementally as pools finish — knockout matches with both sides
+            resolved are scoreable even in this state); `playoffs` → knockout
+            phase active (for mixed: every pool has been seeded into the bracket);
+            `completed` → finished; `invalid` → operator-declared invalid,
+            prerequisite for deleting an already-started competition.
           enum: [setup, draw-ready, pools, playoffs, completed, invalid, ""]
         mirror:
           type: boolean
@@ -2411,14 +2952,6 @@ components:
           type: string
         hasParticipantIDs:
           type: boolean
-        sourceCompID:
-          type: string
-          maxLength: 64
-          description: >
-            For a `playoffs` competition created via POST /playoffs, the ID of
-            the mixed source competition whose pool winners seed this playoff.
-            The roster is resolved from the source at start time. Empty for all
-            other competitions.
         teamMatchType:
           type: string
           description: Team-match scoring model — `fixed` (positions) or `kachinuki` (winner-stays).
@@ -2434,6 +2967,14 @@ components:
             can mark participants as checked in via the admin UI or the API.
             Check-in state is informational — the draw pipeline does not filter
             out unchecked participants.
+        fightingSpiritAwards:
+          type: array
+          description: >
+            Optional fighting-spirit (敢闘賞) awards for this competition. Independent of the
+            auto-derived placement podium. Absent / empty when no awards have been set.
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/FightingSpiritAward'
         players:
           type: array
           description: >
@@ -2441,6 +2982,23 @@ components:
             `GET /api/viewer/competitions/{id}`). Always empty in admin competition responses.
           items:
             $ref: '#/components/schemas/Player'
+
+    FightingSpiritAward:
+      type: object
+      required: [title, recipientName]
+      properties:
+        title:
+          type: string
+          maxLength: 100
+          description: Award title, e.g. "Fighting Spirit".
+        recipientName:
+          type: string
+          maxLength: 100
+          description: Plain name of the honouree.
+        recipientDojo:
+          type: string
+          maxLength: 100
+          description: Dojo affiliation of the honouree (optional, for disambiguation).
 
     Player:
       type: object
@@ -2464,15 +3022,17 @@ components:
           items:
             type: string
             maxLength: 200
-        tag:
+        source:
           type: string
           maxLength: 200
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). Responses always emit one of these canonical values. The legacy value `reserved` is accepted only on the write endpoints (normalized to `manual`) and is never emitted here.
         seed:
           type: integer
           description: Seed rank (0 = unseeded).
         number:
           type: string
-          description: Match number prefix + sequence (e.g. "K1"). Only present when number-prefix is set.
+          description: The competitor's "tag" — assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.
@@ -2498,9 +3058,11 @@ components:
           items:
             type: string
             maxLength: 200
-        tag:
+        source:
           type: string
           maxLength: 200
+          enum: [manual, registered, transfer]
+          description: Registration source / provenance (renamed from `tag`; stored lower-case). Responses always emit one of these canonical values. The legacy value `reserved` is accepted only on input (see `ParticipantInput`, normalized to `manual`) and is never emitted here.
         checkedIn:
           type: boolean
           readOnly: true
@@ -2525,6 +3087,34 @@ components:
           type: array
           items:
             type: string
+
+    ParticipantInput:
+      type: object
+      description: Request-body variant of `Participant`. Identical to the response shape except `source` additionally accepts the legacy `reserved` alias, which is normalized to `manual` on write.
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 100
+        displayName:
+          type: string
+          maxLength: 50
+        dojo:
+          type: string
+          maxLength: 100
+        metadata:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 200
+        source:
+          type: string
+          maxLength: 200
+          enum: [manual, registered, transfer, reserved]
+          description: Registration source / provenance (renamed from `tag`; case-insensitive, stored lower-case). The legacy value `reserved` is accepted and normalized to `manual` on write.
 
     SeedAssignment:
       type: object
@@ -2551,6 +3141,25 @@ components:
       properties:
         id:
           type: string
+        rev:
+          type: integer
+          format: int64
+          writeOnly: true
+          description: >
+            Optional client-monotonic revision counter, stamped only on
+            "running"-status autosave writes. The server's rev-guard uses it
+            (scoped to revSession) to drop out-of-order delivery from a
+            reconnect flush. Never returned in responses or public projections.
+        revSession:
+          type: string
+          maxLength: 64
+          writeOnly: true
+          description: >
+            Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
+            with "running" autosave writes. It lets the server's rev-guard drop a
+            single session's own out-of-order delivery (a reconnect flush). Writes
+            from different sessions are concurrent operators and apply
+            last-write-wins. Never returned in responses or public projections.
         sideA:
           type: string
           maxLength: 100
@@ -2611,9 +3220,11 @@ components:
         decidedByHantei:
           type: boolean
           description: >
-            True when the winner was declared by referee hantei after a tied encho
-            (FIK Art. 7-5 / 29-6). On a bracket-match score request, omitting the field
-            preserves the stored value; sending an explicit true/false applies it.
+            True when the winner was declared by referee hantei on a tied bout
+            (FIK Art. 7-5 / 29-6). Overtime is not required — a tied scoreline may be
+            taken straight to a judges' decision. On a bracket-match score request,
+            omitting the field preserves the stored value; sending an explicit
+            true/false applies it.
 
     SubMatchResult:
       type: object
@@ -2649,20 +3260,21 @@ components:
             `""` (normal victory), `"hikiwake"` (draw/tie), or `"fusensho"`
             (per-bout default win). The daihyosen representative bout
             (`position: -1`) always carries `"daihyosen"` — including when its
-            winner is declared by hantei after a tied encho (the frontend emits
+            winner is declared by hantei on a tied bout (the frontend emits
             `decision: "daihyosen"` together with `decidedByHantei: true`). The
             server also tolerates `""` or `"fought"` alongside hantei, but
             `"daihyosen"` is the canonical persisted value for the rep bout.
         decidedByHantei:
           type: boolean
           description: >
-            True when this sub-bout's winner was declared by referee hantei after a
-            tied encho. Valid ONLY for the daihyosen representative bout (`position: -1`)
-            AND only when `encho.periodCount > 0`; regular numbered bouts have fixed
-            regulation time and are never decided by hantei. The accompanying `decision`
-            is `"daihyosen"` (the value the frontend persists for the rep bout); the
-            server additionally accepts `""` or `"fought"`. `winner` must be set — the
-            server rejects hantei without encho or with any other decision code.
+            True when this sub-bout's winner was declared by referee hantei on a
+            tied bout. Valid ONLY for the daihyosen representative bout (`position: -1`);
+            regular numbered bouts have fixed regulation time and are never decided by
+            hantei. Overtime is NOT required — a tied daihyosen may be decided by judges
+            directly (`encho` is optional). The accompanying `decision` is `"daihyosen"`
+            (the value the frontend persists for the rep bout); the server additionally
+            accepts `""` or `"fought"`. `winner` must be set and the scoreline must be
+            tied — the server rejects hantei with any other decision code.
         encho:
           allOf:
             - $ref: '#/components/schemas/EnchoMetadata'
@@ -2715,7 +3327,7 @@ components:
           $ref: '#/components/schemas/EnchoMetadata'
         decidedByHantei:
           type: boolean
-          description: True when the match winner was declared by referee hantei after a tied encho.
+          description: True when the match winner was declared by referee hantei on a tied bout (overtime not required).
         subResults:
           type: array
           description: >
@@ -2723,6 +3335,26 @@ components:
             can restore hantei state and bout-level detail on re-open.
           items:
             $ref: '#/components/schemas/SubMatchResult'
+
+    CourtMatchSide:
+      type: object
+      description: >
+        Per-side overlay payload for GET /api/viewer/court/{court}/current,
+        assembled by buildSide. `name` is the canonical participant/team name;
+        `displayName` is the zekken when withZekkenName is set, else equals name.
+      properties:
+        playerId:
+          type: string
+          description: Participant UUID, or empty when the name could not be resolved.
+        name:
+          type: string
+        displayName:
+          type: string
+        dojo:
+          type: string
+        number:
+          type: string
+          description: numberPrefix-derived competitor number (e.g. "A1"), when configured.
 
     Bracket:
       type: object
@@ -2883,9 +3515,10 @@ components:
             type: string
           description: Map of position label to player ID.
         lockedAt:
-          type: string
+          type:
+            - string
+            - "null"
           format: date-time
-          nullable: true
 
     ScheduleEstimate:
       type: object
@@ -2899,3 +3532,34 @@ components:
             type: integer
         ceremonyMinutes:
           type: integer
+
+    LeagueTiebreakCandidateGroup:
+      type: object
+      description: >
+        One consequential tied group in a team league: teams tied on all official
+        criteria whose finishing positions fall within the tie-breaker band.
+      properties:
+        teamNames:
+          type: array
+          description: Names of the tied teams, in standings order.
+          items:
+            type: string
+        minPosition:
+          type: integer
+          description: 1-based best finishing rank among the tied teams.
+        maxPosition:
+          type: integer
+          description: 1-based worst finishing rank among the tied teams.
+
+    LeagueTiebreakRequest:
+      type: object
+      description: >
+        Selects exactly one tied group (by team name set) for the league
+        tie-breaker POST/DELETE endpoints. Order-independent; duplicates rejected.
+      required: [teamNames]
+      properties:
+        teamNames:
+          type: array
+          minItems: 2
+          items:
+            type: string

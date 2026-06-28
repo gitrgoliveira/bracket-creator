@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { applyPatchOrdered } from '../patch.jsx';
+import { applyPatchOrdered, checkSeqGap } from '../patch.jsx';
 
 // T218 / Phase 12.D — gap detection on the SSE consumer side.
 //
@@ -179,6 +179,68 @@ describe('applyPatchOrdered', () => {
       expect(state.lastSeq).toBe(1);
     } finally {
       window.removeEventListener('competitor-status-updated', handler);
+    }
+  });
+});
+
+describe('checkSeqGap', () => {
+  it('returns {duplicate:false,gap:false} and sets lastSeq on first event', () => {
+    const state = {};
+    const onGap = vi.fn();
+    const result = checkSeqGap(state, 7, onGap);
+    expect(result).toEqual({ duplicate: false, gap: false });
+    expect(state.lastSeq).toBe(7);
+    expect(onGap).not.toHaveBeenCalled();
+  });
+
+  it('returns {duplicate:true,gap:false} and does NOT advance lastSeq for replay', () => {
+    const state = { lastSeq: 10 };
+    const onGap = vi.fn();
+    const result = checkSeqGap(state, 8, onGap);
+    expect(result).toEqual({ duplicate: true, gap: false });
+    expect(state.lastSeq).toBe(10); // unchanged
+    expect(onGap).not.toHaveBeenCalled();
+  });
+
+  it('returns {duplicate:true,gap:false} for equal-seq (same-seq replay)', () => {
+    const state = { lastSeq: 10 };
+    const onGap = vi.fn();
+    const result = checkSeqGap(state, 10, onGap);
+    expect(result).toEqual({ duplicate: true, gap: false });
+    expect(state.lastSeq).toBe(10);
+    expect(onGap).not.toHaveBeenCalled();
+  });
+
+  it('returns {gap:true,duplicate:false}, calls onGap, and advances lastSeq on jump', () => {
+    const state = { lastSeq: 5 };
+    const onGap = vi.fn();
+    const result = checkSeqGap(state, 9, onGap);
+    expect(result).toEqual({ gap: true, duplicate: false });
+    expect(state.lastSeq).toBe(9);
+    expect(onGap).toHaveBeenCalledTimes(1);
+    expect(onGap).toHaveBeenCalledWith({ from: 6, to: 8 });
+  });
+
+  it('returns {duplicate:false,gap:false} and does NOT mutate state when seq is not a number', () => {
+    const state = { lastSeq: 5 };
+    const onGap = vi.fn();
+    const result = checkSeqGap(state, undefined, onGap);
+    expect(result).toEqual({ duplicate: false, gap: false });
+    expect(state.lastSeq).toBe(5); // unchanged
+    expect(onGap).not.toHaveBeenCalled();
+  });
+
+  it('swallows a throwing onGap and still advances lastSeq', () => {
+    const state = { lastSeq: 3 };
+    const onGap = vi.fn(() => { throw new Error("boom"); });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = checkSeqGap(state, 10, onGap);
+      expect(result).toEqual({ gap: true, duplicate: false });
+      expect(state.lastSeq).toBe(10);
+      expect(onGap).toHaveBeenCalledTimes(1);
+    } finally {
+      errSpy.mockRestore();
     }
   });
 });

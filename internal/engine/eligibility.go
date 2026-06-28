@@ -34,6 +34,34 @@ func (e *IneligibleCompetitorError) Is(target error) bool {
 	return target == ErrIneligibleCompetitor
 }
 
+// ErrCourtBusy is the sentinel error matched by
+// errors.Is(err, engine.ErrCourtBusy). The concrete value is a
+// *CourtBusyError that carries Court, MatchID, and CompID.
+var ErrCourtBusy = errors.New("court already has a running match")
+
+// CourtBusyError is returned when the target court already has a running
+// match. Which competitions are scanned depends on the call site:
+//   - StartMatch (non-tx): scans all competitions via store.RunningMatchOnCourt.
+//   - CheckCrossCompCourtBusy (pre-tx gate): scans all competitions except compID.
+//   - StartMatchTx (tx path): scans only within compID — cross-competition
+//     conflicts are caught by CheckCrossCompCourtBusy before the tx begins.
+//
+// Courts are tournament-global: one physical shiaijo can host only one match at
+// a time regardless of which competition owns it.
+type CourtBusyError struct {
+	Court   string
+	MatchID string
+	CompID  string
+}
+
+func (e *CourtBusyError) Error() string {
+	return fmt.Sprintf("court %q already has running match %s (competition %s)", e.Court, e.MatchID, e.CompID)
+}
+
+func (e *CourtBusyError) Is(target error) bool {
+	return target == ErrCourtBusy
+}
+
 // AlreadyIneligibleError is returned by RecordDecision when the
 // intended loser already carries Eligible:false from a *different*
 // match — indicating two operators on different courts concurrently
@@ -113,20 +141,188 @@ func (e *Engine) CheckEligibility(compID string, playerIDs []string) error {
 }
 
 // StartMatch gates the scheduled → running transition by checking
-// every participant's competitor-status. It returns *IneligibleCompetitorError
-// (which matches errors.Is(err, ErrIneligibleCompetitor)) when any
-// participant has Eligible: false; nil when the match may proceed.
+// every participant's competitor-status and ensuring that no participant
+// is already Running in a different match within the same competition
+// (the simultaneity gate, Phase 2c).
+//
+// It returns *IneligibleCompetitorError (which matches
+// errors.Is(err, ErrIneligibleCompetitor)) when any participant has
+// Eligible: false or is already fighting elsewhere; nil when the match
+// may proceed.
 //
 // The status transition itself remains with the score handler — this
 // method is the pre-flight gate.
 //
 // FR-035, T084.
 func (e *Engine) StartMatch(compID, matchID string) error {
+	if err := e.checkCourtExclusivity(compID, matchID, ""); err != nil {
+		return err
+	}
+	if err := e.checkSimultaneousMatch(compID, matchID); err != nil {
+		return err
+	}
 	ids, err := e.resolveMatchParticipantIDs(compID, matchID)
 	if err != nil {
 		return err
 	}
 	return e.checkEligibilityExcludingMatch(compID, ids, matchID)
+}
+
+// checkCourtExclusivity rejects StartMatch when the target match's court
+// already has a running match anywhere in the tournament. skipCompID is
+// the competition whose data the caller already holds a write lock for
+// (passed to store.RunningMatchOnCourt to avoid re-locking a non-reentrant
+// mutex). Pass "" when calling outside a WithTransaction body.
+func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error {
+	court, err := e.lookupMatchCourt(compID, matchID)
+	if err != nil {
+		return err
+	}
+	if court == "" {
+		return nil
+	}
+	occ, err := e.store.RunningMatchOnCourt(court, skipCompID)
+	if err != nil {
+		return err
+	}
+	if occ != nil && (occ.CompID != compID || occ.MatchID != matchID) {
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	}
+	return nil
+}
+
+// CheckCrossCompCourtBusy checks whether the court assigned to matchID is
+// currently occupied by a running match in a different competition.
+// It MUST be called before entering WithTransaction for compID: calling
+// store.RunningMatchOnCourt while holding a per-comp write lock risks a
+// circular-wait deadlock if another competition is simultaneously in its
+// own WithTransaction (both goroutines try to read-lock each other's mutex).
+func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
+	court, err := e.lookupMatchCourt(compID, matchID)
+	if err != nil || court == "" {
+		return err
+	}
+	crossOcc, err := e.store.RunningMatchOnCourt(court, compID)
+	if err != nil {
+		return err
+	}
+	if crossOcc != nil {
+		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
+	}
+	return nil
+}
+
+// lookupMatchCourt returns the court assigned to matchID in compID's pool
+// matches or bracket. Returns "" (not an error) when the match exists but
+// has no court assigned.
+func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Court, nil
+		}
+	}
+	bracket, err := e.store.LoadBracket(compID)
+	if err != nil {
+		return "", err
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID {
+					return bm.Court, nil
+				}
+			}
+		}
+	}
+	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
+}
+
+// checkSimultaneousMatch returns an *IneligibleCompetitorError if either
+// participant in matchID is currently Running in a different match within
+// the same competition. Pool matches and bracket matches are both checked.
+//
+// Phase 2c simultaneity gate.
+func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
+	sideA, sideB, err := e.lookupMatchSides(compID, matchID)
+	if err != nil {
+		return nil
+	}
+	if sideA == "" && sideB == "" {
+		return nil
+	}
+
+	idA, idB := e.resolvePlayerIDs(compID, sideA, sideB)
+
+	poolMatches, err := e.store.LoadPoolMatches(compID)
+	if err == nil {
+		for _, m := range poolMatches {
+			if m.ID == matchID || m.Status != state.MatchStatusRunning {
+				continue
+			}
+			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+		}
+	}
+
+	bracket, berr := e.store.LoadBracket(compID)
+	if berr == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+					return &IneligibleCompetitorError{
+						PlayerID: idA,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+					return &IneligibleCompetitorError{
+						PlayerID: idB,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		return sideA, sideB
+	}
+	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		return sideA, sideB
+	}
+	pool := combinedPlayerPool(comp.Players, participants)
+	idA := lookupPlayerID(pool, sideA)
+	if idA == "" {
+		idA = sideA
+	}
+	idB := lookupPlayerID(pool, sideB)
+	if idB == "" {
+		idB = sideB
+	}
+	return idA, idB
 }
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips
@@ -153,7 +349,8 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
 // and persists the result via RecordMatchResultWithIneligibility. The
 // canonical SideA=Aka / SideB=Shiro mapping (CLAUDE.md) is used to
-// translate decisionBy → which side loses/forfeits the auto-filled X-0 scoreline.
+// translate decisionBy → which side loses/forfeits: winner gets ○○ (regulation)
+// or ○ (encho), loser gets nothing.
 //
 // When the match already has a kiken/fusenpai decision recorded (the
 // "undo" path, T103/CHK024) the engine enforces the
@@ -225,7 +422,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	}
 	winIppons := make([]string, winningCount)
 	for i := range winIppons {
-		winIppons[i] = "M"
+		winIppons[i] = defaultWinIppon
 	}
 	result := &state.MatchResult{
 		ID:             matchID,
@@ -238,7 +435,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		Status:         state.MatchStatusCompleted,
 	}
 	// shiro=SideB (White, left), aka=SideA (Red, right). The losing
-	// side ends with 0 ippons; the surviving side gets the X auto-fill
+	// side ends with 0 ippons; the surviving side gets the ○ default-win fill
 	// and becomes Winner.
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons

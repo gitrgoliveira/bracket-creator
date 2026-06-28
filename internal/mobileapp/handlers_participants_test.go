@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -305,16 +306,18 @@ func TestDuplicateNameRejection(t *testing.T) {
 	_, err = store.AddParticipant(compID, domain.Player{Name: "Bob", Dojo: "Dojo B"}, false)
 	require.NoError(t, err)
 
-	// 1. POST add duplicate → 409.
-	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo X"})
+	// 1. POST add duplicate — same (name, dojo) → 409. Different dojo with same
+	// name is allowed (two real people at different clubs), so we must use the
+	// SAME dojo as Alice to trigger the conflict.
+	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dupAdd))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "POST add of duplicate name+dojo must return 409")
 
-	// 2. PUT replace of Bob renaming to Alice → 409.
-	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo B"})
+	// 2. PUT replace: move Bob to Alice's dojo AND rename → same (name,dojo) → 409.
+	dupReplace, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
 	bobID := ""
 	for _, p := range mustLoad(t, store, compID) {
 		if p.Name == "Bob" {
@@ -327,7 +330,7 @@ func TestDuplicateNameRejection(t *testing.T) {
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+bobID, bytes.NewBuffer(dupReplace))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice must return 409")
+	assert.Equal(t, http.StatusConflict, w.Code, "PUT replace renaming Bob→Alice with same dojo must return 409")
 
 	// 3. PUT renaming Alice to her OWN current name is a no-op rename and must succeed.
 	sameName, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A2"})
@@ -338,6 +341,99 @@ func TestDuplicateNameRejection(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "PUT with unchanged name (dojo edit) must succeed")
 }
 
+// TestBatchPostDuplicateNameDojo_409 covers the batch (players array) POST
+// path: a perfect (name, dojo) duplicate within one request is rejected with
+// 409, while two same-named competitors at different dojos are accepted. This
+// complements TestDuplicateNameRejection (single-add) and the state-level
+// TestSaveParticipants_RejectsDuplicateNameDojo. (mp-ljry, Copilot round 2)
+func TestBatchPostDuplicateNameDojo_409(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-dup"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Dup Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// Perfect (name, dojo) duplicate in one batch (case/whitespace variant) → 409.
+	dup, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "alice  smith", "dojo": "wakaba"},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(dup))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code, "batch POST with duplicate (name,dojo) must return 409")
+
+	// Same name at DIFFERENT dojos in one batch is allowed.
+	ok, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Alice Smith", "dojo": "Tora"},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(ok))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "same name at different dojos must be accepted in a batch")
+}
+
+// TestBatchPostBlankDojo_400 covers the batch (players array) POST path: a row
+// with a blank dojo must be rejected with 400, mirroring the single-add path
+// (which already returns "dojo must not be blank"). Without this, a misformatted
+// roster paste — e.g. a two-column "Name, Dojo" line in a zekken competition,
+// which parseParticipantLines maps to {displayName: dojo, dojo: ""} — would be
+// silently accepted, persisting a competitor with no dojo while the UI reports
+// success. (invalid-submission acceptance bug)
+func TestBatchPostBlankDojo_400(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-batch-blank-dojo"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Batch Blank Dojo Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	// A blank dojo on any row must reject the whole batch with 400.
+	blank, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Alice Smith", "dojo": "Wakaba"},
+		{"name": "Bob Jones", "dojo": ""},
+	}})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(blank))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a blank dojo must return 400")
+
+	// A whitespace-only dojo is equally invalid (trimmed to empty).
+	ws, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "Carol White", "dojo": "   "},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(ws))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a whitespace-only dojo must return 400")
+
+	// A blank name is likewise rejected.
+	blankName, _ := json.Marshal(map[string]any{"players": []map[string]string{
+		{"name": "  ", "dojo": "Wakaba"},
+	}})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(blankName))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "batch POST with a blank name must return 400")
+
+	// Nothing should have been persisted by any of the rejected batches.
+	players := mustLoad(t, store, compID)
+	assert.Empty(t, players, "no participants should be saved when a batch is rejected")
+}
+
 // TestReplaceDoesNotInheritOldDisplayName ensures that replacing a participant
 // with displayName:"" (the corrected JS payload) writes a clean 2-column CSV
 // row, not a 3-column row that carries the old slot's stale SanitizeName value.
@@ -345,8 +441,8 @@ func TestDuplicateNameRejection(t *testing.T) {
 // Regression guard for the bug where the frontend was sending
 // displayName: replaceTarget.displayName (the old player's auto-derived
 // "A. SMITH") as part of the replace payload, causing saveParticipantsNoLock
-// to emit "Alice Yamamoto, A. SMITH, Senbukan" instead of
-// "Alice Yamamoto, Senbukan".
+// to emit "Alice Yamamoto, A. SMITH, Raizan" instead of
+// "Alice Yamamoto, Raizan".
 func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -359,7 +455,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	}))
 
 	// Add Alice Smith — Go will auto-derive displayName = "A. SMITH".
-	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Senbukan"})
+	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Raizan"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(addBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -372,7 +468,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	// to "" as the corrected frontend does.
 	replBody, _ := json.Marshal(map[string]interface{}{
 		"name":        "Alice Yamamoto",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 		"displayName": "",
 	})
 	w = httptest.NewRecorder()
@@ -386,7 +482,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 	players := mustLoad(t, store, compID)
 	require.Len(t, players, 1)
 	assert.Equal(t, "Alice Yamamoto", players[0].Name)
-	assert.Equal(t, "Senbukan", players[0].Dojo)
+	assert.Equal(t, "Raizan", players[0].Dojo)
 	wantDisplay := helper.SanitizeName("Alice Yamamoto") // "A. YAMAMOTO"
 	assert.Equal(t, wantDisplay, players[0].DisplayName,
 		"displayName must be derived from the new name, not inherited from the old slot")
@@ -580,7 +676,7 @@ func TestBulkCheckIn_BroadcastBehaviour(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	admin := r.Group("/api")
-	RegisterParticipantHandlers(admin, store, spy, NewFileElevatedVerifier(store))
+	RegisterParticipantHandlers(admin, store, engine.New(store), spy, NewFileElevatedVerifier(store))
 
 	compID := "comp-broadcast-test"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -616,17 +712,17 @@ func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
 	return players
 }
 
-// TestAddParticipant_DefaultsManualTag pins that an add via the single-add
-// endpoint without an explicit tag gets "manual" — so rows added via this UI
-// land in the same tag-filter bucket as rows the operator hand-edits into
+// TestAddParticipant_DefaultsManualSource pins that an add via the single-add
+// endpoint without an explicit source gets "manual" — so rows added via this UI
+// land in the same source-filter bucket as rows the operator hand-edits into
 // the paste-box import.
-func TestAddParticipant_DefaultsManualTag(t *testing.T) {
+func TestAddParticipant_DefaultsManualSource(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	compID := "comp-manual-tag"
+	compID := "comp-manual-source"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Manual Tag Test", Status: state.CompStatusSetup,
+		ID: compID, Name: "Manual Source Test", Status: state.CompStatusSetup,
 	}))
 
 	body, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
@@ -638,10 +734,10 @@ func TestAddParticipant_DefaultsManualTag(t *testing.T) {
 
 	var added domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
-	assert.Equal(t, "manual", added.Tag, "single-add without an explicit tag must default to manual")
+	assert.Equal(t, "manual", added.Source, "single-add without an explicit source must default to manual")
 
-	// An explicit tag must be respected (not overwritten by the default).
-	body, _ = json.Marshal(map[string]interface{}{"name": "Bob", "dojo": "Dojo B", "tag": "registered"})
+	// An explicit source must be respected (not overwritten by the default).
+	body, _ = json.Marshal(map[string]interface{}{"name": "Bob", "dojo": "Dojo B", "source": "registered"})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -650,7 +746,7 @@ func TestAddParticipant_DefaultsManualTag(t *testing.T) {
 
 	var bob domain.Player
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &bob))
-	assert.Equal(t, "registered", bob.Tag, "explicit tag must override the manual default")
+	assert.Equal(t, "registered", bob.Source, "explicit source must override the manual default")
 }
 
 // TestZekkenAddAndReplace covers the previously-missing path for
@@ -673,7 +769,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Tanaka",
 		"displayName": "TANAKA",
-		"dojo":        "Mumeishi",
+		"dojo":        "Gyokusen",
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(body))
@@ -689,13 +785,13 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "TANAKA", loaded[0].DisplayName, "zekken must round-trip through participants.csv")
-	assert.Equal(t, "Mumeishi", loaded[0].Dojo)
+	assert.Equal(t, "Gyokusen", loaded[0].Dojo)
 
 	// Replace forwarding a new zekken.
 	replBody, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Yamamoto",
 		"displayName": "YAMAMOTO",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 	})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
@@ -708,14 +804,14 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "YAMAMOTO", loaded[0].DisplayName, "operator-supplied zekken must persist through replace")
 	assert.Equal(t, "Akira Yamamoto", loaded[0].Name)
-	assert.Equal(t, "Senbukan", loaded[0].Dojo)
+	assert.Equal(t, "Raizan", loaded[0].Dojo)
 
 	// Replace with empty displayName — the backend must re-derive from the new
 	// name (NOT inherit the previous "YAMAMOTO"), matching non-zekken behavior.
 	replBody, _ = json.Marshal(map[string]interface{}{
 		"name":        "Kenji Sato",
 		"displayName": "",
-		"dojo":        "Senbukan",
+		"dojo":        "Raizan",
 	})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
@@ -791,7 +887,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 		}()
 
 		wg.Wait()
-		assert.NoError(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
+		assert.NoErrorf(t, <-startErrCh, "iteration %d: status-flip goroutine must not error", i)
 		assert.True(t, replCode == http.StatusOK || replCode == http.StatusConflict,
 			"iteration %d: replace must return 200 or 409, got %d", i, replCode)
 
@@ -805,7 +901,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 				"iteration %d: returned player name must match request", i)
 
 			reloaded, err := store.LoadParticipants(compID, false)
-			require.NoError(t, err, "iteration %d: must be able to reload participants after 200", i)
+			require.NoErrorf(t, err, "iteration %d: must be able to reload participants after 200", i)
 			found := false
 			for _, p := range reloaded {
 				if p.ID == player.ID {
@@ -815,7 +911,251 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 					break
 				}
 			}
-			assert.True(t, found, "iteration %d: replaced participant must still exist in roster", i)
+			assert.Truef(t, found, "iteration %d: replaced participant must still exist in roster", i)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Whitespace-only danGrade must not persist as a blank metadata entry
+// Tests both POST (add) and PUT (replace) paths — mirrors the registration
+// handler's analogous test (TestRegistration_POST_WhitespaceDanGrade_NotPersisted).
+// ---------------------------------------------------------------------------
+
+func TestParticipants_WhitespaceDanGrade_NotPersisted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const compID = "comp-ws-dan-admin"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Whitespace Dan Test",
+		Status: state.CompStatusSetup,
+	}))
+
+	t.Run("POST add — whitespace danGrade not persisted", func(t *testing.T) {
+		payload := map[string]interface{}{
+			"name":     "Alice Ws",
+			"dojo":     "Dojo",
+			"danGrade": "   ",
+		}
+		b, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Empty(t, players[0].Metadata, "whitespace-only danGrade must not persist")
+	})
+
+	t.Run("PUT replace — whitespace danGrade not persisted", func(t *testing.T) {
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		pid := players[0].ID
+
+		payload := map[string]interface{}{
+			"name":     "Alice Ws",
+			"dojo":     "Dojo",
+			"danGrade": "  ",
+		}
+		b, _ := json.Marshal(payload)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+pid, bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		updated, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		require.Len(t, updated, 1)
+		assert.Empty(t, updated[0].Metadata, "whitespace-only danGrade must not persist on replace")
+	})
+}
+
+// TestPutParticipant_DrawReady_Succeeds verifies that PUT /participants/:pid
+// returns 200 (not 409) when the competition is in draw-ready state, and that
+// the change cascades through pools.csv.
+func TestPutParticipant_DrawReady_Succeeds(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-draw-ready-put"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Draw-Ready PUT Test",
+		Status:       state.CompStatusSetup,
+		Format:       state.CompFormatMixed,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Kind:         "individual",
+	}))
+
+	// Add 6 participants so the pool generator has enough players (pool size ≥ 2).
+	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Find Alice's ID.
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	aliceID := ""
+	for _, p := range saved {
+		if p.Name == "Alice" {
+			aliceID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, aliceID, "Alice must have a UUID after save")
+
+	// Generate the draw so we reach draw-ready state.
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// Verify draw-ready.
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+	// PUT Alice → Alicia while draw is pending.
+	payload := map[string]any{"name": "Alicia", "dojo": "DojoA"}
+	body, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equalf(t, http.StatusOK, w.Code, "PUT in draw-ready state must return 200, not 409; body: %s", w.Body.String())
+
+	// Response must include the updated player.
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "Alicia", resp["name"])
+
+	// pools.csv must reflect the new name.
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	aliciaInPools := false
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			if pl.Name == "Alicia" {
+				aliciaInPools = true
+			}
+			assert.NotEqual(t, "Alice", pl.Name, "old name must not remain in pools")
+		}
+	}
+	assert.True(t, aliciaInPools, "Alicia must appear in pools after cascade")
+}
+
+// TestPutParticipant_DrawReady_DojoConflictWarning verifies that when a PUT in
+// draw-ready state introduces a dojo conflict, the response includes a warnings
+// field alongside the player data.
+func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "comp-draw-dojo-warn"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:           compID,
+		Name:         "Dojo Conflict Warning Test",
+		Status:       state.CompStatusSetup,
+		Format:       state.CompFormatMixed,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Kind:         "individual",
+	}))
+
+	// 6 players, each from a unique dojo so the generator can place them freely.
+	names := []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+	players := make([]domain.Player, len(names))
+	for i, n := range names {
+		players[i] = domain.Player{Name: n, Dojo: "Dojo" + string(rune('A'+i))}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// After draw, find a pool-mate of Alice and change their dojo to Alice's
+	// dojo. This deterministically creates a conflict regardless of pool layout.
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	var aliceDojo, targetName, targetDojo string
+	for _, p := range pools {
+		aliceInPool := false
+		for _, pl := range p.Players {
+			if pl.Name == "Alice" {
+				aliceDojo = pl.Dojo
+				aliceInPool = true
+			}
+		}
+		if aliceInPool {
+			for _, pl := range p.Players {
+				if pl.Name != "Alice" {
+					targetName = pl.Name
+					targetDojo = pl.Dojo
+					break
+				}
+			}
+			break
+		}
+	}
+	require.NotEmpty(t, targetName, "must find a pool-mate of Alice")
+	require.NotEqual(t, aliceDojo, targetDojo, "pool-mate must have a different dojo")
+
+	saved, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	targetID := ""
+	for _, p := range saved {
+		if p.Name == targetName {
+			targetID = p.ID
+			break
+		}
+	}
+	require.NotEmpty(t, targetID)
+
+	// Replace the pool-mate with a new participant from Alice's dojo.
+	payload := map[string]any{"name": "Grace", "dojo": aliceDojo}
+	body, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+targetID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equalf(t, http.StatusOK, w.Code, "PUT must succeed even with dojo conflict; body: %s", w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	// Dojo conflict warning MUST be present — we deterministically created one.
+	ws, ok := resp["warnings"]
+	require.True(t, ok, "warnings must be present when dojo conflict exists")
+	wsSlice, ok := ws.([]any)
+	require.True(t, ok, "warnings must be a JSON array")
+	require.NotEmpty(t, wsSlice, "at least one dojo conflict warning expected")
+	assert.Contains(t, wsSlice[0], "dojo conflict")
+
+	// Grace must be in pools.
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	graceFound := false
+	for _, p := range poolsAfter {
+		for _, pl := range p.Players {
+			if pl.Name == "Grace" {
+				graceFound = true
+			}
+		}
+	}
+	assert.True(t, graceFound, "Grace must appear in pools after cascade")
 }

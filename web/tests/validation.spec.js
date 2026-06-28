@@ -16,7 +16,7 @@ describe("escapeHtml", () => {
     });
 
     it("returns plain text unchanged", () => {
-        expect(escapeHtml("Jane Doe, Mushin Dojo")).toBe("Jane Doe, Mushin Dojo");
+        expect(escapeHtml("Jane Doe, Enzan Dojo")).toBe("Jane Doe, Enzan Dojo");
     });
 });
 
@@ -52,7 +52,7 @@ describe("normalizeNameForValidation", () => {
 
 describe("getParticipantValidationState", () => {
     it("flags a valid two-column entry as no-issues", () => {
-        const state = getParticipantValidationState("Jane Doe, Mushin Dojo", false);
+        const state = getParticipantValidationState("Jane Doe, Enzan Dojo", false);
         expect(state.errors).toEqual([]);
         expect(state.warnings).toEqual([]);
         expect(state.participantCount).toBe(1);
@@ -67,7 +67,7 @@ describe("getParticipantValidationState", () => {
 
     it("errors on duplicate participant entries", () => {
         const state = getParticipantValidationState(
-            "Jane Doe, Mushin Dojo\nJane Doe, Mushin Dojo",
+            "Jane Doe, Enzan Dojo\nJane Doe, Enzan Dojo",
             false
         );
         expect(state.errors.length).toBe(1);
@@ -75,14 +75,14 @@ describe("getParticipantValidationState", () => {
     });
 
     it("requires three columns when zekken mode is enabled", () => {
-        const state = getParticipantValidationState("Jane Doe, Mushin Dojo", true);
+        const state = getParticipantValidationState("Jane Doe, Enzan Dojo", true);
         expect(state.errors.length).toBe(1);
         expect(state.errors[0]).toMatch(/Name, ZekkenName, Dojo/);
     });
 
     it("treats zekken duplicates as duplicates regardless of case", () => {
         const state = getParticipantValidationState(
-            "John Smith, JOHN, Mushin Dojo\nJohn Smith, john, Mushin Dojo",
+            "John Smith, JOHN, Enzan Dojo\nJohn Smith, john, Enzan Dojo",
             true
         );
         expect(state.errors.length).toBe(1);
@@ -98,7 +98,7 @@ describe("getParticipantValidationState", () => {
 
     it("emits an info note when extra metadata columns are detected", () => {
         const state = getParticipantValidationState(
-            "Jane Doe, Mushin Dojo, 4-dan",
+            "Jane Doe, Enzan Dojo, 4-dan",
             false
         );
         expect(state.infos.length).toBe(1);

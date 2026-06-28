@@ -40,14 +40,14 @@ describe('mp-p7n: Apply with clean 2-col paste does not introduce a phantom lead
   // shape `${compID}-p${i+1}`. With compID="asddasd" this matches the
   // bug-report screenshot's "Asddasd-P1..P8" pattern.
   const SAMPLE_PLAYERS = [
-    { id: 'asddasd-p1', name: 'Aaron Adams',    dojo: 'Team Alpha',   displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p2', name: 'Albus Blake',    dojo: 'Team Delta',   displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p3', name: 'Arthur Dick',    dojo: 'Team Gamma',   displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p4', name: 'Benjamin Granger', dojo: 'Team Lambda', displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p5', name: 'Bilbo Herbert',  dojo: 'Team Omega',   displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p6', name: 'Bram Lannister', dojo: 'Team Pi',      displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p7', name: 'Caleb Martinez', dojo: 'Team Sigma',   displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
-    { id: 'asddasd-p8', name: 'Charles Rodriguez', dojo: 'Team Upsilon', displayName: '', danGrade: '', tag: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p1', name: 'Aaron Adams',    dojo: 'Team Alpha',   displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p2', name: 'Albus Blake',    dojo: 'Team Delta',   displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p3', name: 'Arthur Dick',    dojo: 'Team Gamma',   displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p4', name: 'Benjamin Granger', dojo: 'Team Lambda', displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p5', name: 'Bilbo Herbert',  dojo: 'Team Omega',   displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p6', name: 'Bram Lannister', dojo: 'Team Pi',      displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p7', name: 'Caleb Martinez', dojo: 'Team Sigma',   displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
+    { id: 'asddasd-p8', name: 'Charles Rodriguez', dojo: 'Team Upsilon', displayName: '', danGrade: '', source: null, seed: null, checkedIn: false },
   ];
 
   it('initial textarea (from c.players) renders 2-col lines, not 3-col with id prefix', () => {
@@ -105,7 +105,7 @@ describe('mp-p7n: Apply with clean 2-col paste does not introduce a phantom lead
     // the screenshot so we can detect any regression that re-introduces
     // it during Apply.
     const corrupt = [
-      { id: 'x', name: 'Asddasd-P1', dojo: 'Aaron Adams', danGrade: 'Team Alpha', tag: null, seed: null, checkedIn: false, displayName: '' },
+      { id: 'x', name: 'Asddasd-P1', dojo: 'Aaron Adams', danGrade: 'Team Alpha', source: null, seed: null, checkedIn: false, displayName: '' },
     ];
     const text = generateText(corrupt, false);
     // This is the BUG output. The test pins this so a fix that ALSO
@@ -118,8 +118,8 @@ describe('mp-p7n: Apply with clean 2-col paste does not introduce a phantom lead
     // opposite must be true: starting from corrupt state, an Apply of
     // clean text should REMOVE the corruption. Pin that contract.
     const corrupt = [
-      { id: 'asddasd-p1', name: 'Asddasd-P1', dojo: 'Aaron Adams', danGrade: 'Team Alpha', tag: null, seed: null, checkedIn: false, displayName: '' },
-      { id: 'asddasd-p2', name: 'Asddasd-P2', dojo: 'Albus Blake', danGrade: 'Team Delta', tag: null, seed: null, checkedIn: false, displayName: '' },
+      { id: 'asddasd-p1', name: 'Asddasd-P1', dojo: 'Aaron Adams', danGrade: 'Team Alpha', source: null, seed: null, checkedIn: false, displayName: '' },
+      { id: 'asddasd-p2', name: 'Asddasd-P2', dojo: 'Albus Blake', danGrade: 'Team Delta', source: null, seed: null, checkedIn: false, displayName: '' },
     ];
     const userTypedLines = ['Aaron Adams, Team Alpha', 'Albus Blake, Team Delta'];
     const parsed = parseParticipantLines(userTypedLines, false);

@@ -62,11 +62,14 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 		for rIdx, round := range bracket.Rounds {
 			for mIdx, m := range round {
 				if m.ID == matchID {
-					if result.SideA == "" {
-						result.SideA = m.SideA
+					if !bracketMatchPlayable(&bracket.Rounds[rIdx][mIdx]) {
+						return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
 					}
-					if result.SideB == "" {
-						result.SideB = m.SideB
+					// Match identity is fixed at seeding; a score must not
+					// rewrite it. Backfill omitted sides; reject a non-empty
+					// payload side that disagrees with the resolved pairing.
+					if reconcileSides(result, m.SideA, m.SideB) {
+						return ErrMatchSideMismatch
 					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
@@ -81,6 +84,12 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					bracket.Rounds[rIdx][mIdx].DecisionBy = result.DecisionBy
 					bracket.Rounds[rIdx][mIdx].DecisionReason = result.DecisionReason
 					bracket.Rounds[rIdx][mIdx].Encho = result.Encho
+					if result.ResultSource != "" {
+						bracket.Rounds[rIdx][mIdx].ResultSource = result.ResultSource
+					}
+					if result.CorrectionReason != "" {
+						bracket.Rounds[rIdx][mIdx].CorrectionReason = result.CorrectionReason
+					}
 					// nil = omitted (preserve stored data); non-nil [] = explicit clear.
 					if result.SubResults != nil {
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
@@ -236,19 +245,65 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// hasn't moved under us — we hold the lock).
 	prior, _ := e.lookupExistingResultTx(tx, compID, matchID)
 
+	// mp-e2k1: For mixed competitions, capture the pre-write standings for
+	// the match's pool so we can compare after the write and detect whether
+	// any qualifying finisher would be displaced from a started knockout match.
+	// We only need this for re-scores (prior != nil) in mixed comps.
+	var (
+		poolRescoredName string   // pool this match belongs to (empty = not a pool match)
+		oldTopN          []string // qualifying finisher names BEFORE the write
+		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
+	)
+	if prior != nil {
+		// Fail closed at the gate too: if the competition record can't be read
+		// we can't tell whether this re-score needs the guard, so abort rather
+		// than let a potentially-unsafe re-score through. Nothing is staged yet,
+		// so returning here aborts cleanly. (First scores have prior == nil and
+		// skip this block entirely, so non-re-score writes are unaffected.)
+		comp, compErr := tx.LoadCompetition(compID)
+		if compErr != nil {
+			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
+		}
+		if comp != nil && comp.Format == state.CompFormatMixed {
+			// Only actual pool matches ("Pool X-…") can change pool finishers.
+			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i") — whose ID
+			// would otherwise parse as a pool via poolNameFromMatchID's trailing
+			// "-<digits>" rule — skips the standings pre-read entirely.
+			if pn, ok := poolNameFromMatchID(matchID); ok && IsPoolMatchID(matchID) {
+				poolRescoredName = pn
+				poolWinners = comp.EffectivePoolWinners()
+				// Fail closed: if we can't establish the pre-write finishers we
+				// can't prove the re-score is safe, so abort before writing
+				// anything (nothing is staged yet, so returning aborts cleanly).
+				preStandings, sErr := e.computeStandingsFrom(tx, compID)
+				if sErr != nil {
+					return nil, fmt.Errorf("mp-e2k1: pre-write standings for %s pool %q: %w", compID, pn, sErr)
+				}
+				ps := preStandings[pn]
+				for i := 0; i < poolWinners && i < len(ps); i++ {
+					oldTopN = append(oldTopN, ps[i].Player.Name)
+				}
+			}
+		}
+	}
+
+	var sideMismatch bool
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
+		if reconcileSides(result, r.SideA, r.SideB) {
+			sideMismatch = true
+			return // leave the stored match untouched
 		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
-		}
+		// Preserve generation-time participant ids + resolve winner id across
+		// the whole-struct overwrite below (the /score endpoint scores through
+		// this Tx path). See backfillMatchIdentity.
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -258,7 +313,62 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if err := e.recordBracketMatchResultTx(tx, compID, matchID, result); err != nil {
 			return nil, err
 		}
+	} else if sideMismatch {
+		// Match identity is fixed at generation; a score payload naming
+		// different competitors is rejected (HTTP 409) rather than allowed to
+		// overwrite the stored pairing. Returns before any side-effect write.
+		return nil, ErrMatchSideMismatch
 	}
+
+	// mp-e2k1 guard: after the pool-match write, check whether any
+	// qualifying finisher changed. If a displaced finisher already appears
+	// in a started/completed bracket match, reject the re-score.
+	if err == nil && poolRescoredName != "" && len(oldTopN) > 0 {
+		// Fail closed on any verification-read failure past this point: the
+		// forward write is already staged, so we restore prior before returning
+		// the error — never silently commit a re-score we couldn't prove safe.
+		postStandings, sErr := e.computeStandingsFrom(tx, compID)
+		if sErr != nil {
+			e.rollbackMatchResultTx(tx, compID, matchID, prior)
+			return nil, fmt.Errorf("mp-e2k1: post-write standings for %s pool %q: %w", compID, poolRescoredName, sErr)
+		}
+		ps := postStandings[poolRescoredName]
+		// Build new top-N set and find displaced names. poolWinners was
+		// captured pre-write — the competition record can't change within
+		// this tx, so no reload is needed.
+		newSet := make(map[string]struct{}, poolWinners)
+		for i := 0; i < poolWinners && i < len(ps); i++ {
+			newSet[ps[i].Player.Name] = struct{}{}
+		}
+		var displaced []string
+		for _, name := range oldTopN {
+			if _, stillIn := newSet[name]; !stillIn {
+				displaced = append(displaced, name)
+			}
+		}
+		if len(displaced) > 0 {
+			blockingFinisher, knockoutMatchID, hErr := e.hasStartedKnockoutMatchTx(tx, compID, displaced)
+			if hErr != nil {
+				e.rollbackMatchResultTx(tx, compID, matchID, prior)
+				return nil, fmt.Errorf("mp-e2k1: checking started knockout matches for %s: %w", compID, hErr)
+			}
+			if blockingFinisher != "" {
+				// Reject: restore the prior result so the corrupting re-score
+				// never lands. Within a tx, writes are in-memory WAL intents
+				// coalesced last-write-wins, so this rollback supersedes the
+				// forward write before Commit applies the final state. Report the
+				// finisher actually sitting in the blocking match so Finisher and
+				// MatchID stay consistent (matters when poolWinners > 1).
+				e.rollbackMatchResultTx(tx, compID, matchID, prior)
+				return nil, &DownstreamKnockoutScoredError{
+					Pool:     poolRescoredName,
+					Finisher: blockingFinisher,
+					MatchID:  knockoutMatchID,
+				}
+			}
+		}
+	}
+
 	status, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result)
 	if err != nil {
 		var alreadyErr *AlreadyIneligibleError
@@ -268,25 +378,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			// but the intended loser is already ineligible from a
 			// different match — revert before returning 409.
 			if prior != nil {
-				// Normalize nil SubResults to an explicit empty slice so
-				// the nil-preserve branch in recordBracketMatchResultTx
-				// treats this as "clear sub-results" rather than "leave
-				// the partially-written SubResults in place".
-				if prior.SubResults == nil {
-					prior.SubResults = []state.SubMatchResult{}
-				}
-				// Same nil-collision on the sibling field: lookupExistingResultTx
-				// projects DecidedByHantei through HanteiPtr, which collapses a
-				// stored false to nil. nil then hits the nil-preserve branch in
-				// recordBracketMatchResultTx, leaving a partially-written hantei
-				// flag in place. Force an explicit false so rollback clears it.
-				if prior.DecidedByHantei == nil {
-					clearHantei := false
-					prior.DecidedByHantei = &clearHantei
-				}
-				if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
-					log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
-				}
+				e.rollbackMatchResultTx(tx, compID, matchID, prior)
 			}
 			return nil, err
 		}
@@ -297,6 +389,32 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	return status, nil
 }
 
+// rollbackMatchResultTx restores prior over a partial score-write within the
+// same transaction. Shared by the two reject paths in
+// RecordMatchResultWithIneligibilityTx: K3 (AlreadyIneligible) and mp-e2k1
+// (downstream knockout already scored). Within a tx, writes are in-memory WAL
+// intents coalesced last-write-wins, so this restore supersedes the forward
+// write before Commit applies the final state. prior must be non-nil.
+//
+// It normalizes two nil-collision fields before restoring:
+//   - SubResults nil → explicit empty slice, so recordBracketMatchResultTx
+//     treats it as "clear sub-results" rather than leaving the partial write.
+//   - DecidedByHantei nil → explicit false: lookupExistingResultTx projects the
+//     flag through HanteiPtr, which collapses a stored false to nil; nil would
+//     hit the nil-preserve branch and leave the partial hantei flag in place.
+func (e *Engine) rollbackMatchResultTx(tx state.StoreTx, compID, matchID string, prior *state.MatchResult) {
+	if prior.SubResults == nil {
+		prior.SubResults = []state.SubMatchResult{}
+	}
+	if prior.DecidedByHantei == nil {
+		clearHantei := false
+		prior.DecidedByHantei = &clearHantei
+	}
+	if rerr := e.recordMatchResultTx(tx, compID, matchID, prior); rerr != nil {
+		log.Printf("engine: RecordMatchResultWithIneligibilityTx rollback failed compId=%s matchId=%s: %v", compID, matchID, rerr)
+	}
+}
+
 // recordMatchResultTx is the tx-aware twin of RecordMatchResult. Used
 // exclusively by the K3 partial-write rollback inside
 // RecordMatchResultWithIneligibilityTx — the prior result is restored
@@ -304,18 +422,22 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) error {
 	result.ID = matchID
 	err := e.withPoolMatchTx(tx, compID, matchID, func(r *state.MatchResult) {
-		if result.SideA == "" {
-			result.SideA = r.SideA
-		}
-		if result.SideB == "" {
-			result.SideB = r.SideB
-		}
+		// Identity reconciliation only backfills here: this path restores a
+		// trusted prior snapshot (K3 rollback), not a client payload, so the
+		// stored sides always match — the mismatch result is intentionally
+		// ignored rather than turned into a rejection.
+		_ = reconcileSides(result, r.SideA, r.SideB)
+		// Preserve generation-time participant ids + resolve winner id across
+		// the whole-struct overwrite below (the /score endpoint scores through
+		// this Tx path). See backfillMatchIdentity.
+		backfillMatchIdentity(result, r)
 		if result.Court == "" {
 			result.Court = r.Court
 		}
 		if result.ScheduledAt == "" {
 			result.ScheduledAt = r.ScheduledAt
 		}
+		result.Round = r.Round
 		*r = *result
 	})
 	if err != nil {
@@ -400,8 +522,9 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 
 // StartMatchTx is the tx-aware FR-035 gate. Same contract as
 // StartMatch: returns *IneligibleCompetitorError when any participant
-// in matchID is marked ineligible from a *different* match. The
-// undo-path is permitted (status with MatchID==matchID is skipped).
+// in matchID is marked ineligible from a *different* match or is
+// currently Running in a different match (Phase 2c simultaneity gate).
+// The undo-path is permitted (status with MatchID==matchID is skipped).
 //
 // The score handler wraps RecordMatchResultWithIneligibilityTx with
 // this check so a fought / hikiwake score on a match whose
@@ -410,6 +533,12 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 // RecordDecisionTx, which intentionally bypasses this gate — they ARE
 // the act of recording a new withdrawal.
 func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
+	if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
+		return err
+	}
+	if err := e.checkSimultaneousMatchTx(tx, compID, matchID); err != nil {
+		return err
+	}
 	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
 	if err != nil {
 		return err
@@ -438,6 +567,175 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 		}
 	}
 	return nil
+}
+
+// checkSimultaneousMatchTx is the tx-aware twin of checkSimultaneousMatch.
+// Returns *IneligibleCompetitorError if either participant in matchID is
+// currently Running in a different match within the same competition.
+//
+// Phase 2c simultaneity gate.
+func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID string) error {
+	sideA, sideB, err := e.lookupMatchSidesTx(tx, compID, matchID)
+	if err != nil {
+		return nil
+	}
+	if sideA == "" && sideB == "" {
+		return nil
+	}
+
+	idA, idB := resolvePlayerIDsTx(tx, compID, sideA, sideB)
+
+	poolMatches, err := tx.LoadPoolMatches(compID)
+	if err == nil {
+		for _, m := range poolMatches {
+			if m.ID == matchID || m.Status != state.MatchStatusRunning {
+				continue
+			}
+			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
+				}
+			}
+		}
+	}
+
+	bracket, berr := tx.LoadBracket(compID)
+	if berr == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+					return &IneligibleCompetitorError{
+						PlayerID: idA,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+					return &IneligibleCompetitorError{
+						PlayerID: idB,
+						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkCourtExclusivityTx checks that no OTHER match in compID's own pool or
+// bracket is already running on the same court. The cross-competition check is
+// intentionally omitted here: calling store.RunningMatchOnCourt (which acquires
+// read locks on other competitions) while holding compID's write lock via
+// WithTransaction risks a circular-wait deadlock if another competition is
+// simultaneously in its own WithTransaction. The cross-competition check is
+// performed by CheckCrossCompCourtBusy before WithTransaction is entered.
+func (e *Engine) checkCourtExclusivityTx(tx state.StoreTx, compID, matchID string) error {
+	court, err := lookupMatchCourtTx(tx, compID, matchID)
+	if err != nil {
+		return err
+	}
+	if court == "" {
+		return nil
+	}
+	occ, err := courtOccupiedInCompTx(tx, compID, court, matchID)
+	if err != nil {
+		return err
+	}
+	if occ != nil {
+		return &CourtBusyError{Court: court, MatchID: occ.MatchID, CompID: occ.CompID}
+	}
+	return nil
+}
+
+func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error) {
+	poolMatches, err := tx.LoadPoolMatches(compID)
+	if err != nil {
+		return "", err
+	}
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.Court, nil
+		}
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return "", err
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == matchID {
+					return bm.Court, nil
+				}
+			}
+		}
+	}
+	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
+}
+
+// courtOccupiedInCompTx scans compID's pool matches and bracket (via tx)
+// for any match — other than skipMatchID — that is Running on court.
+func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) (*state.CourtOccupancy, error) {
+	poolMatches, err := tx.LoadPoolMatches(compID)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range poolMatches {
+		if m.ID == skipMatchID || m.Status != state.MatchStatusRunning {
+			continue
+		}
+		if m.Court == court {
+			return &state.CourtOccupancy{CompID: compID, MatchID: m.ID}, nil
+		}
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return nil, err
+	}
+	if bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, bm := range round {
+				if bm.ID == skipMatchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if bm.Court == court {
+					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+				}
+			}
+		}
+	}
+	return nil, nil
+}
+
+func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {
+	comp, err := tx.LoadCompetition(compID)
+	if err != nil || comp == nil {
+		return sideA, sideB
+	}
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	if err != nil {
+		return sideA, sideB
+	}
+	pool := combinedPlayerPool(comp.Players, participants)
+	idA := lookupPlayerID(pool, sideA)
+	if idA == "" {
+		idA = sideA
+	}
+	idB := lookupPlayerID(pool, sideB)
+	if idB == "" {
+		idB = sideB
+	}
+	return idA, idB
 }
 
 // checkConcurrentIneligibilityTx is the tx-aware twin of
@@ -532,6 +830,66 @@ func (e *Engine) hasDownstreamMatchStartedTx(tx state.StoreTx, compID string, pl
 	return false, nil
 }
 
+// hasStartedKnockoutMatchTx reports whether any BRACKET (knockout) match
+// with status running or completed currently lists one of playerNames as a
+// side. This is the bracket-only twin of hasDownstreamMatchStartedTx —
+// pool matches are intentionally NOT scanned because a pool finisher
+// legitimately appears in their own completed pool bouts, which must NOT
+// trip the guard.
+//
+// mp-e2k1.
+func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, playerNames []string) (matchedName, matchID string, err error) {
+	wantSet := make(map[string]struct{}, len(playerNames))
+	for _, n := range playerNames {
+		if n != "" {
+			wantSet[n] = struct{}{}
+		}
+	}
+	if len(wantSet) == 0 {
+		return "", "", nil
+	}
+	// matchedSide returns the displaced name found on this match (a or b), or ""
+	// if neither side is one of the displaced finishers. Returning the name keeps
+	// the caller's error payload consistent: the reported Finisher is the one
+	// actually sitting in the blocking match, not just displaced[0].
+	matchedSide := func(a, b string) string {
+		if _, ok := wantSet[a]; ok {
+			return a
+		}
+		if _, ok := wantSet[b]; ok {
+			return b
+		}
+		return ""
+	}
+	isStarted := func(s state.MatchStatus) bool {
+		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		// A genuinely absent bracket is NOT an error — LoadBracket maps a
+		// missing file to an empty bracket with nil error (parseBracketFile,
+		// os.IsNotExist). So a non-nil error here is a real fault (corrupt
+		// bracket.json, permission/IO error). Propagate it rather than treating
+		// it as "no started knockout match", which would let the caller's guard
+		// fail open and allow a re-score that should be blocked.
+		return "", "", err
+	}
+	if bracket == nil {
+		return "", "", nil
+	}
+	for _, round := range bracket.Rounds {
+		for _, bm := range round {
+			if !isStarted(bm.Status) {
+				continue
+			}
+			if name := matchedSide(bm.SideA, bm.SideB); name != "" {
+				return name, bm.ID, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
 // restoreCompetitorEligibilityTx is the tx-aware twin of
 // restoreCompetitorEligibility.
 func (e *Engine) restoreCompetitorEligibilityTx(tx state.StoreTx, compID, priorLoser, matchID string) (*domain.CompetitorStatus, error) {
@@ -612,7 +970,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	winIppons := make([]string, winningCount)
 	for i := range winIppons {
-		winIppons[i] = "M"
+		winIppons[i] = defaultWinIppon
 	}
 	result := &state.MatchResult{
 		ID:             matchID,

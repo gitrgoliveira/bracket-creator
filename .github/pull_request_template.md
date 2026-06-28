@@ -1,24 +1,64 @@
-<!--- Provide a general summary of your changes in the Title above -->
-
-# Description
-
 <!--
-Please include a summary of the changes and the related issue. Please also include relevant motivation and context. List any dependencies that are required for this change.
+Title: conventional-commit style, e.g.
+  feat(mp-xxxx): short imperative summary
+  fix(mp-xxxx): ...
+  chore: ...
 -->
 
-Fixes #
+## Summary
 
-## Type of change
+<!-- Bullet points: what changed and why it matters. Lead with user-visible behavior. -->
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] This change requires a documentation update
+-
+-
 
-# Checklist:
+<!-- Optional — include when it helps reviewers:
 
-- [ ] I have read the [CONTRIBUTING](https://github.com/gitrgoliveira/bracket-creator/blob/main/.github/CONTRIBUTING.md) document.
-- [ ] I have performed a self-review of my code
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
+## Why
+
+Motivation / root cause. For fixes, state the root cause explicitly.
+
+-->
+
+## Files changed
+
+<!-- REQUIRED. One row per file touched. -->
+
+| File | What |
+|---|---|
+| `path/to/file` | one-line description |
+
+## Screenshots
+
+<!--
+REQUIRED for any change that affects the UI (web-mobile/ or web/) — including
+visual, layout, copy, or behavior changes. Attach before/after images.
+Delete this section only if the change has no UI impact whatsoever.
+
+Agents: `gh gist create` rejects binaries. Push the PNG to the `pr-assets`
+branch (never merged to main) and embed the raw URL:
+  gh api --method PUT .../contents/pr-assets/<pr>/shot.png \
+    -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"
+  ![desc](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)
+A real browser/MCP screenshot is MANDATORY — there is no textual / DOM /
+geometry substitute. If you have not captured one yet, the PR is not ready:
+capture it (Playwright or equivalent headless browser tooling), then fill this section. Never
+mark a UI PR ready with this section empty. Full recipe: the `/pr-screenshots` skill.
+-->
+
+## Test plan
+
+<!--
+Every box must be checked before the PR is ready. Manual browser steps are NOT
+optional for web-mobile / web changes — run them in a real browser, don't just
+read the diff. See CONTRIBUTING and CLAUDE.md.
+-->
+
+- [ ] `make go/test` passes (lint + security scan + tests)
+- [ ] New/updated unit tests cover the change
+- [ ] Manual browser verification (for `web-mobile/` or `web/` changes) — describe what you exercised
+- [ ] Screenshots added above (REQUIRED for any UI-affecting change)
+- [ ] No new console errors or warnings
+
+<!-- Bead reference: -->
+Closes mp-xxxx

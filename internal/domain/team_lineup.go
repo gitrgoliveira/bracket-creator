@@ -29,7 +29,7 @@ func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 // TeamLineup pins which player occupies each Position for a team in a
 // given round OR for a specific match. The lineup is replaceable up
 // until its match (match-scoped) or its round's first match
-// (round-scoped) goes live, at which point LockedAt is set and further
+// (round-scoped) starts, at which point LockedAt is set and further
 // PUT/PATCH operations are rejected.
 //
 // Keying (mp-825): when MatchID is non-empty the lineup is
@@ -38,7 +38,7 @@ func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 // independently when its own match starts. When MatchID is empty the
 // lineup is round-scoped (the legacy behavior, still used by bracket
 // rounds and pre-mp-825 data): one lineup per (team, round), frozen
-// when the round's first match goes live. The two scopes coexist; a
+// when the round's first match starts. The two scopes coexist; a
 // match-scoped entry shadows the round-scoped fallback for that match.
 //
 // FR-040, data-model §4.
@@ -49,6 +49,11 @@ type TeamLineup struct {
 	MatchID       string              `json:"matchId,omitempty" yaml:"matchId,omitempty"`
 	Positions     map[Position]string `json:"positions" yaml:"positions"`
 	LockedAt      *time.Time          `json:"lockedAt,omitempty" yaml:"lockedAt,omitempty"`
+	// ChangeReason is a mandatory audit justification when an operator
+	// edits a lineup after the match has started (force=true). Format:
+	// "<category>: <note>" (e.g. "Substitution: injury to jiho").
+	// Omitted for pre-match lineup submissions.
+	ChangeReason string `json:"changeReason,omitempty" yaml:"changeReason,omitempty"`
 }
 
 var (
@@ -77,9 +82,7 @@ func (t TeamLineup) Validate(teamSize int) error {
 }
 
 func (t TeamLineup) validateFive() error {
-	allowed := map[Position]struct{}{
-		PosSenpo: {}, PosJiho: {}, PosChuken: {}, PosFukusho: {}, PosTaisho: {},
-	}
+	allowed := allowedPositionSet(5)
 	for pos := range t.Positions {
 		if _, ok := allowed[pos]; !ok {
 			return fmt.Errorf("team_lineup: position %q not allowed in 5-person team", pos)
@@ -121,14 +124,39 @@ func (t TeamLineup) validateFive() error {
 }
 
 func (t TeamLineup) validateNumbered(teamSize int) error {
-	allowed := make(map[Position]struct{}, teamSize)
-	for i := 1; i <= teamSize; i++ {
-		allowed[PositionNumbered(i)] = struct{}{}
+	// Identical to ValidatePositions on the reachable path (Validate already
+	// rejected teamSize <= 0 and dispatched teamSize == 5 to validateFive), so
+	// delegate rather than keep a second copy of the key-check loop.
+	return t.ValidatePositions(teamSize)
+}
+
+// ValidatePositions checks only that the position KEYS are valid for the team
+// size; it does NOT enforce the FIK completeness/vacancy rule. Lineups are
+// entered incrementally while bouts run, so a partial lineup must be
+// persistable — completeness is surfaced as a non-blocking UI warning, not
+// enforced at write time.
+func (t TeamLineup) ValidatePositions(teamSize int) error {
+	if teamSize <= 0 {
+		return ErrLineupTeamSizeInvalid
 	}
+	allowed := allowedPositionSet(teamSize)
 	for pos := range t.Positions {
 		if _, ok := allowed[pos]; !ok {
 			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)
 		}
 	}
 	return nil
+}
+
+// allowedPositionSet returns the valid position keys for a team size: the five
+// FIK names for 5-person teams, else numbered positions 1..teamSize.
+func allowedPositionSet(teamSize int) map[Position]struct{} {
+	if teamSize == 5 {
+		return map[Position]struct{}{PosSenpo: {}, PosJiho: {}, PosChuken: {}, PosFukusho: {}, PosTaisho: {}}
+	}
+	allowed := make(map[Position]struct{}, teamSize)
+	for i := 1; i <= teamSize; i++ {
+		allowed[PositionNumbered(i)] = struct{}{}
+	}
+	return allowed
 }

@@ -100,11 +100,24 @@ describe('parseParticipantLines', () => {
     expect(p.dojo).toBe('checked_in');
   });
 
-  it('detects both tag and checkedIn when "..., tag, checked_in"', () => {
+  it('detects both source and checkedIn when "..., source, checked_in"', () => {
     const [p] = parseParticipantLines(['Name, Dojo, registered, checked_in'], false);
     expect(p.checkedIn).toBe(true);
-    expect(p.tag).toBe('registered');
+    expect(p.source).toBe('registered');
     expect(p.name).toBe('Name');
     expect(p.dojo).toBe('Dojo');
+  });
+
+  it('aliases the legacy "reserved" source to "manual" (mirrors Go)', () => {
+    const [p] = parseParticipantLines(['Jane Doe, Osaka, reserved'], false);
+    expect(p.source).toBe('manual');
+    expect(p.dojo).toBe('Osaka');
+    expect(p.danGrade).toBe(''); // "reserved" consumed as source, not left as danGrade
+  });
+
+  it('leaves an unknown trailing token as danGrade, not source', () => {
+    const [p] = parseParticipantLines(['Bob Lee, Kyoto, vip'], false);
+    expect(p.source).toBe('');
+    expect(p.danGrade).toBe('vip');
   });
 });

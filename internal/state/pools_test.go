@@ -50,6 +50,147 @@ func TestLoadPoolMatchesLocked_WithData(t *testing.T) {
 	assert.Equal(t, "Charlie", results[1].Winner)
 }
 
+// TestPoolMatches_SideIDsRoundTrip verifies the appended SideAID/SideBID
+// columns survive a save→load cycle (the league matrix relies on them to
+// disambiguate same-name participants from different dojos).
+func TestPoolMatches_SideIDsRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	matches := []MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Yamamoto Yuki", SideAID: "uuid-a", SideBID: "uuid-b", Status: MatchStatusScheduled},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "uuid-a", results[0].SideAID)
+	assert.Equal(t, "uuid-b", results[0].SideBID)
+}
+
+// TestPoolMatches_LegacyFileWithoutIDs verifies a pool-matches.csv written
+// before the id columns existed (15 columns) still loads, leaving the id
+// fields empty so consumers fall back to name matching.
+func TestPoolMatches_LegacyFileWithoutIDs(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Legacy"}))
+
+	// 15-column legacy row (header + one data row), no SideAID/SideBID.
+	legacy := "PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource\n" +
+		"Pool A,0,Alice,Bob,,,,0,0,,scheduled,A,,09:00,\n"
+	require.NoError(t, os.WriteFile(store.compPath(compID, "pool-matches.csv"), []byte(legacy), 0600))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Alice", results[0].SideA)
+	assert.Empty(t, results[0].SideAID, "legacy row has no id column → empty")
+	assert.Empty(t, results[0].SideBID)
+}
+
+// TestPoolMatches_RepPlayersRoundTrip verifies the appended RepPlayerA/RepPlayerB
+// columns (mp-62vr) survive a save→load cycle. These name the individual fighter
+// each TEAM fields for a pool/league daihyosen rep bout (SideA/SideB hold the
+// team names).
+func TestPoolMatches_RepPlayersRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	matches := []MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Kyoto Dojo", SideB: "Tokyo Dojo",
+			RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro", Status: MatchStatusScheduled},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Kyoto Dojo", results[0].SideA, "side stays the team name")
+	assert.Equal(t, "Tokyo Dojo", results[0].SideB)
+	assert.Equal(t, "Sato Ren", results[0].RepPlayerA)
+	assert.Equal(t, "Yamada Taro", results[0].RepPlayerB)
+}
+
+// TestPoolMatches_LegacyFileWithoutRepPlayers verifies a pool-matches.csv
+// written before the rep-player columns existed (≤20 columns) still loads,
+// leaving RepPlayerA/RepPlayerB empty (mp-62vr backward-compat).
+func TestPoolMatches_LegacyFileWithoutRepPlayers(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "legacy-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Legacy"}))
+
+	// 20-column row (through CorrectionReason), no RepPlayerA/RepPlayerB.
+	legacy := "PoolName,MatchIdx,SideA,SideB,Winner,IpponsA,IpponsB,HansokuA,HansokuB,Decision,Status,Court,SubResults,ScheduledAt,ResultSource,Round,SideAID,SideBID,WinnerID,CorrectionReason\n" +
+		"Pool A,DH-0,Kyoto Dojo,Tokyo Dojo,,,,0,0,,scheduled,A,,09:00,,-1,,,,\n"
+	require.NoError(t, os.WriteFile(store.compPath(compID, "pool-matches.csv"), []byte(legacy), 0600))
+
+	results, err := store.LoadPoolMatchesLocked(compID)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Kyoto Dojo", results[0].SideA)
+	assert.Empty(t, results[0].RepPlayerA, "legacy row has no rep-player column → empty")
+	assert.Empty(t, results[0].RepPlayerB)
+}
+
+// TestPools_PlayerIDRoundTrip verifies the appended participant-id column in
+// pools.csv survives a save→load cycle so pool.players carry .ID for the
+// league matrix.
+func TestPools_PlayerIDRoundTrip(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "test-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{Name: "Tanaka Kenji", Dojo: "Tokyo", ID: "uuid-1"},
+			{Name: "Yamamoto Yuki", Dojo: "Osaka", ID: "uuid-2"},
+		},
+	}}
+	require.NoError(t, store.SavePools(compID, pools))
+
+	loaded, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	require.Len(t, loaded[0].Players, 2)
+	assert.Equal(t, "uuid-1", loaded[0].Players[0].ID)
+	assert.Equal(t, "uuid-2", loaded[0].Players[1].ID)
+}
+
 func TestLoadPoolMatchesLocked_InvalidCompID(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-pools-test-*")
 	require.NoError(t, err)
@@ -167,6 +308,44 @@ func TestParsePoolMatchesBytes_WithData(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "Alice", results[0].SideA)
+}
+
+// TestParsePoolMatches_EmptyIpponsAreZeroLength is a regression guard: an
+// empty ippon CSV field must parse to a zero-length slice, NOT [""]. The bug
+// was strings.Split("", "|") returning a one-element slice holding "", whose
+// len() == 1 then counted as a phantom point in individual standings —
+// inflating points-lost and breaking pool tie detection (two players who
+// actually tied read as differing by one phantom ippon, so no tiebreaker
+// match was injected).
+func TestParsePoolMatches_EmptyIpponsAreZeroLength(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-ippon-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "ippon-comp"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "T"}))
+
+	// A completed hikiwake (no ippons either side) and a 1-0 win.
+	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
+		{ID: "Pool A-0", SideA: "P", SideB: "R", Winner: "", Decision: "hikiwake", Status: MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "P", SideB: "T", Winner: "P", IpponsA: []string{"M"}, Status: MatchStatusCompleted},
+	}))
+
+	got, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	byID := map[string]MatchResult{}
+	for _, m := range got {
+		byID[m.ID] = m
+	}
+	// Empty fields must be zero-length, not [""].
+	assert.Len(t, byID["Pool A-0"].IpponsA, 0, "empty IpponsA must parse to len 0, not [\"\"]")
+	assert.Len(t, byID["Pool A-0"].IpponsB, 0)
+	assert.Len(t, byID["Pool A-1"].IpponsB, 0, "loser's empty ippons must be len 0")
+	// Non-empty field still parses correctly.
+	assert.Equal(t, []string{"M"}, byID["Pool A-1"].IpponsA)
 }
 
 // TestParsePoolMatchesBytes_MalformedCSV covers the csv.ReadAll error path
@@ -385,4 +564,96 @@ func TestLoadPoolMatches_InvalidCompID(t *testing.T) {
 
 	_, err = store.LoadPoolMatches("../bad")
 	assert.Error(t, err)
+}
+
+// TestParsePoolsFile_DrawOrderSort verifies that parsePoolsFile restores
+// draw order from the persisted col-2 position even when CSV rows are
+// written in a different sequence.
+func TestParsePoolsFile_DrawOrderSort(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-draw-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	// Write a pools.csv where rows appear out of draw order (P2 before P1).
+	// The draw-position column (col 2) records the original 0-indexed order.
+	compDir := dir + "/competitions/sort-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	csv := "Pool A,P2,1,,,0,\nPool A,P1,0,,,0,\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	// Fake competition so the store doesn't reject the compID.
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "sort-test", Name: "Sort Test"}))
+
+	loaded, err := store.LoadPools("sort-test")
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	// P1 (draw pos 0 → PoolPosition 1) must appear before P2 (draw pos 1 → PoolPosition 2)
+	require.Len(t, loaded[0].Players, 2)
+	assert.Equal(t, "P1", loaded[0].Players[0].Name, "P1 should be first (draw pos 0)")
+	assert.Equal(t, "P2", loaded[0].Players[1].Name, "P2 should be second (draw pos 1)")
+	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
+	assert.Equal(t, int64(2), loaded[0].Players[1].PoolPosition)
+}
+
+// TestParsePoolsFile_InvalidPosition verifies that negative or non-integer
+// col-2 values fall back to 1-based append order rather than corrupting
+// draw order.
+func TestParsePoolsFile_InvalidPosition(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-inv-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	compDir := dir + "/competitions/inv-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	// Row 1: negative position (-1) → must use fallback (append order = 1)
+	// Row 2: non-integer ("x") → must use fallback (append order = 2)
+	// Row 3: valid position (2) → PoolPosition 3 (pos+1)
+	csv := "Pool A,P1,-1,,,0,\nPool A,P2,x,,,0,\nPool A,P3,2,,,0,\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "inv-test", Name: "Inv Test"}))
+
+	loaded, err := store.LoadPools("inv-test")
+	require.NoError(t, err)
+	require.Len(t, loaded[0].Players, 3)
+	// P1 and P2 get append-order defaults (1, 2); P3 gets pos+1=3.
+	// Stable sort: 1 < 2 < 3, so order is P1, P2, P3 — row order preserved.
+	assert.Equal(t, "P1", loaded[0].Players[0].Name)
+	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
+	assert.Equal(t, "P2", loaded[0].Players[1].Name)
+	assert.Equal(t, int64(2), loaded[0].Players[1].PoolPosition)
+	assert.Equal(t, "P3", loaded[0].Players[2].Name)
+	assert.Equal(t, int64(3), loaded[0].Players[2].PoolPosition)
+}
+
+// TestParsePoolsFile_LegacyNoCol2 verifies that legacy CSV files without a
+// draw-position column (col 2) load in row order via stable sort on the
+// 1-based append-order defaults.
+func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {
+	dir, err := os.MkdirTemp("", "state-pools-test-legacy-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	compDir := dir + "/competitions/legacy-test"
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	// Only pool name + player name columns — no draw-position column.
+	csv := "Pool A,Alice\nPool A,Bob\nPool A,Charlie\n"
+	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&Competition{ID: "legacy-test", Name: "Legacy"}))
+
+	loaded, err := store.LoadPools("legacy-test")
+	require.NoError(t, err)
+	require.Len(t, loaded[0].Players, 3)
+	// Append-order defaults are unique (1, 2, 3), so row order is preserved.
+	assert.Equal(t, "Alice", loaded[0].Players[0].Name)
+	assert.Equal(t, "Bob", loaded[0].Players[1].Name)
+	assert.Equal(t, "Charlie", loaded[0].Players[2].Name)
 }

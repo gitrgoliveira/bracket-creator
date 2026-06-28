@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -44,16 +45,19 @@ func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) Elev
 // is the HTTP handler; the returned *Hub is exposed so the caller
 // (cmd/mobile_app.go) can call Hub.Close() from a graceful-shutdown
 // hook — without that, http.Server.Shutdown would block forever on
-// the long-lived SSE goroutines.
-func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub) {
-	return NewRouterWithHub(store, eng, res, verifier, NewHub())
+// the long-lived SSE goroutines. The returned *APIRateLimiter should
+// also be closed on shutdown to stop the per-IP cleanup goroutine.
+func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub, *APIRateLimiter) {
+	return NewRouterWithHub(store, eng, res, verifier, NewHub(), false)
 }
 
 // NewRouterWithHub is the testable / configurable variant — pass a
 // pre-built Hub (e.g. one with NewHubWithLimits) instead of constructing
 // the default. cmd/mobile_app.go uses this to apply the SSE_MAX_CLIENTS
 // override; tests use it to inject a small-capacity hub.
-func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub) (*gin.Engine, *Hub) {
+// scheduleEnabled is sourced from ENABLE_TOURNAMENT_SCHEDULE (mp-fwce) and
+// forwarded to RegisterAuthConfigHandlers.
+func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier, hub *Hub, scheduleEnabled bool) (*gin.Engine, *Hub, *APIRateLimiter) {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
@@ -83,6 +87,40 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
+	rateLimitVal := 5000.0
+	if val, exists := os.LookupEnv("API_RATE_LIMIT"); exists {
+		if parsed, err := strconv.ParseFloat(val, 64); err == nil && parsed > 0 {
+			rateLimitVal = parsed
+		} else {
+			slog.Warn("mobile-app: invalid API_RATE_LIMIT (must be > 0), falling back to default", "val", val)
+		}
+	}
+
+	burstVal := 10000
+	if val, exists := os.LookupEnv("API_RATE_LIMIT_BURST"); exists {
+		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
+			burstVal = parsed
+		} else {
+			slog.Warn("mobile-app: invalid API_RATE_LIMIT_BURST (must be > 0), falling back to default", "val", val)
+		}
+	}
+
+	slog.Info("mobile-app: api rate limit configured", "globalRate", rateLimitVal, "globalBurst", burstVal, "perIPRate", DefaultPerIPRate, "perIPBurst", DefaultPerIPBurst)
+
+	// Two-layer rate limiting for API endpoints:
+	//   1. Per-IP: prevents a single client from starving others (100 req/s default)
+	//   2. Global: circuit breaker for total server capacity (5000 req/s default)
+	// Both layers are zero-config with automatic cleanup of idle IP entries.
+	apiLimiter := NewAPIRateLimiter(rateLimitVal, burstVal)
+	apiRateLimiter := apiLimiter.Middleware()
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			apiRateLimiter(c)
+		} else {
+			c.Next()
+		}
+	})
+
 	// SSE Events endpoint
 	r.GET("/api/events", hub.HandleEvents())
 
@@ -99,6 +137,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// `make run` and `make run-mobile` frontends.
 	api := r.Group("/api")
 	RegisterScheduleHandlers(api)
+	RegisterVersionHandlers(api)
 
 	// Public read-only endpoints for resources whose GET is unauthenticated
 	// (same contract as /api/viewer/*). The write paths for each are on the
@@ -114,6 +153,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
 	RegisterPublicAnnouncementHandlers(api, store)
+	RegisterPublicRegistrationHandlers(api, store, hub)
+	RegisterPublicSponsorHandlers(api, store)
+	RegisterPublicBrandingHandlers(api, store)
+	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
 	// outside the admin group: /reset is the recovery path for a
@@ -123,7 +166,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// inert payloads when locked mode is active — see handlers_reset.go
 	// and handlers_auth_config.go.
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier, elevated)
+	RegisterAuthConfigHandlers(api, verifier, elevated, scheduleEnabled)
 
 	// Admin API endpoints (protected). Split into three sub-groups by
 	// expected body size so the body cap fires BEFORE AuthMiddleware at
@@ -142,17 +185,33 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
 	RegisterAdminPasswordHandler(adminSmallBody, store, elevated)
 	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub, elevated)
-	RegisterParticipantHandlers(adminSmallBody, store, hub, elevated)
-	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub)
+	RegisterParticipantHandlers(adminSmallBody, store, eng, hub, elevated)
+	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
-	RegisterLineupHandlers(adminSmallBody, store, store, store)
+	RegisterLineupHandlers(adminSmallBody, store, store, store, hub)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
+	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
+
+	// PDF export — POST body is effectively empty (type in URL param only);
+	// uses DefaultMaxBodyBytes for consistency with the other admin JSON tier.
+	RegisterPrintHandlers(adminSmallBody, eng)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
 	RegisterImportHandlers(adminLargeBody, store, hub, elevated)
+
+	// Sponsor uploads (mp-c38) — multipart logo upload needs envelope
+	// headroom for the file plus boundary/form-field overhead, so it gets
+	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
+	// on the same group (DELETE skips the cap by method anyway).
+	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
+	RegisterSponsorHandlers(adminSponsorBody, store)
+
+	// Tournament branding logo (mp-scf) — same 2 MB envelope as sponsors.
+	adminBrandingBody := adminGroup(r, BrandingMaxBodyBytes, verifier, store)
+	RegisterBrandingHandlers(adminBrandingBody, store)
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()
@@ -218,5 +277,5 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		})
 	}
 
-	return r, hub
+	return r, hub, apiLimiter
 }

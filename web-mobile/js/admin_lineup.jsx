@@ -2,7 +2,7 @@
 //
 // Teams pick which player occupies each named position (Senpo, Jiho,
 // Chuken, Fukusho, Taisho for 5-person teams; numeric "1"..."N" for
-// other sizes) before the round's first match goes live. Once the
+// other sizes) before the round's first match starts. Once the
 // server stamps LockedAt the form locks; a "Revise" affordance reopens
 // it locally as long as the current round is finished AND the next
 // round hasn't started yet.
@@ -20,6 +20,8 @@
 // competitions, each c.players[i] is the team (its Name is the team
 // name, its Metadata is the list of member names per the CSV parser at
 // internal/helper/tournament.go).
+
+import { LineupNameInput } from './admin_scoring_shared.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
@@ -63,6 +65,31 @@ function rosterFor(team) {
   return [];
 }
 
+// mergeRosterWithAssigned unions a team's base roster (its registered members,
+// from team.metadata via rosterFor) with any names already assigned in the
+// team's lineup. An operator who enters a substitute via the picker's "+ Add …"
+// row stores a free name that is NOT in team.metadata; without this union that
+// name would never reappear in the autocomplete for the team's OTHER positions.
+// Base (registered) names come first in their original order; extra assigned
+// names follow in first-seen order. De-duplication is case-insensitive; blank /
+// whitespace assignments are ignored. The base array is never mutated.
+function mergeRosterWithAssigned(baseRoster, lineup) {
+  const base = Array.isArray(baseRoster) ? baseRoster : [];
+  const positions = lineup && lineup.positions ? lineup.positions : null;
+  if (!positions) return base;
+  const seen = new Set(base.map(n => String(n).trim().toLowerCase()));
+  const extras = [];
+  for (const raw of Object.values(positions)) {
+    const name = String(raw == null ? "" : raw).trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extras.push(name);
+  }
+  return extras.length ? [...base, ...extras] : base;
+}
+
 // Resolve the team's stable ID. Backend uses player.id (UUID assigned
 // at first persist); pre-persist teams may not have one yet — fall back
 // to name as a best-effort key.
@@ -71,33 +98,17 @@ function teamIdOf(team) {
 }
 
 // "Revise" is enabled when the current round's matches are all completed
-// AND the next round hasn't started yet. We use the in-memory competition
-// detail (pools + bracket) to evaluate that — when the shape isn't a
-// clean fit we fall back to "current round completed" and surface a
-// TODO for cleaner round-aware gating.
+// AND the next round hasn't started yet. Uses m.roundIndex (0-based
+// backend index stamped by compMatches) for precise round filtering.
 function canRevise(competition, round) {
   if (!competition || !window.compMatches) return false;
   const all = window.compMatches(competition);
-  // Heuristic: rounds in this codebase are usually "round" (bracket) or
-  // "poolName"-shaped strings on pool matches. Without a robust per-
-  // round filter, gate Revise on:
-  //   1) at least one match exists for the team's competition, AND
-  //   2) every running/scheduled match in round+1 hasn't started yet.
-  // TODO(T130): once the wire shape exposes a numeric round on every
-  // match, switch to a strict (round === r && completed) test.
-  const currentLabel = `Round ${round + 1}`;
-  const nextLabel = `Round ${round + 2}`;
-  // Fail closed if NO match in the comp uses the "Round N" label we
-  // expect — that means the wire format has drifted and the heuristic
-  // below is unreliable. Erring toward "cannot revise" is safer than
-  // surfacing a Revise button mid-round.
-  const recognisable = all.some(m => typeof m.round === "string" && /^Round \d+$/.test(m.round));
-  if (!recognisable) return false;
-  const inProgressNext = all.some(m => (m.status === "running" || m.status === "completed") && m.round === nextLabel);
+  const currentMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round);
+  const nextMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round + 1);
+  if (!currentMatches.length) return false;
+  const inProgressNext = nextMatches.some(m => m.status === "running" || m.status === "completed");
   if (inProgressNext) return false;
-  // Otherwise allow revise as long as no current-round match is still live
-  const currentLive = all.some(m => m.status === "running" && m.round === currentLabel);
-  return !currentLive;
+  return currentMatches.every(m => m.status === "completed");
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
@@ -155,6 +166,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const isLocked = !!lockedAt && !revising;
 
+  // Autocomplete suggestions: the registered roster (if any) plus names already
+  // typed into this lineup, so a name entered once is reusable across positions.
+  const suggestions = mergeRosterWithAssigned(roster, { positions: values });
+
   const save = async () => {
     setError("");
     setSaving(true);
@@ -164,9 +179,19 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       // empty values as "missing", which is what we want.
       const positionsOut = {};
       Object.entries(values).forEach(([k, v]) => {
-        if (v) positionsOut[k] = v;
+        // Trim here too (not just onBlur) so a Save triggered without a blur —
+        // e.g. Enter — never persists leading/trailing or whitespace-only names.
+        const trimmed = (v || "").trim();
+        if (trimmed) positionsOut[k] = trimmed;
       });
       const updated = await window.API.putTeamLineup(compId, teamId, round, positionsOut, password);
+      // F5: a queued (offline/transient) write is NOT a confirmed save — don't
+      // clear the revising state or show "saved"; the write is durable and will
+      // retry. Keep the form editable and tell the operator it's pending.
+      if (updated && updated.queued) {
+        if (typeof showToast === "function") showToast("Offline — lineup not saved yet, will retry");
+        return;
+      }
       setLockedAt(updated.lockedAt || null);
       setRevising(false);
       if (typeof showToast === "function") showToast("Lineup saved");
@@ -180,7 +205,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const onRevise = () => {
     setError("");
     // Local-only flip — the server will accept the next PUT only if
-    // the round's first match hasn't gone live yet (same 409 path).
+    // the round's first match hasn't started yet (same 409 path).
     setRevising(true);
   };
 
@@ -192,7 +217,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     <div className="page" data-testid="lineup-form-root" style={{ padding: 24, maxWidth: 640 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em", fontWeight: 700 }}>
+          <div className="overline">
             {comp?.name} · Round {round + 1}
           </div>
           <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
@@ -210,7 +235,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             </span>
           )}
           {onClose && (
-            <button className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
           )}
         </div>
       </div>
@@ -230,31 +255,25 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   ? <TermAL name={p.termId}>{p.label}</TermAL>
                   : p.label}
               </span>
-              <select
-                data-testid={`lineup-position-${p.key}`}
-                className="input"
+              <LineupNameInput
                 value={values[p.key] || ""}
+                roster={suggestions}
+                ariaLabel={`${p.label} player`}
                 disabled={isLocked || saving}
-                onChange={(e) => setValues(v => ({ ...v, [p.key]: e.target.value }))}
-                style={{ padding: "6px 8px", fontSize: 14 }}
-              >
-                <option value="">— Select —</option>
-                {roster.map(member => (
-                  <option key={member} value={member}>{member}</option>
-                ))}
-              </select>
+                onSelect={(name) => setValues(v => ({ ...v, [p.key]: name }))}
+              />
             </label>
           ))}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No roster found on this team. Add member names as metadata in the participant CSV.
+              This team has no registered members — type each competitor's name directly.
             </div>
           )}
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
           {isLocked ? (
-            <button
+            <button type="button"
               className="btn btn--primary"
               onClick={onRevise}
               disabled={!reviseEligible}
@@ -265,10 +284,10 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
               Revise
             </button>
           ) : (
-            <button
+            <button type="button"
               className="btn btn--primary"
               onClick={save}
-              disabled={saving || roster.length === 0}
+              disabled={saving}
             >
               {saving ? "Saving…" : "Save lineup"}
             </button>
@@ -302,7 +321,7 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
     <div>
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 16, padding: "0 24px", paddingTop: 24 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Team</span>
+          <span className="overline">Team</span>
           <select
             className="input"
             value={teamId}
@@ -315,7 +334,7 @@ function AdminTeamLineupsList({ comp, password, showToast }) {
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Round</span>
+          <span className="overline">Round</span>
           <input
             className="input"
             type="number"
@@ -356,7 +375,7 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, teamIdOf, canRevise };
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, teamIdOf, canRevise };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };

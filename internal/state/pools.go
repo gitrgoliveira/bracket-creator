@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,21 @@ func parsePoolsFile(path string) (any, error) {
 		}
 
 		player := helper.Player{Name: playerName}
+		// Default to 1-based append order so that a corrupt/missing col 2 never
+		// leaves PoolPosition at the zero value (which would misplace the player
+		// at the front of the stable sort and corrupt Excel pool-draw labels).
+		// col 2 overrides this only when it is present, parseable, AND non-negative.
+		// savePoolsLocked writes it as strconv.Itoa(i) — 0-indexed — so add 1 to
+		// align with the 1-based convention used by Excel pool/draw exporters.
+		// (Other producer paths may use different conventions; this +1 applies only
+		// to the CSV round-trip used by LoadPools.)
+		player.PoolPosition = int64(len(pools[idx].Players) + 1) // 1-based default
+		if len(rec) > 2 && rec[2] != "" {
+			if pos, err2 := strconv.ParseInt(rec[2], 10, 64); err2 == nil && pos >= 0 {
+				player.PoolPosition = pos + 1 // convert 0-indexed CSV value → 1-indexed
+			}
+			// negative or non-integer values leave the 1-based append-order default intact
+		}
 		if len(rec) > 3 {
 			player.DisplayName = rec[3]
 		}
@@ -74,8 +90,27 @@ func parsePoolsFile(path string) (any, error) {
 		if len(rec) > 6 {
 			player.Number = rec[6]
 		}
+		// Participant UUID (appended after the legacy 7-column layout).
+		// Absent in pre-change files → empty id; the league matrix then
+		// falls back to name-based cell matching.
+		if len(rec) > 7 {
+			player.ID = rec[7]
+		}
 		pools[idx].Players = append(pools[idx].Players, player)
 	}
+
+	// Sort each pool's Players by their stored draw position so that the ordering
+	// is authoritative from the persisted field, not from CSV row order. This
+	// guarantees correct draw order even if rows were written out-of-order or
+	// the file was manually edited. Legacy files without col 2 receive sequential
+	// 1-based append-order defaults above. Ties (e.g. from a manually edited file
+	// with duplicate positions) are resolved by insertion order via SliceStable.
+	for i := range pools {
+		sort.SliceStable(pools[i].Players, func(a, b int) bool {
+			return pools[i].Players[a].PoolPosition < pools[i].Players[b].PoolPosition
+		})
+	}
+
 	return pools, nil
 }
 
@@ -131,6 +166,27 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	return s.savePoolsLocked(compID, pools)
+}
+
+// loadPoolsLocked reads pools.csv directly from disk without acquiring the
+// per-competition lock. Caller MUST already hold the per-comp write lock —
+// typically from inside a WithTransaction closure.
+func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
+	path := s.compPath(compID, "pools.csv")
+	parsed, err := parsePoolsFile(path)
+	if err != nil {
+		return nil, err
+	}
+	pools, _ := parsed.([]helper.Pool)
+	return s.copyPools(pools), nil
+}
+
+// savePoolsLocked writes pools.csv without acquiring the per-competition lock.
+// Caller MUST already hold the per-comp write lock — typically from inside a
+// WithTransaction closure. Writes directly to disk (not WAL-staged) but is
+// crash-safe via atomicWrite.
+func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 	path := s.compPath(compID, "pools.csv")
 
 	// Build the CSV body in memory then write it atomically + durably
@@ -145,7 +201,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 			if player.Seed > 0 {
 				seedStr = strconv.Itoa(player.Seed)
 			}
-			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr, player.Number}); err != nil {
+			if err := writer.Write([]string{p.PoolName, player.Name, strconv.Itoa(i), player.DisplayName, player.Dojo, seedStr, player.Number, player.ID}); err != nil {
 				return err
 			}
 		}
@@ -246,6 +302,22 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 	return parsePoolMatchesRecords(records), nil
 }
 
+// splitIppons parses a "|"-joined ippon field into a slice, mapping an
+// EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
+// one-element slice holding the empty string), which len() then counts as a
+// phantom ippon — inflating points-won/lost in standings and corrupting
+// individual pool tie detection (two players who actually tied read as
+// differing by a phantom point). An empty field maps to a zero-length slice
+// across every consumer; we return a non-nil empty slice (not nil) so the
+// JSON projection stays a stable array ([]), not null — the viewer endpoints
+// serialize IpponsA/IpponsB and an array field should never flip to null.
+func splitIppons(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, "|")
+}
+
 // parsePoolMatchesRecords turns a CSV record matrix into MatchResults.
 // Extracted so the file-based and bytes-based parsers share the
 // rec-shape→struct mapping verbatim (no drift between the two).
@@ -267,8 +339,8 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 			SideA:    rec[2],
 			SideB:    rec[3],
 			Winner:   rec[4],
-			IpponsA:  strings.Split(rec[5], "|"),
-			IpponsB:  strings.Split(rec[6], "|"),
+			IpponsA:  splitIppons(rec[5]),
+			IpponsB:  splitIppons(rec[6]),
 			HansokuA: hansokuA,
 			HansokuB: hansokuB,
 			Decision: rec[9],
@@ -281,6 +353,42 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		}
 		if len(rec) > 13 {
 			m.ScheduledAt = rec[13]
+		}
+		if len(rec) > 14 {
+			m.ResultSource = rec[14]
+		}
+		if len(rec) > 15 && rec[15] != "" {
+			if v, err := strconv.Atoi(rec[15]); err == nil {
+				m.Round = v
+			} else {
+				m.Round = -1
+			}
+		} else {
+			m.Round = -1
+		}
+		// Participant-id columns (appended after Round, after the legacy
+		// 15-column layout). Absent in files written before this was added
+		// → ids stay empty and consumers fall back to name matching.
+		if len(rec) > 16 {
+			m.SideAID = rec[16]
+		}
+		if len(rec) > 17 {
+			m.SideBID = rec[17]
+		}
+		if len(rec) > 18 {
+			m.WinnerID = rec[18]
+		}
+		if len(rec) > 19 {
+			m.CorrectionReason = rec[19]
+		}
+		// Rep-player columns (appended after CorrectionReason) — the individual
+		// fighters each team fields for a pool/league daihyosen/tiebreaker rep
+		// bout. Absent in files written before mp-62vr → stay empty.
+		if len(rec) > 20 {
+			m.RepPlayerA = rec[20]
+		}
+		if len(rec) > 21 {
+			m.RepPlayerB = rec[21]
 		}
 
 		results = append(results, m)
@@ -318,7 +426,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB"}); err != nil {
 		return err
 	}
 
@@ -351,6 +459,14 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.Court,
 			subJSON,
 			r.ScheduledAt,
+			r.ResultSource,
+			strconv.Itoa(r.Round),
+			r.SideAID,
+			r.SideBID,
+			r.WinnerID,
+			r.CorrectionReason,
+			r.RepPlayerA,
+			r.RepPlayerB,
 		}); err != nil {
 			return err
 		}

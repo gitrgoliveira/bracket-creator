@@ -128,7 +128,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 
 		PrintPoolMatches(f, pools, 1, 1, 1, false, poolCoords, pCoords)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F18")
-		assert.Equal(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
+		assert.Equalf(t, "1.", val, "expected result 1. at F18 for teamMatches=1, got '%s'", val)
 	})
 
 	t.Run("teamMatches = 10", func(t *testing.T) {
@@ -154,7 +154,7 @@ func TestPrintPoolMatchesEdgeTeamMatches(t *testing.T) {
 
 		PrintPoolMatches(f, pools, 10, 1, 1, false, poolCoords, pCoords)
 		val, _ := f.GetCellValue(SheetPoolMatches, "F27")
-		assert.Equal(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
+		assert.Equalf(t, "1.", val, "expected result 1. at F27 for teamMatches=10, got '%s'", val)
 	})
 }
 

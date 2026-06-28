@@ -245,6 +245,45 @@ func TestGenerateFinals(t *testing.T) {
 	}
 }
 
+// TestGenerateFinals_NoDuplicatesOrMissing sweeps poolWinners 1..6 × pool counts
+// 2..10 and asserts the output multiset is EXACTLY {each pool} × {1st..poolWinners}
+// — every placeholder present exactly once, none duplicated, none missing. This
+// is the invariant the old `len(pools)%poolWinners` round-gate violated for
+// non-coprime combos (e.g. poolWinners>=4 with 2/6/10 pools), which silently
+// corrupted the live in-place knockout (mp-turx). The previous tests only checked
+// length/membership and happened to use clean combos, so they missed it.
+func TestGenerateFinals_NoDuplicatesOrMissing(t *testing.T) {
+	for poolWinners := 1; poolWinners <= 6; poolWinners++ {
+		for poolCount := 2; poolCount <= 10; poolCount++ {
+			name := fmt.Sprintf("%dpools_%dwinners", poolCount, poolWinners)
+			t.Run(name, func(t *testing.T) {
+				pools := make([]Pool, poolCount)
+				want := make(map[string]int, poolCount*poolWinners)
+				for p := 0; p < poolCount; p++ {
+					pools[p] = Pool{PoolName: fmt.Sprintf("Pool %c", 'A'+p)}
+					for rank := 1; rank <= poolWinners; rank++ {
+						want[fmt.Sprintf("Pool %c-%s", 'A'+p, GetOrdinal(rank))] = 1
+					}
+				}
+
+				finals := GenerateFinals(pools, poolWinners)
+				require.Len(t, finals, poolCount*poolWinners,
+					"output length must equal poolCount*poolWinners")
+
+				got := make(map[string]int, len(finals))
+				for _, f := range finals {
+					got[f]++
+				}
+				for label := range got {
+					assert.LessOrEqual(t, got[label], 1, "placeholder %q appears %d times (must be exactly once)", label, got[label])
+				}
+				assert.Equal(t, want, got,
+					"multiset of finalists must be exactly each pool × each rank, with no dups/missing")
+			})
+		}
+	}
+}
+
 func TestCalculateDepth(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1003,7 +1042,7 @@ func TestGenerateFinalsEdgeCases(t *testing.T) {
 					t.Errorf("Expected 5 finalists, got %d", len(finalists))
 				}
 				for i := range 5 {
-					expected := fmt.Sprintf("Pool X-%s", getOrdinal(i+1))
+					expected := fmt.Sprintf("Pool X-%s", GetOrdinal(i+1))
 					if finalists[i] != expected {
 						t.Errorf("Position %d: expected %s, got %s", i, expected, finalists[i])
 					}
@@ -1166,15 +1205,112 @@ func TestPrintLeafNodesEdgeCases(t *testing.T) {
 	}
 }
 
-// applyTreeAdjustments replicates the pre-order traversal that PrintLeafNodes
-// performs when pools=true, calling treeAdjustment at each non-leaf node.
-func applyTreeAdjustments(node *Node) {
-	if node == nil || node.LeafNode {
-		return
+func TestTreeToLeafArray(t *testing.T) {
+	makeLeaves := func(names ...string) []string { return names }
+	makeLabels := func(n int) []string {
+		out := make([]string, n)
+		for i := range n {
+			out[i] = string(rune('A' + i))
+		}
+		return out
 	}
-	treeAdjustment(node)
-	applyTreeAdjustments(node.Left)
-	applyTreeAdjustments(node.Right)
+
+	cases := []struct {
+		name      string
+		input     []string
+		wantLen   int
+		wantSlots []string // nil means "don't check exact slots, just length + non-empty count"
+		wantReal  int      // number of non-empty slots
+	}{
+		{
+			name:      "1 leaf",
+			input:     makeLeaves("A"),
+			wantLen:   1,
+			wantSlots: []string{"A"},
+			wantReal:  1,
+		},
+		{
+			name:      "2 leaves",
+			input:     makeLeaves("A", "B"),
+			wantLen:   2,
+			wantSlots: []string{"A", "B"},
+			wantReal:  2,
+		},
+		{
+			name:  "3 leaves — A gets bye",
+			input: makeLeaves("A", "B", "C"),
+			// CreateBalancedTree splits [A] left, [B,C] right
+			// left → ["A"], right → ["B","C"]
+			// pad left to NextPow2(max(1,2))=2 → ["A",""]
+			// result: ["A","","B","C"]
+			wantLen:   4,
+			wantSlots: []string{"A", "", "B", "C"},
+			wantReal:  3,
+		},
+		{
+			name:     "4 leaves — identity",
+			input:    makeLeaves("A", "B", "C", "D"),
+			wantLen:  4,
+			wantReal: 4,
+		},
+		{
+			name:     "5 leaves",
+			input:    makeLabels(5),
+			wantLen:  8,
+			wantReal: 5,
+		},
+		{
+			name:     "7 leaves",
+			input:    makeLabels(7),
+			wantLen:  8,
+			wantReal: 7,
+		},
+		{
+			name:     "8 leaves — identity",
+			input:    makeLabels(8),
+			wantLen:  8,
+			wantReal: 8,
+		},
+		{
+			name:     "12 leaves",
+			input:    makeLabels(12),
+			wantLen:  16,
+			wantReal: 12,
+		},
+		{
+			name:     "24 leaves",
+			input:    makeLabels(24),
+			wantLen:  32,
+			wantReal: 24,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := CreateBalancedTree(tt.input)
+			got := TreeToLeafArray(tree)
+
+			assert.Len(t, got, tt.wantLen, "output length must be NextPow2(N)")
+
+			realCount := 0
+			for _, v := range got {
+				if v != "" {
+					realCount++
+				}
+			}
+			assert.Equal(t, tt.wantReal, realCount, "non-empty slot count must equal input count")
+
+			if tt.wantSlots != nil {
+				assert.Equal(t, tt.wantSlots, got, "exact slot layout")
+			}
+		})
+	}
+}
+
+// applyTreeAdjustments delegates to the exported ApplyPoolAdjustments so
+// test helpers stay in sync with the production traversal.
+func applyTreeAdjustments(node *Node) {
+	ApplyPoolAdjustments(node)
 }
 
 func leafPool(val string) string {
@@ -1278,8 +1414,8 @@ func TestBracketSamePoolSeparation(t *testing.T) {
 						bottomCount++
 					}
 				}
-				assert.Equal(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
-				assert.Equal(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
+				assert.Equalf(t, 1, topCount, "%s should have exactly 1 player in top half", pool)
+				assert.Equalf(t, 1, bottomCount, "%s should have exactly 1 player in bottom half", pool)
 			}
 		})
 	}
@@ -1355,7 +1491,7 @@ func TestTreeAdjustmentByeAllocation(t *testing.T) {
 			tree := buildAdjustedTree(pools, 2)
 
 			byes := findByeLeaves(tree)
-			require.NotEmpty(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
+			require.NotEmptyf(t, byes, "expected byes for %d pools (non-power-of-2 finalists)", nPools)
 
 			for _, b := range byes {
 				rank := leafRank(b)

@@ -8,10 +8,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster, elevated ElevatedVerifier) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster, elevated ElevatedVerifier) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -57,14 +59,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				DisplayName string   `json:"displayName"`
 				Dojo        string   `json:"dojo"`
 				Metadata    []string `json:"metadata"`
-				Tag         string   `json:"tag"`
+				Source      string   `json:"source"`
 			} `json:"players"`
 			Name        string   `json:"name"`
 			DisplayName string   `json:"displayName"`
 			Dojo        string   `json:"dojo"`
 			Metadata    []string `json:"metadata"`
 			DanGrade    string   `json:"danGrade"`
-			Tag         string   `json:"tag"`
+			Source      string   `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -93,16 +95,18 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				return
 			}
 			metadata := req.Metadata
-			if len(metadata) == 0 && req.DanGrade != "" {
-				metadata = []string{req.DanGrade}
+			if len(metadata) == 0 {
+				if dg := strings.TrimSpace(req.DanGrade); dg != "" {
+					metadata = []string{dg}
+				}
 			}
 
 			// Default to "manual" so rows added via this UI carry the same
 			// provenance marker as rows the operator added by hand to the
-			// paste-box import — keeps tag-filter buckets coherent.
-			tag := req.Tag
-			if tag == "" {
-				tag = "manual"
+			// paste-box import — keeps source-filter buckets coherent.
+			source := helper.CanonicalRegistrationSource(req.Source)
+			if source == "" {
+				source = "manual"
 			}
 
 			// Strip displayName for non-zekken competitions. Otherwise
@@ -116,7 +120,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				displayName = ""
 			}
 
-			if err := validatePlayerLengths(name, displayName, dojo, tag, metadata); err != nil {
+			if err := validatePlayerLengths(name, displayName, dojo, source, metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
@@ -126,13 +130,17 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				DisplayName: displayName,
 				Dojo:        dojo,
 				Metadata:    metadata,
-				Tag:         tag,
+				Source:      source,
 			}
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.WithZekkenName)
 			if err != nil {
 				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, state.ErrReservedName) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
 				if errors.Is(err, state.ErrCompetitionNotInSetup) {
@@ -155,29 +163,61 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		// Per-player length caps — defense-in-depth against unbounded
-		// participants.csv inflation. Reject the whole batch on the
-		// first offender (matches the all-or-nothing semantics
-		// SaveParticipants already enforces on write).
+		// Required-field + length validation. Name and dojo must be non-blank
+		// (after trimming) — mirrors the single-add path above. Without this the
+		// batch path silently accepts a misformatted roster row (e.g. a
+		// two-column "Name, Dojo" line in a zekken competition, which the SPA
+		// parser maps to {displayName: dojo, dojo: ""}), persisting a competitor
+		// with no dojo while the UI reports success. Length caps are
+		// defense-in-depth against unbounded participants.csv inflation. Reject
+		// the whole batch on the first offender (matches the all-or-nothing
+		// semantics SaveParticipants already enforces on write).
 		for i, p := range req.Players {
-			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Tag, p.Metadata); err != nil {
+			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
+				return
+			}
+			if err := validatePlayerLengths(p.Name, p.DisplayName, p.Dojo, p.Source, p.Metadata); err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("players[%d]: %s", i, err.Error())})
 				return
 			}
 		}
 
+		// Tier-1: Reject perfect duplicates (normalizedName, normalizedDojo).
+		// Uses name+dojo so "John Smith / Wakaba" and "John Smith / Tora" are
+		// treated as distinct competitors (different clubs) while
+		// "Müller / Wakaba" vs "muller / wakaba" are rejected.
+		entries := make([][2]string, len(req.Players))
+		for i, p := range req.Players {
+			entries[i] = [2]string{p.Name, p.Dojo}
+		}
+		if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("duplicate participant(s) in request: %s", strings.Join(dupes, "; "))})
+			return
+		}
+
+		// Near-duplicate (Tier-2) warnings are surfaced authoritatively by the
+		// PUT /competitions/:id roster path (the SPA's primary import flow);
+		// this endpoint stays a plain array response to keep one shape.
+
 		// Load existing participants so we can preserve check-in state for
-		// players that survive the edit (matched by name). A full roster
-		// replacement via this endpoint must not silently clear check-ins
-		// that were already recorded.
+		// players that survive the edit (matched by normalizedName+normalizedDojo).
+		// A full roster replacement via this endpoint must not silently clear
+		// check-ins that were already recorded.
 		existing, err := store.LoadParticipants(id, comp.WithZekkenName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
 			return
 		}
-		checkedInByName := make(map[string]bool, len(existing))
+		// Key by (normalizedName, normalizedDojo) — NOT name alone. Tier-1
+		// dedup allows two same-named competitors from different dojos, so a
+		// name-only key would transfer check-in state between distinct people.
+		checkInKey := func(name, dojo string) string {
+			return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
+		}
+		checkedInByKey := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByName[strings.ToLower(strings.TrimSpace(ep.Name))] = ep.CheckedIn
+			checkedInByKey[checkInKey(ep.Name, ep.Dojo)] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -194,13 +234,24 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				DisplayName:  displayName,
 				Dojo:         p.Dojo,
 				Metadata:     p.Metadata,
-				Tag:          p.Tag,
+				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByName[strings.ToLower(strings.TrimSpace(p.Name))],
+				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
 			})
 		}
 
 		if err := store.SaveParticipants(id, players); err != nil {
+			// Defense-in-depth: saveParticipantsNoLock also enforces the
+			// Tier-1 (name, dojo) guard, so map that to 409 rather than 500
+			// in case the pre-check above ever diverges from the write layer.
+			if errors.Is(err, state.ErrDuplicateName) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, state.ErrReservedName) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save participants: " + err.Error()})
 			return
 		}
@@ -232,11 +283,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
-		if comp.Status == state.CompStatusDrawReady {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants while a draw is pending; discard the draw first"})
-			return
-		}
-		if comp.Status != state.CompStatusSetup && comp.Status != "" {
+		if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify participants after competition has started"})
 			return
 		}
@@ -247,7 +294,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			Dojo        string   `json:"dojo"`
 			Metadata    []string `json:"metadata"`
 			DanGrade    string   `json:"danGrade"`
-			Tag         string   `json:"tag"`
+			Source      string   `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -266,17 +313,23 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 		}
 
 		metadata := req.Metadata
-		if len(metadata) == 0 && req.DanGrade != "" {
-			metadata = []string{req.DanGrade}
+		if len(metadata) == 0 {
+			if dg := strings.TrimSpace(req.DanGrade); dg != "" {
+				metadata = []string{dg}
+			}
 		}
 
 		// Run the status check and participant write under one lock acquire so
 		// a concurrent start-competition cannot flip status between the check
 		// and the file write (TOCTOU, mp-0lc).
 		var (
-			updatedPlayer *domain.Player
-			httpStatus    = http.StatusInternalServerError
-			httpMsg       string
+			updatedPlayer  *domain.Player
+			oldName        string
+			oldDojo        string
+			oldDisplayName string
+			isDrawReady    bool
+			httpStatus     = http.StatusInternalServerError
+			httpMsg        string
 		)
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			comp, err := tx.LoadCompetition(id)
@@ -289,12 +342,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				httpMsg = "competition not found"
 				return fmt.Errorf("competition not found")
 			}
-			if comp.Status == state.CompStatusDrawReady {
-				httpStatus = http.StatusConflict
-				httpMsg = "cannot modify participants while a draw is pending; discard the draw first"
-				return state.ErrCompetitionNotInSetup
-			}
-			if comp.Status != state.CompStatusSetup && comp.Status != "" {
+			if comp.Status != state.CompStatusDrawReady && comp.Status != state.CompStatusSetup && comp.Status != "" {
 				httpStatus = http.StatusConflict
 				httpMsg = "cannot modify participants after competition has started"
 				return state.ErrCompetitionNotInSetup
@@ -310,18 +358,27 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 				displayName = ""
 			}
 
-			if err := validatePlayerLengths(name, displayName, dojo, req.Tag, metadata); err != nil {
+			if err := validatePlayerLengths(name, displayName, dojo, req.Source, metadata); err != nil {
 				httpStatus = http.StatusBadRequest
 				httpMsg = err.Error()
 				return err
 			}
 
 			p, err := tx.UpdateParticipant(id, pid, comp.WithZekkenName, func(p *domain.Player) error {
+				// Capture old values before mutation for draw cascade.
+				// The transform callback receives the pre-mutation player,
+				// so this avoids a separate LoadParticipants scan.
+				if comp.Status == state.CompStatusDrawReady {
+					oldName = p.Name
+					oldDojo = p.Dojo
+					oldDisplayName = p.DisplayName
+					isDrawReady = true
+				}
 				p.Name = name
 				p.DisplayName = displayName
 				p.Dojo = dojo
 				p.Metadata = metadata
-				p.Tag = req.Tag
+				p.Source = helper.CanonicalRegistrationSource(req.Source)
 				return nil
 			})
 			if err != nil {
@@ -330,6 +387,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 					httpStatus = http.StatusNotFound
 				case errors.Is(err, state.ErrDuplicateName):
 					httpStatus = http.StatusConflict
+				case errors.Is(err, state.ErrReservedName):
+					httpStatus = http.StatusBadRequest
 				}
 				httpMsg = err.Error()
 				return err
@@ -346,7 +405,54 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, hub Bro
 			return
 		}
 
+		var warnings []string
+		if isDrawReady && oldName != "" {
+			// Cascade the name/dojo change through draw artifacts outside the
+			// transaction — WithTransaction's per-comp lock is released above
+			// (non-reentrant mutex), so the cascade function can acquire it.
+			// Use updatedPlayer.DisplayName (the canonical post-save value) so
+			// auto-derived display names propagate correctly into pools.csv.
+			// For non-zekken competitions UpdateParticipant returns DisplayName=""
+			// (not persisted), but pools.csv carries the auto-derived SanitizeName form.
+			// Match what saveParticipantsNoLock writes so the cascade doesn't blank it.
+			cascadeDisplayName := updatedPlayer.DisplayName
+			if cascadeDisplayName == "" {
+				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
+			}
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
+			if cascadeErr != nil {
+				// participants.csv (and seeds.csv) were already updated — broadcast and
+				// return 200 with the updated player so the client keeps its local state.
+				// Include any warnings collected before the failure (e.g. dojo conflicts
+				// from pools) and a cascadeError field for operator visibility.
+				hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+				type playerWithCascadeError struct {
+					domain.Player
+					Warnings     []string `json:"warnings,omitempty"`
+					CascadeError string   `json:"cascadeError"`
+				}
+				c.JSON(http.StatusOK, playerWithCascadeError{
+					Player:       *updatedPlayer,
+					Warnings:     w,
+					CascadeError: cascadeErr.Error(),
+				})
+				return
+			}
+			warnings = w
+		}
+
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		if len(warnings) > 0 {
+			type playerWithWarnings struct {
+				domain.Player
+				Warnings []string `json:"warnings"`
+			}
+			c.JSON(http.StatusOK, playerWithWarnings{
+				Player:   *updatedPlayer,
+				Warnings: warnings,
+			})
+			return
+		}
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
 

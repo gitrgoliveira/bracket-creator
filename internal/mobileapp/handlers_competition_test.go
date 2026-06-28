@@ -8,8 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -360,6 +362,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			ID: "trim-fields-update", Name: "Trim Fields Update",
 			Kind: "  team  ", Format: "  playoffs  ",
 			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
+			TeamSize: 2,
 		}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
@@ -610,7 +613,60 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			// Confirm no half-baked record landed on disk under the
 			// invalid ID (the validation must fail before SaveCompetition).
 			stored, _ := store.LoadCompetition(badID)
-			assert.Nil(t, stored, "POST with id=%q must not persist", badID)
+			assert.Nilf(t, stored, "POST with id=%q must not persist", badID)
+		}
+	})
+
+	// Tri-review finding: an embedded roster on POST /competitions and the
+	// roster-PUT branch of PUT /competitions/:id only ran validatePlayerLengths
+	// (max-length) — never the blank-name/dojo guard that POST /participants
+	// has. A two-column "Name, Dojo" paste in a zekken competition maps to
+	// {displayName: dojo, dojo: ""}, so a blank dojo persisted a corrupted
+	// competitor while the UI reported success. Both paths now share
+	// validatePlayerRequired and must reject the blank field with 400.
+	t.Run("Embedded Roster Rejects Blank Name Or Dojo With 400", func(t *testing.T) {
+		blankCases := []struct {
+			label   string
+			player  domain.Player
+			wantMsg string
+		}{
+			{"blank dojo", domain.Player{Name: "Alice", Dojo: "   "}, "dojo must not be blank"},
+			{"blank name", domain.Player{Name: "  ", Dojo: "Dojo A"}, "name must not be blank"},
+		}
+		for _, bc := range blankCases {
+			// POST /competitions with an embedded roster.
+			comp := state.Competition{
+				ID:      "blank-roster-post",
+				Name:    "Blank Roster POST",
+				Players: []domain.Player{bc.player},
+			}
+			body, _ := json.Marshal(comp)
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equalf(t, http.StatusBadRequest, w.Code,
+				"POST embedded roster with %s must return 400 (got %d: %s)", bc.label, w.Code, w.Body.String())
+			assert.Containsf(t, w.Body.String(), bc.wantMsg, "POST %s error message", bc.label)
+			stored, _ := store.LoadCompetition("blank-roster-post")
+			assert.Nilf(t, stored, "POST with %s must not persist", bc.label)
+
+			// PUT /competitions/:id roster branch (Players != nil).
+			seed := state.Competition{ID: "blank-roster-put", Name: "Blank Roster PUT", Status: state.CompStatusSetup}
+			require.NoError(t, store.SaveCompetition(&seed))
+			update := state.Competition{
+				ID:      "blank-roster-put",
+				Name:    "Blank Roster PUT",
+				Players: []domain.Player{bc.player},
+			}
+			body, _ = json.Marshal(update)
+			w = httptest.NewRecorder()
+			req, _ = http.NewRequest("PUT", "/api/competitions/blank-roster-put", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+			assert.Equalf(t, http.StatusBadRequest, w.Code,
+				"PUT roster with %s must return 400 (got %d: %s)", bc.label, w.Code, w.Body.String())
+			assert.Containsf(t, w.Body.String(), bc.wantMsg, "PUT %s error message", bc.label)
 		}
 	})
 
@@ -768,7 +824,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clearBody))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "PUT with players=[] must succeed: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "PUT with players=[] must succeed: %s", w.Body.String())
 
 		// Verify the roster on disk is now empty.
 		after, err := store.LoadParticipants(cid, false)
@@ -796,7 +852,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(settingsBody))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "PUT with omitted players must succeed: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "PUT with omitted players must succeed: %s", w.Body.String())
 
 		// Roster on disk MUST be unchanged.
 		after, err := store.LoadParticipants(cid, false)
@@ -963,7 +1019,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	// Parse the response — the Players field must be a non-null array
 	// reflecting the on-disk roster.
@@ -994,6 +1050,58 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 //     on load — the loader trusts HasParticipantIDs).
 //   - A second PUT with the same body produces an idempotent round-trip
 //     (ids don't churn).
+//
+// TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1 pins the
+// server-authoritative duplicate handling on the PRIMARY roster-import path
+// (PUT /competitions/:id): a perfect (name,dojo) duplicate is rejected 409,
+// and a near-duplicate pair is surfaced as non-blocking `warnings` in the
+// response. (mp-ljry, Copilot round 2)
+func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "comp-ndw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "NDW", Date: "12-05-2026",
+		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+	}))
+
+	// Perfect (name,dojo) duplicate → 409.
+	dup := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"John Smith","dojo":"Wakaba"},{"name":"john  smith","dojo":"wakaba"}]}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(dup))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusConflict, w.Code, "perfect (name,dojo) dup on roster PUT must 409: %s", w.Body.String())
+
+	// Near-duplicate (token-subset) → 200 with a warnings entry.
+	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"Ana Maria Rossi","dojo":"Tora"},{"name":"Ana Rossi","dojo":"Wakaba"}]}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(near))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "near-dup roster PUT must succeed: %s", w.Body.String())
+
+	var resp struct {
+		Warnings []helper.NearDupWarning `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Warnings, 1, "near-dup pair must produce exactly one warning")
+	assert.Equal(t, "token-subset", resp.Warnings[0].Score)
+
+	// Clean roster → warnings present as an empty array (consistent shape).
+	clean := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+		"players":[{"name":"Shudokan A","dojo":"X"},{"name":"Shudokan B","dojo":"Y"}]}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clean))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"warnings":[]`, "clean roster must serialize warnings as [] not null")
+}
+
 func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1018,7 +1126,7 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1083,7 +1191,7 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1200,7 +1308,7 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1219,54 +1327,6 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
 	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
-}
-
-// TestPlayoff_CreatesSourceLinkWithEmptyRoster verifies that POST /playoffs
-// stores a SourceCompID link to the mixed source and returns an EMPTY (but
-// non-nil) roster — the pool winners are resolved into the roster later, at
-// draw time (engine.resolvePoolWinners). The non-nil empty slice pins the
-// Copilot round-12 finding (#6): the response must not ship `players: null`
-// (Go nil slice → JSON null), because admin.jsx's refreshCompsAfterCreate
-// fallback appends the response into local state and render paths that read
-// `c.players.length` would crash.
-func TestPlayoff_CreatesSourceLinkWithEmptyRoster(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	src := state.Competition{
-		ID:          "src",
-		Name:        "Source",
-		Format:      state.CompFormatMixed,
-		Status:      state.CompStatusPools,
-		PoolSize:    3,
-		PoolWinners: 2,
-	}
-	require.NoError(t, store.SaveCompetition(&src))
-	require.NoError(t, store.SaveParticipants("src", []domain.Player{
-		{ID: "p1", Name: "P1", Dojo: "D1"},
-		{ID: "p2", Name: "P2", Dojo: "D2"},
-	}))
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/src/playoffs", nil)
-	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
-
-	var resp state.Competition
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "src", resp.SourceCompID, "playoff must link back to the mixed source")
-	assert.Equal(t, state.CompFormatPlayoffs, resp.Format)
-	require.NotNil(t, resp.Players, "Players must NOT be null in POST /playoffs response")
-	assert.NotContains(t, w.Body.String(), `"players":null`,
-		"response must not ship `players: null` — client appends this into local state")
-	assert.Empty(t, resp.Players,
-		"playoff roster starts empty; pool winners are resolved at draw time")
-
-	// The link is persisted on disk, not just echoed in the response.
-	stored, err := store.LoadCompetition(resp.ID)
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Equal(t, "src", stored.SourceCompID)
 }
 
 // TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure pins the
@@ -1379,7 +1439,7 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/r1-m0/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	// Re-load bracket and verify the match is RUNNING, not COMPLETED.
 	br, err := store.LoadBracket(cid)
@@ -1443,7 +1503,7 @@ func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	saved, err := store.LoadCompetition(cid)
 	require.NoError(t, err)
@@ -1485,7 +1545,7 @@ func TestGenerateDrawHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		assert.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
@@ -1507,6 +1567,384 @@ func TestGenerateDrawHandler(t *testing.T) {
 	})
 }
 
+func TestCreateCompetitionTeamSizeValidation(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("POST team with teamSize=1 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size One",
+			Kind:     "team",
+			TeamSize: 1,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("POST team with teamSize=0 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size Zero",
+			Kind:     "team",
+			TeamSize: 0,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("POST kind omitted with teamSize=1 returns 400", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Ambiguous Size One",
+			TeamSize: 1,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("POST team with teamSize=2 succeeds", func(t *testing.T) {
+		comp := state.Competition{
+			Name:     "Team Size Two",
+			Kind:     "team",
+			TeamSize: 2,
+		}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+}
+
+func TestUpdateCompetitionTeamSizeValidation(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       "put-team-size-test",
+		Name:     "PUT Team Size",
+		Kind:     "team",
+		TeamSize: 3,
+		Status:   state.CompStatusSetup,
+	}))
+
+	t.Run("PUT team with teamSize=1 returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("PUT team with teamSize=0 returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 0,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "teamSize")
+	})
+
+	t.Run("PUT team with teamSize=2 succeeds", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"name":     "PUT Team Size",
+			"kind":     "team",
+			"teamSize": 2,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/put-team-size-test", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestPUTCompetitionAwards(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "awards-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     cid,
+		Name:   "Awards Comp",
+		Status: state.CompStatusComplete,
+	}))
+
+	t.Run("happy path: awards persisted + 200 + SSE emitted", func(t *testing.T) {
+		ch := hub.Subscribe()
+		defer hub.Unsubscribe(ch)
+
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Fighting Spirit", "recipientName": "Alice Yamada", "recipientDojo": "Shinjuku"},
+				{"title": "Best Technique", "recipientName": "Bob Tanaka"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		// Parse response competition and check awards.
+		var resp state.Competition
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.FightingSpiritAwards, 2)
+		assert.Equal(t, "Fighting Spirit", resp.FightingSpiritAwards[0].Title)
+		assert.Equal(t, "Alice Yamada", resp.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Shinjuku", resp.FightingSpiritAwards[0].RecipientDojo)
+		assert.Equal(t, "Best Technique", resp.FightingSpiritAwards[1].Title)
+		assert.Equal(t, "Bob Tanaka", resp.FightingSpiritAwards[1].RecipientName)
+		assert.Equal(t, "", resp.FightingSpiritAwards[1].RecipientDojo)
+
+		// Verify persistence.
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.Len(t, saved.FightingSpiritAwards, 2)
+		assert.Equal(t, "Alice Yamada", saved.FightingSpiritAwards[0].RecipientName)
+
+		// Check SSE tournament_updated was broadcast.
+		sawUpdate := false
+		for range 4 {
+			select {
+			case msg := <-ch:
+				if strings.Contains(msg, `"type":"tournament_updated"`) {
+					sawUpdate = true
+				}
+			default:
+			}
+		}
+		assert.True(t, sawUpdate, "tournament_updated SSE event must be emitted after award save")
+	})
+
+	t.Run("clear awards: empty array persisted", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": []any{}})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Empty(t, saved.FightingSpiritAwards, "awards must be cleared")
+	})
+
+	t.Run("404 for unknown competition", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Ghost"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/no-such-comp/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Contains(t, w.Body.String(), "competition not found")
+	})
+
+	t.Run("400: empty title rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "   ", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "title is required")
+	})
+
+	t.Run("400: empty recipientName rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": ""},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "recipientName is required")
+	})
+
+	t.Run("400: over-cap count (21 awards) rejected", func(t *testing.T) {
+		awards := make([]map[string]any, 21)
+		for i := range awards {
+			awards[i] = map[string]any{"title": "Spirit", "recipientName": fmt.Sprintf("Person %d", i)}
+		}
+		body, _ := json.Marshal(map[string]any{"fightingSpiritAwards": awards})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "fightingSpiritAwards must not exceed")
+	})
+
+	t.Run("400: title exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": strings.Repeat("x", MaxLenPlayerName+1), "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: recipientName exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": strings.Repeat("x", MaxLenPlayerName+1)},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: recipientDojo exceeds max length", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice", "recipientDojo": strings.Repeat("x", MaxLenPlayerDojo+1)},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("missing elevated password rejected", func(t *testing.T) {
+		// Build a router with an active elevated gate: store has a tournament
+		// with a non-empty AdminPassword. The gate becomes active and any
+		// request without X-Admin-Password must be rejected.
+		tmpDir := t.TempDir()
+		s, err := state.NewStore(tmpDir)
+		require.NoError(t, err)
+		// SaveTournament with AdminPassword set activates the fileElevatedVerifier gate.
+		require.NoError(t, s.SaveTournament(&state.Tournament{
+			Name:          "T",
+			Password:      "mainpw",
+			Courts:        []string{"A"},
+			AdminPassword: "secretadminpw",
+		}))
+		require.NoError(t, s.SaveCompetition(&state.Competition{
+			ID: "awards-elev", Name: "Elev Test",
+		}))
+
+		gin.SetMode(gin.TestMode)
+		elev := NewFileElevatedVerifier(s)
+		hr := gin.New()
+		api := hr.Group("/api")
+		RegisterCompetitionHandlers(api, s, nil, NewHub(), elev)
+
+		body2, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/awards-elev/awards", bytes.NewBuffer(body2))
+		req.Header.Set("Content-Type", "application/json")
+		// Do NOT set X-Admin-Password — should be rejected with 401 (wrong credential).
+		hr.ServeHTTP(w, req)
+		assert.Equalf(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
+	})
+
+	t.Run("whitespace trimmed from awards before persisting", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "  Spirit  ", "recipientName": "  Carol  ", "recipientDojo": "  Osaka  "},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		saved, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.Len(t, saved.FightingSpiritAwards, 1)
+		assert.Equal(t, "Spirit", saved.FightingSpiritAwards[0].Title)
+		assert.Equal(t, "Carol", saved.FightingSpiritAwards[0].RecipientName)
+		assert.Equal(t, "Osaka", saved.FightingSpiritAwards[0].RecipientDojo)
+	})
+
+	t.Run("400: missing fightingSpiritAwards field (body {}) rejected", func(t *testing.T) {
+		// The field is documented required; a body of `{}` must 400 rather
+		// than silently clear the list. An explicit [] (covered above) clears.
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "fightingSpiritAwards is required")
+	})
+
+	t.Run("400: malformed JSON body rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/awards", bytes.NewBufferString("{not json"))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400: invalid competition ID rejected", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"fightingSpiritAwards": []map[string]any{
+				{"title": "Spirit", "recipientName": "Alice"},
+			},
+		})
+		w := httptest.NewRecorder()
+		// An over-length ID (>64 chars) is a single valid path segment that
+		// reaches the handler and is rejected by requireValidCompID before
+		// any store access.
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+strings.Repeat("x", 65)+"/awards", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
 func TestDiscardDrawHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1524,7 +1962,7 @@ func TestDiscardDrawHandler(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("DELETE", "/api/competitions/"+cid+"/draw", nil)
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNoContent, w.Code, "response: %s", w.Body.String())
+		assert.Equalf(t, http.StatusNoContent, w.Code, "response: %s", w.Body.String())
 
 		saved, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
@@ -1543,5 +1981,556 @@ func TestDiscardDrawHandler(t *testing.T) {
 		req, _ := http.NewRequest("DELETE", "/api/competitions/no-such-comp/draw", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// TestCompetitionCourtsInvariant verifies that every competition resolves to at
+// least one court: empty competition courts inherit the tournament's courts so
+// generated matches carry a real court label (otherwise the per-court Shiaijo
+// operator view at /admin/shiaijo/:court cannot surface them). See
+// resolveCompetitionCourts in handlers_tournament.go.
+func TestCompetitionCourtsInvariant(t *testing.T) {
+	// readBackCourts POSTs/loads a competition and returns its persisted courts.
+	postComp := func(t *testing.T, r *gin.Engine, body map[string]any) map[string]any {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(b))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusCreated, w.Code, "resp: %s", w.Body.String())
+		var got map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got
+	}
+	courtsOf := func(comp map[string]any) []string {
+		raw, _ := comp["courts"].([]any)
+		out := make([]string, 0, len(raw))
+		for _, v := range raw {
+			out = append(out, v.(string))
+		}
+		return out
+	}
+
+	t.Run("empty courts inherit the tournament's courts", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "No Courts Comp"})
+		assert.Equal(t, []string{"A", "B", "C"}, courtsOf(comp),
+			"a competition created without courts must inherit the tournament's courts")
+
+		// Confirm it is persisted, not just echoed in the response.
+		reloaded, err := store.LoadCompetition(comp["id"].(string))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"A", "B", "C"}, reloaded.Courts)
+	})
+
+	t.Run("explicit competition courts are preserved", func(t *testing.T) {
+		r, store, _, _, _ := setupTestRouter(t)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Courts: []string{"A", "B", "C"},
+		}))
+		comp := postComp(t, r, map[string]any{"name": "One Court Comp", "courts": []string{"B"}})
+		assert.Equal(t, []string{"B"}, courtsOf(comp),
+			"an explicit court selection must not be overridden by the tournament's courts")
+	})
+
+	t.Run("no tournament falls back to a single default court", func(t *testing.T) {
+		r, _, _, _, _ := setupTestRouter(t) // setupTestRouter saves no tournament
+		comp := postComp(t, r, map[string]any{"name": "Bootstrap Comp"})
+		assert.Equal(t, []string{"A"}, courtsOf(comp),
+			"with no tournament configured, an empty-courts competition defaults to court A")
+	})
+}
+
+// TestCheckUniqueCompFields tests the checkUniqueCompFields helper directly.
+func TestCheckUniqueCompFields(t *testing.T) {
+	_, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	seed := func(id, name, prefix string) {
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: name, NumberPrefix: prefix}))
+	}
+
+	t.Run("empty prefix is always exempt", func(t *testing.T) {
+		seed("pfx-empty-1", "EmptyPfx1", "")
+		seed("pfx-empty-2", "EmptyPfx2", "")
+		infraErr, valErr := checkUniqueCompFields(store, "NewComp", "", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
+		infraErr, valErr := checkUniqueCompFields(store, "AnotherNewComp", "  ", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("no collision for distinct prefixes", func(t *testing.T) {
+		seed("pfx-k", "KendoComp", "K")
+		infraErr, valErr := checkUniqueCompFields(store, "DistinctName", "M", "")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("collision detected (exact prefix match)", func(t *testing.T) {
+		seed("pfx-collision", "CollisionComp", "X")
+		_, err := checkUniqueCompFields(store, "UniqueName", "X", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "number prefix")
+		assert.Contains(t, err.Error(), "CollisionComp")
+	})
+
+	t.Run("collision detected (case-insensitive prefix)", func(t *testing.T) {
+		seed("pfx-case", "CaseComp", "Y")
+		_, err := checkUniqueCompFields(store, "AnotherUnique", "y", "")
+		assert.Error(t, err)
+	})
+
+	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
+		seed("pfx-self", "SelfComp", "Z")
+		infraErr, valErr := checkUniqueCompFields(store, "SelfComp", "Z", "pfx-self")
+		require.NoError(t, infraErr)
+		assert.NoError(t, valErr)
+	})
+
+	t.Run("collision detected (duplicate name)", func(t *testing.T) {
+		seed("name-col", "DuplicateName", "Q")
+		_, err := checkUniqueCompFields(store, "DuplicateName", "W", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "competition name")
+	})
+}
+
+// TestNumberPrefixUniquenessHandlers tests POST and PUT validation via HTTP.
+func TestNumberPrefixUniquenessHandlers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed an existing competition with prefix "K".
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "K",
+	}))
+
+	post := func(id, name, prefix string) *httptest.ResponseRecorder {
+		comp := state.Competition{ID: id, Name: name, NumberPrefix: prefix}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("POST with duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-post", "Another Kendo", "K")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+		stored, _ := store.LoadCompetition("pfx-dup-post")
+		assert.Nil(t, stored, "duplicate-prefix competition must not be persisted")
+	})
+
+	t.Run("POST with case-insensitive duplicate prefix is rejected 400", func(t *testing.T) {
+		w := post("pfx-dup-case", "Lower Kendo", "k")
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("POST with unique prefix succeeds", func(t *testing.T) {
+		w := post("pfx-unique", "Men Open", "M")
+		assert.Equal(t, http.StatusCreated, w.Code)
+	})
+
+	t.Run("PUT can keep own prefix", func(t *testing.T) {
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open Updated", NumberPrefix: "K"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("PUT with another competition's prefix is rejected 400", func(t *testing.T) {
+		// pfx-unique has prefix "M"; try to update pfx-existing to "M".
+		comp := state.Competition{ID: "pfx-existing", Name: "Kendo Open", NumberPrefix: "M"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/pfx-existing", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "number prefix")
+	})
+}
+
+// TestNormalizePoolConfig_LeagueAndPlayoffs verifies the normalizePoolConfig
+// pure function directly (no HTTP round-trip needed for the unit assertion).
+func TestNormalizePoolConfig_LeagueAndPlayoffs(t *testing.T) {
+	cases := []struct {
+		name          string
+		format        string
+		inPoolSize    int
+		inPoolWinners int
+		wantPoolSize  int
+		wantWinners   int
+	}{
+		{
+			name:          "league zeroes poolSize and poolWinners",
+			format:        state.CompFormatLeague,
+			inPoolSize:    5,
+			inPoolWinners: 2,
+			wantPoolSize:  0,
+			wantWinners:   0,
+		},
+		{
+			name:          "playoffs zeroes poolSize and poolWinners",
+			format:        state.CompFormatPlayoffs,
+			inPoolSize:    8,
+			inPoolWinners: 3,
+			wantPoolSize:  0,
+			wantWinners:   0,
+		},
+		{
+			name:          "mixed preserves poolSize and poolWinners",
+			format:        state.CompFormatMixed,
+			inPoolSize:    4,
+			inPoolWinners: 2,
+			wantPoolSize:  4,
+			wantWinners:   2,
+		},
+		{
+			name:          "swiss preserves poolSize and poolWinners",
+			format:        state.CompFormatSwiss,
+			inPoolSize:    6,
+			inPoolWinners: 1,
+			wantPoolSize:  6,
+			wantWinners:   1,
+		},
+		{
+			name:          "empty format preserves poolSize and poolWinners",
+			format:        "",
+			inPoolSize:    4,
+			inPoolWinners: 2,
+			wantPoolSize:  4,
+			wantWinners:   2,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			comp := &state.Competition{
+				Format:      tc.format,
+				PoolSize:    tc.inPoolSize,
+				PoolWinners: tc.inPoolWinners,
+			}
+			normalizePoolConfig(comp)
+			assert.Equal(t, tc.wantPoolSize, comp.PoolSize, "PoolSize")
+			assert.Equal(t, tc.wantWinners, comp.PoolWinners, "PoolWinners")
+		})
+	}
+}
+
+// TestPOSTCompetition_LeaguePoolConfigNormalized verifies that creating a
+// league competition with poolSize / poolWinners set results in them being
+// silently zeroed on disk (API normalises, does not reject).
+func TestPOSTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	body, _ := json.Marshal(state.Competition{
+		Name:        "League Cup",
+		Format:      state.CompFormatLeague,
+		Kind:        "individual",
+		PoolSize:    6,
+		PoolWinners: 3,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	// Verify the stored competition has zeroed pool config.
+	stored, err := store.LoadCompetition("league-cup")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 0, stored.PoolSize, "league PoolSize must be zeroed on create")
+	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on create")
+}
+
+// TestPUTCompetition_LeaguePoolConfigNormalized verifies that updating a
+// league competition with poolSize / poolWinners set results in them being
+// silently zeroed on disk (settings PUT normalises, does not reject).
+func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Seed a league competition (with zeroed pool config on disk).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "league-edit",
+		Name:   "League Edit",
+		Format: state.CompFormatLeague,
+		Kind:   "individual",
+	}))
+
+	// PUT with poolSize / poolWinners set — they must be zeroed on save.
+	body, _ := json.Marshal(state.Competition{
+		ID:          "league-edit",
+		Name:        "League Edit",
+		Format:      state.CompFormatLeague,
+		Kind:        "individual",
+		PoolSize:    7,
+		PoolWinners: 2,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/league-edit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	stored, err := store.LoadCompetition("league-edit")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 0, stored.PoolSize, "league PoolSize must be zeroed on PUT")
+	assert.Equal(t, 0, stored.PoolWinners, "league PoolWinners must be zeroed on PUT")
+}
+
+// TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart verifies that the
+// league tie-breaker knobs (leagueTiebreakTopN / leagueTwoThirdPlaces) can be
+// changed before the competition starts but are rejected (400) once it has
+// progressed past setup — changing them mid-league would alter the
+// consequential-tie set and which ties already-played tie-breakers resolve.
+func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// Pre-start (setup): a change is accepted.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                 "lp-setup",
+		Name:               "LP Setup",
+		Format:             state.CompFormatLeague,
+		Kind:               "team",
+		TeamSize:           5,
+		Status:             state.CompStatusSetup,
+		LeagueTiebreakTopN: 3,
+	}))
+	body, _ := json.Marshal(state.Competition{
+		ID: "lp-setup", Name: "LP Setup", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/lp-setup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := store.LoadCompetition("lp-setup")
+	require.NoError(t, err)
+	assert.Equal(t, 4, stored.LeagueTiebreakTopN, "pre-start change must persist")
+	assert.True(t, stored.LeagueTwoThirdPlaces)
+
+	// Started (pools): a change is rejected with 400, on-disk value unchanged.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                 "lp-started",
+		Name:               "LP Started",
+		Format:             state.CompFormatLeague,
+		Kind:               "team",
+		TeamSize:           5,
+		Status:             state.CompStatusPools,
+		LeagueTiebreakTopN: 3,
+	}))
+	body, _ = json.Marshal(state.Competition{
+		ID: "lp-started", Name: "LP Started", Format: state.CompFormatLeague,
+		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/lp-started", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	stored, err = store.LoadCompetition("lp-started")
+	require.NoError(t, err)
+	assert.Equal(t, 3, stored.LeagueTiebreakTopN, "started league config must be unchanged")
+}
+
+// TestPUTCompetition_MixedPoolConfigPreserved verifies that a mixed
+// competition retains its poolSize / poolWinners after a settings PUT.
+func TestPUTCompetition_MixedPoolConfigPreserved(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "mixed-edit",
+		Name:        "Mixed Edit",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		PoolSize:    5,
+		PoolWinners: 2,
+	}))
+
+	body, _ := json.Marshal(state.Competition{
+		ID:          "mixed-edit",
+		Name:        "Mixed Edit",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		PoolSize:    4,
+		PoolWinners: 1,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/mixed-edit", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	stored, err := store.LoadCompetition("mixed-edit")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, 4, stored.PoolSize, "mixed PoolSize must be preserved")
+	assert.Equal(t, 1, stored.PoolWinners, "mixed PoolWinners must be preserved")
+}
+
+func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "draw-ready-gate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          cid,
+		Name:        "Draw Ready Gate",
+		Format:      state.CompFormatMixed,
+		Kind:        "individual",
+		Courts:      []string{"A"},
+		PoolSize:    4,
+		PoolWinners: 2,
+		Status:      state.CompStatusDrawReady,
+	}))
+
+	t.Run("REJECT output-affecting PoolSize change while draw-ready", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate",
+			"format":      state.CompFormatMixed,
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    5, // changed from stored 4 — output-affecting
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"changing PoolSize while draw-ready must return 409: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "discard",
+			"409 body must mention discarding the draw")
+
+		// Status must remain draw-ready — gate must not mutate state.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+
+	t.Run("REJECT zero-value bypass: format set to empty while draw-ready", func(t *testing.T) {
+		// Regression for the Copilot finding: the gate must compare effective
+		// values directly (no zero/empty sentinels), else a caller can set an
+		// output-affecting field TO its empty value to slip past the gate and
+		// corrupt the draw. format:"" is accepted by validateCompetitionFormat.
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate",
+			"format":      "", // changed from stored "mixed" TO empty — must still 409
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    4,
+			"poolWinners": 2,
+			"roundRobin":  false,
+			"mirror":      false,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"setting format to empty while draw-ready must return 409 (no zero-value bypass): %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, state.CompFormatMixed, stored.Format,
+			"format must be unchanged after a rejected zero-value PUT")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+
+	// NumberPrefix and WithZekkenName reach the Excel generator (POST /create),
+	// so they are output-affecting and must be gated while draw-ready.
+	for _, tc := range []struct {
+		name  string
+		field string
+		value any
+	}{
+		{"REJECT numberPrefix change while draw-ready", "numberPrefix", "X"},
+		{"REJECT withZekkenName change while draw-ready", "withZekkenName", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"id":          cid,
+				"name":        "Draw Ready Gate",
+				"format":      state.CompFormatMixed,
+				"kind":        "individual",
+				"courts":      []string{"A"},
+				"poolSize":    4,
+				"poolWinners": 2,
+				"roundRobin":  false,
+				"mirror":      false,
+				tc.field:      tc.value, // the only output-affecting change
+			})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			assert.Equalf(t, http.StatusConflict, w.Code,
+				"changing %s while draw-ready must return 409: %s", tc.field, w.Body.String())
+			stored, err := store.LoadCompetition(cid)
+			require.NoError(t, err)
+			assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+		})
+	}
+
+	t.Run("ALLOW cosmetic Name rename while draw-ready", func(t *testing.T) {
+		// All output-affecting fields match the stored comp; only Name differs.
+		// The gate compares effective values directly (no sentinels): the real
+		// client always PUTs the full config, and the omitted fields here
+		// (poolSizeMode/poolFormat/teamSize) match the stored zero values, so no
+		// output-affecting change is detected and the rename is allowed.
+		body, _ := json.Marshal(map[string]any{
+			"id":          cid,
+			"name":        "Draw Ready Gate Renamed", // cosmetic change — allowed
+			"format":      state.CompFormatMixed,
+			"kind":        "individual",
+			"courts":      []string{"A"},
+			"poolSize":    4,     // same as stored
+			"poolWinners": 2,     // same as stored
+			"roundRobin":  false, // same as stored
+			"mirror":      false, // same as stored
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"renaming while draw-ready must be allowed: %s", w.Body.String())
+
+		// Rename must have persisted.
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "Draw Ready Gate Renamed", stored.Name,
+			"cosmetic Name change must persist through the draw-ready gate")
+		// Status must remain draw-ready — a rename does not discard the draw.
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 }

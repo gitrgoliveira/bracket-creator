@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit, enrichPoolMatchWithComp, buildLiveById, isRanksLocked, poolMatchesForPool } from '../admin_pools.jsx';
+import { decideRankCommit, enrichPoolMatchWithComp, buildRunningById, isRanksLocked, poolMatchesForPool } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -175,34 +175,34 @@ describe('decideRankCommit', () => {
   });
 });
 
-describe('buildLiveById', () => {
+describe('buildRunningById', () => {
   it('returns an object keyed by match id', () => {
     const matches = [
       { id: 'pool-A-1', status: 'completed', ipponsA: 2, ipponsB: 0 },
       { id: 'pool-A-2', status: 'scheduled' },
     ];
-    const live = buildLiveById(matches);
-    expect(live['pool-A-1'].status).toBe('completed');
-    expect(live['pool-A-2'].status).toBe('scheduled');
+    const running = buildRunningById(matches);
+    expect(running['pool-A-1'].status).toBe('completed');
+    expect(running['pool-A-2'].status).toBe('scheduled');
   });
 
   it('returns empty object when poolMatches is null or empty', () => {
-    expect(buildLiveById(null)).toEqual({});
-    expect(buildLiveById([])).toEqual({});
+    expect(buildRunningById(null)).toEqual({});
+    expect(buildRunningById([])).toEqual({});
   });
 
-  it('live state overrides stale pool.matches entry', () => {
+  it('running state overrides stale pool.matches entry', () => {
     const stale = { id: 'pool-A-1', status: 'scheduled' };
-    const live = buildLiveById([{ id: 'pool-A-1', status: 'completed', ipponsA: 1, ipponsB: 0 }]);
-    const resolved = live[stale.id] || stale;
+    const running = buildRunningById([{ id: 'pool-A-1', status: 'completed', ipponsA: 1, ipponsB: 0 }]);
+    const resolved = running[stale.id] || stale;
     expect(resolved.status).toBe('completed');
     expect(resolved.ipponsA).toBe(1);
   });
 
-  it('falls back to stale entry when match not yet in live list', () => {
+  it('falls back to stale entry when match not yet in running list', () => {
     const stale = { id: 'pool-A-99', status: 'scheduled' };
-    const live = buildLiveById([]);
-    const resolved = live[stale.id] || stale;
+    const running = buildRunningById([]);
+    const resolved = running[stale.id] || stale;
     expect(resolved.status).toBe('scheduled');
   });
 });
@@ -260,6 +260,26 @@ describe('enrichPoolMatchWithComp', () => {
     // Original fields preserved verbatim.
     expect(enriched.id).toBe('A-0');
     expect(enriched.status).toBe('scheduled');
+  });
+
+  it('sets compFormat from competition.format so score editors can render format-aware labels', () => {
+    const leagueComp = { id: 'c2', name: 'League Cup', kind: 'individual', teamSize: 0, format: 'league' };
+    const m = { id: 'Pool A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, leagueComp);
+    expect(enriched.compFormat).toBe('league');
+  });
+
+  it('prefers compFormat already on the match over the competition format', () => {
+    const leagueComp = { id: 'c2', name: 'League Cup', kind: 'individual', teamSize: 0, format: 'league' };
+    const m = { id: 'Pool A-0', status: 'scheduled', compFormat: 'mixed' };
+    const enriched = enrichPoolMatchWithComp(m, leagueComp);
+    expect(enriched.compFormat).toBe('mixed');
+  });
+
+  it('falls back to empty string for compFormat when competition has no format', () => {
+    const m = { id: 'A-0', status: 'scheduled' };
+    const enriched = enrichPoolMatchWithComp(m, comp); // comp has no .format
+    expect(enriched.compFormat).toBe('');
   });
 
   it('prefers the explicit poolNameOverride over the id-derived prefix', () => {

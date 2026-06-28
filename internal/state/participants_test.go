@@ -11,6 +11,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestSaveParticipants_CanonicalizesSource pins that marshalParticipantsCSV
+// normalizes Source (trim + lower-case) on write regardless of the casing the
+// caller supplied — so participants.csv never carries "Manual"/" registered "
+// variants that would split filter buckets or get mis-parsed on reload.
+func TestSaveParticipants_CanonicalizesSource(t *testing.T) {
+	dir, err := os.MkdirTemp("", "participants-canon-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "comp-canon"
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", compID), 0700))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A", Source: "Manual"},
+		{Name: "Bob", Dojo: "Dojo B", Source: "  Registered "},
+		{Name: "Carol", Dojo: "Dojo C", Source: "vip"}, // unknown → dropped, not round-tripped
+	}))
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 3)
+	assert.Equal(t, "manual", loaded[0].Source, "Source must be lower-cased on write")
+	assert.Equal(t, "registered", loaded[1].Source, "Source must be trimmed + lower-cased on write")
+	assert.Empty(t, loaded[2].Source, "unknown Source must NOT be persisted")
+	assert.Empty(t, loaded[2].Metadata, "unknown Source must NOT round-trip into Metadata")
+}
+
 func TestParticipants(t *testing.T) {
 	dir, err := os.MkdirTemp("", "participants-test-*")
 	require.NoError(t, err)
@@ -30,7 +57,7 @@ func TestParticipants(t *testing.T) {
 
 	// 2. Save participants
 	playersToSave := []domain.Player{
-		{Name: "Alice", Dojo: "Dojo A", Tag: "manual"},
+		{Name: "Alice", Dojo: "Dojo A", Source: "manual"},
 		{Name: "Bob", Dojo: "Dojo B"},
 	}
 	err = store.SaveParticipants(compID, playersToSave)
@@ -44,13 +71,13 @@ func TestParticipants(t *testing.T) {
 	assert.Equal(t, "Alice", loadedPlayers[0].Name)
 	assert.Equal(t, "ALICE", loadedPlayers[0].DisplayName)
 	assert.Equal(t, "Dojo A", loadedPlayers[0].Dojo)
-	assert.Equal(t, "manual", loadedPlayers[0].Tag)
+	assert.Equal(t, "manual", loadedPlayers[0].Source)
 
 	assert.NotEmpty(t, loadedPlayers[1].ID) // UUID generated
 	assert.Equal(t, "Bob", loadedPlayers[1].Name)
 	assert.Equal(t, "BOB", loadedPlayers[1].DisplayName)
 	assert.Equal(t, "Dojo B", loadedPlayers[1].Dojo)
-	assert.Empty(t, loadedPlayers[1].Tag)
+	assert.Empty(t, loadedPlayers[1].Source)
 
 	// 4. Save and load participants with existing IDs
 	playersToSaveWithID := []domain.Player{
@@ -205,7 +232,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 
 	// Simulate the import handler's pipeline: helper.CreatePlayers parses
 	// the uploaded CSV in non-zekken mode, which auto-derives DisplayName.
-	parsed, err := helper.CreatePlayers([]string{"Jane Doe, Mushin Dojo"}, false)
+	parsed, err := helper.CreatePlayers([]string{"Jane Doe, Enzan Dojo"}, false)
 	require.NoError(t, err)
 	require.Equal(t, "J. DOE", parsed[0].DisplayName, "guard: helper still auto-derives DisplayName")
 
@@ -221,7 +248,7 @@ func TestParticipantsNonZekkenImportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Jane Doe", loaded[0].Name)
-	assert.Equal(t, "Mushin Dojo", loaded[0].Dojo, "Dojo must round-trip intact (regression)")
+	assert.Equal(t, "Enzan Dojo", loaded[0].Dojo, "Dojo must round-trip intact (regression)")
 	assert.Empty(t, loaded[0].Metadata, "real Dojo must not leak into Metadata (regression)")
 	assert.Equal(t, "J. DOE", loaded[0].DisplayName, "loader still re-derives DisplayName")
 }
@@ -271,7 +298,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 
 	players := []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A", Metadata: []string{"2d"}},
-		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Tag: "registered"},
+		{Name: "Bob", Dojo: "Dojo B", Metadata: []string{"3d"}, Source: "registered"},
 		{Name: "Carol", Dojo: "Dojo C"},
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
@@ -287,7 +314,7 @@ func TestMetadataRoundTrip(t *testing.T) {
 	require.Len(t, loaded, 3)
 	assert.Equal(t, []string{"2d"}, loaded[0].Metadata, "Alice's danGrade must round-trip")
 	assert.Equal(t, []string{"3d"}, loaded[1].Metadata, "Bob's danGrade must round-trip")
-	assert.Equal(t, "registered", loaded[1].Tag, "Bob's tag must round-trip alongside danGrade")
+	assert.Equal(t, "registered", loaded[1].Source, "Bob's source must round-trip alongside danGrade")
 	assert.Empty(t, loaded[2].Metadata, "Carol with no metadata must stay empty")
 }
 
@@ -327,14 +354,14 @@ func TestCheckedInColumnBasedDetection(t *testing.T) {
 
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
 	// Minimal "Name, Dojo, checked_in" (3-column) format.
-	content := "Alice, Kenshikan, checked_in\nBob, Mumeishi\n"
+	content := "Alice, Suigetsu, checked_in\nBob, Gyokusen\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
 
 	loaded, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
 	assert.True(t, loaded[0].CheckedIn, "Alice must be detected as checked-in from 3-column row")
-	assert.Equal(t, "Kenshikan", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
+	assert.Equal(t, "Suigetsu", loaded[0].Dojo, "Dojo must not be consumed by checked_in detection")
 	assert.False(t, loaded[1].CheckedIn, "Bob must not be checked-in")
 
 	// Negative: dojo literally named "checked_in" must NOT be consumed.
@@ -392,7 +419,7 @@ func TestUpdateParticipant(t *testing.T) {
 }
 
 func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
-	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,tag][,checked_in]".
+	// Regression (Copilot review): UUID rows have format "uuid,Name,Dojo[,source][,checked_in]".
 	// A 3-part UUID row "uuid,Alice,checked_in" must NOT be misclassified: "checked_in" is the Dojo.
 	dir := t.TempDir()
 	store, err := NewStore(dir)
@@ -414,12 +441,12 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 
 	// 4-col UUID row: uuid, Name, Dojo, checked_in — trailing checked_in IS a valid marker.
 	require.NoError(t, os.WriteFile(path,
-		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Kenshikan, checked_in\n"), 0600))
+		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Suigetsu, checked_in\n"), 0600))
 	loaded2, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, loaded2, 1)
 	assert.True(t, loaded2[0].CheckedIn, "4-part UUID row must be detected as checked-in")
-	assert.Equal(t, "Kenshikan", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
+	assert.Equal(t, "Suigetsu", loaded2[0].Dojo, "Dojo must survive after checked_in token is stripped")
 }
 
 func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
@@ -430,14 +457,137 @@ func TestAddParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup"}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{Name: "Alice", Dojo: "Dojo A"}}))
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space variant must be caught by duplicate guard")
+	// Same name AND same dojo (normalized) must be rejected.
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice ", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space name variant with same dojo must be caught by duplicate guard")
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space variant must be caught by duplicate guard")
+	_, err = store.AddParticipant(compID, domain.Player{Name: " Alice", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "leading-space name variant with same dojo must be caught by duplicate guard")
 
-	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo B"}, false)
-	assert.ErrorIs(t, err, ErrDuplicateName, "case-only variant must be caught by duplicate guard")
+	_, err = store.AddParticipant(compID, domain.Player{Name: "alice", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-only name variant with same dojo must be caught by duplicate guard")
+
+	// Same name but DIFFERENT dojo is explicitly ALLOWED (two real people).
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo B"}, false)
+	assert.NoError(t, err, "same name at a different dojo must be allowed")
+}
+
+// TestSaveParticipants_RejectsDuplicateNameDojo pins the Tier-1 guard at the
+// lowest write layer (saveParticipantsNoLock). This is the path the SPA's
+// PRIMARY batch/paste-import flow takes (PUT /competitions/:id →
+// SaveParticipants), so enforcing here makes the perfect-duplicate reject
+// non-bypassable across every persistence path, not just the single-add/edit
+// handlers. (mp-ljry)
+func TestSaveParticipants_RejectsDuplicateNameDojo(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "bulk-dup"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Bulk Dup"}))
+
+	// Perfect (name, dojo) duplicate within one bulk import — including a
+	// diacritic/whitespace/case variant — must be rejected.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Müller", Dojo: "Wakaba"},
+		{Name: "muller ", Dojo: "wakaba"},
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "normalized (name,dojo) collision in a bulk save must be rejected")
+
+	// Same name at DIFFERENT dojos is allowed (two real people).
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "John Smith", Dojo: "Wakaba"},
+		{Name: "John Smith", Dojo: "Tora"},
+	})
+	assert.NoError(t, err, "same name at different dojos must be allowed in a bulk save")
+
+	// Two same-named teams with empty dojo collide (real duplicate).
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan", Dojo: ""},
+		{Name: "shudokan", Dojo: ""},
+	})
+	assert.ErrorIs(t, err, ErrDuplicateName, "identical team names with empty dojo must collide")
+
+	// Squad variants (different names) are NOT perfect duplicates.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan A", Dojo: ""},
+		{Name: "Shudokan B", Dojo: ""},
+	})
+	assert.NoError(t, err, "A/B squad teams are distinct names and must be allowed")
+}
+
+func TestSaveParticipants_RejectsReservedNames(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "reserved-names"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Names"}))
+
+	cases := []struct {
+		name string
+		dojo string
+	}{
+		{"Pool A-1st", "Wakaba"},
+		{"Pool Z-2nd", "Tora"},
+		{"Winner of r1-m0", ""},
+		{"Winner of r3-m10", "Dojo"},
+	}
+	for _, tc := range cases {
+		err := store.SaveParticipants(compID, []domain.Player{{Name: tc.name, Dojo: tc.dojo}})
+		assert.ErrorIs(t, err, ErrReservedName, "reserved name %q must be rejected by SaveParticipants", tc.name)
+	}
+
+	// Non-reserved names must be allowed regardless of superficial similarity.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Winner of the 2025 Cup", Dojo: "Wakaba"},
+	})
+	assert.NoError(t, err, "non-reserved name must be accepted")
+}
+
+func TestAddParticipant_RejectsReservedName(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "reserved-add"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Add"}))
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Pool B-3rd", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrReservedName, "reserved pool-finalist name must be rejected by AddParticipant")
+
+	_, err = store.AddParticipant(compID, domain.Player{Name: "Winner of r2-m5", Dojo: "Dojo A"}, false)
+	assert.ErrorIs(t, err, ErrReservedName, "reserved winner-of name must be rejected by AddParticipant")
+}
+
+func TestReplaceParticipant_RejectsReservedName(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "reserved-replace"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Reserved Replace"}))
+
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice", Dojo: "Dojo A"}, false)
+	require.NoError(t, err)
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Pool C-1st"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrReservedName, "rename to a reserved pool-finalist name must be rejected")
+
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Winner of r1-m0"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.ErrorIs(t, err, ErrReservedName, "rename to a reserved winner-of name must be rejected")
+
+	// A non-reserved rename must succeed.
+	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Alice Renamed"
+		p.Dojo = "Dojo A"
+		return nil
+	})
+	assert.NoError(t, err, "non-reserved rename must succeed")
 }
 
 func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
@@ -448,7 +598,7 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "WS Dup Upd"}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "Alice", Dojo: "Dojo A"},
-		{Name: "Bob", Dojo: "Dojo B"},
+		{Name: "Bob", Dojo: "Dojo A"}, // same dojo so rename collides
 	}))
 
 	loaded, err := store.LoadParticipants(compID, false)
@@ -461,50 +611,50 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	}
 	require.NotEmpty(t, bobID)
 
-	// Renaming Bob to "Alice " (trailing space) must be rejected.
+	// Renaming Bob to "Alice " (trailing space) must be rejected — same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "Alice "
 		return nil
 	})
-	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name must be rejected")
+	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name+dojo must be rejected")
 
-	// Renaming Bob to "alice" (case variant) must also be rejected.
+	// Renaming Bob to "alice" (case variant) must also be rejected — same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "alice"
 		return nil
 	})
-	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name must be rejected")
+	assert.ErrorIs(t, err, ErrDuplicateName, "case-variant rename colliding with existing name+dojo must be rejected")
 }
 
-// TestZekkenWithTagDoesNotCorruptCSV pins the marshalParticipantsCSV column-
+// TestZekkenWithSourceDoesNotCorruptCSV pins the marshalParticipantsCSV column-
 // layout fix: a zekken competition where DisplayName equals SanitizeName(Name)
-// AND Tag is non-empty (e.g. the "manual" default applied by the single-add
-// endpoint) used to produce a 4-field row [id, Name, Dojo, Tag] that
+// AND Source is non-empty (e.g. the "manual" default applied by the single-add
+// endpoint) used to produce a 4-field row [id, Name, Dojo, Source] that
 // CreatePlayersFromRecords(_, true) misparsed as
-// (Name, DisplayName=Dojo, Dojo=Tag) — silently corrupting the row.
+// (Name, DisplayName=Dojo, Dojo=Source) — silently corrupting the row.
 // The writer now always emits the DisplayName column for zekken comps.
-func TestZekkenWithTagDoesNotCorruptCSV(t *testing.T) {
+func TestZekkenWithSourceDoesNotCorruptCSV(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
-	compID := "zekken-tag"
+	compID := "zekken-source"
 	require.NoError(t, store.SaveCompetition(&Competition{
-		ID: compID, Name: "Zekken Tag", WithZekkenName: true,
+		ID: compID, Name: "Zekken Source", WithZekkenName: true,
 	}))
 
 	// DisplayName left blank — SaveParticipants must still write the
 	// DisplayName column for zekken comps so the row is round-trip safe.
-	// Tag="manual" mirrors what the single-add endpoint defaults to.
+	// Source="manual" mirrors what the single-add endpoint defaults to.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Akira Tanaka", Dojo: "Mumeishi", Tag: "manual"},
+		{Name: "Akira Tanaka", Dojo: "Gyokusen", Source: "manual"},
 	}))
 
 	loaded, err := store.LoadParticipants(compID, true)
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "Akira Tanaka", loaded[0].Name, "Name must round-trip")
-	assert.Equal(t, "Mumeishi", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
-	assert.Equal(t, "manual", loaded[0].Tag, "Tag must NOT shift into Dojo (regression)")
+	assert.Equal(t, "Gyokusen", loaded[0].Dojo, "Dojo must NOT shift into DisplayName (regression)")
+	assert.Equal(t, "manual", loaded[0].Source, "Source must NOT shift into Dojo (regression)")
 	assert.NotEmpty(t, loaded[0].DisplayName, "auto-derived DisplayName must be present after reload")
 }
 

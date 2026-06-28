@@ -195,8 +195,9 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
 
         // Verify the warn was emitted for devtools visibility.
+        // F5: kind is now included in the warn prefix ('score' for running writes).
         expect(warnSpy).toHaveBeenCalledWith(
-            '[sync] queued running write rejected (409):',
+            '[sync] queued score write rejected (409):',
             expect.objectContaining({ error: 'ineligible_competitor' })
         );
         warnSpy.mockRestore();
@@ -223,8 +224,9 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         // Advance well past every backoff step — no retry should ever fire.
         await tick(20000);
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
+        // F5: kind is now included in the warn prefix ('score' for running writes).
         expect(warnSpy).toHaveBeenCalledWith(
-            '[sync] queued running write rejected (400):',
+            '[sync] queued score write rejected (400):',
             expect.objectContaining({ error: 'bad request' })
         );
         warnSpy.mockRestore();
@@ -430,12 +432,15 @@ describe('recordScore: queues running writes on network failure', () => {
         expect(result).toMatchObject({ queued: true });
     });
 
-    it('re-throws network errors for completed writes (must not queue)', async () => {
+    it('queues completed writes on network failure (F5 — terminal durability)', async () => {
+        // F5: completed writes are now queued for durable re-delivery on transient
+        // failures (network error, abort, 5xx, 429) instead of throwing. The caller
+        // receives { queued: true } so the UI can show a "not yet saved" state.
+        // 4xx errors on the direct call still throw (no retry possible).
         global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
 
-        await expect(
-            API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)
-        ).rejects.toThrow();
+        const result = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        expect(result).toMatchObject({ queued: true });
     });
 
     it('throws on 409 for running writes (real operator errors must not be swallowed)', async () => {
@@ -531,40 +536,36 @@ describe('recordScore: completed write drains queued running autosave', () => {
         expect(finalStatuses).toContain('synced');
     });
 
-    it('a FAILED completed write KEEPS the queued running snapshot (drain deferred to success)', async () => {
-        // Regression: the drain used to run pre-flight, so a completed write that
-        // failed (e.g. Finish while offline) discarded the last queued running
-        // snapshot — losing the operator's scores. The drain now runs only after
-        // the completed write is server-confirmed, so a failure preserves the
-        // snapshot for later delivery.
+    it('a FAILED completed write is queued as terminal (supersedes running snapshot)', async () => {
+        // F5: a completed write that fails offline is now queued as a terminal
+        // entry. It supersedes the running entry for the same key (last-write-wins,
+        // terminal takes priority) so only the terminal completed write is flushed
+        // when connectivity returns — the stale running snapshot is not re-sent.
+        // The drain of the running entry still happens only after a server-confirmed
+        // success (not pre-flight), but here the terminal enqueue replaces it.
         let online = false;
         const delivered = [];
         global.fetch = vi.fn().mockImplementation((_url, opts) => {
             const body = JSON.parse(opts.body);
             if (!online) {
-                // Offline: every write fails at the network layer.
                 return Promise.reject(new TypeError('network error'));
             }
             delivered.push(body.status);
             return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
         });
 
-        // Step 1: running write fails → queued.
-        const queued = await API.recordScore('c1', 'm_keep', { status: 'running', ipponsA: ['M'] }, 'pw', null);
-        expect(queued).toMatchObject({ queued: true });
+        // Step 1: running write fails → queued as running entry.
+        const runQueued = await API.recordScore('c1', 'm_keep', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        expect(runQueued).toMatchObject({ queued: true });
 
-        // Step 2: completed write while still offline → throws. It must NOT drain
-        // the queued running snapshot (the old pre-flight drain would have).
-        await expect(
-            API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null)
-        ).rejects.toThrow();
+        // Step 2: completed write while offline → queued as terminal (not a throw).
+        // The terminal entry supersedes the running entry for the same key.
+        const completedQueued = await API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null);
+        expect(completedQueued).toMatchObject({ queued: true });
 
-        // Step 3: connection returns; the preserved snapshot flushes on the next
-        // backoff retry. Only the running write was ever queued — the failed
-        // completed write was not, so it does not reappear.
+        // Step 3: connection returns; only the terminal completed write flushes.
         online = true;
         await tick(600);
-        expect(delivered).toContain('running');
-        expect(delivered).not.toContain('completed');
+        expect(delivered).toContain('completed');
     });
 });

@@ -78,6 +78,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   const [submitting, setSubmitting] = useStateA(false);
+  // F5: pending-write state — set when a terminal submit resolves { queued:true }
+  // (offline / transient failure). While pending the modal stays open and shows a
+  // sticky "Not saved yet" banner. Cleared when the queue drains for this match
+  // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
+  // terminal submit closure so "Retry now" can re-invoke it directly.
+  const [pendingWrite, setPendingWrite] = useStateA(false);
+  const pendingFnRef = useRefA(null);
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
   // Fetched once on open so the warning banner can fire before the
   // operator submits (the server validates the same cap on PUT /score).
@@ -157,6 +164,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setWithdrawnPlayer, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete, entityLabel: "competitors",
+    // F5: thread pending-write handles so the factory can show the sticky banner
+    // when the decision write is only queued (offline / transient failure).
+    setPendingWrite, pendingFnRef,
   });
 
   // Hansoku Hs are now physically present in the opponent's pts array
@@ -262,8 +272,40 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
     setSubmitting(true);
-    try { await fn(); } finally { if (mountedRef.current) setSubmitting(false); }
+    // Clear any prior pending-write state when the operator explicitly retries.
+    if (mountedRef.current) setPendingWrite(false);
+    let res;
+    try {
+      res = await fn();
+    } finally {
+      if (mountedRef.current) setSubmitting(false);
+    }
+    // F5: if the terminal write was only queued (offline / transient), do NOT
+    // close or advance. Instead enter pending-write mode: show the sticky banner
+    // and remember the submit closure so "Retry now" can re-invoke it.
+    if (res && res.queued) {
+      if (mountedRef.current) {
+        setPendingWrite(true);
+        pendingFnRef.current = fn;
+      }
+    }
+    return res;
   };
+
+  // F5: subscribe to sync-status so the pending-write banner auto-clears once
+  // the queue drains for this match. Mounted once; reads match identity via
+  // closure. Uses mountedRef guard so setState never fires after unmount.
+  useEffectA(() => {
+    if (!m.compId || !m.id) return;
+    const unsub = window.subscribeSyncStatus((status) => {
+      if (!mountedRef.current) return;
+      if (status === 'synced' && !window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+        setPendingWrite(false);
+        pendingFnRef.current = null;
+      }
+    });
+    return unsub;
+  }, [m.compId, m.id]);
 
   // Draw detection: check both the score.type (when present) and the
   // top-level decision string. Either being "hikiwake" means draw.
@@ -723,6 +765,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               }}
               onCancel={() => setShowCorrectionPrompt(false)}
             />
+          )}
+          {/* F5: pending-write banner — shown when a terminal submit was only queued
+              (offline / transient failure). The write is durable in localStorage
+              and will be retried automatically. Operator may still dismiss. */}
+          {pendingWrite && (
+            <div className="pending-write-banner" role="status" aria-live="polite">
+              <span>Not saved yet — offline. Will retry automatically.</span>
+              <button
+                type="button"
+                className="btn btn--sm btn--ghost"
+                disabled={submitting}
+                onClick={() => {
+                  if (pendingFnRef.current) doSubmit(pendingFnRef.current);
+                }}
+              >
+                Retry now
+              </button>
+            </div>
           )}
           <div className="score-nav">
             {prevMatch ? (

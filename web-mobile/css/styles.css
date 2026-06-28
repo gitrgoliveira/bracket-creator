@@ -6235,6 +6235,45 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-wrap: wrap;
 }
 
+/* F5: pending-write banner — offline / transient queued terminal write */
+.pending-write-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--r-sm);
+  padding: 8px 12px; /* align to the .alert spacing scale */
+  font-size: var(--fs-sm);
+  color: var(--warn-ink);
+  font-weight: 500;
+  margin-bottom: 8px;
+  animation: pending-write-in 160ms ease-out;
+}
+/* Leading amber dot — matches the offline sync-pill's glance language so the
+   two offline signals read as one family. Static (not pulsing): this is passive
+   status ("will retry automatically"); DESIGN.md reserves the amber *pulse* for
+   a demanded next action, which here is the explicit "Retry now" button. */
+.pending-write-banner::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--warn-strong);
+}
+.pending-write-banner > span {
+  flex: 1;
+  min-width: 0;
+}
+@keyframes pending-write-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pending-write-banner { animation: none; }
+}
+
 /* ---------- H ippon button ---------- */
 .ipt-btn--h {
   background: rgba(220, 38, 38, 0.08);

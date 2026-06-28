@@ -286,15 +286,32 @@ function makeSubmitDecision({
   onAfterDecision,
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
   entityLabel = 'competitors',
+  // F5: optional pending-write handles threaded in from ScoreEditorModal so
+  // a queued (offline) decision write shows the sticky "Not saved yet" banner.
+  // Not provided by TeamScoreEditorModal (which has its own pending state path).
+  setPendingWrite,
+  pendingFnRef,
 }) {
   const submit = async (kind, { decisionBy, decisionReason }, opts = {}) => {
     setDecisionSubmitting(true);
     setDecisionErr('');
+    // F5: clear any prior pending-write state when the operator retries.
+    if (setPendingWrite && mountedRef.current) setPendingWrite(false);
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password, opts,
       );
       if (!mountedRef.current) return;
+      // F5: if the write was only queued (offline / transient), do NOT close or
+      // advance. Enter pending-write mode so the banner shows in the footer.
+      // Save the submit closure so "Retry now" can re-invoke it directly.
+      if (updated && updated.queued) {
+        if (setPendingWrite) {
+          setPendingWrite(true);
+          if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
+        }
+        return;
+      }
       if (window.isKikenDecision(kind)) {
         // Kiken keeps the modal open so the operator can walk through
         // RemainingMatchesPanel and award default wins to each remaining

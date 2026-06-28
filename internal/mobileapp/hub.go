@@ -39,11 +39,12 @@ const (
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers
 	// ignore the event — their flow doesn't depend on the admin password.
-	EventPasswordReset EventType = "password_reset"
-	EventAnnouncement  EventType = "announcement"
-	EventDrawGenerated EventType = "draw_generated"
-	EventDrawDiscarded EventType = "draw_discarded"
-	EventLineupUpdated EventType = "lineup_updated"
+	EventPasswordReset  EventType = "password_reset"
+	EventAnnouncement   EventType = "announcement"
+	EventDrawGenerated  EventType = "draw_generated"
+	EventDrawDiscarded  EventType = "draw_discarded"
+	EventLineupUpdated  EventType = "lineup_updated"
+	EventResyncRequired EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the
@@ -427,13 +428,33 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		// directly.
 		if lastEventID > 0 {
 			entries, complete := h.snapshotHistorySince(lastEventID)
+			currentHeadSeq := h.seq.Load()
+			unsatisfiable := !complete || lastEventID > currentHeadSeq
 			if !complete {
 				fmt.Printf("SSE replay: client requested Last-Event-ID=%d but oldest retained seq exceeds it; %d entries replayed\n", lastEventID, len(entries))
 			}
-			for _, entry := range entries {
-				writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
+			if unsatisfiable {
+				// The ring rolled past the client's Last-Event-ID (eviction)
+				// or the server restarted and its seq counter reset below the
+				// client's Last-Event-ID. Either way a gap-free replay is
+				// impossible. Signal the client with a resync_required frame
+				// (stamped with the current head seq so the client's
+				// Last-Event-ID advances to head and won't immediately re-gap)
+				// then fall through to the normal streaming loop.
+				resyncEvent := SSEEvent{Type: EventResyncRequired, Seq: currentHeadSeq}
+				resyncPayload, err := json.Marshal(resyncEvent)
+				if err != nil {
+					fmt.Printf("SSE resync marshal error: %v\n", err)
+				} else {
+					writeSSEEnvelope(c.Writer, currentHeadSeq, string(resyncPayload))
+					c.Writer.Flush()
+				}
+			} else {
+				for _, entry := range entries {
+					writeSSEEnvelope(c.Writer, entry.seq, entry.payload)
+				}
+				c.Writer.Flush()
 			}
-			c.Writer.Flush()
 		}
 
 		ticker := time.NewTicker(15 * time.Second)
@@ -454,7 +475,14 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				}
 				return false
 			case <-ticker.C:
-				if _, err := w.Write([]byte(": keep-alive\n\n")); err != nil {
+				// Emit a real data frame (no id: line) so client JS can
+				// observe the heartbeat via onmessage. SSE comment lines
+				// (": keep-alive") are silently swallowed by the browser
+				// EventSource API and are invisible to JS handlers.
+				// Omitting id: means the browser's Last-Event-ID is
+				// unchanged — the heartbeat neither consumes a seq nor
+				// creates a gap.
+				if _, err := w.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n")); err != nil {
 					return false
 				}
 				c.Writer.Flush() // Ensure heartbeat is sent immediately

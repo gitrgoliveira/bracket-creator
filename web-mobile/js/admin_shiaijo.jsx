@@ -764,14 +764,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onClose={() => {}}
                                     canClose={false}
                                     onSubmit={async (patch) => {
-                                        try { await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch); }
+                                        try {
+                                            const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // F5: queued write — return signal so the editor shows the pending-save banner.
+                                            if (res && res.queued) return res;
+                                        }
                                         catch (_e) { /* surfaced via toast */ }
                                     }}
                                     onSubmitAndNext={async (patch) => {
                                         const next = nextActiveAfter(selectedMatch);
                                         try {
-                                            await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
-                                            if (!mountedRef.current) return;
+                                            const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            if (!mountedRef.current) return res;
+                                            // F5: queued write — do NOT advance. Return signal to editor.
+                                            if (res && res.queued) return res;
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {

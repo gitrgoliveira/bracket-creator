@@ -8,6 +8,12 @@ repo_url: https://github.com/gitrgoliveira/bracket-creator
 extra_css:
   - assets/stylesheets/extra.css
 
+# Mermaid: load the library explicitly + an init that re-runs on Material's
+# instant-navigation page swaps (see assets/javascripts/mermaid-init.js).
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js
+  - assets/javascripts/mermaid-init.js
+
 markdown_extensions:
   - admonition
   - pymdownx.details
@@ -15,7 +21,13 @@ markdown_extensions:
       anchor_linenums: true
       use_pygments: true
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      # Register the `mermaid` fence so Material renders ```mermaid blocks as
+      # diagrams (built-in Mermaid support) instead of plain code blocks.
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
 

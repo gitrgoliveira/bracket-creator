@@ -166,9 +166,21 @@ const QUEUE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 // and flush, kept in one place so the two checks can't drift apart.
 const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST'];
 function _isAllowedTerminalRequest(method, url) {
-    return _ALLOWED_QUEUE_METHODS.includes(method)
-        && typeof url === 'string'
-        && url.startsWith('/api/competitions/');
+    if (!_ALLOWED_QUEUE_METHODS.includes(method) || typeof url !== 'string' || !url) return false;
+    // Defense-in-depth: localStorage is tamperable. Resolve the URL against our own
+    // origin and validate the NORMALIZED same-origin pathname. A naive
+    // startsWith('/api/competitions/') would let a dot-segment payload such as
+    // "/api/competitions/../../api/admin/secrets" pass while fetch normalizes it to
+    // "/api/admin/secrets" on the wire. The URL parse also rejects absolute,
+    // cross-origin, and protocol-relative ("//evil.com/…") URLs.
+    const origin = (typeof location !== 'undefined' && location.origin) || 'http://localhost';
+    let u;
+    try {
+        u = new URL(url, origin);
+    } catch (_e) {
+        return false;
+    }
+    return u.origin === origin && u.pathname.startsWith('/api/competitions/');
 }
 
 // ---------------------------------------------------------------------------

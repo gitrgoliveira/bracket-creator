@@ -666,6 +666,47 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         expect(m.API.hasPendingTerminalWrite('c1', 'm4')).toBe(false);
     });
 
+    it('rejects a dot-segment path-traversal url that normalizes outside /api/competitions/', async () => {
+        // Passes a naive startsWith('/api/competitions/') but fetch would normalize
+        // it to /api/admin/secrets on the wire — must be rejected.
+        const bad = [['c1:m5', {
+            compID: 'c1', matchID: 'm5', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/../../api/admin/secrets', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm5')).toBe(false);
+    });
+
+    it('rejects a cross-origin / protocol-relative terminal url', async () => {
+        const bad = [['c1:m6', {
+            compID: 'c1', matchID: 'm6', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '//evil.example.com/api/competitions/c1/matches/m6/score', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm6')).toBe(false);
+    });
+
+    it('accepts a legitimate same-origin /api/competitions/ terminal url', async () => {
+        const good = [['c1:m7', {
+            compID: 'c1', matchID: 'm7', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m7/score', enqueuedAt: Date.now(),
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(good));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm7')).toBe(true);
+    });
+
     it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
         // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
         // terminal entry. A non-array element would throw on destructure and (under

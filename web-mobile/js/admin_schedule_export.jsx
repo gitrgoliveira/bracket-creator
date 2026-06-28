@@ -21,7 +21,7 @@ export function AdminExport({ c, t }) {
       // pool would hand the operator a structurally wrong workbook. Block it
       // with a clear message instead (live results live in the scoring view).
       if (cfg.format === "swiss") {
-        throw new Error("Swiss competitions can't be exported to a static Excel bracket — use the live scoring view to track Swiss rounds.");
+        throw new Error("Swiss competitions can't be exported to a static Excel bracket : use the live scoring view to track Swiss rounds.");
       }
 
       const players = cfg.players || [];
@@ -37,7 +37,7 @@ export function AdminExport({ c, t }) {
 
       // RFC-4180-quote any field containing a comma/quote/newline so the Go
       // parser (helper.CreatePlayers) routes the line through encoding/csv
-      // instead of a naive strings.Split — otherwise a name or dojo with a
+      // instead of a naive strings.Split : otherwise a name or dojo with a
       // comma (e.g. "Smith, Jr") silently corrupts the roster.
       const csvField = (s) =>
         /[",\n]/.test(s) ? '"' + String(s).replace(/"/g, '""') + '"' : s;

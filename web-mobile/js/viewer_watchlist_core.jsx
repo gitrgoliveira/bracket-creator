@@ -1,17 +1,17 @@
-// viewer_watchlist_core.jsx — watchlist hooks + normalization logic extracted
+// viewer_watchlist_core.jsx: watchlist hooks + normalization logic extracted
 // from viewer.jsx (mp-pxxc step 2). Pure file split: no behaviour change.
 //
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module — do NOT give it its own <script type="module">
+// index.html and imports this module : do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
 // Cycle note: viewer.jsx imports from this file and re-exports every symbol
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged. viewer_watchlist.jsx (panel UI) continues to read the watchlist
-// helpers via window.* lazy reads — those assignments still live in viewer.jsx.
+// helpers via window.* lazy reads : those assignments still live in viewer.jsx.
 
 const { useState } = React;
 
@@ -71,7 +71,7 @@ const LS_WATCHLIST = "bc_watchlist";
 export const WATCHLIST_MAX = 50;
 
 // ---------------------------------------------------------------------------
-// mp-xhaa: Unified watchlist — polymorphic entries + primary selection
+// mp-xhaa: Unified watchlist : polymorphic entries + primary selection
 // ---------------------------------------------------------------------------
 //
 // The watchlist absorbs the old single "followed player". Entries are now
@@ -84,7 +84,7 @@ export const WATCHLIST_MAX = 50;
 // is no hero and no chime (critique decision: avoid the alert storm). The pin
 // is stored as an `entryKey` string, decoupled from list order.
 
-// entryKey — stable identity for an entry, used for the pin pointer, React
+// entryKey : stable identity for an entry, used for the pin pointer, React
 // keys, and dedup. Player keys are id-based, dojo keys are name-based. Returns
 // "" for anything unrecognisable so callers can filter it out.
 export function entryKey(entry) {
@@ -94,7 +94,7 @@ export function entryKey(entry) {
   return id ? "player:" + id : "";
 }
 
-// normalizeWatchlistEntry — coerce a raw stored/added value into a canonical
+// normalizeWatchlistEntry : coerce a raw stored/added value into a canonical
 // entry, or null if it carries no usable identity. Legacy entries (pre-merge
 // `{id,name,dojo}` with no `type`) are upgraded to player entries. This is the
 // single choke point that lets dojo entries survive a round-trip through
@@ -105,13 +105,13 @@ export function normalizeWatchlistEntry(x) {
     const dojo = (x.dojo != null ? String(x.dojo) : "").trim();
     return dojo ? { type: "dojo", dojo } : null;
   }
-  // Explicit player OR legacy (no type) — both keyed by id.
+  // Explicit player OR legacy (no type) : both keyed by id.
   const id = x.id != null ? String(x.id) : "";
   if (!id) return null;
   return { type: "player", id, name: x.name != null ? String(x.name) : "", dojo: x.dojo != null ? String(x.dojo) : "" };
 }
 
-// normalizeWatchlist — normalize every entry, drop the unusable ones, dedup by
+// normalizeWatchlist : normalize every entry, drop the unusable ones, dedup by
 // entryKey (first occurrence wins), and cap at WATCHLIST_MAX. Tolerant of a
 // non-array argument (returns []), so it doubles as the storage guard.
 export function normalizeWatchlist(arr) {
@@ -128,14 +128,14 @@ export function normalizeWatchlist(arr) {
   return out.slice(0, WATCHLIST_MAX);
 }
 
-// migrateWatchlistOnLoad — fold the legacy single "followed player"
+// migrateWatchlistOnLoad : fold the legacy single "followed player"
 // (bc_my_player_id / bc_my_player_name) into the watchlist exactly once.
 // Returns { list, migrated }:
 //   - list: the normalized watchlist with the legacy player injected at the
 //           FRONT iff it isn't already present (dedup by id).
 //   - migrated: true when a legacy player was actually injected, so the caller
 //           knows to persist and then delete the legacy keys (the deletion is
-//           what makes this one-time — a second load sees no legacy keys).
+//           what makes this one-time : a second load sees no legacy keys).
 // Pure and idempotent: calling it again with the legacy id already in the list
 // is a no-op (the dedup in normalizeWatchlist absorbs it).
 export function migrateWatchlistOnLoad(rawWatchlist, legacyId, legacyName) {
@@ -148,7 +148,7 @@ export function migrateWatchlistOnLoad(rawWatchlist, legacyId, legacyName) {
   return { list: normalizeWatchlist(injected), migrated: true };
 }
 
-// addPlayerToWatchlist — append a player entry (dedup by id), returning the
+// addPlayerToWatchlist : append a player entry (dedup by id), returning the
 // new list (or the original unchanged when the player is missing or already
 // watched). Single source of truth for the player-entry shape + dedup rule,
 // shared by the home panel and its picker.
@@ -158,8 +158,8 @@ export function addPlayerToWatchlist(watchlist, p) {
   return [...watchlist, { type: "player", id: p.id, name: p.name || "", dojo: p.dojo || "" }];
 }
 
-// resolveEntryPlayerIds — the set of roster player ids a single entry covers.
-// A player entry is itself (even if not in the roster — a stale watch still
+// resolveEntryPlayerIds : the set of roster player ids a single entry covers.
+// A player entry is itself (even if not in the roster : a stale watch still
 // filters matches by id). A dojo entry expands to every CURRENT roster member
 // of that dojo, so late registrations are auto-included.
 export function resolveEntryPlayerIds(entry, roster) {
@@ -172,11 +172,11 @@ export function resolveEntryPlayerIds(entry, roster) {
   return entry.id ? [String(entry.id)] : [];
 }
 
-// resolveWatchedPlayers — expand the whole watchlist to a flat, deduped list of
+// resolveWatchedPlayers : expand the whole watchlist to a flat, deduped list of
 // player records (preferring the live roster record so check-in state and the
 // canonical name come through). Dojo entries expand to their current members.
 // This single resolved list feeds the schedule filter (watchedIds), the
-// highlight Set, and the alert hook — they must all agree on who is watched.
+// highlight Set, and the alert hook : they must all agree on who is watched.
 export function resolveWatchedPlayers(watchlist, roster) {
   const rosterById = new Map((Array.isArray(roster) ? roster : []).filter((p) => p && p.id).map((p) => [String(p.id), p]));
   const out = [];
@@ -198,7 +198,7 @@ export function resolveWatchedPlayers(watchlist, roster) {
   return out;
 }
 
-// effectivePrimaryKey — which entry (by entryKey) is currently primary.
+// effectivePrimaryKey : which entry (by entryKey) is currently primary.
 //   0 entries  → null (nothing to be primary).
 //   1 entry    → that entry, implicitly (no pin UI is shown for a lone entry).
 //   ≥2 entries → the pinned entry IF it still exists, else null (no hero, no
@@ -212,18 +212,18 @@ export function effectivePrimaryKey(watchlist, pinnedKey) {
   return list.some((e) => entryKey(e) === pinnedKey) ? pinnedKey : null;
 }
 
-// findPrimaryEntry — the primary entry object (or null), per effectivePrimaryKey.
+// findPrimaryEntry : the primary entry object (or null), per effectivePrimaryKey.
 export function findPrimaryEntry(watchlist, pinnedKey) {
   const key = effectivePrimaryKey(watchlist, pinnedKey);
   if (!key) return null;
   return normalizeWatchlist(watchlist).find((e) => entryKey(e) === key) || null;
 }
 
-// buildPrimaryNextMatch — the hero match for the primary entry: the nearest
+// buildPrimaryNextMatch : the hero match for the primary entry: the nearest
 // non-completed match involving the primary (a player → just them; a dojo →
 // any current member), ordered running-first then by scheduledAt so the hero
 // surfaces a live match before a merely-scheduled one. Callers pass match
-// lists already filtered through hasBothSides (as the home page does) — this
+// lists already filtered through hasBothSides (as the home page does) : this
 // helper stays free of the window.hasBothSides proxy so it is unit-testable
 // in isolation.
 export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
@@ -313,13 +313,13 @@ export function useWatchlist() {
       try {
         window.localStorage.setItem(LS_WATCHLIST, JSON.stringify(migrated));
         persisted = true;
-      } catch (_e) { /* keep the legacy keys as a fallback — see below */ }
+      } catch (_e) { /* keep the legacy keys as a fallback : see below */ }
     }
     // Clear the legacy keys ONLY once the migrated list is durably written.
     // If the write failed (e.g. QuotaExceededError), leave them in place so the
     // followed player isn't silently lost and migration safely retries on the
     // next load. removeItem frees space, so it can succeed even when setItem
-    // threw — gating on `persisted` prevents that asymmetric loss.
+    // threw : gating on `persisted` prevents that asymmetric loss.
     if ((legacyId || legacyName) && persisted) {
       try {
         window.localStorage.removeItem(LS_MY_PLAYER_ID);
@@ -333,7 +333,7 @@ export function useWatchlist() {
     // can happen outside (side effects must not live in state updaters).
     // Preact 10 executes functional updaters synchronously within the useState
     // setter call, so normalized and changed are always set before the LS write below.
-    // Same reliance as useChimeMuted.toggle — revisit if upgrading Preact beyond v10.
+    // Same reliance as useChimeMuted.toggle : revisit if upgrading Preact beyond v10.
     let normalized;
     let changed = false;
     setList(prevList => {

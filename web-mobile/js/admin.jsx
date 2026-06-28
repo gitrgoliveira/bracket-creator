@@ -1,4 +1,4 @@
-// Admin side — single tournament. Tournament has multiple Competitions.
+// Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
@@ -12,7 +12,7 @@ const REFRESHABLE_EVENTS = new Set([
   "tournament_updated",
   // T099: competitor_status_updated fires when a participant's eligibility
   // changes (kiken/fusenpai/fusensho/recovery). Treat it like match_updated
-  // for the purposes of refetching this competition's data — the change
+  // for the purposes of refetching this competition's data; the change
   // affects who's eligible for downstream matches and the kachinuki
   // line-up, both of which the schedule/score-editor reads from the
   // competition-details payload. patch.jsx re-broadcasts the event as a
@@ -23,7 +23,7 @@ const REFRESHABLE_EVENTS = new Set([
   // relevance check at the subscription site treats any nil-data event as
   // tournament-wide and always triggers the fetchCompetitionDetails refresh).
   "schedule_updated",
-  // T191/T192 (US13 — FR-050d): swiss_round_generated fires when a new
+  // T191/T192 (US13; FR-050d): swiss_round_generated fires when a new
   // Swiss round's matches are persisted. Carries competitionId +
   // swissCurrentRound + matchCount; the admin section refetches comp
   // detail so the round counter, match list, and "Generate next round"
@@ -34,7 +34,7 @@ const REFRESHABLE_EVENTS = new Set([
 ]);
 
 // Page components rendered by AdminApp's view switch (produced by sibling
-// admin_*.jsx files, all loaded before this one — see web-mobile/admin_split_plan.md).
+// admin_*.jsx files, all loaded before this one (see web-mobile/admin_split_plan.md).
 const AdminDashboard = window.AdminDashboard;
 const AdminCompetition = window.AdminCompetition;
 const AdminEditTournament = window.AdminEditTournament;
@@ -56,7 +56,7 @@ const Modal = window.Modal;
 // startAllCompetitions, the import onImported callback)
 // all do `await window.API.X(...)` then
 // `onUpdate({ ...t, competitions: comps })`. The closure-captured `t`
-// is the tournament at handler-definition time — if SSE fires during
+// is the tournament at handler-definition time; if SSE fires during
 // the in-flight await and updates the tournament (another comp's
 // match completes, a comp starts, etc.), the post-await onUpdate
 // clobbers the SSE update with stale state. The tRef / onUpdateRef
@@ -86,7 +86,7 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
 // non-empty password (the env-var bcrypt hash is authoritative; the
 // on-disk Password is irrelevant). Restoring the session password here
 // would cause every locked-mode admin edit (name/venue/courts) to
-// 400. When `locked` is true we explicitly send an empty password —
+// 400. When `locked` is true we explicitly send an empty password:
 // the backend's locked-mode transform preserves whatever's on disk
 // regardless.
 function mergeTournamentPatch(currentT, patch, sessionPassword, locked) {
@@ -141,14 +141,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // AdminApp unmounts on logout / viewer-mode switch. Several async
   // handlers below (updateCompetition's fetchCompetitionDetails,
   // startAllCompetitions) setAdminCompData / setAdminLoading
-  // / setView post-await. Narrow window but real — gate via mountedRef.
+  // / setView post-await. Narrow window but real. Gate via mountedRef.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Best-effort post-mutation refresh. Several mutation handlers below
   // (moveMatchCourt, editMatchScore, addCompetition,
   // startCompetition) used to wrap the mutation AND the follow-up
-  // fetchCompetitions in the same try/catch — so a transient refresh
+  // fetchCompetitions in the same try/catch. So a transient refresh
   // failure (server slow, network blip) surfaced as a mutation failure,
   // even though the action was already persisted on disk. That misled
   // operators into retrying score saves / start-competition / create-playoff
@@ -163,7 +163,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
-      if (mountedRef.current) showToast(`${actionLabel} succeeded; refresh failed — reload to see latest`, "error");
+      if (mountedRef.current) showToast(`${actionLabel} succeeded; refresh failed. Reload to see latest`, "error");
     }
   };
 
@@ -172,7 +172,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // the caller's immediate navigation to `view.kind="competition", id:
   // created.id` finds the comp in `t.competitions`. Pre-fix, the caller
   // would render the "Competition not found" branch until the next
-  // refresh succeeded — confusing for the user who just clicked "Create".
+  // refresh succeeded. Confusing for the user who just clicked "Create".
   // Skips the merge if a (possibly newer) record with the same ID
   // already exists locally; otherwise appends.
   //
@@ -195,7 +195,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         const normalized = normalizeCreatedRecord(created);
         onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
           comps => comps.some(c => c.id === normalized.id) ? comps : [...comps, normalized]));
-        showToast(`${actionLabel} succeeded; refresh failed — reload to see latest`, "error");
+        showToast(`${actionLabel} succeeded; refresh failed. Reload to see latest`, "error");
       }
     }
   };
@@ -203,7 +203,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // Re-throws after surfacing the error toast so callers can branch on
   // success vs failure. Pre-fix the catch swallowed the rejection, so
   // every caller that chained .then / .catch (or expected to await this)
-  // saw a resolved Promise even when the underlying PUT failed —
+  // saw a resolved Promise even when the underlying PUT failed.
   // producing UX like "Saved!" + "Save failed" toasts in quick
   // succession (AdminParticipants.apply) or a "Last saved 13:45:22"
   // stamp on a failed save (AdminSettings.saveNow).
@@ -212,7 +212,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // SPA's primary roster writer: a non-null `players` payload makes the
     // server persist participants/seeds, which is a destructive op. Prompt
     // for the admin password here (centrally) only when the payload carries
-    // a roster mutation — settings-only saves omit `players` and stay
+    // a roster mutation. Settings-only saves omit `players` and stay
     // single-factor. promptAdminPassword returns "" when the gate is
     // inactive (proceed) and null when cancelled/not-configured (abort).
     let admin = "";
@@ -233,14 +233,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // it so callers (AdminParticipants.apply) can surface the post-save banner.
     const { warnings: nearDupWarnings, ...updatedComp } = updated || {};
     // Merge PUT response into the LATEST tournament state. tRef.current
-    // (not the closure-captured `t`) — see mergeCompetitionsIntoTournament
+    // (not the closure-captured `t`). See mergeCompetitionsIntoTournament
     // at the top of this file for why: SSE may have updated `t` during
     // the await above, and using the closure-captured `t` would clobber
     // those updates with stale state. Same reasoning applies to
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
       comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
-    // Best-effort detail refresh. Isolated from the rethrow above —
+    // Best-effort detail refresh. Isolated from the rethrow above.
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
     // treat the save as failed. Log and move on; SSE will catch up.
@@ -256,10 +256,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   // Mutation handlers split into two phases:
-  //   1. Server mutation — failure shows the error toast and rethrows
+  //   1. Server mutation. Failure shows the error toast and rethrows
   //      (or returns, depending on caller contract) so caller sees the
   //      real outcome.
-  //   2. Post-mutation refresh — best-effort via refreshCompsBestEffort.
+  //   2. Post-mutation refresh: best-effort via refreshCompsBestEffort.
   //      A refresh failure cannot make the mutation "look failed."
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
@@ -280,7 +280,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       throw e;
     }
     // F5: when the write was only queued (offline/transient), skip the
-    // best-effort refresh — there is nothing new on the server yet.
+    // best-effort refresh. There is nothing new on the server yet.
     // Return saveRes so callers (onSubmit/onSubmitAndNext props) can
     // propagate the { queued: true } signal up to the score editor.
     if (saveRes && saveRes.queued) return saveRes;
@@ -298,7 +298,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
     // Use the create-flow refresh: on refresh failure, merge `created`
     // into local state so the caller's immediate navigation to the new
-    // comp's view doesn't render "Competition not found" — pre-fix the
+    // comp's view doesn't render "Competition not found". Pre-fix the
     // generic refreshCompsBestEffort left local state stale, breaking
     // the post-create navigation.
     await refreshCompsAfterCreate(created, "Create");
@@ -329,7 +329,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
     });
 
-    // Best-effort refresh — a refresh failure must not mask which comps
+    // Best-effort refresh. A refresh failure must not mask which comps
     // actually started (the result summary below is authoritative).
     try {
       const fresh = await window.API.fetchCompetitions();
@@ -340,7 +340,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     }
 
     if (!mountedRef.current) return;
-    // Persistent result — does NOT auto-dismiss. Operator closes it.
+    // Persistent result: does NOT auto-dismiss. Operator closes it.
     setStartAll({ phase: "result", comps, failed, succeeded: comps.length - failed.length });
   };
 
@@ -362,17 +362,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       // Surface a new password to the parent BEFORE the API call so the
       // session/store updates even if the request errors after (matches
-      // pre-fix timing — onPasswordChange fired pre-await in the original).
+      // pre-fix timing. onPasswordChange fired pre-await in the original).
       if (patch.password && onPasswordChange) onPasswordChange(patch.password);
       // Use tRef.current (not the closure-captured `t`) for BOTH the API
-      // body and the post-await local-state update — same closure-capture
+      // body and the post-await local-state update. Same closure-capture
       // bug shape that mergeCompetitionsIntoTournament's docstring
       // describes for the other async handlers. If SSE updates the
       // tournament (e.g. a competition starts, a match completes in
       // another comp) during the in-flight save, the closure-captured
       // `t` would be stale; using it for `onUpdate(next)` would clobber
       // the SSE-driven updates with pre-save state until the next refresh.
-      // Treat an unknown (null) authConfig conservatively — same as locked.
+      // Treat an unknown (null) authConfig conservatively; same as locked.
       // If the mode hasn't resolved yet, sending the session password in the
       // PUT body would trigger a 400 "password rotation is disabled" on a
       // locked-mode server. In file mode an empty body password is safe:
@@ -380,7 +380,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const locked = authConfig === null || authConfig.mode === "locked";
       const sendBody = mergeTournamentPatch(tRef.current, patch, password, locked);
       await window.API.updateTournament(sendBody, password);
-      // Bail if the admin navigated away during the in-flight PUT —
+      // Bail if the admin navigated away during the in-flight PUT.
       // mirrors startAllCompetitions / refreshCompsAfterCreate.
       // Without this gate, onUpdateRef.current (parent's
       // setState) and showToast fire on an unmounted component,
@@ -389,7 +389,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // updateTournament to tRef/onUpdateRef but missed the unmount
       // guard the other handlers carry.
       if (!mountedRef.current) return false;
-      // Re-read tRef.current AFTER the await — additional SSE events may
+      // Re-read tRef.current AFTER the await. Additional SSE events may
       // have landed during the save. The patch we just persisted is
       // applied on top of the freshest snapshot.
       onUpdateRef.current(mergeTournamentPatch(tRef.current, patch, password, locked));
@@ -499,10 +499,10 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       const unsub = window.API.subscribeToEvents((event) => {
         if (cancelled) return;
 
-        // F6b — heartbeat: liveness only, no patch, no seq advance.
+        // F6b: heartbeat. Liveness only, no patch, no seq advance.
         if (event.type === 'heartbeat') return;
 
-        // F6b — resync_required: server restarted / replay unsatisfiable.
+        // F6b: resync_required. Server restarted / replay unsatisfiable.
         // Reset seq to the server's head and trigger a full refresh.
         if (event.type === 'resync_required') {
           sseSeq.lastSeq = (typeof event.seq === 'number') ? event.seq : 0;
@@ -518,7 +518,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           return;
         }
 
-        // F6b — gap detection: run on every event so the seq counter
+        // F6b: gap detection. Run on every event so the seq counter
         // advances even for events with no match payload. On a gap,
         // trigger the same scoped refetch the per-type branches use.
         const seqResult = checkSeqGap(sseSeq, event.seq, () => {
@@ -535,9 +535,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         if (seqResult.duplicate) return;
 
         if (REFRESHABLE_EVENTS.has(event.type)) {
-          // tournament_updated carries null data (tournament-wide change) — always
+          // tournament_updated carries null data (tournament-wide change). Always
           // relevant.  match_updated / competition_started / competition_completed
-          // carry competitionId — skip if they belong to a different competition.
+          // carry competitionId. Skip if they belong to a different competition.
           const relevant = event.type === "tournament_updated"
             || !event.data?.competitionId
             || event.data.competitionId === compId;
@@ -640,7 +640,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
             const clashes = await window.API.getScheduleClashes(created.id, password);
             if (Array.isArray(clashes) && clashes.length > 0) {
               const names = clashes.map((w) => w.otherCompName).join(", ");
-              showToast(`Heads up: court clash with ${names} — adjust start time or courts in Settings`, "error");
+              showToast(`Heads up: court clash with ${names}. Adjust start time or courts in Settings`, "error");
             }
           } catch { /* clash check is best-effort; never block creation */ }
           setView({ kind: "competition", id: created.id, section: "participants" });
@@ -726,7 +726,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onImported={async () => {
         const comps = await window.API.fetchCompetitions();
         // tRef/onUpdateRef so SSE updates during the in-flight import
-        // are preserved — see mergeCompetitionsIntoTournament docstring.
+        // are preserved (see mergeCompetitionsIntoTournament docstring).
         onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current, () => comps));
         setView({ kind: "dashboard" });
       }}
@@ -751,7 +751,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           <p className="comp-shell-msg">
             This competition may have been removed, or your view is briefly out of
             sync while real-time updates catch up. Going back to the dashboard or
-            reloading the page is safe — if it still exists, it will reappear.
+            reloading the page is safe. If it still exists, it will reappear.
           </p>
         </div>
       </div>
@@ -801,10 +801,10 @@ function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
 }
 
-// StartAllModal — three-phase dialog for the dashboard "Start all" action.
+// StartAllModal : three-phase dialog for the dashboard "Start all" action.
 // Follows the shared .modal-backdrop / .modal pattern (mirrors
 // AnnouncementModal). The confirm and result phases are dismissable (backdrop
-// click + Escape); the running phase is NOT — closing mid-start would orphan
+// click + Escape); the running phase is NOT. Closing mid-start would orphan
 // in-flight requests with no feedback, so the close affordances are withheld
 // while phase === "running".
 function StartAllModal({ state, onConfirm, onRetry, onClose }) {

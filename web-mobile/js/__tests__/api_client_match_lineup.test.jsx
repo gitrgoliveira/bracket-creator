@@ -1,6 +1,6 @@
 // mp-bkg: tests for the three new matchId-keyed lineup API helpers
 // (fetchMatchLineup, putMatchLineup, deleteMatchLineup) added to api_client.jsx.
-// These mirror the round-scoped helpers — same 404/409/error handling, just
+// These mirror the round-scoped helpers ; same 404/409/error handling, just
 // targeting a different endpoint path (/match-lineups/:matchId vs /lineups/:round).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';

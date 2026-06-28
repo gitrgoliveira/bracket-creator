@@ -10,7 +10,7 @@
 //     (api_serializers.normalizeMatch, playerMap empty).
 //   - The old resolver did `players.find(p => (p.id || p.name) === sideId)`.
 //     Because p.id is a truthy UUID, `||` short-circuited and compared the
-//     UUID against the name-keyed sideId — NEVER equal. So the roster
+//     UUID against the name-keyed sideId : NEVER equal. So the roster
 //     silently failed to resolve and every dropdown showed "No roster found".
 //
 // The fix matches on EITHER id OR name. This test mirrors the real data
@@ -60,7 +60,7 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
     { id: 'uuid-bbbb-2222', name: 'Blue Dojo', dojo: 'Blue Dojo', metadata: ['Shiro Ichi', 'Shiro Ni', 'Shiro San', 'Shiro Shi', 'Shiro Go'] },
   ];
 
-  // The match side is keyed by NAME (id === name) — the real normalized
+  // The match side is keyed by NAME (id === name) : the real normalized
   // shape when api_serializers has no UUID for the slot. THIS is what broke
   // the old `(p.id || p.name) === sideId` resolver.
   const MATCH = {
@@ -100,7 +100,7 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
 
     global.window.compMatches = () => [];
 
-    // MatchLineupSideEditor fetches its saved lineup on mount — stub to null.
+    // MatchLineupSideEditor fetches its saved lineup on mount : stub to null.
     global.window.API = {
       fetchMatchLineup: vi.fn().mockResolvedValue(null),
       fetchTeamLineup: vi.fn().mockResolvedValue(null),
@@ -188,7 +188,7 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
 
     const tree = runtime.currentTree();
     const sideEditors = findComponents(tree, n => n === 'MatchLineupSideEditor');
-    // sideA falls back to the bare {id,name} object (no roster) — still a
+    // sideA falls back to the bare {id,name} object (no roster) : still a
     // side editor node, but its team carries no metadata; sideB resolves.
     const teams = sideEditors.map(n => n.props?.team).filter(Boolean);
     const blue = teams.find(t => (t.name || t.Name) === 'Blue Dojo');

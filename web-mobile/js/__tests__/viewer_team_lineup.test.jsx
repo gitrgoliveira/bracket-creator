@@ -1,4 +1,4 @@
-// mp-13y: Per-match lineup rendering — unit tests for shared logic and
+// mp-13y: Per-match lineup rendering : unit tests for shared logic and
 // view-layer components added in the lineup-rendering PR.
 //
 // Covers:
@@ -10,9 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 
-// ──────────────────────────────────────────────────
-// lineup_resolver.jsx: pure utility functions
-// ──────────────────────────────────────────────────
+// Lineup resolver: pure utility functions
 
 describe('lineup_resolver: resolveLineupTeamId', () => {
   let resolveLineupTeamId;
@@ -150,9 +148,7 @@ describe('lineup_resolver: resolveMatchLineup', () => {
   });
 });
 
-// ──────────────────────────────────────────────────
 // viewer.jsx: boutHansokuMark
-// ──────────────────────────────────────────────────
 
 describe('viewer: boutHansokuMark', () => {
   let boutHansokuMark;
@@ -187,9 +183,7 @@ describe('viewer: boutHansokuMark', () => {
   });
 });
 
-// ──────────────────────────────────────────────────
 // viewer.jsx: BoutSubRow canonical layout
-// ──────────────────────────────────────────────────
 
 describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
   const realReact = global.React;
@@ -297,9 +291,7 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
   });
 });
 
-// ──────────────────────────────────────────────────
-// display.jsx: boutHansokuMarkD + findCurrentBoutIndex
-// ──────────────────────────────────────────────────
+// display.jsx: boutHansokuMarkD and findCurrentBoutIndex
 
 describe('shared: boutHansokuMark (mp-13y)', () => {
   let boutHansokuMark;

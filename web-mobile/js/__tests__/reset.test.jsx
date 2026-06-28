@@ -10,7 +10,7 @@ import { makeReactive } from './helpers/reactive_react.js';
 //
 // The global React stub in vitest.setup.js is non-reactive (useState
 // returns [val, vi.fn()]) which is fine for asserting the static
-// render tree but useless for exercising the submit handler — that's
+// render tree but useless for exercising the submit handler : that's
 // where the new password is sent, errors mapped, localStorage
 // updated, and onSuccess invoked. The shared makeReactive helper
 // installs a minimal reactive shim so useState mutations are
@@ -123,7 +123,7 @@ describe('ResetPasswordForm', () => {
 
     it('renders a loading state when authConfig is null (still loading)', () => {
       // Regression guard against the previous behavior where a missing /
-      // null authConfig defaulted to "form visible" — on a direct /reset
+      // null authConfig defaulted to "form visible" : on a direct /reset
       // deep-link against a locked-mode deployment that would expose the
       // form for the sub-second window before /api/auth-config resolves
       // and the user could submit a password that 404s. The form must
@@ -140,7 +140,7 @@ describe('ResetPasswordForm', () => {
     });
 
     it('renders a loading state when authConfig is undefined (prop omitted)', () => {
-      // Same loading branch as the null case — `== null` matches both.
+      // Same loading branch as the null case : `== null` matches both.
       const tree = runtime.mount(ResetPasswordForm, { onBack: vi.fn(), onSuccess: vi.fn() });
       const text = collectText(tree);
       expect(text).toContain('Loading');
@@ -165,7 +165,7 @@ describe('ResetPasswordForm', () => {
       });
       // Re-query the tree on every interaction. Each setState rerenders
       // the component, producing fresh onChange/onSubmit closures bound
-      // to the latest state slots — stale references would invoke
+      // to the latest state slots : stale references would invoke
       // setters but read stale closure values, so the submit handler
       // would see pw="" even after typing.
       const inputs = (tree) => {
@@ -231,7 +231,7 @@ describe('ResetPasswordForm', () => {
 
       expect(collectText(runtime.currentTree())).toContain('Password reset has been disabled by the operator.');
       expect(onSuccess).not.toHaveBeenCalled();
-      // localStorage must NOT have been written — the reset failed.
+      // localStorage must NOT have been written : the reset failed.
       expect(mockStorage.setItem).not.toHaveBeenCalledWith('bc_password', expect.anything());
     });
 

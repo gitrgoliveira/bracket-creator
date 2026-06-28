@@ -1,4 +1,4 @@
-// admin_competition_overview.jsx — Overview + Fighting-Spirit awards sections
+// admin_competition_overview.jsx: Overview + Fighting-Spirit awards sections
 // of the competition admin. Split out of admin_competition.jsx (mp-hpe3) as
 // cohesive section modules; loaded only via the admin_competition.js entry's
 // imports (no standalone <script> tag) and consumed by the AdminCompetition
@@ -45,7 +45,7 @@ function competitionNextSteps(c) {
 
   const steps = [];
 
-  // Step 1 — always done.
+  // Step 1: always done.
   steps.push({
     id: "create",
     label: "Create competition",
@@ -55,10 +55,10 @@ function competitionNextSteps(c) {
     cta: null,
   });
 
-  // Step 2 — participants.
+  // Step 2: participants.
   const participantDetail = hasEnoughPlayers
     ? `${numPlayers} ${isTeam ? "teams" : "participants"} added${seededCount > 0 ? `, ${seededCount} seeded` : ""}`
-    : `${numPlayers} ${isTeam ? "team" : "participant"}${numPlayers !== 1 ? "s" : ""} added — need at least 2`;
+    : `${numPlayers} ${isTeam ? "team" : "participant"}${numPlayers !== 1 ? "s" : ""} added. Need at least 2`;
   steps.push({
     id: "participants",
     label: `Add ${isTeam ? "teams" : "participants"}`,
@@ -71,7 +71,7 @@ function competitionNextSteps(c) {
     cta: `Add ${isTeam ? "teams" : "participants"} →`,
   });
 
-  // Step 3 — seeds & settings (becomes active once participants done).
+  // Step 3: seeds & settings (becomes active once participants done).
   steps.push({
     id: "settings",
     label: "Review seeds & settings",
@@ -83,7 +83,7 @@ function competitionNextSteps(c) {
     cta: "Review settings →",
   });
 
-  // Step 3b (team only) — lineups, after settings.
+  // Step 3b (team only): lineups, after settings.
   if (isTeam) {
     steps.push({
       id: "lineups",
@@ -95,7 +95,7 @@ function competitionNextSteps(c) {
     });
   }
 
-  // Final step — generate draw (button is in the page-head; no section nav).
+  // Final step: generate draw (button is in the page-head; no section nav).
   steps.push({
     id: "generate",
     label: "Generate the draw",
@@ -127,7 +127,7 @@ function competitionNextSteps(c) {
 // Maps a CompetitionStatus wire value to the overview's render mode. The wire
 // values (internal/state/models.go:441-446) are:
 //   "setup" → "draw-ready" → "pools" / "playoffs" (the two RUNNING phases) →
-//   "completed", plus "invalid". There is NO literal "running" status — an
+//   "completed", plus "invalid". There is NO literal "running" status. An
 //   active competition reports its phase ("pools" or "playoffs"). Anything that
 //   is not setup/draw-ready/completed (including "pools", "playoffs", "invalid",
 //   or any future phase) maps to "running", so an active competition keeps the
@@ -146,8 +146,8 @@ function overviewViewMode(status) {
 // Pure helper: overviewResultsSection
 // ---------------------------------------------------------------------------
 // The section that holds standings/results for a given competition format.
-// Swiss competitions have no pools/bracket section — their results live in the
-// dedicated "swiss" section — so a Results/podium CTA that defaulted to
+// Swiss competitions have no pools/bracket section. Their results live in the
+// dedicated "swiss" section, so a Results/podium CTA that defaulted to
 // pools/bracket would strand the operator on an empty/hidden view. Route swiss
 // to "swiss"; otherwise prefer the bracket when one exists, else pools.
 // Pure + exported so the swiss routing is unit-tested (Copilot review #312).
@@ -157,7 +157,7 @@ function overviewResultsSection(format, hasBracket) {
 }
 
 // ---------------------------------------------------------------------------
-// AdminCompOverview — status-aware overview component
+// AdminCompOverview: status-aware overview component
 // ---------------------------------------------------------------------------
 function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSection, password }) {
   // Prefer the props passed from the detail fetch, but fall back to whatever
@@ -182,7 +182,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // ---------------------------------------------------------------------------
   // CompetitionStatus wire values (internal/state/models.go:441-446):
   //   "setup" → "draw-ready" → "pools"/"playoffs" (running phases) → "completed",
-  //   plus "invalid". There is NO literal "running" status — an active
+  //   plus "invalid". There is NO literal "running" status. An active
   //   competition is in its phase status ("pools" or "playoffs"). isRunning is
   //   therefore the catch-all for any status that is not setup/draw-ready/
   //   completed, which also lets an "invalid" competition keep the progress +
@@ -197,7 +197,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   const isRunning = viewMode === "running";
 
   // ---------------------------------------------------------------------------
-  // Schedule estimate fetch — same AbortController pattern as AdminSettings.
+  // Schedule estimate fetch: same AbortController pattern as AdminSettings.
   // Never blocks render: estimate starts as null and fills in asynchronously.
   // ---------------------------------------------------------------------------
   const [estimate, setEstimate] = useStateA(null);
@@ -247,7 +247,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     ? window.formatCompMinutes
     : (m) => (Number.isFinite(m) && m > 0 ? `${m}m` : null);
 
-  const estDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "—";
+  const estDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
 
   // draw-ready: pool count vs bracket size
   const poolCount = (Array.isArray(pools) && pools.length > 0) ? pools.length : (c.pools ? c.pools.length : null);
@@ -255,10 +255,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
   const pct = total ? Math.round((done / total) * 100) : 0;
 
-  // Stat values step down to 16px via .v--sm unless they are the em-dash
-  // placeholder "—" (which keeps the 22px display size). vClass is only called
+  // Stat values step down to 16px via .v--sm unless they are the n/a
+  // placeholder "n/a" (which keeps the 22px display size). vClass is only called
   // for boxes that hold textual or formatted values ("2 pools", "3h 10m").
-  const vClass = (val) => (val === "—" ? "v" : "v v--sm");
+  const vClass = (val) => (val === "n/a" ? "v" : "v v--sm");
 
   // Standings/results target for this competition's format (see helper above).
   const resultsSection = overviewResultsSection(c.format, !!effectiveBracket);
@@ -267,7 +267,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Render helpers
   // ---------------------------------------------------------------------------
 
-  // Stats strip — 4 boxes, varies by state.
+  // Stats strip: 4 boxes, varies by state.
   function renderStatsStrip() {
     if (isSetup) {
       return (
@@ -294,8 +294,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 
     if (isDrawReady) {
       const drawSizeVal = c.format === "playoffs" || (!poolCount && bracketRounds)
-        ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "—")
-        : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "—");
+        ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "n/a")
+        : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "n/a");
       const drawSizeLabel = c.format === "playoffs" ? "Bracket size" : c.format === "league" ? "League" : "Pools";
       return (
         <div className="stats-strip">
@@ -345,7 +345,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     }
 
     // completed
-    const totalDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "—";
+    const totalDuration = formatCompMinutes(estimate && estimate.totalDurationMinutes) || "n/a";
     return (
       <div className="stats-strip">
         <div className="stat-box">
@@ -374,7 +374,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     );
   }
 
-  // Primary content — branched by state.
+  // Primary content: branched by state.
   function renderPrimaryContent() {
     // --- setup ---
     if (isSetup) {
@@ -557,7 +557,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     );
   }
 
-  // Footer: schedule estimate strip — shown whenever estimate resolves.
+  // Footer: schedule estimate strip. Shown whenever estimate resolves.
   function renderEstimateFooter() {
     if (!estimate && !estimateLoading && !estimateErr) return null;
     const total = formatCompMinutes(estimate && estimate.totalDurationMinutes);
@@ -582,7 +582,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
           if (!total) {
             return (
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                No estimate yet — add participants and configure duration to see a projection.
+                No estimate yet. Add participants and configure duration to see a projection.
               </div>
             );
           }
@@ -637,7 +637,7 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // `dirty` guards the prop-sync effect: the parent refetches the competition
   // on unrelated SSE events (match updates, status changes), which would
   // otherwise clobber the operator's typed-but-unsaved edits. We only re-sync
-  // from props when there are no pending edits — except on a competition
+  // from props when there are no pending edits (except on a competition
   // SWITCH, where we always reset to the new comp's list.
   const [dirty, setDirty] = useStateA(false);
   const lastCompId = useRefA(c.id);

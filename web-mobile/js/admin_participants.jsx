@@ -96,7 +96,7 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 // against a newly-parsed roster. Returns { np, added, updatedCount }.
 //
 // - Existing players (matched by normalized name+dojo) keep their stable
-//   id and seed. The key is (name, dojo) — NOT name alone — because Tier-1
+//   id and seed. The key is (name, dojo) : NOT name alone : because Tier-1
 //   dedup allows two same-named competitors from different dojos; keying on
 //   name only would cross-associate their id/seed/check-in.
 // - New players get the next free `${compID}-pN` slot, skipping any id
@@ -104,7 +104,7 @@ function LinedTextarea({ value, onChange, onFocus, onBlur, rows, placeholder }) 
 //   list (two-pass: pre-populate usedIds before minting, so visible row
 //   order can't cause collisions).
 // - IDs of *removed* players (in c.players but not in parsed) are
-//   intentionally not reserved, so their slots can be reused — keeps
+//   intentionally not reserved, so their slots can be reused : keeps
 //   the `${compID}-pN` numbering compact.
 //
 // Exported for tests in __tests__/admin_participants.test.jsx.
@@ -160,7 +160,7 @@ function generateRosterText(playersList, withZekkenName) {
   return (playersList || []).map((p) => {
     if (withZekkenName) {
       // Fall back to uppercase last name ONLY when displayName is absent
-      // (null/undefined) — `??` not `||`, so an intentional empty zekken
+      // (null/undefined) : `??` not `||`, so an intentional empty zekken
       // (displayName: "") is preserved verbatim. Without that, a saved
       // empty-zekken row would re-render with a synthetic last-name, making
       // the rosterDirty diff flip true on every reload. The fallback covers
@@ -184,7 +184,7 @@ function generateRosterText(playersList, withZekkenName) {
 // before they are sent to the server. Name and dojo are mandatory for every
 // competition. Note that an EMPTY zekken is NOT enforced here: only name + dojo
 // are. In a zekken competition the expected three-column format is
-// Name, Zekken, Dojo — a two-column "Name, Dojo" paste is misparsed into
+// Name, Zekken, Dojo : a two-column "Name, Dojo" paste is misparsed into
 // {displayName: dojo, dojo: ""}, so an empty dojo on a zekken competition is
 // the tell-tale of that misparse rather than a missing zekken value, and the
 // reason text surfaces the expected format as a hint.
@@ -257,7 +257,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Fill the roster textarea with a generated sample roster of `count`
   // competitors. This lives in the Participants view (not the create form)
   // so a sample is a starting point you review and edit before clicking
-  // "Apply changes" — it reuses the whole parse/validate/save path. The
+  // "Apply changes" : it reuses the whole parse/validate/save path. The
   // generated ids are placeholders; apply() assigns `${compId}-pN` ids.
   const fillSample = (count) => {
     const sample = window.makeCompetitors(count, c.kind, c.id, 0, c.gender || "M");
@@ -286,7 +286,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // reader.onload is an async closure so we can await onUpdate before
     // showing the "Matched N seeds" success toast. Pre-fix: the PUT was
     // fire-and-forget (Promise.resolve(...).catch(()=>{})) and the
-    // success toast fired immediately — on PUT failure the user saw
+    // success toast fired immediately : on PUT failure the user saw
     // "Matched N seeds" followed (~1s later) by an error toast, which
     // misleads about whether the persisted state was actually updated.
     reader.onload = async (e) => {
@@ -315,7 +315,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               np[pIdx] = { ...np[pIdx], seed };
               updatedCount++;
             } else {
-              // Find closest name suggestion via Levenshtein distance —
+              // Find closest name suggestion via Levenshtein distance :
               // surfaced in the unmatched-rows UI so the admin can pick
               // the right participant explicitly.
               const nameLower = name.toLowerCase();
@@ -398,7 +398,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
-  // panel fill the width — adding names is the only task at this point.
+  // panel fill the width : adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
   // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
@@ -479,7 +479,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Async so we can await onUpdate(): updateCompetition re-throws on
   // PUT failure (admin.jsx) and surfaces the error via showToast.
   // The pre-async fire-and-forget form silenced the rejection here
-  // with `.catch(() => {})` — asymmetric with the other now-awaited
+  // with `.catch(() => {})` : asymmetric with the other now-awaited
   // mutation flows in this component (apply(), handleSeedFile,
   // shuffleUnseeded). No success toast needed: rank changes are
   // implicit-feedback (the input commits visually), so we just need
@@ -625,15 +625,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     if (admin === null) return;
     setReplaceLoading(true);
     try {
-      // Build metadata from danGrade so the edited grade actually persists —
+      // Build metadata from danGrade so the edited grade actually persists :
       // the backend prefers Metadata over danGrade when Metadata is non-empty,
       // so forwarding the old replaceTarget.metadata blindly would discard any
       // grade change. Slots 1+ are preserved via the shared buildPlayerMetadata
       // helper (mirrored from updateCompetition).
       //
-      // displayName handling — zekken comps: forward the operator's value (or
+      // displayName handling : zekken comps: forward the operator's value (or
       // "" so the backend re-derives via SanitizeName(name)). Non-zekken comps:
-      // ALWAYS send "" — otherwise stale "A. SMITH" from the replaced slot
+      // ALWAYS send "" : otherwise stale "A. SMITH" from the replaced slot
       // would carry over and corrupt the 3-column CSV row.
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: c.withZekkenName ? zekken : "", source: targetSource };
@@ -662,7 +662,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // the success + error toasts fired back-to-back.
   //
   // Split into two try blocks so local errors (parse / mint) get a
-  // user-visible toast, while PUT failures only log here — the latter
+  // user-visible toast, while PUT failures only log here : the latter
   // are already toasted by updateCompetition's catch, so a second
   // toast would double up.
   const apply = async () => {
@@ -684,7 +684,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         return;
       }
 
-      // Tier-1: Duplicate detection — reject on perfect (normalizedName,
+      // Tier-1: Duplicate detection : reject on perfect (normalizedName,
       // normalizedDojo) collision.  Uses name+dojo so two people from
       // different clubs with the same name are allowed.
       // Fallback mirrors the shared normalizer (lower → trim → collapse
@@ -707,7 +707,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
 
       // Tier-2 near-duplicate warnings are computed server-side and returned
-      // by the roster PUT (see doSave) so Go is the single source of truth —
+      // by the roster PUT (see doSave) so Go is the single source of truth :
       // the client no longer runs its own fuzzy pass (which would drift from
       // Go's algorithm).
       ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
@@ -729,12 +729,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // post-save informational banner the operator can review and dismiss.
   const doSave = async (np, added, updatedCount) => {
     // Clear any stale banner from a previous import up front, so a cancelled
-    // or failed save can't leave a misleading "Saved — …" banner on screen.
+    // or failed save can't leave a misleading "Saved : …" banner on screen.
     setNearDupPending(null);
     try {
       const warnings = await onUpdate({ ...c, players: np });
 
-      // Bail if we unmounted during the in-flight PUT — see mountedRef
+      // Bail if we unmounted during the in-flight PUT : see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still
       // mounted on logout-free navigation), but setImportSummary targets
       // this component's local state.
@@ -777,7 +777,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const pasteFromExcel = async () => {
     try {
       const clipboardText = await navigator.clipboard.readText();
-      // Same teardown-race guard as apply() / addSlot — gate the
+      // Same teardown-race guard as apply() / addSlot : gate the
       // post-await setText so a navigate-away during clipboard read
       // doesn't fire setState on a dead component.
       if (!mountedRef.current) return;
@@ -814,7 +814,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated — the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
+          Draw generated : the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
         </div>
       )}
       {isStarted && (
@@ -830,7 +830,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div className="card__title" style={{ marginBottom: 2 }}>
-              {players.length >= 2 ? "Roster ready — next: generate the draw" : "Add your roster to begin"}
+              {players.length >= 2 ? "Roster ready : next: generate the draw" : "Add your roster to begin"}
             </div>
             <div className="card__sub">
               {players.length >= 2
@@ -924,7 +924,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                     {seedImportResult.unmatched.map(({ name, suggestion }) => (
-                      <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> — did you mean <em>{suggestion}</em>?</span> : ""}</li>
+                      <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> : did you mean <em>{suggestion}</em>?</span> : ""}</li>
                     ))}
                   </ul>
                 </div>
@@ -1012,7 +1012,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           ) : (
             <div className="seed-list">
               {/* When a source filter is active, reorder controls would operate on */}
-              {/* full-list indices but rows are filtered — so they'd swap with hidden */}
+              {/* full-list indices but rows are filtered : so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
               {(sourceFilter || showOnlyUnchecked || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
@@ -1041,7 +1041,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
                     onDragLeave={() => { if (dragOverIdx === i) setDragOverIdx(null); }}
                     onDrop={() => {
-                      // Clear both refs on disabled path — if the row went
+                      // Clear both refs on disabled path : if the row went
                       // disabled mid-drag (e.g. draw-ready via SSE) a stale
                       // dragIdxRef would corrupt the next legitimate drop.
                       if (reorderDisabled) { dragIdxRef.current = null; setDragOverIdx(null); return; }
@@ -1073,7 +1073,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           {p.number ? (
                             <span className="num-prefix">{p.number}</span>
                           ) : provisionalNumberById[window.checkinPid(p)] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number — the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
+                            <span className="num-prefix num-prefix--provisional" title="Provisional number : the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>
@@ -1103,7 +1103,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                      <window.StableInput
                         className="seed-row__input"
                         type="number"
-                        placeholder="—"
+                        placeholder=":"
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
@@ -1183,7 +1183,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
           {nearDupPending && (
             <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
-              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved — but these entries look like possible duplicates. Review them:</div>
+              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved : but these entries look like possible duplicates. Review them:</div>
               <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
                 {nearDupPending.pairs.map((w, i) => (
                   <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
@@ -1217,10 +1217,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>{preview.map((p, i) => (
                     <tr key={i}>
-                      <td className={!p.name ? "cell--missing" : ""}>{p.name || "—"}</td>
-                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "—"}</td>}
-                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "—"}</td>
-                      <td>{p.danGrade || "—"}</td>
+                      <td className={!p.name ? "cell--missing" : ""}>{p.name || ":"}</td>
+                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || ":"}</td>}
+                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || ":"}</td>
+                      <td>{p.danGrade || ":"}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -1256,6 +1256,6 @@ function participantSearchTarget(p) {
 
 window.AdminParticipants = AdminParticipants;
 
-// ES export for the vitest suite — pure helpers only. Components remain
+// ES export for the vitest suite : pure helpers only. Components remain
 // behind the window.* global pattern to match the rest of admin_*.jsx.
 export { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows };

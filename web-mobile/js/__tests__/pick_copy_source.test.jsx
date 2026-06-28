@@ -1,4 +1,4 @@
-// mp-bkg: tests for pickCopySource — the "Copy from previous match"
+// mp-bkg: tests for pickCopySource. The "Copy from previous match"
 // candidate-selection algorithm exported from admin_schedule.jsx.
 //
 // Contract:
@@ -6,7 +6,7 @@
 //     → the best source Match, or null if no candidate.
 //
 // Sorting rule:
-//   1. scheduledAt DESC (nulls last — unscheduled treated as least-recent)
+//   1. scheduledAt DESC (nulls last; unscheduled treated as least-recent)
 //   2. court ASC
 //   3. index in allMatches ASC (queue/sequence order)
 //   4. matchId DESC
@@ -78,7 +78,7 @@ describe('pickCopySource', () => {
     };
     const saved = { m1: { positions: { senpo: 'Aka Ichi' } } };
     expect(pickCopySource([m1], CURRENT, ['uuid-red-123', 'Red Dojo'], saved)?.id).toBe('m1');
-    // UUID-only (the pre-fix behaviour) finds nothing — the side is name-keyed.
+    // UUID-only (the pre-fix behaviour) finds nothing; the side is name-keyed.
     expect(pickCopySource([m1], CURRENT, 'uuid-red-123', saved)).toBeNull();
   });
 
@@ -132,7 +132,7 @@ describe('pickCopySource', () => {
   // where two distinct JS objects have identical scheduledAt, court, AND the
   // same indexOf position in allMatches. Because Array.indexOf returns the
   // first occurrence of each reference and each match object is distinct,
-  // two different matches always have different indices — rule 3 always
+  // two different matches always have different indices; rule 3 always
   // resolves before rule 4. Rule 4 is therefore effectively unreachable in
   // practice and has no dedicated test.
 

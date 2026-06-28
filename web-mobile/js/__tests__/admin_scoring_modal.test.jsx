@@ -37,8 +37,8 @@ window.isKikenDecision = isKikenDecision;
 // implement the FR-033 encho-period flow (T104 cap + banner) and the
 // T093–T098 decision prompt path. Each helper is exported separately so
 // vitest can pin the behaviour without mounting either ScoreEditorModal /
-// TeamScoreEditorModal — those run useState/useEffect at the top and the
-// vitest.setup.js React mock stubs hooks, so component-level rendering
+// TeamScoreEditorModal (those run useState/useEffect at the top and the
+// vitest.setup.js React mock stubs hooks), so component-level rendering
 // tests would only ever see the initial render.
 
 describe('resolveDecisionPassword', () => {
@@ -49,7 +49,7 @@ describe('resolveDecisionPassword', () => {
     expect(resolveDecisionPassword('prop-password')).toBe('prop-password');
   });
 
-  it('returns "" when prop is empty/missing (server will 401 — misconfiguration)', () => {
+  it('returns "" when prop is empty/missing (server will 401, misconfiguration)', () => {
     expect(resolveDecisionPassword('')).toBe('');
     expect(resolveDecisionPassword(undefined)).toBe('');
     expect(resolveDecisionPassword(null)).toBe('');
@@ -71,7 +71,7 @@ describe('assertRunningWritePersisted (daihyosen pre-save prerequisite guard)', 
 
   it('does not throw for a same-session stale 200 (server already holds equal-or-newer state)', () => {
     // A { stale: true } result means the server no-op'd an out-of-order write
-    // because it already has an equal-or-newer state — dependent reads are safe,
+    // because it already has an equal-or-newer state; dependent reads are safe,
     // so daihyosen should proceed, not abort.
     expect(() => assertRunningWritePersisted({ stale: true })).not.toThrow();
   });
@@ -137,7 +137,7 @@ describe('buildDecisionBody', () => {
   });
 
   it('passes kind through verbatim (no validation here)', () => {
-    // The helper is dumb — the parent decides which kinds are legal.
+    // The helper is dumb; the parent decides which kinds are legal.
     // Wire validation happens server-side via DecisionRequest.Validate.
     const body = buildDecisionBody('daihyosen', { decisionBy: 'aka' }, 1);
     expect(body.decision).toBe('daihyosen');
@@ -191,7 +191,7 @@ describe('shouldShowEnchoMaxBanner (T104)', () => {
 
   it('returns false when maxEnchoPeriods is null/undefined (unlimited)', () => {
     // Defensive: a missing field on the wire shouldn't surprise the
-    // operator with a banner — treat as unlimited.
+    // operator with a banner; treat as unlimited.
     expect(shouldShowEnchoMaxBanner(5, null)).toBe(false);
     expect(shouldShowEnchoMaxBanner(5, undefined)).toBe(false);
   });
@@ -208,7 +208,7 @@ describe('shouldShowEnchoMaxBanner (T104)', () => {
   });
 
   it('returns true when enchoPeriodCount exceeds the cap (defensive)', () => {
-    // The + button is clamped, so this is unreachable through the UI —
+    // The + button is clamped, so this is unreachable through the UI.
     // but pinning the `>=` so a future refactor doesn't accidentally
     // narrow to `===` and leave operators staring at a non-existent
     // banner if the count somehow over-shoots.
@@ -217,7 +217,7 @@ describe('shouldShowEnchoMaxBanner (T104)', () => {
   });
 
   it('returns false when maxEnchoPeriods is negative (defensive)', () => {
-    // Negative cap is meaningless — treat as unlimited rather than
+    // Negative cap is meaningless; treat as unlimited rather than
     // banner-on-everything.
     expect(shouldShowEnchoMaxBanner(5, -1)).toBe(false);
   });
@@ -272,7 +272,7 @@ describe('nextEnchoPeriod (T104 + button clamp)', () => {
 });
 
 describe('prevEnchoPeriod (the − button)', () => {
-  // The − button uses Math.max(1, current - 1) — clamps at 1 because
+  // The minus button uses Math.max(1, current - 1): clamps at 1 because
   // the encho toggle (above the +/-) is the "set to 0" path. Pinning
   // the clamp so the count can't slip below 1 once the toggle is on.
 
@@ -330,7 +330,7 @@ describe('initialEnchoPeriodsForMatch (mp-4pc daihyosen re-open)', () => {
 describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
   // Encho is decoupled from hantei (validation.go validateSubBout): a tied
   // daihyosen may be decided by judges with or without overtime. The builder
-  // emits the two fields independently — encho when the counter is > 0,
+  // emits the two fields independently; encho when the counter is > 0,
   // decidedByHantei when armed on a tied scoreline.
 
   it('emits encho + decidedByHantei when armed and encho > 0', () => {
@@ -347,7 +347,7 @@ describe('daihyosenEnchoFields (mp-4pc encho/hantei wire gating)', () => {
 
   it('emits hantei WITHOUT encho when armed on a tied bout and no overtime', () => {
     // Decoupled: a tied daihyosen taken straight to a judges' decision with
-    // no overtime sends decidedByHantei alone — the backend accepts it.
+    // no overtime sends decidedByHantei alone; the backend accepts it.
     expect(daihyosenEnchoFields({ enchoPeriodCount: 0, daihyosenTied: true, daihyosenHantei: 'a' }))
       .toEqual({ decidedByHantei: true });
   });
@@ -444,8 +444,8 @@ describe('DecisionPrompt → /decision POST integration', () => {
   });
 
   it('the parent flow: DecisionPrompt onSubmit → submitDecisionRequest → recordDecision', async () => {
-    // Route the DecisionPrompt callback through submitDecisionRequest —
-    // the same path ScoreEditorModal.submitDecision takes — so the test
+    // Route the DecisionPrompt callback through submitDecisionRequest.
+    // the same path ScoreEditorModal.submitDecision takes; so the test
     // would fail if the password stopped flowing to recordDecision.
     const onSubmit = vi.fn((payload) =>
       submitDecisionRequest('comp-1', 'match-1', 'kiken-voluntary', payload, 0, 'explicit-pw'),
@@ -551,7 +551,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
   });
 
   it('fusenpai: decisionBy is the ABSENT/LOSING side, not the winning side', () => {
-    // The UI label was previously "Which side gets the default win?" —
+    // The UI label was previously "Which side gets the default win?"
     // operators interpreted it as picking the WINNER and sent the wrong
     // side as decisionBy, inverting the result. The label is now
     // "Which side did not show up?" so operators pick the ABSENT (losing)
@@ -634,7 +634,7 @@ describe('+ / − encho button behaviour (T104 clamp invariants)', () => {
 describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   // Kendo best-of-3: once either side reaches 2 ippons the bout ends.
   // isBoutDecided drives the disabled-prop on ippon-add buttons in both
-  // ScoreEditorModal and TeamScoreEditorModal — once it returns true, all
+  // ScoreEditorModal and TeamScoreEditorModal: once it returns true, all
   // M/K/D/T/H buttons on BOTH sides are disabled, preventing a 2-2 entry.
   // Server-side mirror: validateIpponCounts in internal/mobileapp/validation.go.
 
@@ -649,7 +649,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
   it('returns false while both sides are below the cap', () => {
     expect(isBoutDecided([], ['M'])).toBe(false);
     expect(isBoutDecided(['K'], [])).toBe(false);
-    expect(isBoutDecided(['M'], ['K'])).toBe(false);  // 1-1 — valid, ongoing
+    expect(isBoutDecided(['M'], ['K'])).toBe(false);  // 1-1: valid, ongoing
   });
 
   it('returns true when side A reaches 2 ippons (decisive win for A)', () => {
@@ -668,7 +668,7 @@ describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
     expect(isBoutDecided(['M', 'K'], ['D', 'T'])).toBe(true);
   });
 
-  it('handles undefined/null gracefully (defensive — arrays may be initialised late)', () => {
+  it('handles undefined/null gracefully (defensive: arrays may be initialised late)', () => {
     expect(isBoutDecided(undefined, [])).toBe(false);
     expect(isBoutDecided([], null)).toBe(false);
     expect(isBoutDecided(undefined, undefined)).toBe(false);
@@ -698,7 +698,7 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
   });
 
   it('second foul appends H to existing opponent ippons', () => {
-    // Opponent already has 1 ippon — H is appended into the second slot.
+    // Opponent already has 1 ippon; H is appended into the second slot.
     expect(applyFoulIncrement(1, ['M'])).toEqual({ fouls: 0, opponentPts: ['M', 'H'] });
   });
 
@@ -726,7 +726,7 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
   });
 
   it('respects custom maxIppons cap (defensive)', () => {
-    // maxIppons param is the same MAX_IPPONS_PER_SIDE default — pinned
+    // maxIppons param is the same MAX_IPPONS_PER_SIDE default; pinned
     // here so a future refactor that lifts the cap doesn't silently let
     // 3+ H pile up in the opponent's slot.
     expect(applyFoulIncrement(1, ['M'], [], 1)).toEqual({ fouls: 0, opponentPts: ['M'] });
@@ -743,7 +743,7 @@ describe('applyFoulIncrement (FIK 2-foul auto-award)', () => {
   });
 
   it('second foul is a no-op when BOTH sides are at maxIppons (already 2-2 is impossible but defensive)', () => {
-    // Backstop for a hypothetical corrupted state — the function must
+    // Backstop for a hypothetical corrupted state; the function must
     // not push a 3rd ippon onto opp regardless of how it was called.
     expect(applyFoulIncrement(1, ['M', 'K'], ['M', 'K'])).toEqual({ fouls: 0, opponentPts: ['M', 'K'] });
   });
@@ -776,7 +776,7 @@ describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
   });
 
   it('tops up missing H when legacy/imported data has fouls but no fold', () => {
-    // rawFouls=2 with empty opp pts (corrupted/imported) — top up 1 H.
+    // rawFouls=2 with empty opp pts (corrupted/imported): top up 1 H.
     expect(reconcileFoulsAtOpen(2, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H'] });
     // Manual ippon exists but the foul-derived H was never folded in.
     expect(reconcileFoulsAtOpen(2, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
@@ -789,7 +789,7 @@ describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
   });
 
   it('caps the top-up at maxIppons (bout would have ended)', () => {
-    // rawFouls=4 → expected 2 H. Opp slot capped at 2 — top up fills the slot.
+    // rawFouls=4 → expected 2 H. Opp slot capped at 2; top up fills the slot.
     expect(reconcileFoulsAtOpen(4, [])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
     // Opp already has 1 ippon, so only room for 1 H top-up despite expecting 2.
     expect(reconcileFoulsAtOpen(4, ['M'])).toEqual({ outstandingFouls: 0, opponentPts: ['M', 'H'] });
@@ -797,7 +797,7 @@ describe('reconcileFoulsAtOpen (correction-flow normalization)', () => {
 
   it('does not duplicate when opp already has more H than expected', () => {
     // expected 1 H from fouls, but opp has 2 H's (e.g., two manual H awards).
-    // Don't add — opp's count exceeds the expected fold count.
+    // Don't add; opp's count exceeds the expected fold count.
     expect(reconcileFoulsAtOpen(2, ['H', 'H'])).toEqual({ outstandingFouls: 0, opponentPts: ['H', 'H'] });
   });
 
@@ -814,7 +814,7 @@ describe('nextFoulOnDecrement (team `−` button regression)', () => {
   // Pre-existing bug: the team sub-match `−` button passed a React-style
   // functional updater (`f => Math.max(0, f - 1)`) to `rs.setFouls`, but
   // rs.setFouls is a plain setter that wrote the function itself into
-  // bFouls — breaking comparisons and rendering. Extracted to a pure
+  // bFouls: breaking comparisons and rendering. Extracted to a pure
   // helper so the contract (returns a NUMBER, not a function) is
   // directly testable.
 
@@ -988,7 +988,7 @@ describe('getValidPointKeys', () => {
   });
 
   it('all button labels from getIpponButtons (including H) match a key in getValidPointKeys', () => {
-    // H is a valid scoring key (Hansoku transfers a point) and IS a button —
+    // H is a valid scoring key (Hansoku transfers a point) and IS a button.
     const kendoKeys = getValidPointKeys(false);
     getIpponButtons(false).forEach(btn => {
       expect(kendoKeys).toContain(btn);
@@ -1035,7 +1035,7 @@ describe('decideDrawToggle (mp-42g: VS demoted, dedicated draw button)', () => {
       .toEqual({ action: "cancel" });
   });
 
-  it('returns {action:"cancel"} even when scores exist — cancel is unconditional', () => {
+  it('returns {action:"cancel"} even when scores exist; cancel is unconditional', () => {
     expect(decideDrawToggle({ isDrawToggled: true, aTotal: 2, bTotal: 1 }))
       .toEqual({ action: "cancel" });
   });
@@ -1082,14 +1082,14 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // The onKeyDown handler calls shouldBlockScoringKeys(s) after the
   // isInteractiveTarget check and before any scoring-key branch. When it
   // returns true the handler exits without calling addPt or toggling draw.
-  // This prevents score mutations while hantei is armed — the backend
+  // This prevents score mutations while hantei is armed; the backend
   // requires a tied scoreline at that point (400 otherwise).
 
-  it('returns true when decidedByHantei is true — scoring keys must be suppressed', () => {
+  it('returns true when decidedByHantei is true; scoring keys must be suppressed', () => {
     expect(shouldBlockScoringKeys({ decidedByHantei: true })).toBe(true);
   });
 
-  it('returns false when decidedByHantei is false — scoring keys work normally', () => {
+  it('returns false when decidedByHantei is false; scoring keys work normally', () => {
     expect(shouldBlockScoringKeys({ decidedByHantei: false })).toBe(false);
   });
 
@@ -1104,8 +1104,8 @@ describe('shouldBlockScoringKeys (hantei keyboard guard)', () => {
   // Ordering contract: Enter and arrow keys are handled BEFORE
   // shouldBlockScoringKeys in onKeyDown (see admin_scoring_modal.jsx line ~828
   // comment "Enter and arrow keys are handled above/before this guard").
-  // Because shouldBlockScoringKeys only inspects decidedByHantei — not key
-  // identity — it cannot selectively suppress Enter; that invariant is
+  // Because shouldBlockScoringKeys only inspects decidedByHantei (not key
+  // identity): it cannot selectively suppress Enter; that invariant is
   // enforced by source ordering, not by a predicate we can unit-test here.
 });
 
@@ -1120,11 +1120,11 @@ describe('teamResultLabel (no draw in a knockout)', () => {
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: false, hasAnyScore: false })).toBe('DRAW');
   });
 
-  it('a tied KNOCKOUT encounter is never a draw — it needs a daihyosen', () => {
+  it('a tied KNOCKOUT encounter is never a draw; it needs a daihyosen', () => {
     // Scored tie in a bracket match → resolve by representative bout.
     expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: true })).toBe('DAIHYOSEN');
     // Nothing scored yet in a bracket match → pending, still not a draw.
-    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe('—');
+    expect(teamResultLabel({ teamWinner: null, isKnockoutPhase: true, hasAnyScore: false })).toBe("-");
   });
 });
 
@@ -1205,7 +1205,7 @@ describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
 
 // Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
 // so the next match on the same court is started without an extra operator tap.
-describe('item 7 — non-points decisions advance to next match', () => {
+describe('item 7: non-points decisions advance to next match', () => {
   // submitHantei is component-internal, but the routing logic
   //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit`
   // is a pure predicate we can test directly.
@@ -1223,7 +1223,7 @@ describe('item 7 — non-points decisions advance to next match', () => {
   it('routes hantei to onSubmit (not onSubmitAndNext) when correcting a completed match', () => {
     const onSubmit = vi.fn();
     const onSubmitAndNext = vi.fn();
-    const isComplete = true; // correction — do not auto-advance
+    const isComplete = true; // correction: do not auto-advance
     const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
     const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
     submitFn(patch);
@@ -1315,7 +1315,7 @@ describe('item 7 — non-points decisions advance to next match', () => {
         entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
-      // Kiken neither advances nor closes — it parks on RemainingMatchesPanel.
+      // Kiken neither advances nor closes; it parks on RemainingMatchesPanel.
       expect(onAfterDecision).not.toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
       expect(setWithdrawnPlayer).toHaveBeenCalled();
@@ -1332,7 +1332,7 @@ describe('isKoTieBlocked (Finish gate for knockout ties)', () => {
     expect(isKoTieBlocked({ isKnockoutPhase: true, teamWinner: 'a', isComplete: false })).toBe(false);
   });
 
-  it('never blocks a pool encounter — a pool draw is finishable', () => {
+  it('never blocks a pool encounter; a pool draw is finishable', () => {
     expect(isKoTieBlocked({ isKnockoutPhase: false, teamWinner: null, isComplete: false })).toBe(false);
   });
 

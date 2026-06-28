@@ -1,4 +1,4 @@
-// match_scoreboard.jsx — the ONE FIK dantai-shiai scoreboard, shared by every
+// match_scoreboard.jsx : the ONE FIK dantai-shiai scoreboard, shared by every
 // surface that shows a match's detail: the viewer card (MatchDetailCard), the
 // self-run modal (MatchViewerModal → MatchDetailCard), and the TV display
 // (TvDisplay). Built straight from running_a_kendo_tournament.md
@@ -10,21 +10,21 @@
 // the established DRY mechanism (same as lineup_resolver.jsx). No window-global
 // coupling needed.
 //
-// `variant` ("card" | "tv") only changes sizing via a CSS modifier — the markup
+// `variant` ("card" | "tv") only changes sizing via a CSS modifier : the markup
 // and data-testids are identical across surfaces.
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup } from './lineup_resolver.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
-// boutHansokuMark — red ▲ for ONE outstanding hansoku (fouls % 2 === 1). On the
+// boutHansokuMark : red ▲ for ONE outstanding hansoku (fouls % 2 === 1). On the
 // second hansoku the ▲ is deleted and 1 ippon (H) goes to the opponent, so a
 // side never shows two triangles (FIK Shinpan Management p.15, Table 1).
 export function boutHansokuMark(foulCount) {
   return (foulCount || 0) % 2 === 1 ? "▲" : "";
 }
 
-// useTeamLineups — fetch per-match lineups for both sides of a team match.
+// useTeamLineups : fetch per-match lineups for both sides of a team match.
 // Unifies the former viewer useTeamLineups + display useTvTeamLineups: pass the
 // competition explicitly when available (TV/SSE), else it falls back to
 // match.compId (viewer). Returns { lineupA, lineupB }; degrades to null/null
@@ -33,7 +33,7 @@ export function boutHansokuMark(foulCount) {
 //
 // `roundIndex` (optional, 0-based) is the authoritative round for the
 // round-scoped lineup fallback. Callers that know the bracket round (the TV
-// display / overlay carry it as promoted.roundIndex) MUST pass it — do not
+// display / overlay carry it as promoted.roundIndex) MUST pass it : do not
 // rely on parsing match.round, which now holds a bracket-size display label
 // ("Round 16"/"Round 32") in some surfaces and would misderive the round.
 export function useTeamLineups(match, competition, roundIndex) {
@@ -71,7 +71,7 @@ export function useTeamLineups(match, competition, roundIndex) {
     (async () => {
       // Prefer the players already on the passed competition (TvDisplay /
       // StreamingOverlay carry them) and skip the extra fetchCompetitionDetails
-      // round-trip — it delays lineup rendering on every promoted-match change.
+      // round-trip : it delays lineup rendering on every promoted-match change.
       let players = (competition && competition.players && competition.players.length)
         ? competition.players
         : [];
@@ -88,7 +88,7 @@ export function useTeamLineups(match, competition, roundIndex) {
         }
       }
       // Prefer the explicit 0-based round index. Only when it is absent do we
-      // fall back to match.round — a raw numeric index, or the legacy engine
+      // fall back to match.round : a raw numeric index, or the legacy engine
       // label "Round <number>" (1-based round NUMBER → 0-based). We deliberately
       // do NOT trust a bracket-size label here; callers with a real round pass
       // roundIndex so this parse is never reached on those surfaces.
@@ -103,7 +103,7 @@ export function useTeamLineups(match, competition, roundIndex) {
       }
       const teamAId = resolveLineupTeamId(sideAId, players);
       const teamBId = resolveLineupTeamId(sideBId, players);
-      // Both sides are independent GETs — fetch them in parallel to halve the
+      // Both sides are independent GETs : fetch them in parallel to halve the
       // time-to-render (the promoted match changes often on TV/overlay).
       const [la, lb] = await Promise.all([
         teamAId ? resolveMatchLineup(compId, teamAId, matchId, round, window.API) : null,
@@ -147,7 +147,7 @@ function slotCells(letters, side, testid) {
   return side === "aka" ? cells.reverse() : cells;
 }
 
-// centreMarks — the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
+// centreMarks : the §263 inner cells: [shiro slot][shiro slot] | vs/X | [aka slot][aka slot].
 // Hansoku ▲ shows on the offending side, on the OUTER edge of the slots (away
 // from centre); X marks a hikiwake; "Ht" flags hantei. For an ippon-less win
 // the winning side is otherwise invisible, so we mark the winner's first slot:
@@ -196,17 +196,17 @@ function centreMarks(sub, matchSideA, matchSideB) {
   );
 }
 
-// BoutSubRow — one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
+// BoutSubRow : one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
 // TV sizing is driven by the parent `.msb--tv` CSS selector, not a prop.
 // state: "now" | "queued" | "done" (TV highlight only). Names come from the
 // pinned lineup, else the per-bout competitor stored on the sub (kachinuki
-// matches carry sub.sideA/sub.sideB), else the bout number — never the team
+// matches carry sub.sideA/sub.sideB), else the bout number : never the team
 // name (it would repeat on every row).
 export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB }) {
   const subSideName = (v) => {
     const n = (v && v.name) || (typeof v === "string" ? v : "");
     if (!n) return "";
-    // Filter out match-level team names — when the backend stores the team
+    // Filter out match-level team names : when the backend stores the team
     // name in every sub-bout (quick-score path), we must fall through to the
     // bout number rather than repeating the team name on every row.
     if (n === matchSideA || n === matchSideB) return "";
@@ -251,9 +251,9 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
   return { ivShiro, ivAka, pwShiro, pwAka };
 }
 
-// IndividualScore — §263 row for an individual match: ippon slots per side
+// IndividualScore : §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
-// withNumber — prepend the assigned competitor number (e.g. "K1") to the
+// withNumber : prepend the assigned competitor number (e.g. "K1") to the
 // display name when present. Falls back to the bare name when no number is
 // set, so competitions without `numberPrefix` render identically to before.
 // Honours the zekken `displayName` when `withZekkenName` is true, matching
@@ -274,7 +274,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   // winner key to each side's key. Prefer the participant id so a same-name
   // head-to-head (two players sharing a name) isn't flagged a win on BOTH
   // sides; fall back to the name. When the two sides are indistinguishable
-  // (same name, no ids), blank the winner so neither side is marked — the
+  // (same name, no ids), blank the winner so neither side is marked : the
   // centre Ht/○ fallback still conveys the result.
   const aKey = sideId(match.sideA) || sideName(match.sideA);
   const bKey = sideId(match.sideB) || sideName(match.sideB);
@@ -288,7 +288,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     sideA: aKey, sideB: bKey,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
-  // colour-coded Shiro dark / Aka red — used by the TV pool/round list where
+  // colour-coded Shiro dark / Aka red : used by the TV pool/round list where
   // each row IS a full match. The card leaves them empty (names render above).
   // Always display the human NAME (never the id key used for comparison).
   // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
@@ -308,14 +308,14 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
   );
 }
 
-// TeamScoreboard — §277 team table: an IV/PW summary row (labeled, per side) +
+// TeamScoreboard : §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
 export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning }) {
   const regular = (subResults || []).filter(s => s.position !== -1);
   const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
-  // TIED after the regular bouts — equal individual victories AND equal points.
+  // TIED after the regular bouts : equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
   // Daihyosen on an already-decided match (mp-13y #12).
   const tied = ivShiro === ivAka && pwShiro === pwAka;
@@ -323,7 +323,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
   const dhSub = renderDH ? (subResults || []).find(s => s.position === -1) : null;
   const tv = variant === "tv";
   // The current bout = first unscored regular bout (navy "now" highlight via
-  // var(--accent-soft) — the running signal), but only while the match is
+  // var(--accent-soft) : the running signal), but only while the match is
   // RUNNING (see rowState below). Already-scored bouts are "done"; unscored
   // bouts are "queued". On a non-running board (completed or up-next) nothing
   // is "now": a completed match that left padded/unplayed positions unscored
@@ -341,16 +341,16 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       (typeof window.isHikiwake === "function" && (window.isHikiwake(s.score?.type) || window.isHikiwake(s.decision)));
   };
   // Render one row PER LINEUP POSITION (teamSize), padding past the recorded
-  // subResults so a running encounter shows all bouts — completed, the live one,
-  // and the still-to-come positions — not just the scored ones. Kachinuki can
+  // subResults so a running encounter shows all bouts : completed, the live one,
+  // and the still-to-come positions : not just the scored ones. Kachinuki can
   // exceed teamSize, so never shrink below regular.length.
   const rowCount = Math.max(regular.length, teamSize || 0);
   const scoredAt = (i) => i < regular.length && isScored(regular[i]);
   // Per-row state: a scored bout is "done"; the first unscored bout is "now"
   // ONLY when the match is RUNNING (so a 0–0 running board highlights bout 1);
   // every other unscored bout is "queued". Gating "now" on isRunning means a
-  // completed match — including a quick-score that synthesised fewer
-  // subResults than teamSize — never lights up a padded blank row, and an
+  // completed match : including a quick-score that synthesised fewer
+  // subResults than teamSize : never lights up a padded blank row, and an
   // up-next board stays all-queued.
   let firstUnscored = -1;
   for (let i = 0; i < rowCount; i++) { if (!scoredAt(i)) { firstUnscored = i; break; } }
@@ -380,7 +380,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       </div>
 
       {/* One row per lineup position (teamSize), padding past the recorded
-          subResults so a running encounter shows the still-to-come bouts too —
+          subResults so a running encounter shows the still-to-come bouts too :
           not just the scored ones (a partially-scored match used to render only
           its scored rows). A padding row has no sub: BoutSubRow shows the pinned
           lineup name when present, else the bout number (mp-13y #4/#6). */}
@@ -392,7 +392,7 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {/* Daihyosen banner + rep bout (knockout tie only). The DH sub is
           enriched with the parent team names (teamB=shiro, teamA=aka) so
           centreMarks can resolve a winner key stored as the TEAM name to
-          the correct side — see centreMarks for the fallback chain. */}
+          the correct side : see centreMarks for the fallback chain. */}
       {renderDH && (
         <>
           <div className="msb-row msb-row--dh-banner" data-testid="dh-banner">

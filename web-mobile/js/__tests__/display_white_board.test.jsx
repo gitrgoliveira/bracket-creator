@@ -5,11 +5,11 @@ import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
 // row, NEXT, sponsor) that delegates the scoreboard body to the SHARED
-// match_scoreboard.jsx components (TeamScoreboard / IndividualScore) — the same
+// match_scoreboard.jsx components (TeamScoreboard / IndividualScore): the same
 // ones the viewer card uses. The scoreboard's own rendering (slots, IV/PW
 // summary, DH banner) is covered by match_scoreboard.test.jsx.
 
-describe('sideLabel — numberPrefix + zekken', () => {
+describe('sideLabel: numberPrefix + zekken', () => {
   it('returns the bare name when there is no number', () => {
     expect(sideLabel({ name: 'Tanaka' })).toBe('Tanaka');
   });
@@ -25,7 +25,7 @@ describe('sideLabel — numberPrefix + zekken', () => {
   });
 });
 
-describe('overlayPositionLabel — FIK names only for 5-person teams', () => {
+describe('overlayPositionLabel: FIK names only for 5-person teams', () => {
   it('returns Senpo..Taisho for a 5-person team', () => {
     expect(overlayPositionLabel(5, 0, {})).toBe('Senpo');
     expect(overlayPositionLabel(5, 2, {})).toBe('Chuken');
@@ -80,7 +80,7 @@ describe('TvWhiteBoard', () => {
     lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
   };
 
-  it('league board header shows just the competition name — no dangling " · " separator', () => {
+  it('league board header shows just the competition name, no dangling " · " separator', () => {
     // phaseLabel returns "" for league; the subtitle must not render "Name · ".
     const p = teamPromoted();
     p.competition = { id: 'c1', name: 'Veterans League', kind: 'team', teamSize: 5, format: 'league' };
@@ -182,7 +182,7 @@ describe('TvWhiteBoard', () => {
 
   it('threads shiroName/akaName into TeamScoreboard so DH team-name winner resolves (tri-review #1)', () => {
     // Without this, centreMarks falls back to centre Ht on a daihyosen result
-    // persisted with the team name as the winner — the round-5 win-mark fix
+    // persisted with the team name as the winner. The round-5 win-mark fix
     // never reaches the TV display path.
     const p = teamPromoted();
     const props = { ...base, promoted: p, isTeamMatch: true,
@@ -258,7 +258,7 @@ describe('gatherIndividualGroup', () => {
       { id: 'Pool A-3', sideA: 'Suzuki', sideB: 'Mori', status: 'scheduled', scheduledAt: '09:30' }, // not started
     ],
   };
-  it('gathers the whole pool — completed first, current next, scheduled LAST; other pools excluded', () => {
+  it('gathers the whole pool: completed first, current next, scheduled LAST; other pools excluded', () => {
     // Pool-phase per-court board shows the WHOLE pool so spectators see the
     // pool's full progression (past → present → future) on one screen.
     // Status sort: completed → current → scheduled. Pool B is excluded.
@@ -279,7 +279,7 @@ describe('gatherIndividualGroup', () => {
     expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-1']);
     expect(rows[rows.length - 1].id).toBe('m-r1-1'); // running at the bottom
   });
-  it('filters bracket round to the promoted court — cross-court matches excluded', () => {
+  it('filters bracket round to the promoted court: cross-court matches excluded', () => {
     const comp = { bracket: { rounds: [
       [ { id: 'm-r1-0', court: 'A', status: 'completed', sideA: 'A', sideB: 'B', scheduledAt: '10:00' },
         { id: 'm-r1-1', court: 'B', status: 'running', sideA: 'C', sideB: 'D', scheduledAt: '10:00' },
@@ -290,7 +290,7 @@ describe('gatherIndividualGroup', () => {
     const rows = gatherIndividualGroup(promoted, 'A');
     expect(rows.map(m => m.id)).toEqual(['m-r1-0', 'm-r1-2']);
   });
-  it('orders by NUMERIC match index in an untimed pool (no scheduledAt) — not lexicographic id', () => {
+  it('orders by NUMERIC match index in an untimed pool (no scheduledAt): not lexicographic id', () => {
     // 12 completed bouts + a running one, no scheduledAt / queuePosition.
     // Lexicographic id sort would put "Pool A-10" before "Pool A-2"; the numeric
     // tiebreak keeps 2 < 10. The running match sorts last (current slot).
@@ -406,7 +406,7 @@ describe('findNextPoolOnCourt', () => {
   });
   it('excludes a pool already started on ANOTHER court (matches can move courts)', () => {
     // Pool B is routed to court A (scheduled here) but already has a COMPLETED
-    // match on court C — it has begun elsewhere, so it must not surface as the
+    // match on court C: it has begun elsewhere, so it must not surface as the
     // future "UP NEXT" pool on court A.
     const c = { poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running',   scheduledAt: '09:00' },
@@ -423,7 +423,7 @@ describe('TvIndividualBoard', () => {
     { id: 'Pool A-0', court: 'B', sideA: 'Tanaka', sideB: 'Suzuki', status: 'running', ipponsA: ['M'], ipponsB: [], scheduledAt: '09:00' },
     { id: 'Pool A-1', court: 'B', sideA: 'Yamada', sideB: 'Mori', status: 'completed', ipponsA: ['M'], ipponsB: ['D'], scheduledAt: '09:10' },
   ] };
-  it('caps visible rows at TV_INDIV_MAX_VISIBLE (10) — oldest completed drop off the top, current stays', () => {
+  it('caps visible rows at TV_INDIV_MAX_VISIBLE (10): oldest completed drop off the top, current stays', () => {
     // 15 completed rows + 1 running → 16 total; tail 10 = 9 completed + the running one.
     const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       ...Array.from({ length: 15 }, (_, i) => ({
@@ -485,9 +485,9 @@ describe('TvIndividualBoard', () => {
   });
 
   it('NOW row uses navy treatment (accent-soft background only); amber #fef3c7 is absent', () => {
-    // mp-pa6s: running row uses the DESIGN.md §3 navy running signal — a quiet
+    // mp-pa6s: running row uses the DESIGN.md §3 navy running signal: a quiet
     // var(--accent-soft) BACKGROUND only (no spine/border, no transform, no
-    // pulse) — and must NOT use the old amber background. The per-court board
+    // pulse) and must NOT use the old amber background. The per-court board
     // also omits the inline "NOW" dot/label badge: every row is the same size
     // and the bg tint alone marks the live row.
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
@@ -522,9 +522,9 @@ describe('TvIndividualBoard', () => {
     expect(doneRow.props.style.borderLeft).toBeUndefined();
   });
 
-  it('all rows have the same padding and no transform — the live row is signalled by bg only', () => {
+  it('all rows have the same padding and no transform: the live row is signalled by bg only', () => {
     // Per user constraint: rows must be uniform size on /display?court=A.
-    // No transform, no spine, no asymmetric padding between live and queue —
+    // No transform, no spine, no asymmetric padding between live and queue.
     // the bg tint alone carries the live signal. Text scales globally via
     // --msb-scale based on row count (asserted separately below).
     const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
@@ -665,7 +665,7 @@ describe('TvIndividualBoard', () => {
   it('passes match sides with .number through to IndividualScore (numberPrefix support)', () => {
     // mp-13y: when a competition has numberPrefix configured, the assigned
     // number (e.g. "K1") rides on match.sideA.number / match.sideB.number
-    // — TvIndividualBoard must pass the full side object through so the
+    // TvIndividualBoard must pass the full side object through so the
     // shared IndividualScore can render "K1 Tanaka".
     const numbered = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'B', status: 'running',
@@ -753,12 +753,12 @@ describe('phaseProgressOnCourt + phase strip', () => {
         { id: 'm-r1-2', court: 'A', status: 'scheduled', sideA: { name: 'Pool A-1st' }, sideB: { name: 'Pool B-2nd' } } ],
     ] } };
     const promoted = { competition, isBracket: true, roundIndex: 0, match: { id: 'm-r1-0' } };
-    // Only the resolved match counts — the two placeholders are not runnable yet.
+    // Only the resolved match counts. The two placeholders are not runnable yet.
     expect(phaseProgressOnCourt(promoted, 'A')).toEqual({ done: 1, total: 1 });
   });
 
-  // c) League single pool — ids shaped "League-0", "League-1", …
-  it('league single pool: large match set — returns correct done/total for court', () => {
+  // c) League single pool: ids shaped "League-0", "League-1", ...
+  it('league single pool: large match set, returns correct done/total for court', () => {
     const total = 45;
     const doneCount = 12;
     const poolMatches = Array.from({ length: total }, (_, i) => ({
@@ -817,7 +817,7 @@ describe('phaseProgressOnCourt + phase strip', () => {
   });
 
   // f) Header subtitle no longer carries the phase label
-  it('top-right header span shows competition name only — no phase label', () => {
+  it('top-right header span shows competition name only, no phase label', () => {
     const comp = { name: 'MyComp', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
     ] };
@@ -825,7 +825,7 @@ describe('phaseProgressOnCourt + phase strip', () => {
     const tree = TvIndividualBoard({ tournament: { name: 'Cup' }, court: 'A', connected: true, zekken: false, queueMatches: [], promoted });
     // Find the span that carries the competition name. It sits inside the
     // top-right flex div that also holds the RECONNECTING badge.
-    // We look for a span whose serialised text contains "MyComp" — and assert
+    // We look for a span whose serialised text contains "MyComp" and assert
     // it does NOT contain "Pool A" (the phase label must have moved to the strip).
     const spans = findAll(tree, n => n.type === 'span' && JSON.stringify(n).includes('MyComp'));
     expect(spans.length).toBeGreaterThan(0);
@@ -837,12 +837,12 @@ describe('phaseProgressOnCourt + phase strip', () => {
 });
 
 // A league is a single round-robin table. The match carries a positive,
-// per-match round-robin round number (4, 5, 6, 0…) — meaningless to a
+// per-match round-robin round number (4, 5, 6, 0...) is meaningless to a
 // spectator and visibly inconsistent across the feed. phaseLabel must
 // suppress it for format === 'league' so only the completed/total counter
 // conveys progress (the round number leaked through as the phase label
-// before this fix — "4 · 10 / 28 MATCHES").
-describe('phaseLabel — league suppresses the round-robin round number', () => {
+// before this fix: "4 · 10 / 28 MATCHES").
+describe('phaseLabel: league suppresses the round-robin round number', () => {
   it('returns "" for a league match instead of String(round)', () => {
     const m = { id: 'Pool A-3', round: 4, status: 'running' };
     expect(phaseLabel(m, false, undefined, undefined, 'league')).toBe('');
@@ -868,7 +868,7 @@ describe('phaseLabel — league suppresses the round-robin round number', () => 
 
   it('does NOT derive a pool-like label from a bracket id when roundLabel is unavailable', () => {
     // poolNameOf matches any "*-<digits>" shape, so a bracket id "m-r1-0" would
-    // wrongly yield "m-r1". The !isBracket guard prevents that — a bracket match
+    // wrongly yield "m-r1". The !isBracket guard prevents that: a bracket match
     // with no roundLabel falls through to the numeric round (or "").
     const saved = window.roundLabel;
     window.roundLabel = undefined; // simulate roundLabel not loaded

@@ -1,4 +1,4 @@
-// viewer_competition.jsx — page-level competition and overview components.
+// viewer_competition.jsx: page-level competition and overview components.
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
@@ -13,13 +13,13 @@ const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const EmptyState = window.EmptyState;
 
-// Lazy callable — window.hasBothSides is set by admin_helpers.js which loads
+// Lazy callable : window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
 // Pool daihyosen matches carry '-DH-' in their id.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
-// mp-tidg: activeTab + onTabChange are controlled props — app.jsx owns the
+// mp-tidg: activeTab + onTabChange are controlled props : app.jsx owns the
 // tab state so browser back/forward across tabs works (each tab switch is a
 // history push in the URL-sync effect). Do not add internal tab state here.
 export function ViewerCompetition({ tournament, competition, pools, poolMatches, standings, bracket, onBack, authed, onEditCompetition, tweaks, activeTab, onTabChange }) {
@@ -113,7 +113,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
       .slice(0, hasActiveFilter ? 20 : 3);
     // Reverse-chronological by scheduled time. allMatches arrives in
     // pool-then-bracket order (not time order), so a bare slice(-N).reverse()
-    // produced a jumbled "Recent results" list — sort by scheduledAt desc,
+    // produced a jumbled "Recent results" list : sort by scheduledAt desc,
     // then take the most recent N. Missing times sort last (oldest).
     const recent = allMatches
       .filter((m) => m.status === "completed" && m.winner && matchInvolvesWatched(m))
@@ -132,14 +132,14 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // A mixed competition always carries a real bracket payload from the server
   // (pool-origin placeholder leaves like "Pool A-1st" while pools are running,
   // each replaced by the real finisher as that pool completes). No need for a
-  // client-side placeholder fallback — just use what the server sends.
+  // client-side placeholder fallback : just use what the server sends.
   const derivedBracket = useMemo(() => {
     if (bracket && bracket.rounds && bracket.rounds.length > 0) return bracket;
     return null;
   }, [bracket]);
 
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
-  // structure — the draw has been generated and the payload already includes
+  // structure : the draw has been generated and the payload already includes
   // pools + bracket data returned unconditionally by handlers_viewer.go.
   // Only setup (no draw yet) is treated as pre-start.
   const isPreStart = !c.status || c.status === "setup";
@@ -148,7 +148,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // T192 (FR-050e): Swiss competitions surface a dedicated standings
   // tab in place of pools/bracket. The standings tab fetches its own
   // data via /swiss/standings (it's not part of the competition-detail
-  // payload — see api_client.jsx).
+  // payload : see api_client.jsx).
   const isSwiss = c.format === "swiss";
   const isLeague = c.format === "league";
   const tabs = [
@@ -160,27 +160,27 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   ].filter(Boolean);
 
   // Clamp the incoming activeTab to the set of tabs that are actually
-  // rendered for this competition — a tab that was valid on a previous
+  // rendered for this competition : a tab that was valid on a previous
   // comp (e.g. "bracket") may not exist yet on draw-ready or setup.
   const effectiveTab = tabs.some(t => t.id === activeTab) ? activeTab : "overview";
 
   // Controlled-tab writer. Maps the default tab to null so App keeps the
   // canonical bare /competition/:id URL (the rest of the app stores null,
   // not "overview", for the default), and tolerates a missing handler via
-  // optional chaining — some unit tests mount ViewerCompetition without an
+  // optional chaining : some unit tests mount ViewerCompetition without an
   // onTabChange just to assert tab presence. (mp-tidg / PR #307 review)
   const selectTab = (id, replace = false) => onTabChange?.(id === "overview" ? null : id, replace);
 
   // mp-tidg: when the requested tab isn't available (deep-link to /bracket
   // before a draw, or a draw_discarded SSE while sitting on it) effectiveTab
   // falls back to overview for display. Propagate that back to app state so
-  // the URL stops claiming a tab the user isn't actually on — otherwise a
+  // the URL stops claiming a tab the user isn't actually on : otherwise a
   // shared permalink would render Overview while still reading /…/bracket.
   // Guard on a truthy activeTab: when no specific tab was requested (the
-  // default/nullish state) there is nothing to correct — the URL is already
+  // default/nullish state) there is nothing to correct : the URL is already
   // canonical.
   React.useEffect(() => {
-    // replace=true: this is a correction, not a navigation — rewrite the
+    // replace=true: this is a correction, not a navigation : rewrite the
     // invalid tab URL in place so Back doesn't return to it (PR #307 review).
     if (activeTab && effectiveTab !== activeTab) selectTab(effectiveTab, true);
   }, [effectiveTab, activeTab, onTabChange]);
@@ -333,7 +333,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
           )}
           {effectiveTab === "results" && c.status === "completed" && (
-            // Pass the *real* server bracket (not derivedBracket) — the latter
+            // Pass the *real* server bracket (not derivedBracket) : the latter
             // is a TBD placeholder for visualization only and carries no
             // winner data. Using real server data ensures deriveAwards sees
             // actual winners; when the final has no winner yet, deriveAwards
@@ -364,7 +364,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   })();
   const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
 
-  // setup: no draw yet — plain "not started" message.
+  // setup: no draw yet : plain "not started" message.
   if (!c.status || c.status === "setup") {
     return (
       <EmptyState icon="⏳" title="Not started yet" message={`Starts at ${c.startTime}. Check back when the competition begins.`} style={{ padding: 32 }} />
@@ -373,7 +373,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
 
   // draw-ready: the draw is published but no match has been called yet.
   // The comp is not running, so the Overview has no running/recent matches to
-  // show — point spectators to the now-available tabs. Swiss comps render a
+  // show : point spectators to the now-available tabs. Swiss comps render a
   // Standings tab instead of Pools/Bracket (same isSwiss signal as the tab
   // logic in ViewerCompetition), so the pointer text must match.
   if (c.status === "draw-ready") {
@@ -461,7 +461,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
               {leagueStandings.slice(0, 5).map((s, i) => (
                 <tr key={s.player?.id || s.player?.name || i} className={s.tied ? "pool__row--tied" : undefined}>
                   {/* Rank-ordered summary: "#" is the authoritative standing rank
-                      (s.rank), not the row index — DRY with the full standings and
+                      (s.rank), not the row index : DRY with the full standings and
                       the backend tiebreak/override logic. */}
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
@@ -469,7 +469,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
                       {/* No rank badge here: this summary is rank-sorted, so the
-                          "#" column already IS the rank — a badge would just echo
+                          "#" column already IS the rank : a badge would just echo
                           it. The rank badge only carries information when rows are
                           in draw order (non-league pools), where rank ≠ position. */}
                     </div>
@@ -503,7 +503,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
         </div>
       )}
 
-      {/* Current match — shown inline, before Up Next */}
+      {/* Current match : shown inline, before Up Next */}
       {currentMatch && currentMatch.status === "running" && (
         <div
           style={{ marginBottom: 12, cursor: isSelfRun ? "pointer" : undefined }}

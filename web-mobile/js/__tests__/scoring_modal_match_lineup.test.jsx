@@ -3,7 +3,7 @@
 // back to the round lineup only when the per-match GET returns null (404).
 //
 // Without this test the "preferred match lineup" change in
-// TeamScoreEditorModal is invisible — the component mounts, fires the
+// TeamScoreEditorModal is invisible. The component mounts, fires the
 // useEffect, but since vitest stubs hooks we test the pure helper directly.
 
 import { describe, it, expect, vi } from 'vitest';

@@ -58,7 +58,7 @@ function findAllByType(node, typeRef, acc = []) {
 }
 
 // ---------------------------------------------------------------------------
-// Suite 1: Viewer — single-competition rendering for mixed comps
+// Suite 1: Viewer : single-competition rendering for mixed comps
 // ---------------------------------------------------------------------------
 
 describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back-compat)', () => {
@@ -361,7 +361,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     expect(collectText(tree)).not.toContain('Knockout in progress');
   });
 
-  it('silently ignores onStartKnockout prop (backward compat — no crash)', () => {
+  it('silently ignores onStartKnockout prop (backward compat : no crash)', () => {
     expect(() => {
       runtime.mount(AdminCompetition, {
         ...baseProps,
@@ -597,7 +597,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     }
     // The reactive shim calls createElement for BracketTree but does NOT call
     // BracketTree() itself. Extract onMatchClick from the BracketTree vnode's
-    // props directly — that is what AdminBracket passes to window.BracketTree.
+    // props directly : that is what AdminBracket passes to window.BracketTree.
     const BracketTreeFn = global.window.BracketTree;
     const bracketTreeVnode = findInTree(tree, n => n?.type === BracketTreeFn);
     return { tree, onMatchClick: bracketTreeVnode?.props?.onMatchClick || null };
@@ -642,7 +642,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Suite 4: api_client — startKnockout method removed
+// Suite 4: api_client : startKnockout method removed
 // ---------------------------------------------------------------------------
 
 describe('api_client: startKnockout method removed (mp-turx)', () => {
@@ -658,7 +658,7 @@ describe('api_client: startKnockout method removed (mp-turx)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Suite 5: hasBothSides — pool-origin placeholder rejection
+// Suite 5: hasBothSides : pool-origin placeholder rejection
 // ---------------------------------------------------------------------------
 
 describe('hasBothSides: rejects pool-origin placeholders (mp-turx)', () => {
@@ -690,7 +690,7 @@ describe('hasBothSides: rejects pool-origin placeholders (mp-turx)', () => {
   });
 
   it('does NOT reject a participant legitimately named "Winner of the 2025 Cup" (long name, no exact format)', () => {
-    // Only the exact format "Winner of rN-mN" is rejected — not all names
+    // Only the exact format "Winner of rN-mN" is rejected : not all names
     // starting with "Winner of". A real participant with that full name should pass.
     expect(hasBothSides({ sideA: 'Winner of the 2025 Cup', sideB: { id: 'p2', name: 'Bob' } })).toBe(true);
   });

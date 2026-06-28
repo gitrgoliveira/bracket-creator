@@ -2,7 +2,7 @@
 //
 // Regression guard: a team with NO member metadata used to render a fixed
 // <select> limited to roster members, with the Save button disabled when the
-// roster was empty — so for teams formed by grouping individuals (no metadata)
+// roster was empty : so for teams formed by grouping individuals (no metadata)
 // the operator could not enter ANY lineup. The form now uses LineupNameInput
 // (a typeable autocomplete combobox) so any name can be typed, and Save is
 // no longer gated on the roster being non-empty.
@@ -80,7 +80,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     // mergeRosterWithAssigned must be available for the suggestions computation
     // in AdminLineup (it reads window.AdminLineupHelpers only in admin_schedule_lineup;
     // admin_lineup.jsx calls mergeRosterWithAssigned directly from its own scope).
-    // But window.AdminLineupHelpers is used by admin_schedule_lineup — set it up
+    // But window.AdminLineupHelpers is used by admin_schedule_lineup : set it up
     // here in case the module re-exports trigger it.
     global.window.AdminLineupHelpers = {
       positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({
@@ -143,7 +143,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
   it('renders pickers for a team WITHOUT metadata', async () => {
     const tree = await mountFor({ id: 'uuid-grouped', name: 'Grouped Team' });
 
-    // LineupNameInput component nodes — one per position (teamSize 3).
+    // LineupNameInput component nodes : one per position (teamSize 3).
     const pickers = findComponents(tree, 'LineupNameInput');
     expect(pickers.length).toBe(3);
 
@@ -196,7 +196,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     const tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
     const pickers = findComponents(tree, 'LineupNameInput');
     expect(pickers.length).toBeGreaterThan(0);
-    // onSelect with whitespace-only string — save() trims to "" and drops it.
+    // onSelect with whitespace-only string : save() trims to "" and drops it.
     pickers[0].props.onSelect('   ');
     const tree2 = runtime.currentTree();
     saveButton(tree2).props.onClick();

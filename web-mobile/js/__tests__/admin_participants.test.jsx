@@ -3,7 +3,7 @@ import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, genera
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
-// optional fields for brevity — mintParticipantIds doesn't read them
+// optional fields for brevity : mintParticipantIds doesn't read them
 // other than passing them through.
 const parsed = (...names) => names.map(n => ({ name: n, dojo: 'Dojo', danGrade: null, source: null }));
 
@@ -15,7 +15,7 @@ describe('mintParticipantIds', () => {
       // Original bug: pasting "Zelda\nAlice\nBob" when Alice (c1-p1) and
       // Bob (c1-p2) already exist would mint Zelda as c1-p1 (because
       // usedIds was still empty), then Alice would later return its own
-      // c1-p1 from existingMap — two rows with the same id.
+      // c1-p1 from existingMap : two rows with the same id.
       const { np } = mintParticipantIds(
         'c1',
         [existing('c1-p1', 'Alice'), existing('c1-p2', 'Bob')],
@@ -48,7 +48,7 @@ describe('mintParticipantIds', () => {
 
   describe('existing-player preservation', () => {
     it('preserves a player\'s stable id when only the casing changes', () => {
-      // Case-insensitive name match — "Alice" in existing matches "alice"
+      // Case-insensitive name match : "Alice" in existing matches "alice"
       // in parsed. The stable id (and seed) are preserved.
       const { np, updatedCount } = mintParticipantIds(
         'c1',
@@ -268,7 +268,7 @@ describe('participantSearchTarget', () => {
     expect(participantSearchTarget(p(null, null, null))).toBe('');
   });
 
-  it('omits empty displayName — no double-space in search target', () => {
+  it('omits empty displayName : no double-space in search target', () => {
     const target = participantSearchTarget(p('Alice', null, 'Tokyo'));
     expect(target).toBe('alice tokyo');
     expect(target.includes('  ')).toBe(false);
@@ -293,7 +293,7 @@ describe('generateRosterText', () => {
     });
   });
 
-  describe('withZekkenName=true — existing players with displayName', () => {
+  describe('withZekkenName=true : existing players with displayName', () => {
     it('formats as Name, Zekken, Dojo when displayName is set', () => {
       const players = [{ name: 'Alice Smith', displayName: 'SMITH', dojo: 'Gyokusen', danGrade: null }];
       expect(generateRosterText(players, true)).toBe('Alice Smith, SMITH, Gyokusen');
@@ -305,11 +305,11 @@ describe('generateRosterText', () => {
     });
   });
 
-  describe('withZekkenName=true — sample players without displayName', () => {
+  describe('withZekkenName=true : sample players without displayName', () => {
     it('falls back to derived zekken so line has three columns (not two)', () => {
       // makePlayer does not set displayName; without a fallback the line is
       // "Name, Dojo" which parseParticipantLines(withZekken=true) misreads as
-      // zekken=Dojo, dojo="" — silently corrupting the saved roster.
+      // zekken=Dojo, dojo="" : silently corrupting the saved roster.
       const players = [{ name: 'Alice Smith', displayName: undefined, dojo: 'Gyokusen', danGrade: null }];
       const line = generateRosterText(players, true);
       const parts = line.split(',').map(s => s.trim());

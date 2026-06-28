@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { bracketHasDecidedFinal, resolveCompetitionAwards } from '../viewer.jsx';
 
-// ── bracketHasDecidedFinal ────────────────────────────────────────────────────
+// bracketHasDecidedFinal
 
 describe('bracketHasDecidedFinal', () => {
   it('returns true when the last round has a decided final', () => {
@@ -56,7 +56,7 @@ describe('bracketHasDecidedFinal', () => {
   });
 });
 
-// ── resolveCompetitionAwards ──────────────────────────────────────────────────
+// resolveCompetitionAwards
 
 // Build a minimal decided bracket fixture.
 function decidedBracket() {
@@ -82,7 +82,7 @@ function undecidedBracket() {
 
 describe('resolveCompetitionAwards', () => {
   // Single-competition mixed model (mp-turx): the knockout fills in place on the
-  // mixed comp's OWN bracket — there is no linked "- Playoffs" comp to fetch.
+  // mixed comp's OWN bracket; there is no linked "- Playoffs" comp to fetch.
 
   // ── mixed → final (two 3rds), derived from the comp's OWN bracket ─────────
   it('mixed comp with decided OWN-bracket final → state "final", podium has two 3rds', async () => {
@@ -101,7 +101,7 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium[1]).toMatchObject({ place: 2, name: 'Carol' });
     expect(result.podium[2]).toMatchObject({ place: 3 });
     expect(result.podium[3]).toMatchObject({ place: 3 });
-    // Derives from the mixed comp's OWN bracket — fetches its own id, NOT a linked comp.
+    // Derives from the mixed comp's OWN bracket; fetches its own id, NOT a linked comp.
     expect(fetchers.fetchCompetitionDetails).toHaveBeenCalledWith('mixed-1');
   });
 

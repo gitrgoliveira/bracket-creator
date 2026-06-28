@@ -18,7 +18,7 @@ afterEach(() => {
     }
 });
 
-// Depth-first vnode walker — same pattern as display_white_board.test.jsx.
+// Depth-first vnode walker. Same pattern as display_white_board.test.jsx.
 function findAll(node, pred, out = []) {
     if (!node || typeof node !== 'object') return out;
     if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, out)); return out; }
@@ -59,7 +59,7 @@ function makeMatch(id, court, status) {
 
 // ─── allCompleted sub-state ───────────────────────────────────────────────────
 
-describe('TvDisplay empty state — allCompleted', () => {
+describe('TvDisplay empty state: allCompleted', () => {
     it('shows "All matches completed" headline without "on Shiaijo A" suffix', () => {
         const comps = [makeComp('c1', [
             makeMatch('m1', 'A', 'completed'),
@@ -85,7 +85,7 @@ describe('TvDisplay empty state — allCompleted', () => {
         expect(str).not.toContain('✓');
     });
 
-    it('uses var(--ink-1) for headline color — not the old #9ca3af', () => {
+    it('uses var(--ink-1) for headline color, not the old #9ca3af', () => {
         const comps = [makeComp('c1', [makeMatch('m1', 'A', 'completed')])];
         const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
         const str = treeStr(tree);
@@ -98,7 +98,7 @@ describe('TvDisplay empty state — allCompleted', () => {
 
 // ─── Active-courts wayfinding strip ──────────────────────────────────────────
 
-describe('TvDisplay empty state — IN PROGRESS wayfinding strip', () => {
+describe('TvDisplay empty state: IN PROGRESS wayfinding strip', () => {
     it('renders tvd-active-courts with chips for B and C when court A is completed and B/C have active matches', () => {
         const tournament = makeTournament(['A', 'B', 'C']);
         const comps = [
@@ -139,7 +139,7 @@ describe('TvDisplay empty state — IN PROGRESS wayfinding strip', () => {
         expect(str).not.toContain('"data-testid":"tvd-active-courts"');
     });
 
-    it('uses "IN PROGRESS" wording — never "LIVE" or "live"', () => {
+    it('uses "IN PROGRESS" wording, never "LIVE" or "live"', () => {
         const tournament = makeTournament(['A', 'B']);
         const comps = [makeComp('c1', [
             makeMatch('a1', 'A', 'completed'),
@@ -155,7 +155,7 @@ describe('TvDisplay empty state — IN PROGRESS wayfinding strip', () => {
 
 // ─── QR affordance ────────────────────────────────────────────────────────────
 
-describe('TvDisplay empty state — "Scan for results" QR affordance', () => {
+describe('TvDisplay empty state: "Scan for results" QR affordance', () => {
     it('renders "Scan for results" label in the empty state', () => {
         const comps = [makeComp('c1', [makeMatch('m1', 'A', 'completed')])];
         const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
@@ -176,7 +176,7 @@ describe('TvDisplay empty state — "Scan for results" QR affordance', () => {
 
 // ─── Headline text verification for all three sub-states ──────────────────────
 
-describe('TvDisplay empty state — headline text per sub-state', () => {
+describe('TvDisplay empty state: headline text per sub-state', () => {
     it('allCompleted: exact headline text (no court suffix)', () => {
         const comps = [makeComp('c1', [makeMatch('m1', 'A', 'completed')])];
         const tree = TvDisplay({ court: 'A', tournament: makeTournament(['A']), competitions: comps, connected: true });
@@ -198,13 +198,13 @@ describe('TvDisplay empty state — headline text per sub-state', () => {
     });
 });
 
-// ─── emptyStateHeadline pure helper — all three sub-states ─────────────────────
+// ─── emptyStateHeadline pure helper: all three sub-states ─────────────────────
 // The "between-matches" branch is unreachable through TvDisplay's own logic
 // (counts and the promote path share bracketSidesReady), so it is covered here
 // at the pure-function level to guard the headline mapping against regression
 // (PR #274 review request).
 
-describe('emptyStateHeadline — headline-per-state mapping', () => {
+describe('emptyStateHeadline: headline-per-state mapping', () => {
     it('allCompleted → "All matches completed"', () => {
         expect(emptyStateHeadline(true, false)).toBe('All matches completed');
     });

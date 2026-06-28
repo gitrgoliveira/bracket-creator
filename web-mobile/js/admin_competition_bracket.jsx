@@ -1,4 +1,4 @@
-// admin_competition_bracket.jsx — AdminBracket section plus its RunningMatchPanel
+// admin_competition_bracket.jsx : AdminBracket section plus its RunningMatchPanel
 // winner-picker detail panel and the pure scoreboard helpers they consume.
 // Split out of admin_competition.jsx (mp-hpe3). buildRunningIpponResult and
 // loadScoreboardPoints are ES-exported and re-exported by the entry for tests.
@@ -72,7 +72,7 @@ function buildRunningIpponResult(winnerSide, sideA, sideB, winnerIppons, loserIp
 // returned only the winner's letters. That was fine when the writer
 // always recorded loser=[]; once buildRunningIpponResult started writing
 // 2-1 wins correctly (loser's single ippon preserved), the loader's
-// truncation surfaced — a 2-1 win came back as 2-0 on re-render and
+// truncation surfaced : a 2-1 win came back as 2-0 on re-render and
 // re-submission silently dropped the loser's letter.
 //
 // admin_scoring_modal.jsx's initialAPts at line 30-31 already used the
@@ -93,14 +93,14 @@ function loadScoreboardPoints(match) {
 }
 
 const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveCourt, onEditScore, password }) => {
-  // Reuse the shared components wholesale — both off the window bridge at render
+  // Reuse the shared components wholesale : both off the window bridge at render
   // time so module load order never matters:
-  //   ScoreEditorModal (variant="inline") — the ONE scoring editor the shiaijo /
+  //   ScoreEditorModal (variant="inline") : the ONE scoring editor the shiaijo /
   //     pools / scores screens use. We keep ITS header (it's the same in every
   //     host), so the panel doesn't add a competing title. `match` is enriched
   //     upstream with the comp metadata the editor needs (compId, compKind,
-  //     teamSize, phase, round) — see AdminBracket.scoringMatch.
-  //   MatchDetailCard — the SAME read-only result card the public viewer shows
+  //     teamSize, phase, round) : see AdminBracket.scoringMatch.
+  //   MatchDetailCard : the SAME read-only result card the public viewer shows
   //     for a completed match (names + winner highlight + FINAL + score marks),
   //     instead of a stripped-down lookalike.
   const ScoreEditorModal = window.ScoreEditorModal;
@@ -121,7 +121,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
           reused editor / result card aren't stretched edge-to-edge. */}
       <div className="running-panel__inner">
       {/* Slim header: only the bits the reused components' own headers DON'T
-          carry — the bracket match number and the move-court control. Comp /
+          carry : the bracket match number and the move-court control. Comp /
           shiaijo / round / time / status come from the embedded component. */}
       <div className="running-panel__head">
         <div className="running-panel__title">{matchNum != null ? `Match M${matchNum}` : `Match · ${match.id.slice(-6)}`}</div>
@@ -144,7 +144,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             // Include subResults.length: the editor reads team sub-bouts into
             // refs on mount, so an SSE update that adds/removes a daihyosen
             // sub-bout from another surface must remount to avoid a stale board
-            // (mirrors the shiaijo inline embed's key — admin_shiaijo.jsx).
+            // (mirrors the shiaijo inline embed's key : admin_shiaijo.jsx).
             key={`${match.id}:${match.status}:${(match.subResults || []).length}`}
             variant="inline"
             match={match}
@@ -195,7 +195,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   }, [runningMatchId]);
 
   // Label a selected match with the SAME number ("M1") and round the bracket
-  // tree shows — derived from the shared buildDisplayModel so the panel and the
+  // tree shows : derived from the shared buildDisplayModel so the panel and the
   // cards/columns can never disagree. Recomputed from bracket.rounds (not stored
   // at click time) so it survives SSE topology refreshes. Hook stays above the
   // early return below so the hook order is stable.
@@ -243,13 +243,13 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // Compute the match's number/round ONCE (one scan of the display model).
   const selectedMeta = selectedMatch ? matchMeta(selectedMatch.id) : { matchNum: null, roundName: null };
   // Enrich the bracket match with the competition metadata the shared scorer
-  // (ScoreEditorModal / MatchDetailCard) reads off the match object — the raw
+  // (ScoreEditorModal / MatchDetailCard) reads off the match object : the raw
   // bracket.rounds entries carry none of it. Mirrors enrichPoolMatchWithComp:
   //   compId      → decision endpoints + maxEncho/naginata fetch
   //   compKind /  → individual vs team editor routing
   //   teamSize
   //   phase       → "bracket" makes isKnockoutPhase true: blocks hikiwake (no
-  //                 draws in elimination — decide by hantei after encho)
+  //                 draws in elimination : decide by hantei after encho)
   //   compFormat, round, matchNumber → header/label fields
   const scoringMatch = selectedMatch && {
     ...selectedMatch,
@@ -262,14 +262,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     round: selectedMatch.round || selectedMeta.roundName,
     matchNumber: selectedMatch.matchNumber || selectedMeta.matchNum || 0,
   };
-  // mp-turx: per-match playability — a bracket match is running iff hasBothSides()
+  // mp-turx: per-match playability : a bracket match is running iff hasBothSides()
   // returns true (both sides are resolved real participants, not “Winner of rX-mY”
   // feeders or pool-origin placeholders like “Pool A-1st”). The old bracket-wide
   // `isPreview` gate is replaced: the tree always renders, and individual matches
   // are non-interactive until their sides are decided. This supports the incremental
   // fill-in model where pool finishers seed into the knockout as each pool completes.
   // Show the "filling in" banner ONLY when pool-origin placeholders remain (a
-  // mixed comp whose feeder pools haven't all finished) — NOT for ordinary
+  // mixed comp whose feeder pools haven't all finished) : NOT for ordinary
   // "Winner of rX-mY" feeders or structural byes, which standalone playoffs and
   // bye-containing brackets legitimately have.
   const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
@@ -282,7 +282,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
       <div className="bracket-layout__bracket">
         {hasUnseededPools && (
           <div className="banner banner--info" style={{ marginBottom: 12, padding: "10px 14px", background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 13 }}>
-            <strong>Knockout filling in</strong> — this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
+            <strong>Knockout filling in</strong> : this bracket fills in automatically as each pool finishes. Matches start once both sides are decided.
           </div>
         )}
         <div className="bracket-canvas" ref={scrollRef}>

@@ -1,10 +1,10 @@
-// admin_competition.jsx — thin entry for the competition admin shell.
+// admin_competition.jsx : thin entry for the competition admin shell.
 // The AdminCompetition shell lives here; its sections were split into sibling
 // modules (mp-hpe3): admin_competition_overview/settings/bracket/swiss.jsx.
 // This file evaluates every section module (via the imports/re-exports below,
 // which set their window.* component globals) and re-exports the full pure-helper
 // surface so existing `import { … } from './admin_competition.jsx'` test sites
-// keep resolving. This entry is the SOLE loader of the section modules — they
+// keep resolving. This entry is the SOLE loader of the section modules : they
 // have no <script> tag of their own (avoids a duplicate module-eval; see
 // index.html) and are pulled in only by the imports here.
 
@@ -33,7 +33,7 @@ const AdminParticipants = window.AdminParticipants;
 const AdminPools = window.AdminPools;
 const AdminScoreEditor = window.AdminScoreEditor;
 const AdminExport = window.AdminExport;
-// Section components — produced by the sibling modules above, aliased here for
+// Section components : produced by the sibling modules above, aliased here for
 // the AdminCompetition render tree.
 const AdminCompOverview = window.AdminCompOverview;
 const FightingSpiritAwardsEditor = window.FightingSpiritAwardsEditor;
@@ -59,17 +59,17 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Use the shared isValidDate (admin_helpers.jsx) which delegates to
-  // normalizeDate for semantic validity — rejects "32-13-2026" / Feb 31 /
+  // normalizeDate for semantic validity : rejects "32-13-2026" / Feb 31 /
   // Feb 29 in non-leap years. Without this, the Start button would enable
   // for shape-valid-but-impossible dates that AdminSettings.saveNow's
-  // stricter check would reject — letting the operator start a competition
+  // stricter check would reject : letting the operator start a competition
   // with a date that can't be saved back.
   const isDateValid = isValidDate;
 
   // mp-w7x: surface how many participants will be excluded from the draw
   // because they have not checked in. Mirror the engine's rule
   // (filterCheckedIn in internal/engine/competition.go): only applies when the
-  // competition has check-in tracking enabled (c.checkInEnabled) — consistent
+  // competition has check-in tracking enabled (c.checkInEnabled) : consistent
   // with the rest of the UI, which masks checkedIn behind that flag. Within an
   // enabled competition, opt-in semantics apply: only exclude when at least one
   // participant is checked in. Empty roster (e.g. a playoffs-from-source
@@ -123,7 +123,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       showToast(`Draw discarded for ${c.name}`);
       // After discard the status reverts to "setup", so draw-only/preview nav
       // items (pools, bracket, swiss) disappear. If the operator is on one of
-      // those sections, fall back to participants — a sensible landing point
+      // those sections, fall back to participants : a sensible landing point
       // after discarding. Otherwise leave them exactly where they are.
       // (This fallback set mirrors the draw-only items gated on isDrawReady /
       // draw artifacts in the sections array above.)
@@ -156,7 +156,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       await window.API.startCompetition(c.id, password);
       // Don't attempt a local-state refresh here. Pre-fix this called
       // onUpdate({ ...t, competitions: comps }), but onUpdate at this
-      // level is wired (in AdminApp's render — see the AdminCompetition
+      // level is wired (in AdminApp's render : see the AdminCompetition
       // <Component onUpdate={...}> binding) to
       // (next) => updateCompetition(c.id, next), which fires
       // PUT /api/competitions/:id with `next` as the body.
@@ -182,7 +182,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   const isDrawReady = c.status === "draw-ready";
-  // Block section/competition navigation while a draw mutation is in-flight —
+  // Block section/competition navigation while a draw mutation is in-flight :
   // the in-flight transition changes which sections are valid and discardDraw's
   // fallback uses the section captured at call time (see the side-nav below).
   const navBusy = generating || starting || discarding;
@@ -194,7 +194,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       sec: "Preparation", items: [
         { id: "overview", label: "Overview" },
         { id: "participants", label: "Participants & seeds" },
-        // T136 nav: Lineups is a team-only surface — hide it for
+        // T136 nav: Lineups is a team-only surface : hide it for
         // individual competitions so the sidebar stays uncluttered.
         c.kind === "team" ? { id: "lineups", label: "Lineups" } : null,
         { id: "settings", label: "Settings" },
@@ -264,7 +264,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 )}
                 {excludedFromDraw > 0 && (
                   <div style={{ color: "var(--ink-3)", fontSize: 11, fontWeight: 600 }}>
-                    {excludedFromDraw} not checked in — will be excluded from the draw
+                    {excludedFromDraw} not checked in : will be excluded from the draw
                   </div>
                 )}
               </>
@@ -274,7 +274,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 <div style={{ display: "flex", gap: 8 }}>
                   {/* navBusy (generating||starting||discarding) covers the brief
                       window where generateDraw has flipped status to draw-ready
-                      but its setGenerating(false) hasn't run yet — without it
+                      but its setGenerating(false) hasn't run yet : without it
                       these buttons would be momentarily clickable mid-generate. */}
                   <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
@@ -285,7 +285,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated — preview below, then start. To change it, discard and edit first.</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated : preview below, then start. To change it, discard and edit first.</div>
               </div>
             )}
             {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (
@@ -298,7 +298,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           {/* Left column stacks the per-competition nav and, as a SEPARATE
               card below it, the switcher to other competitions (mp-xsc1).
               The .comp-rail wrapper is the single sticky unit so both cards
-              pin together — if only the top card sticks, the lower one scrolls
+              pin together : if only the top card sticks, the lower one scrolls
               up and disappears beneath it. */}
           <div className="comp-rail">
             <div className="side-nav">

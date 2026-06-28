@@ -12,7 +12,7 @@ const MAX_TEAM_SIZE = window.MAX_TEAM_SIZE;
 const MAX_TOURNAMENT_DURATION_DAYS = window.MAX_TOURNAMENT_DURATION_DAYS;
 const MIN_YEAR = window.MIN_YEAR;
 const MAX_YEAR = window.MAX_YEAR;
-// Canonical courts cap (admin_helpers.jsx) — mirrors helper.MaxCourts
+// Canonical courts cap (admin_helpers.jsx) : mirrors helper.MaxCourts
 // on the Go side. Anchored to the A–Z labelling used on Shiaijo headers.
 const MAX_COURTS = window.MAX_COURTS;
 const pluralize = window.pluralize;
@@ -44,7 +44,7 @@ function deriveCompetitionName(rawName, kind, gender) {
 }
 
 // pickStackPredecessor returns the latest-STARTING same-day competition that the
-// new competition's default start time should stack after — or null when there
+// new competition's default start time should stack after : or null when there
 // is no usable predecessor (the caller keeps the 09:00 default).
 //
 // Entries are filtered on PARSEABLE start times (timeToMinutes !== null), not
@@ -68,7 +68,7 @@ function pickStackPredecessor(competitions, date) {
 // store NaN when cleared (so the display stays empty instead of
 // collapsing to "0"). Without a submit-time guard, NaN would land at
 // buildEmptyCompetition's `poolSize || 3` fallback (NaN is falsy →
-// defaults to 3) — silently using a different value than the user
+// defaults to 3) : silently using a different value than the user
 // thought they entered. Negative/zero/non-integer values are even
 // worse: `2.5 || 3` evaluates to `2.5` (truthy) and slips through.
 //
@@ -90,9 +90,9 @@ function validatePoolSettings(format, poolSize, winners) {
   return { ok: true, error: null };
 }
 
-// T190 (US13 — FR-050a): submit-time validation for the swissRounds
+// T190 (US13 : FR-050a): submit-time validation for the swissRounds
 // field. Only meaningful when format === "swiss"; short-circuits with
-// { ok: true } for other formats. Same shape as validatePoolSettings —
+// { ok: true } for other formats. Same shape as validatePoolSettings : 
 // NaN/fractional/zero/negative all blocked. Default UI value is 4
 // (common Swiss tournament size for ~16 players).
 //
@@ -112,7 +112,7 @@ import { normalizeTheme } from './admin_branding.jsx';
 import { timeToMinutes } from './admin_schedule_utils.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
-  // In locked mode the on-disk Password is irrelevant — auth comes
+  // In locked mode the on-disk Password is irrelevant : auth comes
   // from TOURNAMENT_PASSWORD_HASH and the backend rejects PUTs that
   // try to set a non-empty password. Surfacing the field anyway would
   // let an operator type a new password, click Save, and (depending
@@ -126,7 +126,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // (tournament.durationDays is undefined / 0 for older records).
   const [durationDays, setDurationDays] = useStateA(tournament.durationDays || 1);
   const [courts, setCourts] = useStateA(window.courtCount(tournament.courts));
-  // Tournament mode (mp-7h7): read-only after creation — shown for
+  // Tournament mode (mp-7h7): read-only after creation : shown for
   // information only and NEVER included in the PUT payload.
   const tournamentMode = tournament.mode || "officiated";
   // mp-zoh Phase 5: ceremony block duration strings ("30m", "1h", "1h30m").
@@ -154,13 +154,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   const [errorField, setErrorField] = useStateA(null);
   // mp-scf: theme colors (updated live by BrandingManager via onThemeChange).
   // Initialise through normalizeTheme so the very first render holds the same
-  // shape BrandingManager emits — when the server returns theme:{} for a
+  // shape BrandingManager emits : when the server returns theme:{} for a
   // logo-only tournament, the raw value is a truthy empty object that would
   // otherwise reach the dirty snapshot and the save payload as `{}` (the
   // backend tolerates it but it's cleaner not to rely on that).
   const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
 
-  // mp-sspn: in-flight save state — disables the primary button and swaps its
+  // mp-sspn: in-flight save state : disables the primary button and swaps its
   // label to "Saving…" so the long form's primary action gives feedback
   // (previously it fired-and-navigated with no on-button cue). mountedRef
   // gates the post-await setSaving so a successful save (which unmounts this
@@ -176,7 +176,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // mp-sspn: refs for the four validated fields so a failed save can focus +
-  // scroll the offending input into view — on a 4-card form the top banner
+  // scroll the offending input into view : on a 4-card form the top banner
   // alone lands off-screen when Save is clicked from the bottom.
   const nameRef = useRefA(null);
   const dateRef = useRefA(null);
@@ -215,7 +215,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, rulesURL,
     awardsNote, infoNotes, pass, contacts, theme]);
 
-  // Elevated (destructive-ops) password — spec 004 / mp-e21. File mode only;
+  // Elevated (destructive-ops) password : spec 004 / mp-e21. File mode only;
   // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
   // here). `elevatedConfigured` decides whether the current-password field is
   // shown (rotation) vs. a first-time set (TOFU).
@@ -266,7 +266,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     if (savingRef.current) return; // synchronous re-entry guard (see savingRef)
     // Trim early and send the trimmed value. The empty-name check below
     // already used `name.trim()`, but the onSave payload was passing the
-    // raw `name` — so " Tournament " on the wire would round-trip to the
+    // raw `name` : so " Tournament " on the wire would round-trip to the
     // backend's trim and produce a canonical "Tournament" that diverges
     // from what the user sees in the input until next refresh.
     const trimmedName = name.trim();
@@ -316,7 +316,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
 
   // mp-sspn: guard navigation away from unsaved edits AND while a save is in
   // flight. The Cancel button is disabled via `saving`, but Esc and the
-  // breadcrumb back-link bypass that — block them too so the user can't
+  // breadcrumb back-link bypass that : block them too so the user can't
   // navigate away mid-PUT and contradict the disabled affordance.
   const handleCancel = () => {
     if (savingRef.current) return;
@@ -324,7 +324,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     onCancel();
   };
 
-  // mp-sspn: keyboard accelerators — Cmd/Ctrl+S saves, Esc cancels. Latest
+  // mp-sspn: keyboard accelerators : Cmd/Ctrl+S saves, Esc cancels. Latest
   // handlers are read through refs so the once-bound listener never calls a
   // stale closure (handleSave/handleCancel close over current form state).
   const handleSaveRef = useRefA(handleSave);
@@ -335,7 +335,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
     const onKey = (e) => {
       // Ignore IME composition keys (CJK input, accented chars). Without this
       // the Escape used to cancel composition would also fire the discard
-      // confirm — silent loss of edits is the failure mode.
+      // confirm : silent loss of edits is the failure mode.
       if (e.isComposing || e.keyCode === 229) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
@@ -378,7 +378,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <label className="field__label">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
               {/* admin_competition.jsx and the MIN_YEAR/MAX_YEAR range */}
-              {/* that validateAndNormalizeDate enforces at handleSave — */}
+              {/* that validateAndNormalizeDate enforces at handleSave : */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
               <input ref={dateRef} className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
@@ -430,7 +430,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           </div>
           {/* Tournament type (mp-7h7): read-only after creation. Displayed
-              for information — it affects the auth boundary (officiated:
+              for information : it affects the auth boundary (officiated:
               main password gates everything; self-run: only destructive
               actions require a password). Never submitted on PUT. */}
           <div className="field" style={{ marginBottom: 0 }}>
@@ -438,8 +438,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
               {tournamentMode === "self-run"
-                ? " — Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
-                : " — All admin actions require the tournament password."}
+                ? " : Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
+                : " : All admin actions require the tournament password."}
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
@@ -473,7 +473,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </div>
         </div>
         {/* mp-ef3: Tournament Information (Public) */}
-        {/* mp-sspn: collapsible — all fields here are optional, so the section */}
+        {/* mp-sspn: collapsible : all fields here are optional, so the section */}
         {/* is a disclosure that opens by default only when data already exists. */}
         <div className="card card--pad-lg">
           <button
@@ -490,7 +490,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </button>
           {publicOpen && (
           <div style={{ marginTop: 16 }}>
-            {/* mp-s1gl: Public URL — single source of truth for externally-shareable links */}
+            {/* mp-s1gl: Public URL : single source of truth for externally-shareable links */}
             <div className="field">
               <label className="field__label">Public URL</label>
               <input
@@ -499,7 +499,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 onChange={(e) => setPublicURL(e.target.value)}
                 placeholder="https://my-tournament.example.com"
               />
-              <div className="field__hint">The address participants reach this tournament at — used for QR codes and share links. Leave blank to use the current browser address.</div>
+              <div className="field__hint">The address participants reach this tournament at : used for QR codes and share links. Leave blank to use the current browser address.</div>
               {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
                 <div className="field__hint" style={{ color: "var(--red)", marginTop: 4 }}>
                   {(() => {
@@ -577,7 +577,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
             </div>
           )}
-          {/* Elevated (destructive-ops) password — spec 004 / mp-e21. */}
+          {/* Elevated (destructive-ops) password : spec 004 / mp-e21. */}
           {locked ? (
             <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Destructive-ops password</label>
@@ -621,7 +621,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             don't need to navigate elsewhere. SponsorsManager owns its own
             sponsors list (seeded from the tournament prop, updated locally
             from the API response on upload/delete) so unsaved edits in the
-            tournament form above survive a sponsor change — no page reload. */}
+            tournament form above survive a sponsor change : no page reload. */}
         {window.SponsorsManager && (
           <window.SponsorsManager
             tournament={tournament}
@@ -673,7 +673,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
   // T190 (FR-050a): Swiss round count. Default 4 is the canonical
-  // Swiss tournament size for ~16 players (log2 of typical field) —
+  // Swiss tournament size for ~16 players (log2 of typical field) : 
   // matches the example in spec.md US13. Only used when format=swiss.
   const [swissRounds, setSwissRounds] = useStateA(4);
   const [startTime, setStartTime] = useStateA("09:00");
@@ -706,7 +706,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   //  - Recomputes when the operator switches days BEFORE editing the start
   //    time (each day has its own predecessor).
   //  - Once the operator types a start time, startTimeEditedRef latches and
-  //    this effect short-circuits — a deliberate manual choice survives
+  //    this effect short-circuits : a deliberate manual choice survives
   //    subsequent day changes rather than being silently overwritten.
   useEffectA(() => {
     if (startTimeEditedRef.current) return;
@@ -749,7 +749,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
     // Pool-format guards. Pure helper above; this just routes the error
     // string through setError. See validatePoolSettings comment for the
-    // failure modes (NaN, fractional, negative — all sneak past the
+    // failure modes (NaN, fractional, negative : all sneak past the
     // `value || 3` fallback in buildEmptyCompetition).
     const poolResult = validatePoolSettings(format, poolSize, winners);
     if (!poolResult.ok) {
@@ -758,7 +758,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     }
 
     // T190 (FR-050a): Swiss-format guard. Same shape/concerns as
-    // validatePoolSettings — NaN/fractional/zero/negative all blocked
+    // validatePoolSettings : NaN/fractional/zero/negative all blocked
     // before they can land on the backend.
     const swissResult = validateSwissSettings(format, swissRounds);
     if (!swissResult.ok) {
@@ -767,7 +767,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     }
 
     // Team-size guard. StableInput's NaN-on-clear fix means teamSize can
-    // now legitimately be NaN — buildEmptyCompetition would silently
+    // now legitimately be NaN : buildEmptyCompetition would silently
     // fall back to 5 via `teamSize || 5`, so the user's cleared input
     // produces a different stored value than they see. Reject early
     // when kind=team. (Individual competitions don't expose this field;
@@ -785,7 +785,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
     // Two distinct names can normalize to the same slug (e.g. "Men's" vs
     // "Mens" both → "mens"). The name-uniqueness check above is case-
-    // insensitive on the *name*, so it won't catch slug collisions —
+    // insensitive on the *name*, so it won't catch slug collisions : 
     // guard explicitly against existing ids and append a numeric suffix
     // (or fall back to a timestamp) so create never 409s server-side.
     const baseSlug = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').substring(0, 50);
@@ -797,7 +797,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         while (existingIds.has(`${baseSlug}-${n}`)) n++;
         id = `${baseSlug}-${n}`;
       } else {
-        // Timestamp ID already taken (extremely unlikely — same-ms create).
+        // Timestamp ID already taken (extremely unlikely : same-ms create).
         // Re-mint with crypto entropy rather than producing a leading-dash
         // slug. crypto.randomUUID is universal in browsers we target; fall
         // back to Math.random for ancient environments.
@@ -812,7 +812,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       name: finalName,
       kind, gender,
       format,
-      // New competitions start with an empty roster — participants (or a
+      // New competitions start with an empty roster : participants (or a
       // sample roster) are added in the Participants view, not here.
       sampleRoster: null,
       seedCount: 0, status: "setup",
@@ -830,12 +830,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // this field yet; setting it after construction keeps the helper's
     // signature unchanged and lets the backend's JSON binding pick up
     // the camelCase key directly. Only emit for formats that run pool
-    // play — knockout-only competitions have no pool phase.
+    // play : knockout-only competitions have no pool phase.
     if (format === "mixed" || format === "league") {
       c.poolFormat = poolFormat;
     }
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
-    // post-construction pattern as poolFormat above — buildCompetition
+    // post-construction pattern as poolFormat above : buildCompetition
     // doesn't know about this field; setting it on the result object
     // lets the backend's JSON binding pick up the camelCase key. The
     // backend uses `omitempty` so the field is invisible on non-Swiss
@@ -858,7 +858,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Add competition</h1>
-            <div className="page-head__sub">A competition is one event within the tournament — e.g. Men's Individual, Women's Teams.</div>
+            <div className="page-head__sub">A competition is one event within the tournament : e.g. Men's Individual, Women's Teams.</div>
           </div>
         </div>
 
@@ -912,12 +912,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                       onChange={(e) => setDate(e.target.value)}
                     >
                       {days.map((d, i) => (
-                        <option key={d} value={d}>Day {i + 1} — {d}</option>
+                        <option key={d} value={d}>Day {i + 1} : {d}</option>
                       ))}
                     </select>
                   );
                 }
-                // Fallback: tournament has no date yet — free date picker.
+                // Fallback: tournament has no date yet : free date picker.
                 return (
                   <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
                 );
@@ -954,12 +954,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <button className={`radio-pill ${poolFormat === "full" ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat("full")}>Full round-robin</button>
                 <button className={`radio-pill ${poolFormat === "partial" ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat("partial")}>Partial / neighbour-only</button>
               </div>
-              <div className="field__hint">{poolFormat === "full" ? "Every participant plays every other participant in their pool." : "Each participant plays a neighbourhood subset — useful when a full round-robin would not fit in the day's schedule."}</div>
+              <div className="field__hint">{poolFormat === "full" ? "Every participant plays every other participant in their pool." : "Each participant plays a neighbourhood subset : useful when a full round-robin would not fit in the day's schedule."}</div>
             </div>
           )}
 
           {/* T190 (FR-050a): Swiss rounds input. Only rendered for */}
-          {/* format=swiss — keeps the create form uncluttered for other */}
+          {/* format=swiss : keeps the create form uncluttered for other */}
           {/* formats. Same NaN-as-"" + decideNumericUpdate pattern as */}
           {/* poolSize / winners above; validateSwissSettings at submit */}
           {/* time rejects NaN / fractional / <1 before the field reaches */}
@@ -1034,7 +1034,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {kind === "team" && (
             <div className="field">
               <label className="field__label">Team size</label>
-              {/* Non-debounced input — uses onChange directly, not StableInput. */}
+              {/* Non-debounced input : uses onChange directly, not StableInput. */}
               {/* StableInput debounces 200ms; if the user clears the field and */}
               {/* immediately clicks "Create", the parent teamSize would still */}
               {/* hold the previous good value and the guard at create() would */}
@@ -1087,7 +1087,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const [results, setResults] = useStateA(null);
   // doImport's setResults/setError/setLoading and onImported timer fire
   // post-await. The page can unmount via onBack() while the upload is in
-  // flight — gate via mountedRef in addition to the existing timer
+  // flight : gate via mountedRef in addition to the existing timer
   // cleanup below.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -1111,7 +1111,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
     setResults(null);
     setError(null);
 
-    // Try to parse manifest client-side for preview (JSON only — YAML needs server).
+    // Try to parse manifest client-side for preview (JSON only : YAML needs server).
     const manifestFile = arr.find(f => f.name === "manifest.yaml" || f.name === "manifest.yml" || f.name === "manifest.json");
     if (manifestFile && manifestFile.name.endsWith(".json")) {
       const reader = new FileReader();
@@ -1143,7 +1143,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       // mountedRef gates the post-await setStates so a navigate-back
       // during the upload doesn't fire setResults / setTimeout on a
       // torn-down component. importedTimerRef has its own unmount
-      // cleanup, but only if it was set — so don't even schedule it
+      // cleanup, but only if it was set : so don't even schedule it
       // post-unmount.
       if (!mountedRef.current) return;
       setResults(body.results || []);
@@ -1155,14 +1155,14 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
           // + navigate). Wrap in Promise.resolve so a refresh rejection
           // doesn't surface as an unhandled promise rejection and leave
           // the UI stuck on the import page. Surface as a non-fatal
-          // toast — the server-side import already completed; the user
+          // toast : the server-side import already completed; the user
           // can reload to recover.
           Promise.resolve()
             .then(() => onImported())
             .catch((e) => {
               console.warn("post-import refresh failed:", e);
               if (mountedRef.current) {
-                setError("Import succeeded; refresh failed — please reload the page. " + (e?.message || ""));
+                setError("Import succeeded; refresh failed : please reload the page. " + (e?.message || ""));
               }
             });
         }, 1500);
@@ -1219,11 +1219,11 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                 <tbody>
                   {preview.map(comp => (
                     <tr key={comp.id || comp.name}>
-                      <td>{comp.id || "—"}</td>
-                      <td>{comp.name || "—"}</td>
-                      <td>{comp.format || "—"}</td>
-                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "—"}</td>
-                      <td>{comp.seeds || "—"}</td>
+                      <td>{comp.id || ": "}</td>
+                      <td>{comp.name || ": "}</td>
+                      <td>{comp.format || ": "}</td>
+                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || ": "}</td>
+                      <td>{comp.seeds || ": "}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1271,7 +1271,7 @@ window.AdminEditTournament = AdminEditTournament;
 window.AdminCreateCompetition = AdminCreateCompetition;
 window.AdminImportPage = AdminImportPage;
 
-// ES export for the vitest suite — pure helpers only. Components stay
+// ES export for the vitest suite : pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
 // The announcement-broadcast helpers (isSendAnnouncementDisabled /
 // sendAnnouncementLabel) moved to admin_announcement.jsx alongside the

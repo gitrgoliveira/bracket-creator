@@ -4,18 +4,18 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 // Window globals required by admin_scoring_modal.jsx (and its transitive
 // import admin_scoring_shared.jsx). Divide into:
-//  SYNC  — called synchronously in the component body on every render
-//  LAZY  — only called inside event handlers or async effects
+//  SYNC: called synchronously in the component body on every render
+//  LAZY: only called inside event handlers or async effects
 //
 // All are set before the dynamic import so module-level capture lines like
 //   const TEAM_POSITIONS = Array.from({length: window.MAX_TEAM_SIZE}, ...)
 // resolve to real values rather than undefined.
 const STUBBED_GLOBALS = {
-  // SYNC — called in the component body on every render
+  // SYNC: called in the component body on every render
   isHikiwake: (_type) => false,
   arraysEqual: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]),
   isKikenDecision: (_kind) => false,
-  // LAZY — only reached from event handlers / async effects
+  // LAZY: only reached from event handlers / async effects
   isTextEntry: () => false,
   isInteractiveTarget: () => false,
   confirmDialog: vi.fn().mockResolvedValue(true),
@@ -30,7 +30,7 @@ const STUBBED_GLOBALS = {
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
-  // Glossary components — used by admin_scoring_shared.jsx
+  // Glossary components: used by admin_scoring_shared.jsx
   Term: ({ children }) => <span>{children}</span>,
   GlossaryHint: ({ name }) => <span title={name} />,
 };

@@ -1,4 +1,4 @@
-// display_lobby.jsx — lobby / schedule TV (LobbyDisplay).
+// display_lobby.jsx: lobby / schedule TV (LobbyDisplay).
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
@@ -13,7 +13,7 @@ const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 const LOBBY_PAGE_SIZE = 2;
 const LOBBY_CYCLE_MS = 10000;
 
-// Colour tokens for the cross-court table — defined once so the
+// Colour tokens for the cross-court table: defined once so the
 // per-cell renderers stay readable. These mirror the mockup's :root
 // vars but expressed as inline-style strings (display.jsx convention).
 // mp-13y: light palette (white redesign by analogy with the per-court board).
@@ -25,16 +25,16 @@ const LOBBY_COLORS = {
     inkMuted:   'rgba(0,0,0,0.35)',
     line:       'rgba(0,0,0,0.10)',
     lineStrong: 'rgba(0,0,0,0.20)',
-    // NOW row: navy accent — emphasis is on the live match.
+    // NOW row: navy accent : emphasis is on the live match.
     nowBg:      'var(--accent-soft, #e7eaf3)',
     nowBorder:  'var(--accent, #1d3557)',
-    // NEXT row: quiet neutral — visible but clearly subordinate to NOW. It
+    // NEXT row: quiet neutral : visible but clearly subordinate to NOW. It
     // shares the queue background (schedBg); a distinct border is its only cue.
     nextBorder: 'rgba(0,0,0,0.10)',
     schedBg:    'rgba(0,0,0,0.02)',
 };
 
-// Row descriptor array — drives both the row-label column and the
+// Row descriptor array : drives both the row-label column and the
 // slot index pulled from the per-court slot arrays.
 const LOBBY_ROWS = [
     { label: 'Now',  slot: 0 },
@@ -45,7 +45,7 @@ const LOBBY_ROWS = [
     { label: '#6',   slot: 5 },
 ];
 
-// Build the display slots for a single court — one per LOBBY_ROWS entry.
+// Build the display slots for a single court : one per LOBBY_ROWS entry.
 //
 // Auto-promote semantics (T062): when there is no running match the first
 // scheduled match is promoted to slot 0 ("Now") with a slight style
@@ -53,7 +53,7 @@ const LOBBY_ROWS = [
 // upcoming matches fill slots 1 – (LOBBY_ROWS.length - 1).
 //
 // Returns an array of exactly LOBBY_ROWS.length elements; missing
-// slots are null (rendered as an empty "—" cell).
+// slots are null (rendered as an empty ":" cell).
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
     const running = findRunningOnCourt(competitions, court);
@@ -91,7 +91,7 @@ function buildCourtSlots(competitions, court) {
 }
 
 // Render one match cell (td > .match-cell div) for the cross-court table.
-// rowKind: 'now' | 'next' | 'queue' — determines the background/border.
+// rowKind: 'now' | 'next' | 'queue' : determines the background/border.
 // slot: the buildCourtSlots entry for this cell (null → empty cell).
 function LobbyMatchCell({ slot, rowKind }) {
     if (!slot) {
@@ -105,7 +105,7 @@ function LobbyMatchCell({ slot, rowKind }) {
                     opacity: 0.12,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 18,
-                }}>—</div>
+                }}>:</div>
             </td>
         );
     }
@@ -119,7 +119,7 @@ function LobbyMatchCell({ slot, rowKind }) {
         cellBg = LOBBY_COLORS.nowBg;
         cellBorder = LOBBY_COLORS.nowBorder;
     } else if (rowKind === 'next') {
-        // cellBg stays schedBg — the border alone distinguishes NEXT from queue.
+        // cellBg stays schedBg : the border alone distinguishes NEXT from queue.
         cellBorder = LOBBY_COLORS.nextBorder;
     }
 
@@ -144,7 +144,7 @@ function LobbyMatchCell({ slot, rowKind }) {
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon
                     slots, hansoku ▲ on the offending side, hantei / decision
-                    marks — attribution is positional, not color-only. For
+                    marks : attribution is positional, not color-only. For
                     scheduled rows the match has no ippons, so the slots
                     render empty (next to each name) which reads as "upcoming"
                     consistently with the running case's progression. */}
@@ -154,7 +154,7 @@ function LobbyMatchCell({ slot, rowKind }) {
     );
 }
 
-// <LobbyDisplay> — multi-court cross-court table for venue lobby screens.
+// <LobbyDisplay>: multi-court cross-court table for venue lobby screens.
 //
 // T064: shows all *active* courts (courts with at least one running or
 // scheduled match) in a 2-column table. Each column is one court;
@@ -180,7 +180,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
     // threshold mid-cycle.
     //
     // All branches that change the page must also bump cycleKey so the
-    // progress bar animation restarts — including guard resets, not
+    // progress bar animation restarts : including guard resets, not
     // only the regular auto-cycle tick.
     useED(() => {
         if (totalPages <= 1) {
@@ -208,7 +208,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 
     // Trim queue rows: always show Now (slot 0) and Next (slot 1) as anchors;
     // only include deeper rows (#3–#6) when at least one visible court has a
-    // non-null slot at that index. This avoids a table half-filled with "—"
+    // non-null slot at that index. This avoids a table half-filled with ":"
     // placeholders when the queue is short.
     const visibleRows = LOBBY_ROWS.filter(row =>
         row.slot < 2 || courtSlots.some(slots => slots[row.slot] != null)
@@ -242,7 +242,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     {tournament?.name || ''}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    {/* Dot pagination — clickable to jump between pages */}
+                    {/* Dot pagination : clickable to jump between pages */}
                     {totalPages > 1 && (
                         <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
                             {Array.from({ length: totalPages }, (_, i) => (
@@ -312,7 +312,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                     <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, tableLayout: 'fixed' }}>
                         <thead>
                             <tr>
-                                {/* Row-label column header — labels the queue-position column (Now/Next/#3…) */}
+                                {/* Row-label column header : labels the queue-position column (Now/Next/#3…) */}
                                 <th
                                     aria-label="Queue position"
                                     scope="col"
@@ -349,7 +349,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                     </div>
                                                 )}
                                             </th>
-                                            {/* Thin separator between courts — decorative, hidden from AT */}
+                                            {/* Thin separator between courts : decorative, hidden from AT */}
                                             {ci < visible.length - 1 && (
                                                 <th aria-hidden="true" style={{ width: 1, padding: 0, background: 'transparent', borderBottom: 'none' }} />
                                             )}
@@ -363,7 +363,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                 const rowKind = row.slot === 0 ? 'now' : row.slot === 1 ? 'next' : 'queue';
                                 return (
                                     <tr key={row.label}>
-                                        {/* Row label — <th scope="row"> so AT associates it with its cells */}
+                                        {/* Row label : <th scope="row"> so AT associates it with its cells */}
                                         <th scope="row" style={{
                                             textAlign: 'right', paddingRight: 16,
                                             fontSize: 10, fontWeight: 700, letterSpacing: '0.14em',
@@ -379,7 +379,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                     slot={courtSlots[ci][row.slot]}
                                                     rowKind={rowKind}
                                                 />
-                                                {/* Thin vertical separator between courts — decorative, hidden from AT */}
+                                                {/* Thin vertical separator between courts : decorative, hidden from AT */}
                                                 {ci < visible.length - 1 && (
                                                     <td aria-hidden="true" style={{ width: 1, padding: 0, background: LOBBY_COLORS.line }} />
                                                 )}
@@ -411,7 +411,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 }
             </div>
 
-            {/* mp-c38: sponsor strip — non-interactive on lobby (no input
+            {/* mp-c38: sponsor strip : non-interactive on lobby (no input
                 hardware to click; touchscreen lobbies should not focus-trap). */}
             {window.SponsorStrip && <window.SponsorStrip sponsors={tournament && tournament.sponsors} variant="lobby" />}
 

@@ -1,4 +1,4 @@
-// Pure-logic tests for deriveAwards — the helper that maps bracket/standings
+// Pure-logic tests for deriveAwards. The helper that maps bracket/standings
 // payloads into the 1/2/3/3 podium per FIK convention (no bronze match).
 import { describe, it, expect } from 'vitest';
 import { deriveAwards } from '../viewer.jsx';
@@ -13,14 +13,14 @@ describe('deriveAwards (bracket-based)', () => {
   it('returns 1st/2nd and two 3rd places from the final + semis', () => {
     const bracket = {
       rounds: [
-        // round 0 — semis (irrelevant)
+        // round 0 : semis (irrelevant)
         [],
-        // round 1 — semi-finals
+        // round 1 : semi-finals
         [
           { sideA: 'Alice', sideB: 'Bob', winner: 'Alice' },
           { sideA: 'Carol', sideB: 'Dan', winner: 'Carol' },
         ],
-        // round 2 — final
+        // round 2 : final
         [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
       ],
     };
@@ -40,14 +40,14 @@ describe('deriveAwards (bracket-based)', () => {
     const mkPlayer = (name, dojo) => ({ id: name.toLowerCase(), name, dojo });
     const bracket = {
       rounds: [
-        // round 0 — semis (irrelevant)
+        // round 0 : semis (irrelevant)
         [],
-        // round 1 — semi-finals
+        // round 1 : semi-finals
         [
           { sideA: mkPlayer('Alice', 'Aoyama'), sideB: mkPlayer('Bob', 'Bunkyo'), winner: mkPlayer('Alice', 'Aoyama') },
           { sideA: mkPlayer('Carol', 'Chiba'), sideB: mkPlayer('Dan', 'Denenchofu'), winner: mkPlayer('Carol', 'Chiba') },
         ],
-        // round 2 — final
+        // round 2 : final
         [{ sideA: mkPlayer('Alice', 'Aoyama'), sideB: mkPlayer('Carol', 'Chiba'), winner: mkPlayer('Alice', 'Aoyama') }],
       ],
     };

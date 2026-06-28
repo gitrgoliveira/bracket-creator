@@ -13,7 +13,7 @@ const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
 const ScoreEditorModal = window.ScoreEditorModal;
-// `hasBothSides` rejects matches with bye/TBD placeholder sides — see
+// `hasBothSides` rejects matches with bye/TBD placeholder sides : see
 // admin_helpers.jsx. Required because normalizeMatch substitutes
 // {id:"",name:""} for missing sides, making the naive `m.sideA && m.sideB`
 // check always pass.
@@ -73,7 +73,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // currently open in the lineup panel (null = panel closed).
   const [lineupMatch, setLineupMatch] = useStateA(null);
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
-  // onEditScore (which routes through AdminApp.editMatchScore — a
+  // onEditScore (which routes through AdminApp.editMatchScore : a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
   // save (parent navigates away), the post-await setOpenMatch fires
   // on a torn-down component. Gate via mountedRef.
@@ -140,7 +140,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         )}
         {/* "All matches scored" banner. Guarded against statusFilter === "complete"
             because the filter trivially makes filtered all-completed, which would
-            misleadingly fire the banner. The wording is intentionally generic — this
+            misleadingly fire the banner. The wording is intentionally generic : this
             view spans all match phases (pool + bracket) and all competition formats
             (pools/mixed/playoffs/league/swiss), so we don't claim "Pool play is
             complete" or point at a specific next tab. */}
@@ -170,12 +170,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           const showScore = m.status === "completed" || m.status === "running";
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
           // Fall back so the cell is never blank: running 0–0 → "vs", a completed
-          // match with no recorded score → "—". Live techniques show once present.
+          // match with no recorded score → ":". Live techniques show once present.
           const seScore = showScore ? window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : "";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
-                <div className="score-edit-row__time">{m.scheduledAt || "—"}</div>
+                <div className="score-edit-row__time">{m.scheduledAt || ":"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
@@ -185,7 +185,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
-                  {/* Foul ▲ flanks the SCORE (Shiro left, Aka right) — a hansoku is part of
+                  {/* Foul ▲ flanks the SCORE (Shiro left, Aka right) : a hansoku is part of
                       the scoreline, so it reads at the score's level. The slots are reserved
                       symmetrically so the centred score never shifts when a foul appears. */}
                   <div className="score-edit-row__score">
@@ -193,7 +193,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     <span className="score-edit-row__scoreval">
                       {m.status === "scheduled"
                         ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
-                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : "—"}</span>)}
+                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : ":"}</span>)}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
@@ -204,7 +204,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
               </div>
               <div>
-                {/* Running: no "● NOW" label — the row highlight is the signal (removed as
+                {/* Running: no "● NOW" label : the row highlight is the signal (removed as
                     redundant). Completed keeps its Final / Corrected status. */}
                 {m.status === "completed" && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{isCorrection ? "Corrected" : "Final"}</span>}
               </div>
@@ -264,7 +264,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // both individual and team matches (subResults is omitted, which the
         // serializer treats as "no bouts scored yet"). The server routes this
         // through eng.StartMatchTx, so all start-gating (eligibility 409,
-        // ≥players checks) still runs — a 409 throws and is caught below.
+        // ≥players checks) still runs : a 409 throws and is caught below.
         // Defined at module level as window.startPatch for reuse across admin_*.jsx.
         return (
           <ScoreEditorModal
@@ -286,7 +286,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // ▶ Start Match: keep the operator IN the scoring surface rather
                 // than dumping them back to the list (which forced a re-find +
                 // reopen per match). A "start" patch is status:running with no
-                // winner — flip the open match's status optimistically so the
+                // winner : flip the open match's status optimistically so the
                 // modal re-renders as the live scoring board (the background
                 // refresh/SSE then reconciles the canonical state). Any other
                 // submit (finish/correction/draw) closes as before.
@@ -303,13 +303,13 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               try {
                 const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
                 if (!mountedRef.current) return res;
-                // F5: queued write — do NOT advance to the next match. Return
+                // F5: queued write : do NOT advance to the next match. Return
                 // the signal so the editor shows the pending-save banner.
                 if (res && res.queued) return res;
                 // "Finish + Start Next →": land on the next match on the SAME
                 // shiaijo AND actually start it (honest to the label). If the
                 // next match is already running/completed, just open it. Start
-                // gating runs server-side (StartMatchTx); a 409 throws — we
+                // gating runs server-side (StartMatchTx); a 409 throws : we
                 // catch it so the operator still lands on the next match (in
                 // pre-match) to resolve the eligibility issue manually.
                 setOpenMatch(nextActiveMatch);
@@ -323,7 +323,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             } : null}
             onAfterDecision={nextActiveMatch ? async () => {
               // A kiken/fusenpai decision already persisted the bout via the
-              // /decision POST — no score PUT here. Mirror onSubmitAndNext's
+              // /decision POST : no score PUT here. Mirror onSubmitAndNext's
               // start-next so a fusenpai advances the operator to (and starts)
               // the next same-court match.
               if (nextActiveMatch.status === "scheduled") {

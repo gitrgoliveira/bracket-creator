@@ -2,7 +2,7 @@
 // pieces. Uses the makeReactive shim (resetModules + dynamic import so the
 // component's `const { useState } = React` destructure picks up the reactive
 // stub). Child component vnodes (WatchHeroCard, WatchPicker, TermV) are NOT
-// executed by the shim — they appear as {type, props} nodes — so panel tests
+// executed by the shim : they appear as {type, props} nodes : so panel tests
 // assert structure + which child renders, and WatchHeroCard is mounted
 // directly for its own inner-render assertions.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -83,7 +83,7 @@ describe('WatchHeroCard', () => {
 
   it('uses a dojo eyebrow when the entity label differs from the competing member', () => {
     // Dojo primary "Hagane Dojo" → member p1 (Robert) is competing.
-    // MATCH is running, so the hero label is the bare dojo eyebrow — no
+    // MATCH is running, so the hero label is the bare dojo eyebrow : no
     // "· next up" suffix (a running match is happening now, not next up).
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
     const lbl = collectText(byClass(tree, 'my-match__lbl')[0]);
@@ -183,7 +183,7 @@ describe('WatchlistPanel', () => {
   });
 
   // onFirstAdd / maybeFirstAdd: fires exactly once per empty→add transition.
-  // Relies on WatchPicker appearing as an unexecuted child vnode — call its
+  // Relies on WatchPicker appearing as an unexecuted child vnode : call its
   // onPickPlayer prop directly to invoke addPlayer() → maybeFirstAdd().
   it('onFirstAdd fires exactly once on the first player add when watchlist is empty', () => {
     const onFirstAdd = vi.fn();

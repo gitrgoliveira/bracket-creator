@@ -75,7 +75,7 @@ describe('teamIVScore', () => {
     expect(teamIVScore(m)).toBe('1–0');
   });
 
-  it('orientation: Shiro(B) is the LEFT number — "ivB–ivA"', () => {
+  it('orientation: Shiro(B) is the LEFT number: "ivB–ivA"', () => {
     const m = {
       sideA: { name: 'AkaTeam' },
       sideB: { name: 'ShiroTeam' },

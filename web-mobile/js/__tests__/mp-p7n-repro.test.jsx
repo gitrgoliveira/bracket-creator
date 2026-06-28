@@ -5,10 +5,10 @@
 //   - BEFORE Apply: textarea = "Aaron Adams, Team Alpha\n..." (clean 2-col)
 //   - AFTER Apply:  textarea = "Asddasd-P1, Aaron Adams, Team Alpha\n..."
 //
-// `Asddasd-P{N}` is sequential — matches the `${prefix}-p${i+1}` ID shape
+// `Asddasd-P{N}` is sequential : matches the `${prefix}-p${i+1}` ID shape
 // that `data.jsx::makePlayer` produces for sample-roster players. So the
 // hypothesis is that the participant `id` (or a normalised form of it) is
-// leaking into the textarea — either by the JS serialiser including p.id
+// leaking into the textarea : either by the JS serialiser including p.id
 // when it shouldn't, or by the round-trip through the server shifting
 // columns.
 //

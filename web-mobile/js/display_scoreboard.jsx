@@ -1,4 +1,4 @@
-// display_scoreboard.jsx — per-court TV scoreboard (TvDisplay).
+// display_scoreboard.jsx: per-court TV scoreboard (TvDisplay).
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
@@ -7,12 +7,12 @@ import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './mat
 
 const { useMemo: useMD } = React;
 
-// emptyStateHeadline — headline text for the TvDisplay empty state, by sub-state.
+// emptyStateHeadline : headline text for the TvDisplay empty state, by sub-state.
 // The third case ("No match in progress") is a defensive fallback that is
 // UNREACHABLE under the current promote logic: countCourtMatches and
 // findUpcomingOnCourt/findRunningOnCourt share the same bracketSidesReady
 // predicate, so any running/scheduled match the counts see is also
-// auto-promoted — and the empty state only renders when nothing is promoted
+// auto-promoted : and the empty state only renders when nothing is promoted
 // (so counts.running and counts.scheduled are both 0 here). It is kept so that
 // if that invariant is ever broken the screen degrades to a correct message
 // rather than a wrong one. Exported + unit-tested per the PR #274 review (mp-s99q).
@@ -22,7 +22,7 @@ function emptyStateHeadline(allCompleted, noMatches) {
     return "No match in progress";
 }
 
-// TvWhiteTeamBoard — mp-13y: white scoreboard for a running TEAM match
+// TvWhiteTeamBoard : mp-13y: white scoreboard for a running TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
 // team case with a light board: court header + black rule, team name row
 // (Shiro black left / Aka red right, NO top IV score), then the per-bout
@@ -65,7 +65,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
                     <span>{headerSubtitle}</span>
-                    {/* mp-13y #9: no "UP NEXT" badge — the promoted match is shown
+                    {/* mp-13y #9: no "UP NEXT" badge : the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
                     {!connected && (
                         <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
@@ -77,7 +77,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 </div>
             </div>
 
-            {/* Team name row — Shiro black (left), Aka red (right), no top score */}
+            {/* Team name row : Shiro black (left), Aka red (right), no top score */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
@@ -92,7 +92,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 </div>
             </div>
 
-            {/* Shared FIK scoreboard (match_scoreboard.jsx) — the SAME component
+            {/* Shared FIK scoreboard (match_scoreboard.jsx) : the SAME component
                 the viewer card uses; variant="tv" only scales it up. Up-next
                 matches have no bouts yet: TeamScoreboard renders numbered/roster
                 rows (mp-13y #6) so the board reads as a real scoreboard rather
@@ -134,7 +134,7 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
     );
 }
 
-// poolMatchIndex — numeric trailing index of a pool-match id ("Pool A-10" → 10,
+// poolMatchIndex: numeric trailing index of a pool-match id ("Pool A-10" → 10,
 // "Pool A-DH-0" → 0); large fallback when none. Used as a final ordering
 // tiebreaker so ids don't sort LEXICOGRAPHICALLY ("Pool A-10" before "Pool A-2").
 function poolMatchIndex(id) {
@@ -142,7 +142,7 @@ function poolMatchIndex(id) {
     return m ? Number(m[1]) : 9999;
 }
 
-// compareByRunOrder — canonical per-court run order: queue position, then
+// compareByRunOrder : canonical per-court run order: queue position, then
 // scheduled time, then the numeric match index. Mirrors findUpcomingOnCourt and
 // survives untimed schedules (blank scheduledAt) without the lexicographic-id
 // pitfall of comparing ids as strings.
@@ -156,7 +156,7 @@ function compareByRunOrder(a, b) {
     return poolMatchIndex(a.id) - poolMatchIndex(b.id);
 }
 
-// gatherIndividualGroup — the sibling matches for an individual TV board:
+// gatherIndividualGroup: the sibling matches for an individual TV board:
 // every match in the same POOL (pool phase) or the same ROUND (knockout) as
 // the promoted match, **on the same court**. The TV display is per-court, so
 // bracket rounds that span multiple courts must not leak cross-court matches.
@@ -185,7 +185,7 @@ function gatherIndividualGroup(promoted, court) {
         if (!pool) return []; // non-pool-shaped id → don't collect every other non-pool match
         group = (comp.poolMatches || []).filter(m => poolNameOf(m.id) === pool);
     }
-    // Filter to the same court — bracket rounds can span multiple courts.
+    // Filter to the same court : bracket rounds can span multiple courts.
     const onCourt = group.filter(m => (m.court || "") === matchCourt);
     const isCurrent = m => m.id === cur.id || m.status === "running";
     const shown = promoted.isBracket
@@ -196,23 +196,23 @@ function gatherIndividualGroup(promoted, court) {
     return shown.slice().sort((a, b) => (statusOrder(a) - statusOrder(b)) || compareByRunOrder(a, b));
 }
 
-// findNextPoolOnCourt — for the per-court pool-phase board: the next POOL that
+// findNextPoolOnCourt: for the per-court pool-phase board, the next POOL that
 // will play on this court after the current one finishes, plus its roster (so
 // the spectator can decide whether to stay). Looks across the SAME competition
 // (court routing is per-comp). Returns { name, players } or null.
 //
 // The pool with the lowest queue position (then earliest scheduledAt, then
-// pool name) plays next — matching findUpcomingOnCourt. Roster = union of
+// pool name) plays next : matching findUpcomingOnCourt. Roster = union of
 // sideA/sideB across ALL of that pool's matches in the comp (not just on this
-// court) — a pool's roster is fixed, the courts list is just routing. For team
+// court) : a pool's roster is fixed, the courts list is just routing. For team
 // competitions, sides carry team names so the roster surfaces team names.
 function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (!competition || !competition.poolMatches) return null;
     const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
     // Candidate pools routed to this court (excluding the current one), tracked
     // by their FIRST match's (queuePosition, scheduledAt). Mirror
-    // findUpcomingOnCourt's ordering — queuePosition first, scheduledAt as a
-    // tiebreaker — so the UP NEXT pool matches the actual queue even in untimed
+    // findUpcomingOnCourt's ordering : queuePosition first, scheduledAt as a
+    // tiebreaker : so the UP NEXT pool matches the actual queue even in untimed
     // schedules. The (qp, ts) pair is taken from the SAME match (lexicographic
     // minimum) so we never synthesise a pair from two different matches.
     const meta = new Map();
@@ -226,7 +226,7 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     }
     if (meta.size === 0) return null;
     // A pool counts as already started if ANY of its matches is running or
-    // completed on ANY court — matches can be moved between courts, so a pool
+    // completed on ANY court : matches can be moved between courts, so a pool
     // begun elsewhere is not a "future" pool here. (Scanning the whole comp,
     // not just this court, is what makes that cross-court check correct.)
     const started = new Set();
@@ -265,12 +265,12 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
 // so ~10 rows fit comfortably. When the gathered group exceeds this, we take a
 // WINDOW anchored on the current match (see windowAroundCurrent) rather than a
-// fixed tail — the pool-phase sort is completed → current → scheduled, so a
+// fixed tail : the pool-phase sort is completed → current → scheduled, so a
 // blind tail slice could drop the running row when there are many upcoming
 // matches. The visible rows are distributed space-evenly to fill the panel.
 const TV_INDIV_MAX_VISIBLE = 10;
 
-// windowAroundCurrent — pick at most `max` consecutive rows from `all` that are
+// windowAroundCurrent : pick at most `max` consecutive rows from `all` that are
 // guaranteed to include the anchored current match. A couple of completed rows
 // are kept above the current one for context; the rest of the window fills with
 // upcoming matches below it. Returns { rows, dropped } where `dropped` is the
@@ -281,13 +281,13 @@ function windowAroundCurrent(all, currentIdx, max) {
     const anchor = currentIdx < 0 ? 0 : currentIdx;
     const LOOKBACK = 2; // completed rows shown above the current match
     let start = Math.max(0, anchor - LOOKBACK);
-    // Don't run past the end — pull the window back so it stays `max` tall.
+    // Don't run past the end : pull the window back so it stays `max` tall.
     // (start is already ≥ 0 here: all.length > max, so all.length - max > 0.)
     if (start + max > all.length) start = all.length - max;
     return { rows: all.slice(start, start + max), dropped: start };
 }
 
-// TvIndividualBoard — mp-13y: white TV board for INDIVIDUAL competitions. The
+// TvIndividualBoard: mp-13y: white TV board for INDIVIDUAL competitions. The
 // body lists the whole pool's matches (pool phase) or the whole round's matches
 // (knockout) as a feed: each row is one match (Shiro name · ippon slots · Aka
 // name, via the shared IndividualScore). Layout: rows are distributed
@@ -298,22 +298,22 @@ function windowAroundCurrent(all, currentIdx, max) {
 function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
     const all = gatherIndividualGroup(promoted, court);
     const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");
-    // A league is one big round-robin table — showing its whole match list would
+    // A league is one big round-robin table : showing its whole match list would
     // cram the board, so cap it at a readable window around the current match.
     // Pools/brackets keep showing their whole group (the pool must be visible in
-    // full — earlier product requirement), bounded only by TV_INDIV_MAX_VISIBLE.
+    // full : earlier product requirement), bounded only by TV_INDIV_MAX_VISIBLE.
     const maxVisible = promoted.competition?.format === "league" ? 6 : TV_INDIV_MAX_VISIBLE;
     const { rows, dropped } = windowAroundCurrent(all, currentIdx, maxVisible);
     const groupLabel = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     // Suppress the bottom NEXT line when its match is already visible in the
-    // body — in pool phase the whole pool's queue is now in the feed, so the
+    // body : in pool phase the whole pool's queue is now in the feed, so the
     // line would otherwise duplicate a row immediately above it.
     const shownIds = new Set(rows.map(r => r.id));
     const firstQueued = queueMatches && queueMatches.length ? queueMatches[0] : null;
     const next = (firstQueued && !shownIds.has(firstQueued.id)) ? firstQueued : null;
     // Pool-phase only: surface the next pool on this court + its roster so
     // spectators know what's coming after the current pool finishes here.
-    // Bracket phase has no pools so this is null. Gated to the "mixed" format —
+    // Bracket phase has no pools so this is null. Gated to the "mixed" format :
     // the only one with MULTIPLE pools. Swiss matches also live in poolMatches
     // and poolNameOf would treat "Swiss-R1-2" as a pool, so without this gate a
     // Swiss board would flood the strip with the whole next round's roster.
@@ -352,7 +352,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 </div>
             </div>
 
-            {/* Phase strip — prominent phase label + per-court progress counter.
+            {/* Phase strip : prominent phase label + per-court progress counter.
                 Replaces the now-removed groupLabel from the top-right subtitle.
                 Uses the same dashed divider style as the UP NEXT strip below
                 for visual consistency. */}
@@ -416,7 +416,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 )}
             </div>
 
-            {/* Next pool on this court — name + roster (or team names for
+            {/* Next pool on this court : name + roster (or team names for
                 team competitions). Tells the spectator what's coming after
                 the current pool finishes here. */}
             {nextPool && (
@@ -437,7 +437,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 </div>
             )}
 
-            {/* Next match line — shown only when there's a queued match NOT
+            {/* Next match line : shown only when there's a queued match NOT
                 already in the body and the UP NEXT pool strip isn't already
                 shown (that strip's next pool subsumes this matchup). In
                 multi-comp / multi-pool-on-one-court setups it surfaces the very
@@ -457,7 +457,7 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
     );
 }
 
-// <TvDisplay court="A"> — fullscreen per-court board.
+// <TvDisplay court="A">: fullscreen per-court board.
 //
 // Implements T061 (visual treatment), T062 (auto-promote first scheduled
 // when no running match + "all completed" / "no matches" empty states), and
@@ -533,7 +533,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         : !!(promoted && promoted.competition && promoted.competition.withZekkenName);
 
     // mp-13y: team match detection for the running promoted slot.
-    // competition.kind === "team" OR competition.teamSize > 0 — EXCEPT a pool
+    // competition.kind === "team" OR competition.teamSize > 0 : EXCEPT a pool
     // daihyosen / tiebreaker rep bout ("Pool X-DH-N" / "Pool X-TB-N"), which is
     // a single INDIVIDUAL ippon-shobu even in a team competition. Mirrors the
     // admin scorer's compKind override (admin_pools.jsx): without it the rep
@@ -554,7 +554,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         promoted ? promoted.roundIndex : undefined
     );
 
-    // mp-13y: DH (Daihyosen) row gating — shown when:
+    // mp-13y: DH (Daihyosen) row gating : shown when:
     //   1. All regular bouts are complete (every sub has ippons, hantei, or draw).
     //   2. IV (Individual Victories) are tied.
     //   3. PW (Points Won) are also tied.
@@ -577,7 +577,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
             const aIp = (s.ipponsA || []).filter(x => x && x !== "•");
             const bIp = (s.ipponsB || []).filter(x => x && x !== "•");
             // Mirror the shared scoreboard's "scored" test: a bout can also be
-            // decided with no ippon letters — fusensho/kiken (winner + decision),
+            // decided with no ippon letters : fusensho/kiken (winner + decision),
             // a hansoku award, or an explicit winner. Without these, a tied
             // knockout closed by forfeit would never satisfy allDone and the
             // Daihyosen row would be suppressed forever.
@@ -591,7 +591,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // The match is tied (→ show DH) when IV and PW are level per side.
         // teamIVPW already prefers an explicit `sub.winner` (which the server
         // guarantees equals sideA/sideB), so a hantei-decided 0-0 bout is
-        // counted as an IV for its winner there — no extra hantei loop needed.
+        // counted as an IV for its winner there : no extra hantei loop needed.
         const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, promotedSideA, promotedSideB);
         return ivShiro === ivAka && pwShiro === pwAka;
     }, [subResults, isTeamMatch, isKnockoutPhase, promotedSideA, promotedSideB]);
@@ -634,7 +634,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     // No promoted match → white board with high-contrast empty state.
     // Three sub-states: allCompleted / noMatches / between-matches.
     // Headline uses var(--ink-1) (~10:1 on white) instead of the prior
-    // #9ca3af (2.5:1) which failed WCAG AA — critical for wall screens in
+    // #9ca3af (2.5:1) which failed WCAG AA : critical for wall screens in
     // bright halls.
     // The completed check-badge colours mirror the playoffs/completed status
     // palette used across the app: #ecfdf5 bg / #065f46 ink / #a7f3d0 border.
@@ -668,14 +668,14 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                 )}
             </div>
 
-            {/* Centre block — anchored slightly above dead-centre */}
+            {/* Centre block : anchored slightly above dead-centre */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingBottom: "8vh", gap: "3vh" }}>
 
                 {/* a) Status icon + headline */}
                 <div data-testid={allCompleted ? "display-all-completed" : (noMatches ? "display-no-matches" : "display-between-matches")}
                     style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2vh", textAlign: "center", maxWidth: "60vw" }}>
                     {allCompleted && (
-                        /* Drawn SVG checkmark — NOT the raw ✓ Unicode glyph */
+                        /* Drawn SVG checkmark : NOT the raw ✓ Unicode glyph */
                         <div style={{
                             width: "8vh", height: "8vh", borderRadius: "50%",
                             /* completed-status palette: mirrors playoffs/completed used across the app */
@@ -695,7 +695,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     </div>
                 </div>
 
-                {/* b) QR affordance — "Scan for results" */}
+                {/* b) QR affordance : "Scan for results" */}
                 {qrUrl && (
                     <div style={{ display: "inline-flex", alignItems: "center", gap: "1.5vw", marginTop: "1vh" }}>
                         <StreamingQR url={qrUrl} />
@@ -703,7 +703,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                     </div>
                 )}
 
-                {/* c) IN PROGRESS wayfinding strip — other active courts */}
+                {/* c) IN PROGRESS wayfinding strip : other active courts */}
                 {otherCourts.length > 0 && (
                     <div data-testid="tvd-active-courts" style={{ display: "inline-flex", alignItems: "center", gap: "1.2vw", flexWrap: "wrap", justifyContent: "center", marginTop: "1vh" }}>
                         <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>IN PROGRESS</span>
@@ -714,7 +714,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
                                 borderRadius: "0.6vw", padding: "0.5vh 1.2vw",
                                 fontWeight: 700, fontSize: "1.8vh",
                             }}>
-                                {/* Static navy dot — wayfinding only, NOT pulsing */}
+                                {/* Static navy dot : wayfinding only, NOT pulsing */}
                                 <span style={{ width: "0.9vh", height: "0.9vh", borderRadius: "50%", background: "var(--accent)", display: "inline-block", flexShrink: 0 }} />
                                 Shiaijo {c}
                             </span>

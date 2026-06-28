@@ -105,9 +105,9 @@ describe('FightingSpiritSection', () => {
   });
 });
 
-// --- AwardsView — Fighting Spirit section is independent of the podium ---
+// --- AwardsView: Fighting Spirit section is independent of the podium ---
 //
-// NOTE: With the static React stub, child component vnodes are NOT executed —
+// NOTE: With the static React stub, child component vnodes are NOT executed :
 // they appear as {type: FightingSpiritSection, props: {...}} in the tree.
 // We assert via the vnode type (component reference), which is reliable
 // and doesn't require a reactive runtime.

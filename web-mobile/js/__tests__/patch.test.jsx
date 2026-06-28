@@ -43,7 +43,7 @@ describe('applyPatch', () => {
     expect(next).not.toBe(prev);
     expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
     expect(next.poolMatches[0].status).toBe("completed");
-    // p2 is the only remaining scheduled match on court B — it gets
+    // p2 is the only remaining scheduled match on court B, so it gets
     // queuePosition: 1 via the post-patch recompute (FR-025).
     expect(next.poolMatches[1].queuePosition).toBe(1);
   });
@@ -87,9 +87,9 @@ describe('applyPatch', () => {
     expect(next.bracket.rounds[0][0].ipponsA).toEqual(["M", "K"]);
   });
 
-  it('preserves court/scheduledAt via the imported mergeMatchPatch (regression — pre-fix the spread fallback would overwrite)', () => {
+  it('preserves court/scheduledAt via the imported mergeMatchPatch (regression: pre-fix the spread fallback would overwrite)', () => {
     const prev = makeState();
-    // patch has court:"" and scheduledAt:null — the real mergeMatchPatch
+    // patch has court:"" and scheduledAt:null. The real mergeMatchPatch
     // preserves both; the old spread-fallback would have dropped them
     const next = applyPatch(prev, {
       data: { result: { id: "p1", winner: "Alice", court: "", scheduledAt: null } },
@@ -109,7 +109,7 @@ describe('applyPatch', () => {
 
   it('only rebuilds the bracket array when at least one bracket match was patched', () => {
     const prev = makeState();
-    // Patch hits only a poolMatch — bracket reference should remain identical
+    // Patch hits only a poolMatch; bracket reference should remain identical
     const next = applyPatch(prev, { data: { result: { id: "p1", winner: "Alice" } } });
     expect(next.bracket).toBe(prev.bracket);
   });
@@ -149,7 +149,7 @@ describe('applyPatch', () => {
   });
 
   // Any transition off "scheduled" releases a slot in the per-court
-  // queue — running included. Previously this test asserted "no
+  // queue, including running. Previously this test asserted "no
   // recompute on scheduled → running"; the Copilot review on PR #124
   // flagged that as wrong because the remaining scheduled siblings
   // need to shift up immediately rather than wait for a refresh.
@@ -202,9 +202,9 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", winner: "Alice" } },
     });
     // winner string is normalised into {id,name} by normalizeMatch (Swiss SSE
-    // path — applies to all pool patches now, not just Swiss).
+    // path : applies to all pool patches now, not just Swiss).
     expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
-    // sibling untouched — same reference
+    // sibling untouched : same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
 
@@ -238,10 +238,10 @@ describe('applyPatch', () => {
       ],
     };
     const next = applyPatch(prev, {
-      // Patch a completed match's metadata — no queue impact.
+      // Patch a completed match's metadata : no queue impact.
       data: { result: { id: "p1", status: "completed", winner: "Alice" } },
     });
-    // sibling untouched — same reference
+    // sibling untouched : same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
 
@@ -249,7 +249,7 @@ describe('applyPatch', () => {
     // p1 (09:00) moves to court B where b1 (08:30) already is. recomputeQueuePositions
     // sorts per-court by scheduledAt, so b1 (08:30) is B-qp=1 and p1 (09:00) is
     // B-qp=2; p2 becomes A-qp=1. The point is *that the recompute happens at
-    // all* (not waiting for a refetch) — exact ordering follows scheduledAt.
+    // all* (not waiting for a refetch) : exact ordering follows scheduledAt.
     const prev = {
       poolMatches: [
         { id: "p1", court: "A", scheduledAt: "09:00", status: "scheduled", queuePosition: 1 },
@@ -337,7 +337,7 @@ describe('recomputeQueuePositions', () => {
     // The contract is that non-scheduled matches must have queuePosition === 0.
     // When the last scheduled match in a court flips to running/completed,
     // _mergeMatchPatch preserves the old queuePosition field, so the recompute
-    // must still run to zero it out — even though no match is `scheduled`.
+    // must still run to zero it out : even though no match is `scheduled`.
     const matches = [
       { id: "a1", court: "A", status: "running", queuePosition: 1 },
       { id: "a2", court: "A", status: "completed", queuePosition: 0 },
@@ -520,7 +520,7 @@ describe('recomputeBracketQueuePositions', () => {
       data: { result: { id: "b1", scoreA: "M" } },
     });
     expect(next.bracket.rounds[0][0].scoreA).toBe("M");
-    // sibling untouched — same reference
+    // sibling untouched : same reference
     expect(next.bracket.rounds[0][1]).toBe(prev.bracket.rounds[0][1]);
   });
 

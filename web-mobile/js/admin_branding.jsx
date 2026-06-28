@@ -1,4 +1,4 @@
-// Branding admin section — embedded in the Edit Tournament page (mp-scf).
+// Branding admin section : embedded in the Edit Tournament page (mp-scf).
 // Lets operators configure accent colors and upload a tournament logo.
 //
 // Endpoints (via window.API.uploadBrandingLogo / window.API.deleteBrandingLogo):
@@ -10,7 +10,7 @@ const { useState: useStateBr, useRef: useRefBr, useEffect: useEffectBr } = React
 
 // Canonical defaults for the branding theme (mp-scf). Single source of truth so
 // admin_setup.jsx's dirty-tracking snapshot stays in lockstep with the values
-// BrandingManager emits — without this, changing a default here would silently
+// BrandingManager emits : without this, changing a default here would silently
 // false-dirty the form on load until admin_setup was patched in tandem.
 const BRANDING_DEFAULTS = Object.freeze({
   primaryColor: "#1d3557",
@@ -19,7 +19,7 @@ const BRANDING_DEFAULTS = Object.freeze({
 });
 
 // Normalize a raw theme to BrandingManager's emitted shape, or null when no
-// colour/title field is set (empty {} — e.g. logo-only — counts as absent so
+// colour/title field is set (empty {} : e.g. logo-only : counts as absent so
 // the PUT payload stays clean). Exported and reused by admin_setup.jsx for
 // dirty tracking, ensuring the pre-mount raw theme and the post-mount synced
 // theme compare equal in the dirty snapshot.
@@ -53,7 +53,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
   // Always update pickers/inputs, but only propagate to the parent when
-  // tournament.theme is explicitly set — passing null when absent keeps
+  // tournament.theme is explicitly set : passing null when absent keeps
   // the parent PUT payload clean (theme block omitted unless configured).
   useEffectBr(() => {
     const norm = normalizeTheme(tournament && tournament.theme);
@@ -179,7 +179,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
             <div className="field">
               <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
               <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
-              <div className="field__hint">Square image recommended — non-square images will be cropped to fit the top bar icon.</div>
+              <div className="field__hint">Square image recommended : non-square images will be cropped to fit the top bar icon.</div>
             </div>
             <div className="branding__logo-actions">
               <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}</button>

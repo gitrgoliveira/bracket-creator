@@ -1,10 +1,10 @@
-// display.jsx — thin entry point and barrel re-export.
+// display.jsx: thin entry point and barrel re-export.
 //
 // The actual implementations live in the split modules:
-//   display_helpers.jsx    — shared data/label layer (pure functions + TermD)
-//   display_scoreboard.jsx — per-court TV scoreboard (TvDisplay + boards)
-//   display_lobby.jsx      — lobby / schedule TV (LobbyDisplay)
-//   streaming_overlay.jsx  — OBS/vMix streaming overlay (StreamingOverlay)
+//   display_helpers.jsx    : shared data/label layer (pure functions + TermD)
+//   display_scoreboard.jsx : per-court TV scoreboard (TvDisplay + boards)
+//   display_lobby.jsx      : lobby / schedule TV (LobbyDisplay)
+//   streaming_overlay.jsx  : OBS/vMix streaming overlay (StreamingOverlay)
 //
 // This file keeps DisplayRoute (the router-level entry) and sets the
 // window.* globals consumed by the legacy script-tag surface, then
@@ -30,7 +30,7 @@ import {
 // Wrapper that picks the right display component based on URL query.
 // Used by the router when the path is /display. Reads `?court=A`,
 // `?court=all`, `?overlay=true|1`, and `?position=top|bottom` off the
-// current URL via useQuery() — see web-mobile/js/router.jsx.
+// current URL via useQuery() : see web-mobile/js/router.jsx.
 //
 // Defaults: missing court → "A", missing overlay → false, missing
 // position → "bottom". Both "true" and "1" toggle overlay mode so the

@@ -9,7 +9,7 @@ import { formatIpponsScore, ipponsFromScore, matchStateCell } from '../bracket.j
 //   formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision)
 //                     ^^^^^^^^   ^^^^^^^^
 //                     SHIRO      AKA
-// so the result reads left-to-right as  SHIRO_score – AKA_score.
+// so the result reads left-to-right as SHIRO_score–AKA_score.
 
 describe('formatIpponsScore', () => {
   describe('basic ippon formatting', () => {
@@ -71,7 +71,7 @@ describe('formatIpponsScore', () => {
 
     it('prefers the winner waza LETTERS over a count when score.ippons is present', () => {
       // Per-side arrays absent (server bracket score) but score.ippons carries
-      // the winner's techniques — show "MK–1", not "2–1". Loser is a count-only
+      // the winner's techniques. Show "MK–1", not "2–1". Loser is a count-only
       // value in this degenerate path, so it stays numeric. Display-only: the
       // numeric winnerPts/loserPts fields are untouched for logic that needs them.
       const score = formatIpponsScore([], [], { type: 'ippon', winnerPts: 2, loserPts: 1, ippons: ['M', 'K'] }, null);
@@ -109,7 +109,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('calling with (ipponsA, ipponsB) would wrongly put AKA score on the left', () => {
-      // This is the WRONG call order for SHIRO-left views — test documents the mistake
+      // This is the WRONG call order for SHIRO-left views. Test documents the mistake
       const wrong = formatIpponsScore(akaMatch.ipponsA, akaMatch.ipponsB, akaMatch.score, akaMatch.decision);
       expect(wrong).toBe('M–·');   // M appears left, but AKA is visually on the right → misleading
     });
@@ -161,7 +161,7 @@ describe('formatIpponsScore', () => {
     });
 
     it('combines (E) Ht for a hantei-decided overtime', () => {
-      // Realistic: tied with scores, then hantei chose a winner — backend
+      // Realistic: tied with scores, then hantei chose a winner. Backend
       // sends decidedByHantei=true alongside the tied ippons.
       const result = formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 }, true);
       expect(result).toBe('M–K (E) Ht');
@@ -172,7 +172,7 @@ describe('formatIpponsScore', () => {
       expect(formatIpponsScore(['M'], ['K'], null, null, { periodCount: 1 })).toBe('M–K (E)');
     });
 
-    it('score.hantei is not read — only the decidedByHantei param controls Ht', () => {
+    it('score.hantei is not read. Only the decidedByHantei param controls Ht', () => {
       // The `score` object is derived client-side by normalizeMatch from flat
       // API fields (ipponsA/B, scoreA/B). The backend never emits a `score`
       // object, so score.hantei can never appear in real match data. Only the
@@ -186,7 +186,7 @@ describe('formatIpponsScore', () => {
 // Item 6 regression suite: scored-draw rendering (formatIpponsScore).
 // Pinned so future changes to the hikiwake branch can't silently revert
 // the display from "M–K" back to the bare-X glyph.
-describe('formatIpponsScore — hikiwake draw display (item 6)', () => {
+describe('formatIpponsScore: hikiwake draw display (item 6)', () => {
   it('0–0 hikiwake (score.type) → bare X', () => {
     expect(formatIpponsScore([], [], { type: 'hikiwake' }, null)).toBe('X');
   });
@@ -208,18 +208,18 @@ describe('formatIpponsScore — hikiwake draw display (item 6)', () => {
 });
 
 // matchStateCell: the shared centre-cell lifecycle cue. completed → score
-// string (with "—" fallback), running → "vs" (the row highlight is the "now"
+// string (with "-" fallback), running → "vs" (the row highlight is the "now"
 // signal, NOT a centre dot), scheduled/other → "–".
-describe('matchStateCell — shared running-row centre cue', () => {
+describe('matchStateCell: shared running-row centre cue', () => {
   it('completed → the formatted ippon score (first arg = SHIRO/left)', () => {
     // matchStateCell(m, ipponsB, ipponsA) → matchScoreStr → formatIpponsScore
     // renders firstArg–secondArg, so ['M'],['K'] → "M–K".
     expect(matchStateCell({ status: 'completed' }, ['M'], ['K'])).toBe('M–K');
   });
 
-  it('completed with no derivable score → "—" fallback', () => {
-    // No ippons, no score, no decision → matchScoreStr returns "" → "—".
-    expect(matchStateCell({ status: 'completed' }, [], [])).toBe('—');
+  it('completed with no derivable score → "-" fallback', () => {
+    // No ippons, no score, no decision → matchScoreStr returns "" → "-".
+    expect(matchStateCell({ status: 'completed' }, [], [])).toBe('-');
   });
 
   it('running → "vs" (no centre dot; the row highlight is the now signal)', () => {

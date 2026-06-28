@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 //   TypeError: Cannot read properties of null (reading 'join')
 // when rendering a competition whose `courts` (or `players`) field was
 // null. The admin create form always sends courts, so this only bit
-// API/import-created competitions — but it tripped the error boundary
+// API/import-created competitions ; but it tripped the error boundary
 // and took down the whole dashboard rather than degrading gracefully.
 // Fix: CompCard defaults null courts/players to [] before .join/.length.
 //
@@ -69,7 +69,7 @@ function findAll(node, pred) {
   return acc;
 }
 
-// ExportPdfModal — busy-gating, API call, filename construction.
+// ExportPdfModal ; busy-gating, API call, filename construction.
 // The component is exported to window by admin_shell.jsx so tests can
 // exercise it directly without mounting a full AdminDashboard.
 describe('ExportPdfModal', () => {
@@ -134,7 +134,7 @@ describe('ExportPdfModal', () => {
       tournament: { name: 'Test' }, password,
       onClose: vi.fn(), showToast: vi.fn(),
     });
-    // PDF_EXPORT_TYPES[0] is "all" — the first Download button.
+    // PDF_EXPORT_TYPES[0] is "all" ; the first Download button.
     const btn = findAll(vnode, n => n.type === 'button' && n.children?.[0] === 'Download')[0];
     await btn.props.onClick();
     expect(exportPDFs).toHaveBeenCalledWith('all', password);

@@ -159,7 +159,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   // mp-jvzy: the "#" column must render the backend's authoritative
   // PlayerStanding.rank (which folds in tiebreakers + manual overrides),
   // NOT the array index. Pass ranks that deliberately differ from index+1
-  // and assert the rendered cells follow s.rank — locking the DRY contract.
+  // and assert the rendered cells follow s.rank. Locking the DRY contract.
   it('league "#" column shows authoritative s.rank, not the row index', () => {
     const standings = { League: [
       { player: { id: 'a', name: 'Player A', dojo: '' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0, rank: 10 },

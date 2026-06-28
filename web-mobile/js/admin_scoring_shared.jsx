@@ -6,12 +6,12 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
-// internal/mobileapp/validation.go — the bout ends when one side reaches
+// internal/mobileapp/validation.go : the bout ends when one side reaches
 // 2 ippons, so 2-2 is an impossible scoreline. Used to gate the M/K/D/T/H
 // buttons on both sides of every bout (individual + team sub-bout).
 const MAX_IPPONS_PER_SIDE = 2;
 
-// isBoutDecided — true once either side has reached the best-of-3 cap.
+// isBoutDecided : true once either side has reached the best-of-3 cap.
 // The UI uses this to disable the add-ippon buttons on BOTH sides at
 // that point: the bout would have ended at first-to-2, so neither side
 // can legitimately add another ippon. Server enforces the same invariant
@@ -21,34 +21,34 @@ function isBoutDecided(aPts, bPts) {
       || (bPts?.length ?? 0) >= MAX_IPPONS_PER_SIDE;
 }
 
-// getIpponButtons — returns the ordered array of scoring button labels for a
+// getIpponButtons : returns the ordered array of scoring button labels for a
 // bout. Naginata adds "S" (Sune, shin strike) between "T" and "H".
 function getIpponButtons(isNaginata) {
   return isNaginata ? ["M", "K", "D", "T", "S", "H"] : ["M", "K", "D", "T", "H"];
 }
 
-// getValidPointKeys — returns the string of valid single-character keyboard
+// getValidPointKeys : returns the string of valid single-character keyboard
 // shortcuts for scoring. Keyboard handler checks `validKeys.includes(upper)`.
 function getValidPointKeys(isNaginata) {
   return isNaginata ? "MKDTSH" : "MKDTH";
 }
 
-// IPPON_LETTER_LEGEND — the M/K/D/T/H (+S for naginata) ippon-type letters
+// IPPON_LETTER_LEGEND : the M/K/D/T/H (+S for naginata) ippon-type letters
 // and their kendo meaning. The strike-target names mirror the kendo glossary
 // (internal/domain/glossary.go datapoint "datapoint"/"sune"/"hansoku"). H is
 // the hansoku-derived free point ("Two hansoku … give the opponent one free
 // point", glossary "hansoku"). The viewer glossary doesn't define these
 // single letters as terms, so the wording is authored here for the operator.
 const IPPON_LETTER_LEGEND = [
-  ["M", "Men — head strike"],
-  ["K", "Kote — wrist strike"],
-  ["D", "Do — torso strike"],
-  ["T", "Tsuki — throat thrust"],
-  ["S", "Sune — shin strike (naginata)"],
-  ["H", "Hansoku point — opponent's 2nd foul"],
+  ["M", "Men : head strike"],
+  ["K", "Kote : wrist strike"],
+  ["D", "Do : torso strike"],
+  ["T", "Tsuki : throat thrust"],
+  ["S", "Sune : shin strike (naginata)"],
+  ["H", "Hansoku point : opponent's 2nd foul"],
 ];
 
-// IpponLegend — compact, always-present key mapping each scoring letter to its
+// IpponLegend : compact, always-present key mapping each scoring letter to its
 // kendo meaning, so the admin scoring modal isn't dependent on the viewer-only
 // glossary. The "S" (Sune) row only shows for naginata competitions. Styled
 // inline with DESIGN tokens (this region of styles.css is owned elsewhere).
@@ -82,7 +82,7 @@ function IpponLegend({ isNaginata }) {
   );
 }
 
-// ScoringShortcutHint — quiet, always-present reminder of the keyboard
+// ScoringShortcutHint : quiet, always-present reminder of the keyboard
 // shortcuts the modal supports. Rendered below the prev/next nav so the
 // affordance sits where operators look for navigation. Clarity over
 // decoration: plain muted text, no animation. Styled inline (this region of
@@ -108,7 +108,7 @@ function ScoringShortcutHint() {
   );
 }
 
-// applyFusenshoToggle — pure reducer for the per-bout Fusensho button in
+// applyFusenshoToggle : pure reducer for the per-bout Fusensho button in
 // TeamScoreEditorModal. Implements three behaviours on top of the sub
 // state {aPts, bPts, aFouls, bFouls, fusensho, _preFusensho?}:
 //   1. Toggle-on from a clean state: snapshot {aPts,bPts,aFouls,bFouls}
@@ -118,10 +118,10 @@ function ScoringShortcutHint() {
 //      genuine pre-fusensho score, not the intermediate 2-0.
 //   3. Toggle-off (re-clicking the active side): restore from
 //      _preFusensho and clear it. If no snapshot exists (e.g. modal
-//      reopened from saved state — initSubs doesn't round-trip the
+//      reopened from saved state : initSubs doesn't round-trip the
 //      snapshot), just clear the flag.
 // Manual pts/fouls edits clear _preFusensho separately (handled in
-// the setPts/setFouls closures) — once the operator hand-edits, the
+// the setPts/setFouls closures) : once the operator hand-edits, the
 // snapshot is stale.
 function applyFusenshoToggle(prev, side) {
   if (prev.fusensho === side) {
@@ -134,15 +134,15 @@ function applyFusenshoToggle(prev, side) {
   return { aPts: [], bPts: ["○", "○"], aFouls: 0, bFouls: 0, fusensho: "b", _preFusensho: snap };
 }
 
-// applyFoulIncrement — pure helper modelling a single `+` press on a
+// applyFoulIncrement : pure helper modelling a single `+` press on a
 // side's foul counter. Per FIK rules (and internal/domain/glossary.go):
 // "Two hansoku awarded to a competitor give the opponent one free point."
 // The 2nd foul auto-awards an "H" ippon to the opponent and resets this
 // side's counter to 0. The counter is "outstanding fouls not yet
-// discharged into an H" — discharged Hs live in the opponent's pts array.
+// discharged into an H" : discharged Hs live in the opponent's pts array.
 //
 // Bout-decided guard: if EITHER side is already at maxIppons the bout is
-// over — the counter still resets to 0 on the 2nd foul but no new H is
+// over : the counter still resets to 0 on the 2nd foul but no new H is
 // awarded. This prevents an auto-award from creating an invalid 2-2
 // scoreline that the server's validateIpponCounts would reject. The UI
 // also disables the `+` button via isBoutDecided as a defense in depth.
@@ -157,11 +157,11 @@ function applyFoulIncrement(fouls, opponentPts, thisSidePts = [], maxIppons = MA
   return { fouls: 0, opponentPts: [...opponentPts, "H"] };
 }
 
-// reconcileFoulsAtOpen — pure helper for the reopen/correction flow.
+// reconcileFoulsAtOpen : pure helper for the reopen/correction flow.
 // Pre-fix builds stored hansoku as a cumulative raw count (0..N) alongside
 // the already-discharged "H" entries in the opponent's pts array. The new
 // counter is "outstanding fouls not yet discharged" (0 or 1). Naively
-// taking `rawFouls % 2` strips full pairs — but if the opponent's pts is
+// taking `rawFouls % 2` strips full pairs : but if the opponent's pts is
 // MISSING the expected H entries (older data, partial save, imported
 // match), the strip silently loses points. This helper tops up the
 // opponent's pts with the missing H's (capped at maxIppons) before
@@ -177,7 +177,7 @@ function reconcileFoulsAtOpen(rawFouls, opponentPts, maxIppons = MAX_IPPONS_PER_
   return { outstandingFouls: safe % 2, opponentPts: newOpp };
 }
 
-// nextFoulOnDecrement — pure helper for the `−` button. Returns the new
+// nextFoulOnDecrement : pure helper for the `−` button. Returns the new
 // foul value (a NUMBER, not a React-style functional updater), suitable
 // for setters like the team sub-match `rs.setFouls(value)` shape that
 // doesn't accept fn-updaters. Extracted so the team-modal `−` regression
@@ -186,7 +186,7 @@ function nextFoulOnDecrement(currentFouls) {
   return Math.max(0, currentFouls - 1);
 }
 
-// Term — kendo-glossary tooltip wrapper. Read lazily off window so the
+// Term : kendo-glossary tooltip wrapper. Read lazily off window so the
 // load order between glossary.js and this module doesn't matter (both
 // are type="module" scripts and may execute in any order). Falls back
 // to a plain pass-through when window.Term isn't available yet (e.g.
@@ -199,7 +199,7 @@ function TermAS(props) {
 }
 
 // Lazily loaded from window for the same load-order reason as TermAS above.
-// Falls back to null — the icon is purely decorative; no content to preserve.
+// Falls back to null : the icon is purely decorative; no content to preserve.
 function GlossaryHintAS({ name }) {
   if (typeof window !== 'undefined' && window.GlossaryHint) {
     return React.createElement(window.GlossaryHint, { name });
@@ -261,7 +261,7 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 // the decision_locked confirm), so it lives here once. The returned closure:
 //   - POSTs the decision, then on a kiken result resolves the loser side and
 //     opens the withdrawn-player panel for default-win chaining (kiken keeps
-//     the modal open — DO NOT route kiken through onAfterDecision, the
+//     the modal open : DO NOT route kiken through onAfterDecision, the
 //     operator must work through RemainingMatchesPanel first);
 //   - for fusenpai / other non-kiken decisions: calls onAfterDecision when
 //     provided and the match is not a correction (item 7: starts next match),
@@ -327,7 +327,7 @@ function makeSubmitDecision({
       } else if (!isComplete && onAfterDecision) {
         // Item 7: fusenpai (and any future non-kiken decision) advances to the
         // next match on the same court. The decision was already persisted via
-        // /decision POST so we do NOT issue another score PUT — just advance.
+        // /decision POST so we do NOT issue another score PUT : just advance.
         await onAfterDecision();
       } else {
         onClose();
@@ -335,7 +335,7 @@ function makeSubmitDecision({
     } catch (e) {
       const msg = e?.message || 'Failed to record decision';
       // T103: server returns "decision_locked" when a kiken-undo would
-      // invalidate a downstream match — confirm and retry with force.
+      // invalidate a downstream match : confirm and retry with force.
       if (!opts.force && /decision_locked/i.test(msg)) {
         const ok = mountedRef.current && await window.confirmDialog({
           message:
@@ -397,7 +397,7 @@ function prevEnchoPeriod(current) {
 // mp-4pc: once a daihyosen (rep bout, wire position -1) exists, the encho
 // rides on that sub, not the top-level match (enchoBlock suppresses the
 // match-level encho when hasDaihyosen). On re-open we must restore the
-// period count from the sub — else a persisted decidedByHantei replays
+// period count from the sub : else a persisted decidedByHantei replays
 // without encho and the backend rejects the next save
 // ("requires encho with at least one period"). Exported for vitest.
 function initialEnchoPeriodsForMatch(m) {
@@ -406,11 +406,11 @@ function initialEnchoPeriodsForMatch(m) {
   return m.encho?.periodCount || 0;
 }
 
-// daihyosenEnchoFields — pure builder for the encho/decidedByHantei wire
+// daihyosenEnchoFields : pure builder for the encho/decidedByHantei wire
 // fields on the daihyosen representative bout (position -1). The backend
 // invariant (validation.go validateSubBout) is: encho and hantei are valid
-// ONLY on the daihyosen. Encho is OPTIONAL for hantei — a tied daihyosen may
-// be taken straight to a judges' decision without overtime — so the two
+// ONLY on the daihyosen. Encho is OPTIONAL for hantei : a tied daihyosen may
+// be taken straight to a judges' decision without overtime : so the two
 // fields are emitted independently: encho whenever the counter is > 0, and
 // decidedByHantei whenever it is armed on a tied scoreline. Returns the fields
 // to merge into the entry (possibly empty). Exported for vitest.
@@ -423,9 +423,9 @@ function daihyosenEnchoFields({ enchoPeriodCount, daihyosenTied, daihyosenHantei
 
 // Pure decision for the draw-toggle action (button and keyboard shortcut).
 // Returns:
-//   {action: "enter"}  — set draw=true, clear pts (only when no scores exist)
-//   {action: "cancel"} — set draw=false (always allowed when in draw mode)
-//   {action: "noop"}   — blocked: scores exist while not in draw mode (button disabled)
+//   {action: "enter"}  : set draw=true, clear pts (only when no scores exist)
+//   {action: "cancel"} : set draw=false (always allowed when in draw mode)
+//   {action: "noop"}   : blocked: scores exist while not in draw mode (button disabled)
 // Exported for vitest.
 function decideDrawToggle({ isDrawToggled, aTotal, bTotal }) {
   if (isDrawToggled) return { action: "cancel" };
@@ -433,7 +433,7 @@ function decideDrawToggle({ isDrawToggled, aTotal, bTotal }) {
   return { action: "noop" };
 }
 
-// shouldBlockScoringKeys — pure predicate consumed by the onKeyDown handler.
+// shouldBlockScoringKeys : pure predicate consumed by the onKeyDown handler.
 // Returns true when scoring keys (M/K/D/T/H/S and x/X draw toggle) must be
 // suppressed. Currently this happens when hantei is armed: the backend
 // requires a tied scoreline at that point, so any score mutation would
@@ -442,7 +442,7 @@ function shouldBlockScoringKeys({ decidedByHantei }) {
   return !!decidedByHantei;
 }
 
-// EnchoControl — collapsed by default to a small "⏱ Overtime" pill so
+// EnchoControl : collapsed by default to a small "⏱ Overtime" pill so
 // it occupies <24px of vertical space in the live scoring modal. The
 // full counter UI mounts only when overtime is active (enchoPeriodCount
 // > 0) OR the operator clicks the pill (local showCounter state). The
@@ -519,7 +519,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
   const [side, setSide] = useStateA(defaultSide || "shiro");
   const [reason, setReason] = useStateA("");
   // Display rule (locked, glossary.md §Display rule): render the
-  // romaji term ALONE — the popover (via <Term>) carries the gloss.
+  // romaji term ALONE : the popover (via <Term>) carries the gloss.
   // We keep "Decision" untouched (it's already plain English) and
   // wrap the kendo terms so a volunteer hovering/tapping the title
   // gets the full tooltip.
@@ -545,11 +545,11 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
         <div style={{ display: "flex", gap: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
-            <span><TermAS name="shiro">SHIRO</TermAS> (White){sideB?.name ? ` — ${sideB.name}` : ""}</span>
+            <span><TermAS name="shiro">SHIRO</TermAS> (White){sideB?.name ? ` : ${sideB.name}` : ""}</span>
           </label>
           <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <input type="radio" name="decision-side" value="aka" checked={side === "aka"} onChange={() => setSide("aka")} />
-            <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? ` — ${sideA.name}` : ""}</span>
+            <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? ` : ${sideA.name}` : ""}</span>
           </label>
         </div>
         {askReason && (
@@ -580,7 +580,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
 // look up every scheduled match where the just-withdrawn player still appears
 // and offer a one-click "Award default win to opponent" for each. The button
 // calls /decision with decision=fusenpai and decisionBy=<the withdrawn side>
-// — note: that's the side the WITHDRAWN player occupies in THAT match, not
+// : note: that's the side the WITHDRAWN player occupies in THAT match, not
 // the side they had in the originating match (sides can flip across matches).
 function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, onClose }) {
   const [matches, setMatches] = useStateA(null);
@@ -616,7 +616,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   }, [compID, withdrawnPlayer?.id, withdrawnPlayer?.name]);
 
   const award = async (m) => {
-    // Figure out which side the withdrawn player occupies in THIS match —
+    // Figure out which side the withdrawn player occupies in THIS match : 
     // that's the side that gets the fusenpai (default loss). Pool matches:
     // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
     const wname = (withdrawnPlayer?.name || "").trim();
@@ -674,7 +674,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
                   className="btn btn--sm"
                   onClick={() => award(m)}
                   disabled={busyId === m.id}
-                  title="Record fusenpai — opponent receives the default win"
+                  title="Record fusenpai : opponent receives the default win"
                 >
                   {busyId === m.id ? "Saving…" : "Award default win to opponent"}
                 </button>
@@ -694,9 +694,9 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 // 2-foul auto-award the awarded H lives in the opponent's pts array, so
 // the counter shows only "outstanding fouls not yet discharged."
 function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
-  // color is "shiro" or "aka" — surface as data-testid so Playwright probes
+  // color is "shiro" or "aka" : surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
-  // `disabled` freezes the `+` button when the bout is already decided —
+  // `disabled` freezes the `+` button when the bout is already decided : 
   // a 2nd-foul auto-award in that state would create an invalid 2-2.
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
@@ -712,10 +712,10 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
   );
 }
 
-// LineupNameInput — typeable player picker/writer for a team lineup slot.
+// LineupNameInput : typeable player picker/writer for a team lineup slot.
 // Type to filter the team roster (matches show in a dropdown); click one or
 // press Enter to pick. Unlike a plain picker, a name not on the roster can be
-// ADDED as-is via the "+ Add …" row — the lineup stores a free name string,
+// ADDED as-is via the "+ Add …" row : the lineup stores a free name string,
 // which is what an operator needs when entering a late substitute while bouts
 // are running. The × clears the slot. Keyboard: ↑/↓ move, Enter picks, Esc closes.
 function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
@@ -795,7 +795,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   );
 }
 
-// ReasonPrompt — inline form for collecting a mandatory audit justification
+// ReasonPrompt : inline form for collecting a mandatory audit justification
 // when an operator corrects a completed match or edits a lineup mid-match.
 //
 // Renders a preset <select> + optional free-text note; calls onConfirm with
@@ -861,7 +861,7 @@ const LINEUP_PRESETS = ["Late lineup", "Substitution", "Correction", "Other"];
 // (e.g. admin_schedule.jsx which cannot use cross-file ES imports).
 window.LINEUP_PRESETS = LINEUP_PRESETS;
 
-// ES exports — the modal file imports these and re-exports the test-facing
+// ES exports : the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
   MAX_IPPONS_PER_SIDE,

@@ -18,9 +18,9 @@ function mixedCompPartiallyResolved() {
       preview: false, // one pool resolved → strip lifted
       rounds: [
         [
-          // Resolved feeder (Pool A & B done) — a real, playable bout on court A.
+          // Resolved feeder (Pool A & B done): a real, playable bout on court A.
           { id: 'm-r1-0', court: 'A', status: 'scheduled', sideA: 'Alice', sideB: 'Bob' },
-          // Unresolved feeders (Pools C & D still running) — placeholders on court A.
+          // Unresolved feeders (Pools C & D still running): placeholders on court A.
           { id: 'm-r1-1', court: 'A', status: 'scheduled', sideA: 'Pool C-1st', sideB: 'Pool D-1st' },
         ],
         [

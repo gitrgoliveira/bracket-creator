@@ -15,17 +15,17 @@ function sideName(side) {
 // True when a match has both sides resolved to a real participant (not a
 // bye, not a TBD bracket placeholder, not an unresolved "Winner of rX-mY"
 // reference). The naïve `m.sideA && m.sideB` test is almost always wrong
-// post-normalizeMatch — that function substitutes {id:"",name:""} for
+// post-normalizeMatch : that function substitutes {id:"",name:""} for
 // missing sides, which is truthy. Use this helper in filter predicates
 // / rendering guards instead.
 //
 // Bracket-side caveat: future-round matches carry placeholder side
 // names like `"Winner of r0-m1"` until the source match resolves. Those
-// are non-empty strings — sideName() returns them as-is — so the
+// are non-empty strings : sideName() returns them as-is : so the
 // underlying `sideName(...)` check ALONE isn't enough. We reject the
 // EXACT placeholder shape `Winner of r<n>-m<n>` (the literal format
 // emitted by internal/engine/bracket.go at lines 65 and 73), NOT every
-// name that happens to start with "Winner of " — a legitimate
+// name that happens to start with "Winner of " : a legitimate
 // participant named "Winner of the 2025 Cup" should still pass.
 // (See web-mobile/js/viewer.jsx for the consumer.)
 //
@@ -48,8 +48,8 @@ function hasBothSides(m) {
 
 // hasPoolOriginPlaceholder reports whether a bracket match still has a pool-origin
 // "Pool A-1st" side (a mixed comp whose feeder pool hasn't finished). Unlike
-// !hasBothSides, this is TRUE only for pool placeholders — NOT for normal
-// "Winner of rX-mY" feeders or structural byes — so the "Knockout filling in"
+// !hasBothSides, this is TRUE only for pool placeholders : NOT for normal
+// "Winner of rX-mY" feeders or structural byes : so the "Knockout filling in"
 // banner shows ONLY for an incomplete mixed knockout, not standalone playoffs or
 // bye-containing brackets.
 function hasPoolOriginPlaceholder(m) {
@@ -67,11 +67,11 @@ function hasPoolOriginPlaceholder(m) {
 // endpoints when match counts are needed.
 function compMatchStats(c) {
   let total = 0, done = 0, running = 0;
-  // Use hasBothSides() — the canonical cross-file predicate — so admin
+  // Use hasBothSides() : the canonical cross-file predicate : so admin
   // dashboard / overview / running-strip stats can't drift from viewer-side
   // filtering. Inline `sideName(m.sideA) && sideName(m.sideB)` was almost
   // right (skips byes / normalizeMatch's empty-side substitute) but missed
-  // bracket placeholders like "Winner of r0-m1" — those have truthy
+  // bracket placeholders like "Winner of r0-m1" : those have truthy
   // sideName() values, so future-round matches were counted as real before
   // their source resolves. hasBothSides also rejects that exact shape.
   const count = (m) => {
@@ -100,10 +100,10 @@ function compMatchStats(c) {
 // here flows to every consumer mechanically.
 //
 // MIN_YEAR / MAX_YEAR mirror helper.MinDateYear / helper.MaxDateYear
-// (internal/helper/constants.go) — the API's validateDateDMY rejects
+// (internal/helper/constants.go) : the API's validateDateDMY rejects
 // out-of-range years to keep the wire contract symmetric with the UI.
-// MAX_COURTS mirrors helper.MaxCourts (same Go file) — anchored to the
-// A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride — overflow
+// MAX_COURTS mirrors helper.MaxCourts (same Go file) : anchored to the
+// A–Z labelling cap. MAX_RANK mirrors helper.MaxRankOverride : overflow
 // guard for the override-rank handler; the real semantic constraint is
 // pool size, enforced server-side.
 //
@@ -148,7 +148,7 @@ function validateAndNormalizeDate(date) {
 
 // Boolean predicate: is `date` a valid DD-MM-YYYY day in the supported
 // year range (1900–2100)? Used by AdminCompetition's "Start competition"
-// button gate — anywhere a boolean result is enough. For save flows that
+// button gate : anywhere a boolean result is enough. For save flows that
 // need both the boolean AND the normalized value, use
 // validateAndNormalizeDate above.
 function isValidDate(date) {
@@ -172,14 +172,14 @@ function isValidDate(date) {
 //   keep the cleared display empty (matches the matchDuration pattern at
 //   admin_schedule.jsx).
 // - `shouldSave` is true only when the parsed value is a positive integer
-//   ≥ min. Callers MUST still issue a saveLater on false — the debounceRef
+//   ≥ min. Callers MUST still issue a saveLater on false : the debounceRef
 //   is single-slot and covers all fields, so an earlier scheduled save
 //   captured the OLD valid value for THIS field and will commit it over
 //   the wire if not replaced. Use saveLater(next-with-NaN) so the
 //   commit-side safeInt fallback resolves the field to the on-disk
 //   c.<field>, while cross-field edits in `next` (e.g. Name typed
 //   concurrently) still propagate. `shouldSave` is therefore informational
-//   only — callers no longer branch on it.
+//   only : callers no longer branch on it.
 //
 // Exported for vitest at __tests__/admin_helpers.test.jsx.
 function decideNumericUpdate(raw, min = 1) {
@@ -242,7 +242,7 @@ function dmyToIso(dmy) {
   const [dd, mm, yyyy] = dmy.split('-');
   return `${yyyy}-${mm}-${dd}`;
 }
-// isoToDmy accepts a DMY DD-MM-YYYY pass-through symmetrically — most callers
+// isoToDmy accepts a DMY DD-MM-YYYY pass-through symmetrically : most callers
 // feed it the raw `e.target.value` from <input type="date">, which is ISO,
 // but defense-in-depth costs nothing here.
 function isoToDmy(iso) {
@@ -367,11 +367,11 @@ if (typeof window !== "undefined") {
 // Rather than prop-drill it to every destructive call site, app.jsx pushes
 // the latest value here whenever it resolves /api/auth-config, and the
 // destructive handlers read it via promptAdminPassword(). Single writer
-// (app.jsx), many readers — no React context needed for an imperative prompt.
+// (app.jsx), many readers : no React context needed for an imperative prompt.
 //
 // IMPORTANT: the cache lives on `window`, NOT a module-level variable.
 // esbuild bundles this file into BOTH the app and admin entry chunks, so a
-// module-scoped `let` would be two independent instances — app.jsx's writes
+// module-scoped `let` would be two independent instances : app.jsx's writes
 // would never be visible to the admin components' reads. A single window slot
 // is shared across both bundles. Guarded for non-browser (vitest) use.
 const _authConfigSlot = () => (typeof window !== "undefined" ? window : globalThis);

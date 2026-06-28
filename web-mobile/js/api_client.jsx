@@ -135,7 +135,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   kind            — 'score' | 'decision' | 'lineup'
  *   terminal        — true for completed / decision / lineup writes
  *   method          — HTTP method string ('PUT' | 'POST')
- *   url             — full request URL string (for replay in _flushQueue)
+ *   url             — same-origin request path, e.g. /api/competitions/… (for replay in _flushQueue)
  *   enqueuedAt      — Date.now() at enqueue time (for TTL eviction on reload)
  *
  * Running score descriptors set terminal=false and do not use method/url
@@ -419,7 +419,7 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
  * @param {string} key        - Queue key (use _revKey or lineup key)
  * @param {WriteKind} kind    - 'score' | 'decision' | 'lineup'
  * @param {string} method     - HTTP method ('PUT' | 'POST')
- * @param {string} url        - Full request URL
+ * @param {string} url        - Same-origin request path (e.g. /api/competitions/…)
  * @param {object} payload    - Request body object
  * @param {string} password   - X-Tournament-Password value
  * @param {string} compID     - Competition ID (for identity tracking)

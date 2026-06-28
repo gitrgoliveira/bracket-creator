@@ -35,6 +35,7 @@ markdown_extensions:
 
 theme:
   name: material
+  custom_dir: overrides
   features:
     - navigation.indexes
     - navigation.sections
@@ -43,16 +44,23 @@ theme:
     - navigation.tabs.sticky
   favicon: assets/images/favicon.ico
   logo: assets/images/logo.png
+  font:
+    # Atkinson Hyperlegible (Braille Institute) maximizes glyph separation
+    # (l/I/1, O/0/Q) — chosen for legibility in bright/noisy halls per
+    # PRODUCT.md. JetBrains Mono keeps CLI examples crisp.
+    text: Atkinson Hyperlegible
+    code: JetBrains Mono
+  # Colors are driven entirely by assets/stylesheets/extra.css (the
+  # --md-primary-fg-color / --md-accent-fg-color tokens, scoped per scheme).
+  # Material's `primary`/`accent` only accept named palettes (e.g. `indigo`),
+  # not hex, so hex values here are silently ignored — they are intentionally
+  # omitted so the CSS is the single source of truth.
   palette:
     - scheme: default
-      primary: 333333
-      accent: 333333
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: "#333333"
-      accent: "#333333"
       toggle:
         icon: material/brightness-3
         name: Switch to light mode

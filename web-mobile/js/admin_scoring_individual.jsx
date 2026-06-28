@@ -812,14 +812,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
               <span>Not saved — {writeFailed.reason}. Re-enter the result and submit again.</span>
-              <button
-                type="button"
-                className="btn btn--sm"
-                disabled={submitting || !pendingFnRef.current}
-                onClick={() => { if (pendingFnRef.current) doSubmit(pendingFnRef.current); }}
-              >
-                Retry
-              </button>
+              {/* Only offer Retry when we still hold the submit closure. After a
+                  reopen/hydration it can't be recovered from the serialized queue,
+                  so a Retry button would be permanently disabled and misleading —
+                  the banner text already tells the operator to re-enter. */}
+              {pendingFnRef.current && (
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={submitting}
+                  onClick={() => doSubmit(pendingFnRef.current)}
+                >
+                  Retry
+                </button>
+              )}
             </div>
           )}
           {/* F5: pending-write banner — shown when a terminal submit was only queued
@@ -828,19 +834,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
               <span>Not saved yet — will keep retrying until it lands.</span>
-              <button
-                type="button"
-                className="btn btn--sm btn--ghost"
-                // Disabled when there is no captured submit closure — e.g. the
-                // banner was hydrated on re-open (pendingFnRef can't be restored
-                // from the serialized queue). The queue still auto-retries.
-                disabled={submitting || !pendingFnRef.current}
-                onClick={() => {
-                  if (pendingFnRef.current) doSubmit(pendingFnRef.current);
-                }}
-              >
-                Retry now
-              </button>
+              {/* Only show Retry when we hold the submit closure. On a hydrated
+                  re-open it can't be restored from the serialized queue — but the
+                  queue still auto-retries in the background, so no button is fine. */}
+              {pendingFnRef.current && (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  disabled={submitting}
+                  onClick={() => doSubmit(pendingFnRef.current)}
+                >
+                  Retry now
+                </button>
+              )}
             </div>
           )}
           <div className="score-nav">

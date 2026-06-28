@@ -149,33 +149,33 @@ Format for bulk paste:
 * Without Zekken: `Name, Dojo[, Dan grade]`
 * With Zekken: `Name, Zekken display name, Dojo[, Dan grade]`
 
-To save the bulk import, click the **Apply** button at the bottom of the right column.
+To save the bulk import, click the **Apply changes** button at the bottom of the right column.
 
 #### Participant Edit Modal
 
 To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
 1. Click the edit pencil icon next to the participant's name in the Centre Column.
 2. In the modal that appears, modify the name, dojo, dan grade, or display name.
-3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Centre Column (Participants & Seeds) described above, via drag-and-drop or the seed-rank input — not in a separate tab.
+3. Click **Save changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Centre Column (Participants & Seeds) described above, via drag-and-drop or the seed-rank input — not in a separate tab.
 
 #### Optional Check-in Workflow
 
 You can enable check-in for any competition in its **Settings** tab. When check-in is enabled:
 - A check-in panel displays in the viewer roster screen.
 - A **Check-in window** (configurable via tournament settings as `Check-in window start/end`) displays a status banner indicating if the window is pending, open, or closed.
-- Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check-in all** to check in everyone.
-- Check-in affects the draw with **opt-in semantics**: when you click **Generate Draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included — so simply enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
+- Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check in all** to check in everyone.
+- Check-in affects the draw with **opt-in semantics**: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included — so simply enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
 
 #### The Draw-Preview (status `draw-ready`) Workflow
 
 To prevent mistakes and allow manual inspection of the draw before matches are locked and started, the application uses a multi-step **Draw-Preview** workflow:
 
-1. Under the setup tab, after importing and checking in all players, click **Generate Draw**.
+1. Under the setup tab, after importing and checking in all players, click **Generate draw**.
 2. The competition transitions to the **`draw-ready`** status.
 3. An interactive draw preview appears, showing the generated pools, bracket structure, or Swiss Round 1 pairings. 
 4. While a draw is in the `draw-ready` status, **participant roster edits are locked** to prevent TOCTOU data corruption. Check-in toggles remain available during this phase.
 5. If the draw is satisfactory, click **Start Competition**. This transitions the status to `pools` (for mixed and Swiss formats) or `playoffs` (for playoffs-only) and exposes the matches to scorers and the public viewer.
-6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard Draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
+6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
 
 ### Pools
 

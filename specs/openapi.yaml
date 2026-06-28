@@ -1490,6 +1490,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Player'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -1507,6 +1509,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Player'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -3090,8 +3094,8 @@ components:
             the server preserves existing check-in state on bulk import
             and ignores any incoming `checkedIn` value. Use the dedicated
             check-in endpoints (`PUT /…/participants/{pid}/checkin`,
-            `POST /…/participants/checkin-bulk`, `DELETE /…/checkin`) to
-            manage check-in state.
+            `POST /…/participants/checkin-bulk`,
+            `DELETE /…/participants/{pid}/checkin`) to manage check-in state.
 
     BulkCheckInResult:
       type: object

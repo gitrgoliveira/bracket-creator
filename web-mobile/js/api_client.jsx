@@ -521,8 +521,15 @@ if (typeof window !== 'undefined') {
             if (!Array.isArray(item) || item.length < 2) continue;
             const [key, descriptor] = item;
             if (!key || !descriptor || typeof descriptor !== 'object') continue;
-            // Drop entries without a timestamp or older than TTL.
-            if (!descriptor.enqueuedAt || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
+            // Drop entries without a valid timestamp or older than TTL. enqueuedAt
+            // must be a finite positive number — a tampered/corrupt entry could set
+            // it to a non-numeric truthy value (e.g. a string), making
+            // (now - enqueuedAt) NaN so the TTL comparison is false and an
+            // arbitrarily old write slips through. Validate the type first.
+            if (typeof descriptor.enqueuedAt !== 'number'
+                || !Number.isFinite(descriptor.enqueuedAt)
+                || descriptor.enqueuedAt <= 0
+                || (now - descriptor.enqueuedAt) > QUEUE_TTL_MS) continue;
             // Defense-in-depth: localStorage is tamperable. Reject terminal entries
             // whose method/url fall outside the queue allowlist (PUT/POST to
             // /api/competitions/…) before they can ever reach fetch on replay.

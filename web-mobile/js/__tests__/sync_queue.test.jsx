@@ -707,6 +707,21 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
         expect(m.API.hasPendingTerminalWrite('c1', 'm7')).toBe(true);
     });
 
+    it('rejects an entry whose enqueuedAt is a non-numeric (tampered) value', async () => {
+        // A string enqueuedAt would make (now - enqueuedAt) NaN, so a naive TTL
+        // check (NaN > TTL === false) would let an arbitrarily old write through.
+        const bad = [['c1:m8', {
+            compID: 'c1', matchID: 'm8', payload: {}, password: 'pw',
+            kind: 'score', terminal: true, method: 'PUT',
+            url: '/api/competitions/c1/matches/m8/score', enqueuedAt: 'not-a-number',
+        }]];
+        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('offline'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        expect(m.API.hasPendingTerminalWrite('c1', 'm8')).toBe(false);
+    });
+
     it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
         // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
         // terminal entry. A non-array element would throw on destructure and (under

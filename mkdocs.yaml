@@ -60,3 +60,8 @@ nav:
   - Developer guide:
       - Code of conduct: dev-guide/code_of_conduct.md
       - Contributing: dev-guide/contributing.md
+      - Connection resilience: dev-guide/connection-resilience.md
+      - Architecture:
+          - Software: architecture/software-architecture.md
+          - Network: architecture/network-architecture.md
+          - Infrastructure: architecture/infrastructure-architecture.md

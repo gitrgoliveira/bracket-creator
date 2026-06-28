@@ -1362,7 +1362,11 @@ paths:
         schema:
           type: string
           maxLength: 64
-        description: Participant/Player ID (UUID).
+        description: |
+          Participant identifier. Either the participant's stable UUID, or — for
+          legacy rosters without UUIDs — the composite `name|dojo` key the client
+          sends for ID-less rows (resolved server-side, UUID first then the
+          name|dojo fallback).
     put:
       tags: [participants]
       summary: Update a participant
@@ -1464,7 +1468,11 @@ paths:
         schema:
           type: string
           maxLength: 64
-        description: Participant/Player ID.
+        description: |
+          Participant identifier. Either the participant's stable UUID, or — for
+          legacy rosters without UUIDs — the composite `name|dojo` key the client
+          sends for ID-less rows (resolved server-side, UUID first then the
+          name|dojo fallback).
     put:
       tags: [participants]
       summary: Check in a single participant

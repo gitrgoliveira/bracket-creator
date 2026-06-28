@@ -1188,7 +1188,8 @@ paths:
         required: true
         schema:
           type: string
-        description: Participant/Player ID.
+          maxLength: 64
+        description: Participant/Player ID (UUID).
     put:
       tags: [participants]
       summary: Update single participant details
@@ -1214,12 +1215,17 @@ paths:
                   maxLength: 100
                 metadata:
                   type: array
+                  maxItems: 16
                   items:
                     type: string
+                    maxLength: 200
                 danGrade:
                   type: string
+                  maxLength: 200
+                  description: Dan grade; persisted as a metadata entry.
                 tag:
                   type: string
+                  maxLength: 200
       responses:
         '200':
           description: Participant updated successfully.
@@ -1808,11 +1814,22 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Conflict (e.g. current Swiss round has incomplete matches).
+          description: Current Swiss round has incomplete matches.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [round_incomplete]
+                    description: Machine-readable conflict code.
+                  round:
+                    type: integer
+                    description: The incomplete round number.
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2301,6 +2318,17 @@ components:
             (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
             field is accepted but silently ignored — the `TOURNAMENT_ADMIN_PASSWORD_HASH`
             env var is the authoritative elevated credential.
+        checkInWindowStart:
+          type: string
+          maxLength: 8
+          description: >
+            Global check-in window open time (HH:MM). Displayed in the viewer as a status
+            banner ("pending / open / closed"). Informational only — does not block
+            check-in API calls outside the window.
+        checkInWindowEnd:
+          type: string
+          maxLength: 8
+          description: Global check-in window close time (HH:MM).
 
     Competition:
       type: object
@@ -2398,6 +2426,14 @@ components:
         maxEnchoPeriods:
           type: integer
           description: Maximum number of encho (extended time) periods permitted per match.
+        checkInEnabled:
+          type: boolean
+          description: >
+            When true, the check-in workflow is active for this competition.
+            A check-in panel is shown in the viewer roster screen and operators
+            can mark participants as checked in via the admin UI or the API.
+            Check-in state is informational — the draw pipeline does not filter
+            out unchecked participants.
         players:
           type: array
           description: >
@@ -2467,7 +2503,15 @@ components:
           maxLength: 200
         checkedIn:
           type: boolean
-          description: True when the participant has checked in.
+          readOnly: true
+          description: >
+            True when the participant has checked in. Read-only in the
+            `POST /api/competitions/{id}/participants` request body —
+            the server preserves existing check-in state on bulk import
+            and ignores any incoming `checkedIn` value. Use the dedicated
+            check-in endpoints (`PUT /…/participants/{pid}/checkin`,
+            `POST /…/participants/checkin-bulk`, `DELETE /…/checkin`) to
+            manage check-in state.
 
     BulkCheckInResult:
       type: object

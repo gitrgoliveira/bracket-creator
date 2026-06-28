@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "test:render": "vitest run --config vitest.config.render.js",
     "lint": "eslint . --max-warnings 0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@vitejs/plugin-react": "^6.0.1",
@@ -16,9 +18,19 @@
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
+    "jsqr": "^1.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "vitest": "^4.1.6"
   },
   "dependencies": {
     "preact-router": "^4.1.2"
+  },
+  "overrides": {
+    "eslint-plugin-react": {
+      "eslint": "$eslint"
+    },
+    "vite": "^8.0.16",
+    "undici": "^7.28.0"
   }
 }

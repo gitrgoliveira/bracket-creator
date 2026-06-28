@@ -153,8 +153,8 @@ To save the bulk import, click the **Apply** button at the bottom of the right c
 
 To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
 1. Click the edit pencil icon next to the participant's name in the Centre Column.
-2. In the modal that appears, modify the name, dojo, dan grade, display name, or seed.
-3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` (and `seeds.csv` if the seed was changed) without disrupting existing check-in or seeding states.
+2. In the modal that appears, modify the name, dojo, dan grade, or display name.
+3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed separately via the Seeds tab.
 
 #### Optional Check-in Workflow
 
@@ -162,7 +162,7 @@ You can enable check-in for any competition in its **Settings** tab. When check-
 - A check-in panel displays in the viewer roster screen.
 - A **Check-in window** (configurable via tournament settings as `Check-in window start/end`) displays a status banner indicating if the window is pending, open, or closed.
 - Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check-in all** to check in everyone.
-- *Rule invariant*: Competitors who are not checked in by the time the draw is generated are excluded from the draw.
+- Check-in state is informational: it is visible in the admin and viewer UI but does not automatically exclude unchecked participants from the draw. The operator is responsible for removing no-shows before clicking **Generate Draw**.
 
 #### The Draw-Preview (status `draw-ready`) Workflow
 
@@ -171,8 +171,8 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 1. Under the setup tab, after importing and checking in all players, click **Generate Draw**.
 2. The competition transitions to the **`draw-ready`** status.
 3. An interactive draw preview appears, showing the generated pools, bracket structure, or Swiss Round 1 pairings. 
-4. While a draw is in the `draw-ready` status, **participant edits and check-ins are locked** to prevent TOCTOU data corruption.
-5. If the draw is satisfactory, click **Start Competition**. This transitions the status to `pools` (for mixed), `playoffs` (for playoffs-only), or `swiss` (for Swiss format) and exposes the matches to scorers and the public viewer.
+4. While a draw is in the `draw-ready` status, **participant roster edits are locked** to prevent TOCTOU data corruption. Check-in toggles remain available during this phase.
+5. If the draw is satisfactory, click **Start Competition**. This transitions the status to `pools` (for mixed and Swiss formats) or `playoffs` (for playoffs-only) and exposes the matches to scorers and the public viewer.
 6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard Draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
 
 ### Live tournament play
@@ -188,10 +188,10 @@ After all pool matches are complete, advance the pool winners to the elimination
 #### Swiss format tournament flow
 
 For large individual tournaments using the **Swiss** format:
-1. **Round Generation**: Click **Generate Round 1** (or the next round) to pair players with equal or similar win records (winners face winners). The competition status moves to `swiss`, and current Swiss round matches are generated.
+1. **Start**: Click **Start Competition**. The competition transitions to `pools` status (the same lifecycle status used for mixed/league formats) and Round 1 pairings are generated, pairing players with equal or similar win records (winners face winners).
 2. **Match Completion**: Scorers record match outcomes. A Swiss round must have all matches completed before the operator can generate the next round.
 3. **Cumulative Standings**: Standings are calculated in real time based on wins, points scored, head-to-head records, and stable alphabetical sorting. This cumulative standings view is public (no authentication required) so spectators can track who is leading the field at any point.
-4. **Advancement**: Click **Generate next round** to compute pairings for the subsequent round. This updates `swissCurrentRound` and broadcasts `swiss_round_generated` SSE events to refresh all screens.
+4. **Advancement**: Click **Generate next round** to compute pairings for the subsequent round. This increments `swissCurrentRound` and broadcasts `swiss_round_generated` SSE events to refresh all screens.
 
 ### Export & print
 

@@ -299,7 +299,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // until the operator re-submits; the queue keeps auto-retrying meanwhile.
   useEffectA(() => {
     if (!m.compId || !m.id) return;
-    if (window.API && window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+    if (window.API && typeof window.API.hasPendingTerminalWrite === 'function'
+        && window.API.hasPendingTerminalWrite(m.compId, m.id)) {
       setPendingWrite(true);
     }
   }, [m.compId, m.id]);
@@ -309,9 +310,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // closure. Uses mountedRef guard so setState never fires after unmount.
   useEffectA(() => {
     if (!m.compId || !m.id) return;
+    // Guard the window globals: in unit/render tests (and during boot ordering)
+    // subscribeSyncStatus / API can be absent — mirror SyncStatusPill's guard so
+    // the modal never throws on mount.
+    if (typeof window.subscribeSyncStatus !== 'function') return;
     const unsub = window.subscribeSyncStatus((status) => {
       if (!mountedRef.current) return;
-      if (status === 'synced' && !window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === 'function')
+        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
+        : false;
+      if (status === 'synced' && !stillPending) {
         setPendingWrite(false);
         pendingFnRef.current = null;
       }

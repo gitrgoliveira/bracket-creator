@@ -156,7 +156,7 @@ To save the bulk import, click the **Apply** button at the bottom of the right c
 To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
 1. Click the edit pencil icon next to the participant's name in the Centre Column.
 2. In the modal that appears, modify the name, dojo, dan grade, or display name.
-3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed separately via the Seeds tab.
+3. Click **Save Changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Centre Column (Participants & Seeds) described above, via drag-and-drop or the seed-rank input — not in a separate tab.
 
 #### Optional Check-in Workflow
 

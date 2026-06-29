@@ -96,7 +96,19 @@ Each shiai-jo runs **one digital scoreboard** on a TV or projector: a court-scop
 
 ## Admin console
 
-Click **Admin** and enter the tournament password to access the admin console. The server runs in one of two authentication modes; see [Admin authentication](#admin-authentication) below.
+Click **Admin** and enter the tournament password to access the admin console. How the password is stored is set by the [authentication mode](#admin-authentication) (file or locked); *who is allowed to act* is set by the tournament mode just below.
+
+### Tournament mode: officiated or self-run
+
+Every tournament is created in one of two **modes**, which decide who may run and score matches. The mode is chosen once during **Create tournament** and **cannot be changed afterward**. (This is separate from the file/locked authentication modes below, which only control how the admin password is stored.)
+
+- **Officiated** (default): the admin password gates the **whole** operator surface. Scoring, check-in, and drawing or starting competitions all happen behind the password, so every result is recorded as entered by an operator.
+- **Self-run**: constructive actions, **scoring, check-in, starting and completing competitions**, are **public** with no admin password, so competitors or table helpers can run and score their own matches. Only **destructive** actions (deleting a competition, editing the roster, discarding a draw) stay gated, behind the [destructive-ops password](#destructive-ops-password-second-password). Self-run also opens a public **self-registration** page where competitors enter themselves (that page returns 404 in officiated mode).
+
+In self-run, each result records its provenance: a score entered by the public is tagged **self-reported**, while one entered by an operator (with the destructive-ops password) is tagged **admin**. In officiated mode every result is **admin**.
+
+!!! note
+    In **file mode**, a self-run tournament must have a destructive-ops password set, otherwise destructive actions would have no gate at all.
 
 ### Admin authentication
 

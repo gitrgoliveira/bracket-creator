@@ -292,7 +292,7 @@ For large individual tournaments using the **Swiss** format:
 
 ### Team lineups
 
-In team competitions you set each team's **fighting order** across the positions Senpo, Jiho, Chuken, Fukusho, and Taisho (or fewer for smaller team sizes). A lineup is set **per team match**, and you can reuse the previous round's order with **Copy from previous match**. The editor enforces the FIK rules for an incomplete team: Senpo and Taisho must always be filled; a single vacancy must be Jiho, two vacancies must be Jiho and Fukusho, and three or more empty positions disqualify the team. Lineups appear on the viewer, the court display, and the streaming overlay.
+In team competitions you set each team's **fighting order** across the positions Senpo, Jiho, Chuken, Fukusho, and Taisho (or fewer for smaller team sizes). A lineup is set **per team match**, and you can reuse the previous round's order with **Copy from previous match**. The app applies the FIK rules for an incomplete team: Senpo and Taisho must always be filled; a single vacancy must be Jiho, two vacancies must be Jiho and Fukusho, and three or more empty positions disqualify the team. Because lineups are often filled in as the round runs, the app flags a lineup that breaks these rules as a warning rather than blocking the save, so you can complete it as you go. Lineups appear on the viewer, the court display, and the streaming overlay.
 
 ### Recording match decisions
 
@@ -303,7 +303,7 @@ Not every bout is decided on points. The score editor records the kendo outcomes
 - **Daihyosen** (a representative bout) to settle a tied team encounter in the knockout.
 - **Hikiwake** (a draw) in pools.
 
-A kiken or fusenpai marks the loser ineligible for further matches, and the app blocks starting an ineligible competitor until they are reinstated, so a withdrawal cannot silently re-enter the draw.
+A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches, and the app blocks starting an ineligible competitor until they are reinstated, so a withdrawal cannot silently re-enter the draw.
 
 ### Awards and winners
 

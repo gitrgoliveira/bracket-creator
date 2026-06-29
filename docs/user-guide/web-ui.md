@@ -1,5 +1,7 @@
 # Web UI
 
+This is the **organiser's** tool for the days before the event: turn a roster into a print-ready bracket, no command line required. On the day, the [live tournament app](mobile-app.md) takes over for scorers, competitors, and spectators.
+
 The web UI lets you generate brackets without using the command line. Start it with:
 
 ```bash

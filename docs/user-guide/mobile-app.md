@@ -51,10 +51,27 @@ New to the app? This is the fastest path from a running server to live results o
 
 Everything below is reference: [authentication and security](#admin-authentication), the full setup and check-in options, the Swiss flow, scheduling, and the on-disk [data format](#data-format). Reach for it when you need it, not before.
 
+## Who uses what
+
+A tournament has several audiences and roles, and each maps to a different surface of the app. These needs come from [Running a Kendo Tournament](https://github.com/gitrgoliveira/bracket-creator/blob/main/running_a_kendo_tournament.md#information-needs-by-audience) (on GitHub).
+
+| Who | What they need | Where in the app |
+|-----|----------------|------------------|
+| **Competitors and teams** | their next match, and roughly how many bouts until it | Public viewer: add yourself to the **Watchlist** for an on-deck alert; your competition's schedule shows the bouts ahead of yours |
+| **Coaches** | when their players or a whole dojo fight; results so far | Public viewer: watch a player or a dojo on the Watchlist; recent results per competition |
+| **Spectators** | who is fighting where, with live scores | Public viewer: the all-shiai-jo schedule and live standings |
+| **Lobby / outside screen** | progress across every court at a glance | A TV on `/display?court=all` (all courts) or `/display?court=A` (one court) |
+| **Table operator** | record results for their court | Admin: the court's shiai-jo operator view and the score editor |
+| **Court manager** | call competitors, watch the queue | Admin: the shiai-jo view (current match plus the upcoming queue) |
+| **Tournament manager** | oversee all courts; set times, move matches | Admin: the [dashboard](#dashboard) and the [Tournament schedule](#tournament-schedule) |
+
+The public surfaces (viewer, displays) need no password; the operator and manager surfaces sit behind the [admin password](#admin-console).
+
 ## Public viewer
 
-The default view requires no password. It shows:
+The default view needs no password: it is the one screen **competitors, coaches, and spectators** share. It shows:
 
+- A personal **Watchlist**: track yourself, specific competitors, or a whole dojo, and get an on-deck nudge as a watched match approaches, so players know when to warm up and coaches know when to be matside.
 - The full match schedule across all shiai-jo, filterable by player or team.
 - Pool standings updated in real time as scores are entered.
 - The elimination bracket as it fills in.
@@ -67,7 +84,7 @@ Tap a competition to drill into its schedule, pool standings, and bracket. Aka (
 
 ### Scoreboards and court displays
 
-For a TV or projector at each shiai-jo, open a court-scoped display (no password):
+For a TV or projector, open a court-scoped display (no password). The single-court view is the per-shiai-jo scoreboard the audience at that court watches; the all-courts view is the **outside / lobby screen** from the tournament guide, the progress board for spectators and competitors waiting to fight.
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.

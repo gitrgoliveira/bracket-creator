@@ -18,6 +18,11 @@
 	/* Brand navy: hover/focus/active states + in-prose links. 12.3:1 on white. */
 	--md-accent-fg-color: #1d3557;
 	--md-typeset-a-color: #1d3557;
+
+	/* Paper is a near-white tinted a whisper toward the brand navy (hue ~225),
+	 * rather than pure #fff, so the reading surface reads as the product's own
+	 * rather than a default white. Body text still clears ~16:1. */
+	--md-default-bg-color: #fbfcfe;
 }
 
 /* Dark (slate) scheme */

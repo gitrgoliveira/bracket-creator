@@ -60,7 +60,8 @@ A tournament has several audiences and roles, and each maps to a different surfa
 | **Competitors and teams** | their next match, and roughly how many bouts until it | Public viewer: add yourself to the **Watchlist** for an on-deck alert; your competition's schedule shows the bouts ahead of yours |
 | **Coaches** | when their players or a whole dojo fight; results so far | Public viewer: watch a player or a dojo on the Watchlist; recent results per competition |
 | **Spectators** | who is fighting where, with live scores | Public viewer: the all-shiai-jo schedule and live standings |
-| **Lobby / outside screen** | progress across every court at a glance | A TV on `/display?court=all` (all courts) or `/display?court=A` (one court) |
+| **Referees and the two competitors** | the agreed live score for the bout in front of them | The court **scoreboard** on a TV: `/display?court=A` |
+| **Lobby / outside screen** | progress across every court at a glance | A TV on `/display?court=all` (all courts) |
 | **Table operator** | record results for their court | Admin: the court's shiai-jo operator view and the score editor |
 | **Court manager** | call competitors, watch the queue | Admin: the shiai-jo view (current match plus the upcoming queue) |
 | **Tournament manager** | oversee all courts; set times, move matches | Admin: the [dashboard](#dashboard) and the [Tournament schedule](#tournament-schedule) |
@@ -84,7 +85,7 @@ Tap a competition to drill into its schedule, pool standings, and bracket. Aka (
 
 ### Scoreboards and court displays
 
-For a TV or projector, open a court-scoped display (no password). The single-court view is the per-shiai-jo scoreboard the audience at that court watches; the all-courts view is the **outside / lobby screen** from the tournament guide, the progress board for spectators and competitors waiting to fight.
+For a TV or projector, open a court-scoped display (no password). The single-court view is the shiai-jo **scoreboard**, the live score for the current bout, read by the **referees** (confirming it matches their calls), the **two competitors**, the **scoring operator** (a check against what they entered), and spectators at that court. The all-courts view is the **outside / lobby screen** from the tournament guide, the progress board for everyone waiting to fight.
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.

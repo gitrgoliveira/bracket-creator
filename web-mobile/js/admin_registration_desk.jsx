@@ -894,7 +894,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 return (
                   <div className="rd-handoff" role="status" aria-live="polite">
                     <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
-                    <div className="rd-handoff__lead"><RdCheckIcon /> Checked in : <strong>{handoff.name}</strong></div>
+                    <div className="rd-handoff__lead"><RdCheckIcon /> Checked in: <strong>{handoff.name}</strong></div>
                     {visibleTags.length > 0 && (
                       <div className="rd-handoff__tags">
                         {visibleTags.map((t, i) => (

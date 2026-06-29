@@ -811,7 +811,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               precedence over the (now-cleared) pending banner. */}
           {writeFailed && (
             <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
-              <span>Not saved : {writeFailed.reason}. Re-enter the result and submit again.</span>
+              <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
               {/* Only offer Retry when we still hold the submit closure. After a
                   reopen/hydration it can't be recovered from the serialized queue,
                   so a Retry button would be permanently disabled and misleading: 

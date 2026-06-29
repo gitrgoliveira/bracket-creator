@@ -416,7 +416,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     Remove unscored tie-breaker
                   </button>
                   {dhScored && (
-                    <span className="field__hint">Tie-breaker is running or already scored : score it to continue.</span>
+                    <span className="field__hint">Tie-breaker is running or already scored: score it to continue.</span>
                   )}
                 </>
               )}

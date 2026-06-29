@@ -1128,7 +1128,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                         </div>
                     ) : (
                         <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                            {match.compName} : {phaseLabel}. Bracket context appears here for elimination matches.
+                            {match.compName}: {phaseLabel}. Bracket context appears here for elimination matches.
                         </p>
                     )}
                 </div>

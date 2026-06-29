@@ -924,7 +924,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   ⚠ {seedImportResult.unmatched.length} row{seedImportResult.unmatched.length !== 1 ? "s" : ""} not matched:
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                     {seedImportResult.unmatched.map(({ name, suggestion }) => (
-                      <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}> : did you mean <em>{suggestion}</em>?</span> : ""}</li>
+                      <li key={name}>{name}{suggestion ? <span style={{ color: "var(--ink-3)" }}>, did you mean <em>{suggestion}</em>?</span> : ""}</li>
                     ))}
                   </ul>
                 </div>

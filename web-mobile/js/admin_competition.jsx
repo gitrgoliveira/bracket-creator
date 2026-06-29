@@ -264,7 +264,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                 )}
                 {excludedFromDraw > 0 && (
                   <div style={{ color: "var(--ink-3)", fontSize: 11, fontWeight: 600 }}>
-                    {excludedFromDraw} not checked in : will be excluded from the draw
+                    {excludedFromDraw} not checked in, will be excluded from the draw
                   </div>
                 )}
               </>
@@ -285,7 +285,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated : preview below, then start. To change it, discard and edit first.</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
               </div>
             )}
             {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (

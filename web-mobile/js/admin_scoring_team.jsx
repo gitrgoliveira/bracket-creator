@@ -77,7 +77,7 @@ function positionAbbrevFor(teamSize, index, sub) {
 // teamResultLabel: the RESULT-band / Finish-button verdict text for a team
 // encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
 // FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
-// "DAIHYOSEN" once a scored tie exists to break, or ": " before any bout lands.
+// "DAIHYOSEN" once a scored tie exists to break, or "-" before any bout lands.
 // Only a pool encounter reads a null winner as a true draw. (a = Aka, b = Shiro.)
 export function teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore }) {
   if (teamWinner === "a") return "AKA WIN";
@@ -97,7 +97,7 @@ export function isKoTieBlocked({ isKnockoutPhase, teamWinner, isComplete }) {
 // IV/PW totals capture decisive bouts and scored draws, but a drawn (hikiwake)
 // bout scored 0–0 contributes neither while still being a real result. Without
 // counting those, a KO encounter tied solely on 0–0 draws would read pending
-// (": ") instead of "DAIHYOSEN". The daihyosen row is excluded to mirror the
+// ("-") instead of "DAIHYOSEN". The daihyosen row is excluded to mirror the
 // IV/PW totals (it is the tiebreaker, not a counting bout).
 export function teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx }) {
   if ((ivA + ivB + pwA + pwB) > 0) return true;
@@ -507,11 +507,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // A knockout encounter cannot end in a draw: a tie is resolved by a
   // representative bout (daihyosen), not recorded as hikiwake. So in a KO phase
   // a null teamWinner is never "DRAW": it's "DAIHYOSEN" once there's a scored
-  // tie to break, or simply pending (": ") before any bout lands. Only pool
+  // tie to break, or simply pending ("-") before any bout lands. Only pool
   // matches read a null winner as a true draw.
   // A drawn (hikiwake) sub-bout produces no IV or PW but is still a landed
   // result, so a KO encounter tied solely on 0–0 draws must read "DAIHYOSEN",
-  // not pending (": "). teamEncounterHasResult folds those draws in.
+  // not pending ("-"). teamEncounterHasResult folds those draws in.
   const teamHasAnyScore = teamEncounterHasResult({ ivA, ivB, pwA, pwB, subTotals, daihyosenIdx });
   const teamVerdictText = teamResultLabel({ teamWinner, isKnockoutPhase, hasAnyScore: teamHasAnyScore });
   // Block Finish while a KO encounter has no winner: the operator must add and
@@ -767,7 +767,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 { incomplete: lineupIncompleteA, label: "AKA" },
               ].map(({ incomplete, label }) => incomplete ? (
                 <div key={label} className="tsm-lineup__incomplete">
-                  {label}: Lineup incomplete : add the remaining players
+                  {label}: Lineup incomplete, add the remaining players
                 </div>
               ) : null)}
             </div>
@@ -1283,7 +1283,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <GlossaryHintAS name="fusenpai" />
               </div>
               <span style={{ color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>
-                (<TermAS name="fusensho">Fusensho</TermAS> is per-bout : use the "Fusensho" button on each row above.)
+                (<TermAS name="fusensho">Fusensho</TermAS> is per-bout: use the "Fusensho" button on each row above.)
               </span>
             </div>
           )}

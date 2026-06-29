@@ -221,7 +221,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             {comp?.name} · Round {round + 1}
           </div>
           <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
-            {team?.name || team?.Name || "Team"} : Lineup
+            {team?.name || team?.Name || "Team"}: Lineup
           </h2>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
             {teamSize}-person team

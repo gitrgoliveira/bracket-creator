@@ -127,10 +127,10 @@ gcloud compute disks snapshot <disk-name> \
 
 | Variable | Default | Description |
 |---|---|---|
-| `project` |: | GCP project ID |
+| `project` | (none) | GCP project ID |
 | `region` | `us-central1` | Must be us-west1/us-central1/us-east1 |
 | `zone` | `""` (auto) | Zone within the region |
-| `hostname` |: | FQDN for the app |
+| `hostname` | (none) | FQDN for the app |
 | `image_ref` | lean mobile image | Docker image tag |
 | `lock_password` | `false` | Enable bcrypt locked mode |
 | `tournament_password_hash` | `""` | Bcrypt hash (sensitive) |
@@ -138,7 +138,7 @@ gcloud compute disks snapshot <disk-name> \
 | `api_rate_limit` | `500` | Global API requests/sec limit (conservative default; raise for larger events) |
 | `api_rate_limit_burst` | `1000` | Global API rate-limit burst |
 | `ssh_user` | `ubuntu` | SSH username |
-| `ssh_pubkey` |: | SSH public key |
+| `ssh_pubkey` | (none) | SSH public key |
 | `operator_cidrs` | `[]` | CIDRs allowed SSH (empty = all) |
 | `reserve_static_ip` | `false` | Reserve a stable static IP |
 

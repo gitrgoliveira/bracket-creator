@@ -438,8 +438,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
               {tournamentMode === "self-run"
-                ? " : Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
-                : " : All admin actions require the tournament password."}
+                ? ": Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
+                : ": All admin actions require the tournament password."}
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
@@ -912,7 +912,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                       onChange={(e) => setDate(e.target.value)}
                     >
                       {days.map((d, i) => (
-                        <option key={d} value={d}>Day {i + 1} : {d}</option>
+                        <option key={d} value={d}>Day {i + 1}: {d}</option>
                       ))}
                     </select>
                   );

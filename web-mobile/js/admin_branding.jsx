@@ -179,7 +179,7 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
             <div className="field">
               <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
               <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
-              <div className="field__hint">Square image recommended : non-square images will be cropped to fit the top bar icon.</div>
+              <div className="field__hint">Square image recommended: non-square images will be cropped to fit the top bar icon.</div>
             </div>
             <div className="branding__logo-actions">
               <button type="submit" className="btn btn--primary" disabled={busy}>{busy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}</button>

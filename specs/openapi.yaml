@@ -2137,7 +2137,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [error]
+                required: [error, code, round]
                 properties:
                   error:
                     type: string

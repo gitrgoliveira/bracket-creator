@@ -277,6 +277,8 @@ A competition's **Export & print** offers two formats:
 - **Excel (`.xlsx`)**: the print-ready bracket workbook (pool draws, schedules, and trees). Always available, with no extra dependencies.
 - **PDF** (competitor tags, name sheets, and bracket trees): an admin-only export that renders the spreadsheets through **LibreOffice**, so the server needs `soffice` available. Use the PDF-enabled image `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest`, or install LibreOffice on the host. The default lean image omits it to stay small; without LibreOffice the app returns a clear message rather than a broken file.
 
+**QR codes on competitor tags.** When the tournament's **public URL** is set and competitors have numbers, each numbered tag carries a **QR code** that opens that competitor's page on the public viewer (their schedule and results) when scanned, so a player can scan their own tag to follow their matches. Set the public URL under **Admin** (the tournament's details) to an address competitors' phones can reach, for example your deployed `https://...` site (see [Hosting the live app](hosting.md)). Without a public URL the tags still print, just without the QR.
+
 ## Data format
 
 State is stored as plain files in the data folder:

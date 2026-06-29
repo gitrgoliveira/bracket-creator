@@ -34,9 +34,11 @@ Provide **exactly one**:
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--output` | `-o` | Output PDF path for a single `--type` |
-| `--output-dir` | | Output directory (required for `--type=all`, or to use default filenames) |
+| `--output` | `-o` | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
+| `--output-dir` | | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
 | `--team-file` | | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable; defaults to any filename containing `team`. |
+
+An output target is always required: for a single `--type`, provide exactly one of `--output` or `--output-dir`; `--type=all` requires `--output-dir` (and rejects `--output`).
 
 ## Usage
 

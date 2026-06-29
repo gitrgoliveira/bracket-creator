@@ -1,12 +1,12 @@
-# Bracket Creator — Workspace Instructions
+# Bracket Creator: Workspace Instructions
 
 A Go CLI tool for generating kendo tournament brackets with pool stages and playoff knockouts. Outputs Excel files with formula-linked cells for bracket visualization. Includes a web UI (Gin) for interactive tournament creation.
 
 ## Architecture
 
 ### Dual Domain Model (In Transition)
-- **Legacy**: `internal/helper` types include Excel coordinates (`sheetName`, `cell` fields) — **still the primary implementation**
-- **Modern**: `internal/domain` types are clean domain models — being phased in gradually
+- **Legacy**: `internal/helper` types include Excel coordinates (`sheetName`, `cell` fields): **still the primary implementation**
+- **Modern**: `internal/domain` types are clean domain models: being phased in gradually
 - When working with tournament logic, expect Excel coordinate coupling in helper package types
 
 ### Excel-Centric Design
@@ -16,12 +16,12 @@ A Go CLI tool for generating kendo tournament brackets with pool stages and play
 - `excel.Client` manages file lifecycle, `excel.SheetManager` handles sheet operations
 
 ### Key Packages
-- `cmd/` — Cobra commands with options structs (each has a `run()` method)
-- `internal/domain` — Domain models (Player, Pool, Tournament, Match, Seed)
-- `internal/service` — Business logic orchestration
-- `internal/helper` — **Core logic**: CSV parsing, pool/match generation, tree building, Excel rendering
-- `internal/excel` — Excel file management (Client, SheetManager, StyleManager)
-- `internal/resources` — Embedded files (web UI, Excel templates) injected via `ExecuteWithResources()`
+- `cmd/`: Cobra commands with options structs (each has a `run()` method)
+- `internal/domain`: Domain models (Player, Pool, Tournament, Match, Seed)
+- `internal/service`: Business logic orchestration
+- `internal/helper`: **Core logic**: CSV parsing, pool/match generation, tree building, Excel rendering
+- `internal/excel`: Excel file management (Client, SheetManager, StyleManager)
+- `internal/resources`: Embedded files (web UI, Excel templates) injected via `ExecuteWithResources()`
 
 ### Seeding System
 - `StandardSeeding()` positions seeded players using `generateBracketOrder()`
@@ -76,7 +76,7 @@ make docker/run
 - **Co-location**: Test files alongside source files (`*_test.go`)
 
 ### Test Patterns
-- **Table-driven tests**: Use `t.Run()` with subtests for multiple cases — see [internal/helper/seed_test.go](internal/helper/seed_test.go), [cmd/serve_test.go](cmd/serve_test.go)
+- **Table-driven tests**: Use `t.Run()` with subtests for multiple cases: see [internal/helper/seed_test.go](internal/helper/seed_test.go), [cmd/serve_test.go](cmd/serve_test.go)
 - **Test helpers**: Leverage `internal/test/helpers.go` factories (`CreateTestPlayers`, `CreateTestPools`, `CreateTestTournament`)
 - **Assertions**: `github.com/stretchr/testify/assert` for non-fatal checks, `require` for fatal errors
 - **Mocking**: Manual mocks with `testify/mock` (no code generation tools)
@@ -129,6 +129,6 @@ make docker/run
 
 ## Further Reading
 
-- [README.md](../README.md) — CLI usage, quickstart, Docker setup
-- [docs/dev-guide/](../docs/dev-guide/) — Contributing guidelines, code of conduct
-- [specs/](../specs/) — Feature specifications with data models and plans
+- [README.md](../README.md): CLI usage, quickstart, Docker setup
+- [docs/dev-guide/](../docs/dev-guide/): Contributing guidelines, code of conduct
+- [specs/](../specs/): Feature specifications with data models and plans

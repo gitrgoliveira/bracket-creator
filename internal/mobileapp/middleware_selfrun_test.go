@@ -104,7 +104,7 @@ func jsonReq(method, path string, body any) *http.Request {
 }
 
 // ---------------------------------------------------------------------------
-// §1 Auth matrix: officiated mode (baseline — no regression)
+// §1 Auth matrix: officiated mode (baseline, no regression)
 // ---------------------------------------------------------------------------
 
 // In officiated mode every admin route still requires X-Tournament-Password.
@@ -134,7 +134,7 @@ func TestSelfRun_OfficiatedMode_RequiresMainPassword(t *testing.T) {
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			// Not checking for 200 because competition/tournament resources
-			// may not exist — just assert it's not a 401.
+			// may not exist, just assert it's not a 401.
 			assert.NotEqual(t, http.StatusUnauthorized, w.Code,
 				"correct password must clear the main gate on %s %s", tc.method, tc.path)
 		})
@@ -205,7 +205,7 @@ func TestSelfRun_SelfRunMode_GETTournament_RequiresMainPassword(t *testing.T) {
 
 // PUT /api/tournament is a tournament-configuration mutation (password, courts,
 // check-in windows). In self-run mode the operational pass-through does NOT
-// apply to it — the main gate fires normally so anonymous callers cannot
+// apply to it, the main gate fires normally so anonymous callers cannot
 // tamper with tournament setup. The SPA always sends X-Tournament-Password
 // on PUT /api/tournament even in self-run mode, so this is transparent.
 func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
@@ -222,7 +222,7 @@ func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
 
 	t.Run("no_pw_returns_401", func(t *testing.T) {
 		req := jsonReq(http.MethodPut, "/api/tournament", putBody)
-		// No X-Tournament-Password — must be rejected (configuration mutation).
+		// No X-Tournament-Password, must be rejected (configuration mutation).
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusUnauthorized, w.Code,
@@ -240,7 +240,7 @@ func TestSelfRun_SelfRunMode_PUTTournament_RequiresMainPassword(t *testing.T) {
 }
 
 // Competition configuration mutations (create a competition, edit competition
-// config) are organiser setup, NOT operational play — like PUT /api/tournament
+// config) are organiser setup, NOT operational play, like PUT /api/tournament
 // they stay main-gated in self-run mode (mp-7h7 / Copilot #203 sibling audit).
 // Without this an anonymous client could create or reconfigure competitions in
 // a self-run tournament. These routes are not elevated-gated, so the main gate
@@ -270,7 +270,7 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 			req.Header.Set("X-Tournament-Password", "main-pw")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
-			// Past the main gate — downstream may 400/404 on the body/id, but
+			// Past the main gate, downstream may 400/404 on the body/id, but
 			// never 401 (the invariant under test).
 			assert.NotEqual(t, http.StatusUnauthorized, w.Code,
 				"correct main password must clear the gate on %s %s (got %d)", tc.method, tc.path, w.Code)
@@ -378,7 +378,7 @@ func TestSelfRun_FailOpenGuard_CreationWithoutAdminPw_Rejected(t *testing.T) {
 // atomically with creation so the fail-open guard passes, the tournament is
 // persisted WITH the credential, and the destructive routes are gated by it.
 //
-// This exercises the path the browser/SPA actually uses — the prior
+// This exercises the path the browser/SPA actually uses, the prior
 // store-seeding test bypassed it, which is why the "creation impossible via
 // real API" bug slipped through.
 func TestSelfRun_FailOpenGuard_CreationWithBodyAdminPw_Atomic(t *testing.T) {
@@ -434,7 +434,7 @@ func TestSelfRun_FailOpenGuard_CreationWithBodyAdminPw_Atomic(t *testing.T) {
 	})
 
 	t.Run("constructive route is public", func(t *testing.T) {
-		// Use GET /api/competitions — GET /api/tournament is main-gated in
+		// Use GET /api/competitions, GET /api/tournament is main-gated in
 		// self-run (file-mode password leak prevention, fix 3329406556).
 		reqPub := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
 		wPub := httptest.NewRecorder()
@@ -468,7 +468,7 @@ func TestSelfRun_FailOpenGuard_CreationWithExistingAdminPw_Allowed(t *testing.T)
 	// Re-POST (re-bootstrap) with mode:"self-run" in body, but no adminPassword
 	// in the body. The fail-open guard passes because the handler's preserve step
 	// copies existingForPost.AdminPassword from the prior record.
-	// NOTE: Mode is immutable — the preserve step also copies existingForPost.Mode
+	// NOTE: Mode is immutable, the preserve step also copies existingForPost.Mode
 	// (empty → "officiated"), so the stored record remains officiated regardless
 	// of what mode the body requests. This test exercises the fail-open path, not
 	// self-run creation; for first-create self-run see TestSelfRun_Immutability_POSTPreservesMode.
@@ -489,7 +489,7 @@ func TestSelfRun_FailOpenGuard_CreationWithExistingAdminPw_Allowed(t *testing.T)
 	assert.Equal(t, http.StatusCreated, w.Code,
 		"re-bootstrap must succeed when existing record has admin pw")
 
-	// The stored mode must be "officiated" — mode immutability preserves the
+	// The stored mode must be "officiated", mode immutability preserves the
 	// existing record's mode (empty → officiated) and ignores the body's "self-run".
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
@@ -515,7 +515,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 	store := newTempStore(t)
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	// Step 1: fresh bootstrap as officiated (no auth header needed — bootstrap).
+	// Step 1: fresh bootstrap as officiated (no auth header needed, bootstrap).
 	postBody := map[string]any{
 		"name":     "My Officiated",
 		"date":     "01-06-2026",
@@ -541,7 +541,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 		"GET must return mode=officiated after officiated POST")
 
 	// Step 2: verify self-run mode persists when created as a FRESH tournament
-	// (no prior record — true first bootstrap). Use a clean store with no
+	// (no prior record, true first bootstrap). Use a clean store with no
 	// existing tournament so POST acts as first-create (not re-bootstrap).
 	// Fix 3329416172 makes re-bootstrap preserve the existing mode (immutability),
 	// so we must use a fresh store to actually create a self-run tournament via POST.
@@ -557,7 +557,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 		"mode":          "self-run",
 		"adminPassword": "admin-pw", // required for self-run in file mode
 	}
-	// Fresh bootstrap — no X-Tournament-Password needed (file mode, no record).
+	// Fresh bootstrap, no X-Tournament-Password needed (file mode, no record).
 	req3 := jsonReq(http.MethodPost, "/api/tournament", postSelfRun)
 	w3 := httptest.NewRecorder()
 	r2.ServeHTTP(w3, req3)
@@ -565,7 +565,7 @@ func TestSelfRun_Immutability_POSTPreservesMode(t *testing.T) {
 
 	// GET the tournament and verify mode = self-run.
 	// GET /api/tournament is main-gated in self-run (file-mode password leak
-	// prevention — fix 3329406556), so send the main password.
+	// prevention, fix 3329406556), so send the main password.
 	req4 := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
 	req4.Header.Set("X-Tournament-Password", "main-pw")
 	w4 := httptest.NewRecorder()
@@ -608,7 +608,7 @@ func TestSelfRun_Immutability_PUT_OmittingModePreservesIt(t *testing.T) {
 	seedSelfRunTournament(t, store, "admin-pw")
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	// PUT without mode field — should preserve self-run.
+	// PUT without mode field, should preserve self-run.
 	putBody := map[string]any{
 		"name":   "SelfRun Test",
 		"date":   "01-06-2026",
@@ -738,7 +738,7 @@ func TestSelfRun_LockedMode_DestructiveRoutes_StillRequireAdminPw(t *testing.T) 
 		Venue:    "Dojo",
 		Courts:   []string{"A"},
 		Password: "", // irrelevant in locked mode
-		// No AdminPassword on disk — locked mode reads from env var only.
+		// No AdminPassword on disk, locked mode reads from env var only.
 		Mode: state.TournamentModeSelfRun,
 	})
 	require.NoError(t, err)
@@ -748,17 +748,17 @@ func TestSelfRun_LockedMode_DestructiveRoutes_StillRequireAdminPw(t *testing.T) 
 	// Destructive route without admin header → 503 (lockedUnconfigured elevated
 	// verifier: GateActive==true, Configured==false → 503).
 	req := httptest.NewRequest(http.MethodDelete, "/api/competitions/any-id", nil)
-	// Main password provided (required by locked verifier even in self-run? —
+	// Main password provided (required by locked verifier even in self-run?,
 	// no: self-run skips the main gate, so we send nothing).
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	// 401 (admin pw required but not provided) or 503 (no hash configured).
-	// Either is acceptable — both mean "destructive gate is active."
+	// Either is acceptable, both mean "destructive gate is active."
 	assert.True(t, w.Code == http.StatusUnauthorized || w.Code == http.StatusServiceUnavailable,
 		"locked+self-run destructive route must return 401 or 503, got %d: %s", w.Code, w.Body.String())
 
 	// Constructive route without any header must NOT be 401 in self-run
-	// (main gate is skipped). Use GET /api/competitions — GET /api/tournament
+	// (main gate is skipped). Use GET /api/competitions, GET /api/tournament
 	// is main-gated in self-run to prevent file-mode password leaks (fix 3329406556).
 	req2 := httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
 	w2 := httptest.NewRecorder()
@@ -769,7 +769,7 @@ func TestSelfRun_LockedMode_DestructiveRoutes_StillRequireAdminPw(t *testing.T) 
 
 // Regression (mp-7h7): a locked-mode self-run tournament has an empty on-disk
 // AdminPassword (the env-var bcrypt hash is authoritative). The self-run
-// fail-open guard applies to FILE MODE ONLY — in locked mode the elevated
+// fail-open guard applies to FILE MODE ONLY, in locked mode the elevated
 // gate already fails closed via GateActive(). A routine PUT that edits
 // venue/name MUST therefore succeed. Before the fix the PUT transform guard
 // fired unconditionally on desired.AdminPassword == "", returning 400
@@ -956,12 +956,12 @@ func TestSelfRun_Sponsors_RequireMainPassword(t *testing.T) {
 	t.Run("GET_sponsor_logo_is_public", func(t *testing.T) {
 		// GET /api/sponsors/:file is a public asset endpoint (serves logo to
 		// viewer/TV/lobby). It must NOT require authentication in self-run mode.
-		// A 400 (invalid filename) is fine — the route is reachable without a
+		// A 400 (invalid filename) is fine, the route is reachable without a
 		// password.
 		req := httptest.NewRequest(http.MethodGet, "/api/sponsors/abcdef0123456789.png", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.NotEqual(t, http.StatusUnauthorized, w.Code,
-			"GET /api/sponsors/:file must be public — logo is served to unauthenticated viewer/TV surfaces")
+			"GET /api/sponsors/:file must be public, logo is served to unauthenticated viewer/TV surfaces")
 	})
 }

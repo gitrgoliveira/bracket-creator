@@ -136,7 +136,7 @@ func TestAuthMiddleware_WithTournament_EmptyPassword(t *testing.T) {
 
 // Defense-in-depth for the F4 sentinel-into-auth-field scenario.
 // AuthMiddleware's `password != t.Password` comparison would otherwise
-// be satisfied vacuously when both sides are "" — an unauthenticated
+// be satisfied vacuously when both sides are "", an unauthenticated
 // client sending no `X-Tournament-Password` header would match an
 // empty stored password and reach c.Next(). The POST and PUT handlers
 // in handlers_tournament.go now reject writes that would land an
@@ -187,7 +187,7 @@ func TestAuthMiddleware_LegacyEmptyStoredPassword_NoBypass(t *testing.T) {
 }
 
 // Locked-mode bootstrap (no tournament yet, bcrypt verifier active)
-// must require X-Tournament-Password — anonymous bootstrap on a fresh
+// must require X-Tournament-Password, anonymous bootstrap on a fresh
 // locked deployment would let any network client race-claim the
 // initial tournament record. file-mode bootstrap stays anonymous
 // (existing behavior, covered by TestAuthMiddleware_NoTournament_AllowsCreateTournament).
@@ -238,7 +238,7 @@ func TestAuthMiddleware_LockedMode_BootstrapRequiresAuth(t *testing.T) {
 
 // In locked mode the stored password is always empty (auth comes from the
 // env-var hash). A tournament legitimately named "New Tournament" must NOT
-// be treated as uninitialized — the uninitialized sentinel
+// be treated as uninitialized, the uninitialized sentinel
 // (Name == "New Tournament" && Password == "") only applies in file mode.
 func TestAuthMiddleware_LockedMode_NewTournamentNameNotSentinel(t *testing.T) {
 	gin.SetMode(gin.TestMode)

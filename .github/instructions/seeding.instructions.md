@@ -8,11 +8,11 @@ applyTo: "internal/helper/seed*.go"
 ## How Seeding Works
 - `generateBracketOrder(n)` produces bracket positions (e.g., for 8: `[1,8,4,5,2,7,3,6]`)
 - `StandardSeeding()` places seeded players at bracket positions, fills remaining with unseeded
-- `ApplySeeds()` resolves collisions by **swapping seed values** — never fails on collision
+- `ApplySeeds()` resolves collisions by **swapping seed values**: never fails on collision
 
 ## Validation Rules (from `internal/domain/seed.go`)
 - Seed ranks must be **positive integers**
-- Seed ranks must be **unique** — duplicate ranks are rejected
+- Seed ranks must be **unique**: duplicate ranks are rejected
 - Names must **exactly match** participant names (**case-sensitive**)
 - Empty seed rank = unseeded (placed in remaining pool)
 
@@ -26,4 +26,4 @@ applyTo: "internal/helper/seed*.go"
 1. Always test with 0, 1, 2, and many seeded players
 2. Verify bracket order stays correct for powers of 2 (4, 8, 16, 32)
 3. Check collision swapping doesn't lose any players
-4. Run `make go/test` — seed_test.go has comprehensive table-driven cases
+4. Run `make go/test`: seed_test.go has comprehensive table-driven cases

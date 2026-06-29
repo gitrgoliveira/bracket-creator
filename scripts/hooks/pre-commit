@@ -5,7 +5,7 @@
 # (set by `make hooks/install`, which is also run from `make local/deps`).
 #
 # Goal: catch the cheap, high-frequency breakages (bad gofmt, compile/vet
-# errors) BEFORE a commit — and therefore before Copilot/CI — without paying
+# errors) BEFORE a commit, and therefore before Copilot/CI, without paying
 # the cost of the full `make go/test` (lint + security scan + JS suite) on
 # every commit. Run that heavier gate before pushing instead.
 #
@@ -21,13 +21,13 @@ if [ -z "$staged_go" ]; then
 fi
 
 if ! command -v go >/dev/null 2>&1; then
-  echo "pre-commit: 'go' not found on PATH — skipping Go checks." >&2
+  echo "pre-commit: 'go' not found on PATH, skipping Go checks." >&2
   exit 0
 fi
 
 fail=0
 
-# 1) Formatting — flag (do not auto-rewrite) any staged file gofmt would change.
+# 1) Formatting, flag (do not auto-rewrite) any staged file gofmt would change.
 unformatted=$(gofmt -l $staged_go || true)
 if [ -n "$unformatted" ]; then
   echo "pre-commit: gofmt would reformat these staged files:" >&2
@@ -48,17 +48,17 @@ for stub in commit.txt version.txt build_date.txt; do
   [ -e "$f" ] || : > "$f"
 done
 
-# 2) Vet — type-checks + common-bug analysis across all packages (compiles, so
+# 2) Vet, type-checks + common-bug analysis across all packages (compiles, so
 #    this also catches build breakage). Cache makes the steady-state run fast.
 if ! go vet ./... ; then
-  echo "pre-commit: 'go vet ./...' failed — fix the above before committing." >&2
+  echo "pre-commit: 'go vet ./...' failed, fix the above before committing." >&2
   fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then
   echo "" >&2
   echo "pre-commit gate failed. Re-run after fixing, or bypass with: git commit --no-verify" >&2
-  echo "(The full gate — lint + security + JS — still runs via 'make go/test' before push.)" >&2
+  echo "(The full gate, lint + security + JS, still runs via 'make go/test' before push.)" >&2
   exit 1
 fi
 

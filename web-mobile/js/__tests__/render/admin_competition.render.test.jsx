@@ -2,15 +2,15 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
-// mp-hpe3 Phase 0 safety net — RENDER-SMOKE characterization of the sections
+// mp-hpe3 Phase 0 safety net: RENDER-SMOKE characterization of the sections
 // inside admin_competition.jsx that the upcoming split moves into their own
 // modules: AdminCompOverview, AdminSettings, FightingSpiritAwardsEditor,
 // AdminBracket, and AdminSwissRounds.
 //
 // These components are module-internal (not on window), so they are exercised
 // through the PUBLIC AdminCompetition entry by routing each `section`. That
-// also means the test survives the split unchanged — AdminCompetition stays on
-// window — and pins exactly what a split must preserve: every section must
+// also means the test survives the split unchanged; AdminCompetition stays on
+// window and pins exactly what a split must preserve: every section must
 // still mount with zero console errors. The render harness mounts with REAL
 // React and FAILS on any console.warn/error, so a moved component that
 // references a window.* dep not yet loaded at its render time throws here
@@ -42,7 +42,7 @@ const STUBBED_GLOBALS = {
   // NOTE: the pure helpers admin_competition_* consumes (compMatchStats,
   // hasBothSides, hasPoolOriginPlaceholder, dmyToIso, isoToDmy, isValidDate,
   // validateAndNormalizeDate, decideNumericUpdate, deriveTournamentDays) are
-  // deliberately NOT stubbed here — the render harness (vitest.setup.render.js)
+  // deliberately NOT stubbed here; the render harness (vitest.setup.render.js)
   // loads the real admin_helpers.jsx, so the components run against the genuine
   // implementations and contracts. Hand-rolled stubs drifted from the real
   // signatures/shapes (e.g. decideNumericUpdate is (raw, min), not (field, value)),
@@ -56,7 +56,7 @@ const STUBBED_GLOBALS = {
     addEventListener: noop, removeEventListener: noop,
     addListener: noop, removeListener: noop,
   }),
-  // Dialogs / async — only reached from handlers; safe resolved stubs.
+  // Dialogs / async: only reached from handlers; safe resolved stubs.
   confirmDialog: vi.fn().mockResolvedValue(false),
   promptAdminPassword: vi.fn().mockResolvedValue(null),
   promptDialog: vi.fn().mockResolvedValue(null),
@@ -117,7 +117,7 @@ function makeTournament(comp, overrides = {}) {
 }
 
 // Mount within act() so async effects (e.g. AdminSettings' schedule-estimate
-// fetch) flush and settle their state updates inside the act boundary — the
+// fetch) flush and settle their state updates inside the act boundary: the
 // render harness fails the test on the "not wrapped in act(...)" console.error
 // otherwise. Returns the render result; a throw during mount fails the test.
 async function mountSection(section, { comp = makeCompetition(), tweaks = {} } = {}) {

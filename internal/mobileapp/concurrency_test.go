@@ -1,4 +1,4 @@
-// Phase 12.E — T219: integration-level proof for A2 closure.
+// Phase 12.E, T219: integration-level proof for A2 closure.
 //
 // The hub-level unit tests (broadcast_order_test.go) prove that the seq
 // counter is unique and strictly monotonic under concurrent Broadcast
@@ -13,7 +13,7 @@
 //     goroutine (no torn writes / lost updates).
 //
 // This complements TestScoreHandler_NoDeadlockUnderConcurrentLoad
-// (T156 era) — that test guarantees liveness, this one guarantees SSE
+// (T156 era); that test guarantees liveness, this one guarantees SSE
 // ordering. Both should pass under `go test -race`.
 package mobileapp
 
@@ -80,7 +80,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	admin := r.Group("/api")
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 
-	// Goroutines all fire concurrently — each scores a different match
+	// Goroutines all fire concurrently; each scores a different match
 	// so the per-comp lock is contended on every step (LoadCompetition
 	// to check encho cap, StartMatchTx, RecordMatchResultWithIneligibilityTx,
 	// MaybeAdvanceKachinuki, tryAutoCompletePools).
@@ -164,7 +164,7 @@ func TestConcurrentScoresPreserveOrder(t *testing.T) {
 	select {
 	case <-httpDone:
 	case <-time.After(10 * time.Second):
-		t.Fatal("score writes did not complete within 10s — possible deadlock")
+		t.Fatal("score writes did not complete within 10s; possible deadlock")
 	}
 
 	// Wait briefly for the drain goroutine to settle on the post-write

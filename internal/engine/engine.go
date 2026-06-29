@@ -15,7 +15,7 @@ type standingsCacheEntry struct {
 type Engine struct {
 	store           *state.Store
 	standingsCache  sync.Map // map[compID string]*standingsCacheEntry
-	standingsFlight sync.Map // map[compID string]*sync.Once — collapses concurrent cold-cache calls
+	standingsFlight sync.Map // map[compID string]*sync.Once, collapses concurrent cold-cache calls
 }
 
 func New(store *state.Store) *Engine {

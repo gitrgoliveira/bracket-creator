@@ -1,4 +1,4 @@
-// reset.jsx — the /reset SPA page. Lets an operator who has forgotten
+// reset.jsx: the /reset SPA page. Lets an operator who has forgotten
 // the admin password set a new one without authenticating against the
 // old one (since they don't know it). The backing endpoint is
 // POST /api/tournament/reset (handlers_reset.go); it is unauthenticated
@@ -8,7 +8,7 @@
 //
 // Mounted by app.jsx's parsePath/pathFromState when the URL is /reset.
 // authConfig.resetEnabled (fetched from /api/auth-config on App() mount)
-// gates which UI is shown — form or "operator-disabled" message.
+// gates which UI is shown: form or "operator-disabled" message.
 
 const { useState: useStateR, useEffect: useEffectR, useRef: useRefR } = React;
 
@@ -27,7 +27,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
 
   // authConfig is still loading (null at App mount, undefined if a
   // direct caller omitted the prop). Don't render the active reset
-  // form yet — a direct /reset deep-link on a locked-mode deployment
+  // form yet: a direct /reset deep-link on a locked-mode deployment
   // would otherwise expose the form for the sub-second window before
   // /api/auth-config resolves and the user could submit a password
   // that 404s. fetchAuthConfig always resolves (fail-open to file
@@ -76,7 +76,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
     setErr("");
     try {
       // Pass the per-tab originatorId so the server can echo it on
-      // the SSE password_reset broadcast — without that, the
+      // the SSE password_reset broadcast: without that, the
       // originator tab receives its own event and clears the
       // localStorage credential we're about to write below.
       await window.API.resetPassword(pw, originatorId);
@@ -90,14 +90,14 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
       } catch {
         // localStorage can throw in private-browsing modes; the
         // password rotation still succeeded, so swallow the error
-        // and let onSuccess proceed — the user will just have to
+        // and let onSuccess proceed: the user will just have to
         // sign in again manually.
       }
       onSuccess(pw);
     } catch (e2) {
       if (!mountedRef.current) return;
       // 404 specifically means the server's authConfig says reset is
-      // disabled — surface a precise message rather than the generic
+      // disabled: surface a precise message rather than the generic
       // server one. This races with a stale-cached authConfig (operator
       // flipped --lock-password while the SPA was open).
       if (e2.status === 404) {
@@ -116,7 +116,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
         <h2 style={{ marginBottom: 8 }}>Reset tournament password</h2>
         <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>
           Set a new admin password. The new password will replace the current one
-          for everyone — any logged-in admins will need to sign in again.
+          for everyone: any logged-in admins will need to sign in again.
         </p>
         <form onSubmit={submit}>
           <div className="field">

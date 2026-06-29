@@ -118,7 +118,7 @@ func TestKachinukiExhaustionEndsMatch(t *testing.T) {
 // TestKachinukiHikiwakeExhaustsLast covers the edge case where a
 // hikiwake retires the last player on each side simultaneously. The
 // engine ends the match and logs (default WinningSide=A is a
-// reviewer-flag — admins are expected to override).
+// reviewer-flag, admins are expected to override).
 func TestKachinukiHikiwakeExhaustsLast(t *testing.T) {
 	bout := state.SubMatchResult{
 		Position: 5,
@@ -285,7 +285,7 @@ func TestMaybeAdvanceKachinuki_MatchNotFound(t *testing.T) {
 		TeamSize:      5,
 	}))
 
-	// Save empty pool — no matches.
+	// Save empty pool, no matches.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
 
 	changed, err := eng.MaybeAdvanceKachinuki(compID, "nonexistent")
@@ -333,7 +333,7 @@ func TestAdvanceKachinuki_HikiwakeSideBExhausted(t *testing.T) {
 
 // TestMaybeAdvanceKachinuki_BracketPath verifies that findTeamMatch exercises
 // the bracket search path. BracketMatch has no SubResults, so
-// MaybeAdvanceKachinuki returns (false, nil) — this covers the bracket lookup.
+// MaybeAdvanceKachinuki returns (false, nil), this covers the bracket lookup.
 func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-bracket"
@@ -344,7 +344,7 @@ func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 		TeamSize:      5,
 	}))
 
-	// Create a bracket with a single match — no SubResults on BracketMatch.
+	// Create a bracket with a single match, no SubResults on BracketMatch.
 	bracketMatchID := "B1"
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -426,7 +426,7 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 					Position: 1,
 					SideA:    "A-Senpo",
 					SideB:    "B-Senpo",
-					// No Winner, no Decision — bout still in progress
+					// No Winner, no Decision, bout still in progress
 				},
 			},
 		},
@@ -439,7 +439,7 @@ func TestMaybeAdvanceKachinuki_NoOutcome(t *testing.T) {
 
 // TestMaybeAdvanceKachinuki_HikiwakeBothExhausted verifies that when both
 // sides are exhausted after a hikiwake (empty remaining rosters),
-// MaybeAdvanceKachinuki returns (false, nil) — the "no-op" path when
+// MaybeAdvanceKachinuki returns (false, nil), the "no-op" path when
 // AdvanceKachinuki cannot determine a next action.
 func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -451,7 +451,7 @@ func TestMaybeAdvanceKachinuki_HikiwakeBothExhausted(t *testing.T) {
 		TeamSize:      5,
 		Format:        state.CompFormatMixed,
 	}))
-	// Single hikiwake bout — both players are retired; remaining rosters empty.
+	// Single hikiwake bout, both players are retired; remaining rosters empty.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
 			ID:    "P1-0",

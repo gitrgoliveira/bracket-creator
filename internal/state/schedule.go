@@ -10,7 +10,7 @@ type ScheduleEntry struct {
 	MatchType   string `json:"matchType"` // pool | bracket | break
 	MatchRef    string `json:"matchRef"`  // ID of the match (empty for breaks)
 	Court       string `json:"court"`
-	Date        string `json:"date"`        // DD-MM-YYYY (matches Tournament.Date / Competition.Date canonical) — reserved for future multi-day tournament use
+	Date        string `json:"date"`        // DD-MM-YYYY (matches Tournament.Date / Competition.Date canonical), reserved for future multi-day tournament use
 	ScheduledAt string `json:"scheduledAt"` // HH:MM
 	Status      string `json:"status"`
 	IsBreak     bool   `json:"isBreak,omitempty"`
@@ -29,7 +29,7 @@ func (s *Store) LoadSchedule(compID string) ([]ScheduleEntry, error) {
 }
 
 func parseScheduleFile(path string) (any, error) {
-	f, err := os.Open(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+	f, err := os.Open(path) // #nosec G304, path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []ScheduleEntry{}, nil

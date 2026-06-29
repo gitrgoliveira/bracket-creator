@@ -40,7 +40,7 @@ function findAllByType(node, typeRef, acc = []) {
 // draw-ready (the draw is published but no match has been called), keep
 // "not started" for setup, keep Swiss excluded from pools/bracket, and
 // never treat draw-ready as running. (Phase 2 split-comp cross-links removed
-// in mp-turx — mixed comps are now a single competition.)
+// in mp-turx; mixed comps are now a single competition.)
 describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
   const realReact = global.React;
   let runtime;

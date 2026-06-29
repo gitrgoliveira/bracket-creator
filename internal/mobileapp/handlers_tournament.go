@@ -18,7 +18,7 @@ import (
 // reference layout `02-01-2006` which catches both shape errors and
 // out-of-range days (Feb 31, 32-01-2026, etc.). Also enforces the same
 // year range that the frontend validator applies (see admin_helpers.jsx
-// MIN_YEAR/MAX_YEAR — kept in lockstep with helper.MinDateYear /
+// MIN_YEAR/MAX_YEAR, kept in lockstep with helper.MinDateYear /
 // helper.MaxDateYear) so direct API callers can't persist a year the UI
 // then refuses to display or save against. Shared helper used by
 // tournament + competition + import write paths to keep the canonical
@@ -38,7 +38,7 @@ func validateDateDMY(date string) error {
 }
 
 // validateCourtLabels checks that each entry in courts is a non-empty
-// single character (the spec-documented format — see Tournament.courts
+// single character (the spec-documented format, see Tournament.courts
 // in specs/openapi.yaml). Used as a shared check for both tournament
 // and competition courts. Caller decides whether empty courts is
 // acceptable: validateCourts rejects empty (tournament must have at
@@ -57,11 +57,11 @@ func validateCourtLabels(courts []string) error {
 		}
 		// Reject whitespace-only labels. Pre-fix, the `label == ""`
 		// check above and the single-character check below both passed
-		// for a label like " " (single space) — `label != ""` is true
+		// for a label like " " (single space), `label != ""` is true
 		// and `len([]rune(" ")) == 1`. The label then propagated to
 		// disk and became a React `key={cc}` value, schedule
 		// `byCourt[m.court]` bucket key, and filter value. Visually
-		// blank but structurally distinct from "" — broke the admin's
+		// blank but structurally distinct from "", broke the admin's
 		// court-filter dropdown and produced an unnamed schedule
 		// column. The admin UI's auto-generated A,B,C... labels can't
 		// produce whitespace, so this is defense-in-depth against
@@ -84,7 +84,7 @@ func validateCourtLabels(courts []string) error {
 		// The admin UI's AdminEditTournament generates courts via
 		// `Array.from({length: n}, (_, i) => String.fromCharCode(65 + i))`
 		// so duplicates can't arise via the form, but direct API/import
-		// payloads bypass that — defense-in-depth at the validator.
+		// payloads bypass that, defense-in-depth at the validator.
 		if seen[label] {
 			return fmt.Errorf("courts[%d]: duplicate court label %q", i, label)
 		}
@@ -111,7 +111,7 @@ func validateCourts(courts []string) error {
 // character. Empty is allowed at validation time because all three write
 // paths (POST /competitions, PUT settings, and the manifest importer)
 // resolve empty courts to the tournament's courts via
-// resolveCompetitionCourts immediately after this check — so a persisted
+// resolveCompetitionCourts immediately after this check, so a persisted
 // competition always carries >=1 court. The label and cap invariants from
 // validateCourtLabels still apply when courts are explicitly provided.
 func validateCompetitionCourts(courts []string) error {
@@ -124,7 +124,7 @@ func validateCompetitionCourts(courts []string) error {
 // was never materialized: bracket/pool generation left such matches with an
 // empty Court (engine bracket.go only assigns a label when len(comp.Courts)>0),
 // which the per-court Shiaijo operator view (/admin/shiaijo/:court) filters on
-// and therefore cannot surface — the matches become invisible. Inheriting the
+// and therefore cannot surface, the matches become invisible. Inheriting the
 // tournament's courts makes every match carry a real label and distribute
 // across the venue's courts so each court's operator view is populated.
 // Tournaments always have >=1 court (validateCourts rejects empty); the
@@ -161,7 +161,7 @@ func validateTournamentDurationDays(durationDays int) error {
 
 // errModeImmutable is the sentinel the PUT /tournament transform returns
 // when the caller tries to change the tournament Mode field after creation
-// (mp-7h7). Mode is immutable — flipping it mid-event would either
+// (mp-7h7). Mode is immutable, flipping it mid-event would either
 // suddenly expose the admin surface (officiated → self-run) or lock
 // participants out mid-scoring (self-run → officiated).
 var errModeImmutable = errors.New("tournament mode cannot be changed after creation")
@@ -171,7 +171,7 @@ var errModeImmutable = errors.New("tournament mode cannot be changed after creat
 // elevated (admin) password configured. In self-run mode the main-gate
 // is skipped, so if enforceElevated's GateActive()==false path (file mode,
 // no admin password) were reached the destructive routes would be fully
-// public — violating the self-run invariant that destructive calls still
+// public, violating the self-run invariant that destructive calls still
 // require X-Admin-Password. (mp-7h7 fail-open fix)
 var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
 
@@ -229,7 +229,7 @@ func validateTournamentLengths(t *state.Tournament) error {
 	if err := validateMaxLen("closingBlock", t.ClosingBlock, MaxLenCeremonyBlock); err != nil {
 		return err
 	}
-	// mp-s1gl: publicURL — externally-shareable base URL for QR codes / share links.
+	// mp-s1gl: publicURL, externally-shareable base URL for QR codes / share links.
 	if err := validateMaxLen("publicURL", t.PublicURL, MaxLenPublicURL); err != nil {
 		return err
 	}
@@ -326,7 +326,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// for cross-file guard symmetry with handlers_import.go (which
 		// trims competition.Date) and handlers_competition.go (which
 		// trims the same competition string fields uniformly). Password
-		// is NOT trimmed — the user may intentionally use leading/
+		// is NOT trimmed, the user may intentionally use leading/
 		// trailing whitespace, and the auth header check is exact-string
 		// match.
 		t.Name = strings.TrimSpace(t.Name)
@@ -347,7 +347,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// (admin_setup.jsx) validates trimmed name client-side before
 		// submit; this is defense-in-depth against direct API callers
 		// (curl etc.). Without this guard, the trim above silently
-		// persists Name == "" — admin UI then shows a blank tournament
+		// persists Name == "", admin UI then shows a blank tournament
 		// title and the persisted record fails the documented "tournament
 		// has a name" invariant.
 		// Cross-file guard symmetry with the POST handler below and
@@ -397,8 +397,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		// Validate Mode before entering the update transform. Mode is
-		// immutable after creation (mp-7h7) — the transform enforces that
-		// invariant — but it must also be a known value so an invalid string
+		// immutable after creation (mp-7h7), the transform enforces that
+		// invariant, but it must also be a known value so an invalid string
 		// never lands on disk via a direct API call. Empty is accepted here
 		// (the transform normalises "" → preserved-stored-value or
 		// "officiated" for a new record). ValidateTournamentMode is the
@@ -412,12 +412,12 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// or sends "". The frontend AdminEditTournament uses
 		// `password: pass || undefined` (admin_setup.jsx:89) so an
 		// admin who edits the name/venue without changing the password
-		// sends a JSON body with the password field omitted — Go's
+		// sends a JSON body with the password field omitted, Go's
 		// ShouldBindJSON then leaves t.Password == "". Without the
 		// preserve step, that save would clobber the stored password
 		// with "", and AuthMiddleware's `password != t.Password` check
 		// would then vacuously pass for an empty `X-Tournament-Password`
-		// header — exposing every /api/* endpoint unauthenticated.
+		// header, exposing every /api/* endpoint unauthenticated.
 		//
 		// The load + preserve + save sequence runs under the store's
 		// write lock via UpdateTournamentChanged. The earlier
@@ -425,7 +425,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// calls) had a TOCTOU window: two concurrent PUTs, one with
 		// empty Password (intent: keep) and one with a new password
 		// (intent: change), could race so that the empty-password PUT's
-		// late save overwrote the change-password PUT's earlier save —
+		// late save overwrote the change-password PUT's earlier save,
 		// silently losing the password change. The atomic primitive
 		// closes that window.
 		//
@@ -433,7 +433,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// (today: the bcrypt locked verifier) auth from the env-var hash;
 		// the on-disk Password field is irrelevant. If the admin sent a
 		// non-empty Password in locked mode it would silently never take
-		// effect — surface a 400 explaining the situation rather than
+		// effect, surface a 400 explaining the situation rather than
 		// pretending the rotation worked. Empty Password is fine
 		// (the SPA's `password: pass || undefined` pattern hits this
 		// path when the operator is just editing name/venue/courts).
@@ -450,7 +450,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
 			// Preserve the write-only elevated password (spec 004). It has
 			// json:"-", so the bound body always leaves desired.AdminPassword
-			// == "" — without copying it forward, a routine name/venue save
+			// == "", without copying it forward, a routine name/venue save
 			// would silently wipe the elevated credential. It is changed only
 			// via PUT /api/auth/admin-password, never here.
 			if current != nil {
@@ -483,7 +483,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// rejected as a mutation ("" != "officiated").
 			if current != nil {
 				if desired.Mode == "" {
-					// Preserve on omit — backward-compat and "no change" intent.
+					// Preserve on omit, backward-compat and "no change" intent.
 					desired.Mode = current.Mode
 				} else {
 					// Normalize legacy empty current mode before comparing.
@@ -502,7 +502,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			}
 
 			if locked {
-				// Reset passwordChanged to false defensively — the
+				// Reset passwordChanged to false defensively, the
 				// non-empty case is already rejected above, but keep
 				// the bookkeeping consistent in case the guard is
 				// ever loosened.
@@ -521,7 +521,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// tournament.md), reject. An empty stored Password is the
 			// exact precondition for the AuthMiddleware vacuous-pass
 			// scenario described above (also blocked at the middleware
-			// itself — see middleware.go).
+			// itself, see middleware.go).
 			if desired.Password == "" {
 				return errPasswordRequired
 			}
@@ -576,7 +576,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				// sessions out so their cached bc_password isn't
 				// silently stale. The originatorId field on the body
 				// would be welcome here too (and we'd echo it on the
-				// event), but the admin PUT body doesn't carry one —
+				// event), but the admin PUT body doesn't carry one,
 				// every admin tab including the originator will
 				// re-prompt, which is acceptable since the operator
 				// just typed the new credential and can type it again.
@@ -586,7 +586,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// In locked mode the on-disk Password is irrelevant and must not
 		// leak through any response surface. GET strips it; apply the
 		// same redaction here so an admin GET-after-PUT can't differ
-		// from a plain GET. Copy `t` before mutating — the
+		// from a plain GET. Copy `t` before mutating, the
 		// UpdateTournamentChanged transform stashed the same struct in
 		// the store's cache, so a direct `t.Password = ""` would also
 		// blank the cached password and cause subsequent LoadTournament
@@ -620,7 +620,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		// Second bind into a local struct to capture the transient admin
 		// (destructive-ops) password. Tournament.AdminPassword has json:"-"
-		// so it is never populated by the bind above — this is the only way
+		// so it is never populated by the bind above, this is the only way
 		// to read it from the body at creation time. A bind failure here is
 		// impossible (the first bind already validated the JSON), but handle
 		// it for safety.
@@ -633,7 +633,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		// See PUT handler above. The current CreateTournament UI in
 		// app.jsx trims client-side before submit; this is defense-in-depth
-		// against direct API callers (curl etc.) sending padded values —
+		// against direct API callers (curl etc.) sending padded values,
 		// the server-side trim is the canonical defense layer so persisted
 		// records are always canonical.
 		t.Name = strings.TrimSpace(t.Name)
@@ -673,7 +673,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 
 		// Validate and normalize the Mode field (mp-7h7). POST is the creation
-		// endpoint — Mode is accepted here and becomes immutable thereafter.
+		// endpoint, Mode is accepted here and becomes immutable thereafter.
 		// Empty maps to "officiated" (default, backward compat).
 		if err := state.ValidateTournamentMode(t.Mode); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -700,18 +700,18 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		// Reject empty Password on POST (initial setup) in file mode.
 		// AuthMiddleware allows POST /api/tournament unauthenticated
-		// when the tournament is uninitialized — this is the bootstrap
+		// when the tournament is uninitialized, this is the bootstrap
 		// entry point. If Password == "" lands on disk, AuthMiddleware's
 		// `password != t.Password` check vacuously passes for any
 		// request with an empty `X-Tournament-Password` header (empty
 		// == empty), exposing every /api/* endpoint unauthenticated.
 		// The PUT handler's preserve-stored-on-empty guard above
-		// can't reach this state on update — but POST is how that
+		// can't reach this state on update, but POST is how that
 		// state would land in the first place, so block it here.
 		// Note: Password is NOT trimmed (passwords may intentionally
 		// contain whitespace; auth check is exact-string match).
 		//
-		// Locked mode: the on-disk Password is irrelevant — auth comes
+		// Locked mode: the on-disk Password is irrelevant, auth comes
 		// from the env-var bcrypt hash. The SPA's CreateTournament form
 		// detects locked mode via /api/auth-config and labels the
 		// password field as the env-var credential, sending it as
@@ -733,7 +733,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if verifier != nil && verifier.RedactStoredPassword() {
 			// Locked mode: the on-disk Password is not authoritative.
 			// For a true first bootstrap (no tournament.md on disk yet),
-			// store "" so GET /tournament returns empty — no stale
+			// store "" so GET /tournament returns empty, no stale
 			// credential visible. For re-POSTs against an existing record,
 			// preserve whatever is currently stored so a later file-mode
 			// rollback can recover the original credential.
@@ -751,7 +751,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// re-bootstrap POST. It has json:"-" so the bound body never carries
 		// it; without this a re-POST over an existing record would wipe the
 		// elevated credential. On a true first bootstrap (existingForPost ==
-		// nil) it stays "" — the operator sets it later via Settings.
+		// nil) it stays "", the operator sets it later via Settings.
 		if existingForPost != nil {
 			t.AdminPassword = existingForPost.AdminPassword
 		}
@@ -762,7 +762,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// versa via POST. Normalise legacy empty to "officiated" so the on-disk
 		// record gains the canonical value on the next write. On a true first
 		// bootstrap (existingForPost == nil), Mode was already validated and
-		// normalised above — no change needed.
+		// normalised above, no change needed.
 		if existingForPost != nil {
 			existingMode := existingForPost.Mode
 			if existingMode == "" {
@@ -776,8 +776,8 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Tournament.AdminPassword (fileElevatedVerifier.Verify does an
 		// exact-string compare). When the body carried an `adminPassword`
 		// (read into `extra` above) and no admin password is already on disk,
-		// set it now — BEFORE the fail-open guard and before
-		// SaveTournamentChanged — so a self-run tournament is persisted WITH
+		// set it now, BEFORE the fail-open guard and before
+		// SaveTournamentChanged, so a self-run tournament is persisted WITH
 		// the credential in a single request. This is what makes self-run
 		// creation possible via the real API (the json:"-" invariant blocks
 		// the field from being bound directly into Tournament).
@@ -813,7 +813,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// In self-run mode the main-gate is skipped, so destructive routes
 		// rely SOLELY on RequireElevatedPassword / enforceElevated.
 		// enforceElevated GateActive()==false (file mode, no admin password)
-		// means destructive routes would be fully public — violating the
+		// means destructive routes would be fully public, violating the
 		// invariant. Reject creation of a self-run tournament in file mode
 		// unless an AdminPassword is set: either already on disk (preserved
 		// from existingForPost) or supplied in this request's body (set just
@@ -840,9 +840,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// to SSE before submit, and the create-tournament flow calls
 		// `onCreated(t, pass)` to mark itself authenticated with the
 		// just-typed password. An empty-originator `password_reset`
-		// broadcast would race that, and the SPA's SSE handler — which
+		// broadcast would race that, and the SPA's SSE handler, which
 		// has no originatorId to ignore (the POST body doesn't carry
-		// one) — would clear the freshly-cached credential and kick
+		// one), would clear the freshly-cached credential and kick
 		// the user straight back to AuthModal.
 		//
 		// In locked mode, t.Password is always set to the pre-existing

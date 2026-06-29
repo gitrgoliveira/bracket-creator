@@ -3,7 +3,7 @@
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
-**`.specify/memory/constitution.md`** — defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
+**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
 
 ## Project Overview
 
@@ -125,9 +125,9 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 
 ## PR Workflow
 
-- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section — `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
-- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation — never silently skip the section.
-- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional — execute them, then check them.
+- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation: never silently skip the section.
+- **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional: execute them, then check them.
 - **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.
 
@@ -136,12 +136,12 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 - **Never report an automated-review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero.
 - When re-requesting a GitHub Copilot review, use the REST endpoint (the `gh pr edit --add-reviewer` form lowercases the login and fails):
   `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
-- Run `make go/test` after fixes and before pushing — a red gate means fix-or-revert, never push.
+- Run `make go/test` after fixes and before pushing: a red gate means fix-or-revert, never push.
 
 ## Testing & Verification
 
 - **Verify in the browser, never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
-- **Test self-run / public features from the PUBLIC page, not the admin UI** — the public flow is what users hit; admin-side scoring proves nothing about it.
+- **Test self-run / public features from the PUBLIC page, not the admin UI**: the public flow is what users hit; admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
 - Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
 
@@ -149,7 +149,7 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 
 When rebasing or resolving conflicts, watch for these recurring breakages:
 - Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
-- UUID-vs-name-string mismatches in player/entity maps — match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
+- UUID-vs-name-string mismatches in player/entity maps: match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
 - Re-run `make go/test` after every rebase; a clean rebase that compiles can still be semantically broken.
 
 
@@ -169,9 +169,9 @@ bd close <id>         # Complete work if the PR is merged
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Use `bd` for ALL task tracking: do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `bd remember` for persistent knowledge: do NOT use MEMORY.md files
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 

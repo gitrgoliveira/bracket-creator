@@ -11,7 +11,7 @@ import (
 // Excel CLI web wrapper assets. List explicit patterns so the npm
 // artefacts created by `cd web && npm install` (node_modules,
 // package.json, package-lock.json, vitest.config.js) and the vitest
-// spec files (web/tests/*.spec.js) stay OUT of the production binary —
+// spec files (web/tests/*.spec.js) stay OUT of the production binary;
 // previously `all:web` recursed into them and the binary ballooned by
 // ~36 MB while publicly serving every npm dependency at /static/.
 // When adding new top-level files under web/, extend this list.
@@ -20,7 +20,7 @@ import (
 //go:embed web/css web/js
 var webFiles embed.FS
 
-// Mobile-app assets — only the files the HTTP server actually serves.
+// Mobile-app assets; only the files the HTTP server actually serves.
 // web-mobile/js (JSX sources) and dev tooling are excluded; the browser
 // loads compiled output from dist/ and vendor libraries from vendor/.
 // Tracked "keep" placeholders in dist/ and vendor/ ensure the directories

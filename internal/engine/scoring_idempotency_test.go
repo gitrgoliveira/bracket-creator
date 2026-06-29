@@ -6,12 +6,12 @@ package engine
 // to retry from the client).
 //
 // Three scenarios are tested:
-//  1. Knockout bracket — winner propagation to the next round must be a SET,
+//  1. Knockout bracket, winner propagation to the next round must be a SET,
 //     not an append: re-recording the same result must leave the next-round
 //     slot unchanged.
-//  2. Pool match — standings accounting must not double-count wins/points on a
+//  2. Pool match, standings accounting must not double-count wins/points on a
 //     second identical submission.
-//  3. Kachinuki team match — MaybeAdvanceKachinuki must not double-append a
+//  3. Kachinuki team match, MaybeAdvanceKachinuki must not double-append a
 //     next bout when the last sub-result already has an outcome and the last
 //     sub-result is an outcome-less (un-scored) bout that was appended on the
 //     first call.
@@ -54,7 +54,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 			}
 		}
 
-		// First submit — should succeed and propagate Alice to the final.
+		// First submit, should succeed and propagate Alice to the final.
 		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, newResult()))
 
 		bracket, err = store.LoadBracket(compID)
@@ -69,7 +69,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		snapshotWinner := finalSlot.Winner
 		snapshotStatus := finalSlot.Status
 
-		// Second submit — a FRESH identical payload, simulating a wifi retry.
+		// Second submit, a FRESH identical payload, simulating a wifi retry.
 		require.NoError(t, eng.RecordMatchResult(compID, sf1ID, newResult()))
 
 		bracket, err = store.LoadBracket(compID)
@@ -103,7 +103,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 
 		// Pick the first match. Alice wins with two ippons.
 		m := matches[0]
-		// Fresh result per submit — RecordMatchResult mutates in-place, so a real
+		// Fresh result per submit, RecordMatchResult mutates in-place, so a real
 		// retry must re-send a fresh identical payload, not the mutated struct.
 		newResult := func() *state.MatchResult {
 			return &state.MatchResult{
@@ -129,7 +129,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		require.NotNil(t, winner1, "winner must appear in standings")
 		require.NotNil(t, loser1, "loser must appear in standings")
 
-		// Second submit — a FRESH identical payload, wifi retry.
+		// Second submit, a FRESH identical payload, wifi retry.
 		require.NoError(t, eng.RecordMatchResult(compID, m.ID, newResult()))
 
 		standings2, err := eng.CalculatePoolStandings(compID)
@@ -189,7 +189,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 			},
 		}))
 
-		// First call — should append bout 3.
+		// First call, should append bout 3.
 		changed, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err)
 		assert.True(t, changed, "first advance must append bout 3")
@@ -205,7 +205,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 		assert.Empty(t, lastBout.Winner, "freshly appended bout must have no winner yet")
 		assert.Empty(t, lastBout.Decision, "freshly appended bout must have no decision yet")
 
-		// Second call — the last sub-result has no outcome, so this must be a no-op.
+		// Second call, the last sub-result has no outcome, so this must be a no-op.
 		changed2, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
 		require.NoError(t, err)
 
@@ -216,7 +216,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 
 		if changed2 {
 			// If the engine reported changed=true on the second call it means
-			// it DID perform some mutation (not necessarily a double-append —
+			// it DID perform some mutation (not necessarily a double-append,
 			// e.g. match-ended detection). Record what we found for the report.
 			t.Logf("NOTICE: second MaybeAdvanceKachinuki returned changed=true; SubResults len: %d -> %d",
 				lenAfterFirst, lenAfterSecond)

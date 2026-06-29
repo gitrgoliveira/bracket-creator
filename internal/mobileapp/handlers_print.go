@@ -15,7 +15,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/pdf"
 )
 
-// printTypeList is the human-readable list of valid :type values for the
+// printTypeList is the human-readable list of valid: type values for the
 // 400 error message. It is derived from pdf.Groups (plus "all") at init
 // time so it stays in sync automatically if groups are added or renamed.
 var printTypeList = func() string {
@@ -30,11 +30,11 @@ var printTypeList = func() string {
 // RegisterPrintHandlers wires the admin-gated PDF export endpoint under r.
 // Route: POST /api/print/:type
 //
-// Valid :type values are the Type fields of pdf.Groups (e.g. "registration",
+// Valid: type values are the Type fields of pdf.Groups (e.g. "registration",
 // "names", "tags", "pools-trees", "full-bracket") plus the meta-selector "all".
 // The set is derived from pdf.Groups at call time so it never drifts.
 //
-// The handler is synchronous — PDF generation via LibreOffice takes 30–60 s
+// The handler is synchronous, PDF generation via LibreOffice takes 30–60 s
 // for a typical tournament. That is acceptable for an admin-initiated,
 // one-at-a-time operation. Concurrency is bounded by the package-level
 // sofficeMu mutex in internal/pdf, which serialises every soffice invocation
@@ -43,7 +43,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 	r.POST("/print/:type", func(c *gin.Context) {
 		printType := c.Param("type")
 
-		// Validate :type against the canonical pdf.Groups list (plus "all").
+		// Validate: type against the canonical pdf.Groups list (plus "all").
 		// Deriving the check from pdf.Groups avoids the list drifting if a
 		// group is ever added, removed, or renamed. The error message uses
 		// printTypeList (also derived from pdf.Groups) for the same reason.
@@ -89,7 +89,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			return
 		}
 
-		// Generate PDFs — either all groups or the single requested group.
+		// Generate PDFs, either all groups or the single requested group.
 		var produced map[string]string
 		if printType == "all" {
 			produced, err = gen.GenerateAll(c.Request.Context(), sources, workDir)

@@ -27,7 +27,7 @@ func TestViewer_PanicInSpawnedGoroutine_ReturnsHTTP500_DoesNotCrash(t *testing.T
 	defer os.RemoveAll(tempDir)
 
 	// Save a competition so the /competitions handler has something to
-	// iterate over — without this, the spawned-goroutine code path is
+	// iterate over, without this, the spawned-goroutine code path is
 	// never entered and the test would pass vacuously.
 	comp := state.Competition{ID: "c1", Name: "Comp 1"}
 	require.NoError(t, store.SaveCompetition(&comp))

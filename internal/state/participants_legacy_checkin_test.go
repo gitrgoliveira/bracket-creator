@@ -12,7 +12,7 @@ import (
 
 // writeLegacyRoster writes a genuine legacy (UUID-less) participants.csv to a
 // fresh competition directory. SaveParticipants can't be used here because
-// marshalParticipantsCSV mints a UUID for every empty ID — which is exactly the
+// marshalParticipantsCSV mints a UUID for every empty ID; which is exactly the
 // migration that masks the bug. Writing the file directly reproduces a roster
 // that was never re-saved through the app, so loadParticipantsNoLock returns
 // players with empty IDs (the pre-condition for the check-in resolution bug).

@@ -15,7 +15,7 @@ import (
 // (direct-elimination) playoffs competition. StandardSeeding → CreateBalancedTree
 // → TreeToLeafArray mirrors the Excel create-playoffs path exactly (mp-5ng7);
 // the unbalanced tree's structural byes are embedded as "" slots in the pow2
-// array. (A mixed competition's pool-fed knockout is NOT built here — it is the
+// array. (A mixed competition's pool-fed knockout is NOT built here, it is the
 // preview bracket from generatePoolPreviewBracket, filled in by
 // ResolveQualifiedPools as each pool finishes.)
 func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
@@ -49,8 +49,8 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 
 // generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
 // (Pools + Knockout) competition at draw time. Its leaves start as pool-origin
-// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals
-// — the same hyphenated labels the Excel Tree sheet uses — and the bracket is
+// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals,
+// the same hyphenated labels the Excel Tree sheet uses, and the bracket is
 // scheduled here so knockout matches have court/time slots from the start. As
 // each pool finishes, ResolveQualifiedPools replaces that pool's placeholders
 // with the real finishers IN PLACE (no separate playoffs competition, no manual
@@ -62,7 +62,7 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 // No-ops (returns nil without writing bracket.json) when there are no pools
 // (nothing to seed a tree from) or when helper.GenerateFinals returns an empty
 // list. PoolWinners <= 0 is coerced to 2 (matching the same default in
-// ResolveQualifiedPools) rather than treated as "skip" — a mixed source with the
+// ResolveQualifiedPools) rather than treated as "skip", a mixed source with the
 // field unset still has a knockout to preview, and matching the resolver default
 // ensures the preview shape equals the live knockout bracket.
 func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
@@ -102,7 +102,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 // ordered pow2 leaf array. Callers must provide a pow2-length slice produced
 // by helper.TreeToLeafArray (which mirrors the Excel bracket topology). Labels
 // may be resolved player names (live playoffs) or pool-origin placeholders
-// (preview bracket) — the tree shape, court assignment, bye resolution, and
+// (preview bracket), the tree shape, court assignment, bye resolution, and
 // scheduling are identical either way. The caller persists the result (and
 // sets Preview when appropriate).
 func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string) (*state.Bracket, error) {
@@ -172,7 +172,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 				Status: state.MatchStatusScheduled,
 				Court:  court,
 				// ScheduledAt is populated below by
-				// assignBracketMatchSlots — uniform start times
+				// assignBracketMatchSlots, uniform start times
 				// were retired in T150.
 			}
 
@@ -244,7 +244,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// Display metadata (mp-7f2w): label each match with its effective round and
 	// real feeders so the viewer renders the same effective-round columns as the
 	// Excel Tree sheet (structural byes skip a column). Computed once here, while
-	// the "Winner of rX-mY" placeholders are still intact — it must NOT be
+	// the "Winner of rX-mY" placeholders are still intact, it must NOT be
 	// recomputed after results resolve those placeholders into player names.
 	computeBracketDisplayMetadata(bracket)
 
@@ -261,10 +261,10 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 // non-empty) bracket match. This is the web API's numbering implementation; the
 // Excel renderer has a SEPARATE one, helper.AssignMatchNumbers, which operates on
 // []*Node instead of *state.Bracket. The two are NOT a literally-shared function
-// (the types differ) — they are kept equal-by-contract so the on-screen "Match N"
+// (the types differ), they are kept equal-by-contract so the on-screen "Match N"
 // always equals the printed Excel "Match N".
 //
-// Ordering — CRITICAL for byes: the Excel sheet numbers via eliminationMatchRounds,
+// Ordering, CRITICAL for byes: the Excel sheet numbers via eliminationMatchRounds,
 // which groups matches by DEPTH-FROM-ROOT (the unbalanced tree's deepest matches
 // come first), NOT by raw bracket.Rounds index. With a non-power-of-two roster the
 // pow2-padded bracket.Rounds order diverges from that depth grouping, so numbering
@@ -272,7 +272,7 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 // be Match 1, not the shallow slot-0 bout). DisplayRound already encodes the Excel
 // depth grouping (verified by TestBracketDisplayMetadata_MatchesExcelRounds), so we
 // number by descending DisplayRound (deepest/earliest round first) then by the
-// 0-based position parsed from the match ID — identical to both the Excel
+// 0-based position parsed from the match ID, identical to both the Excel
 // AssignMatchNumbers walk and the JS buildDisplayModel matchNumById ordering.
 //
 // Skip rule (matches the Excel nil-node skip): Hidden (structural-bye) matches and
@@ -280,8 +280,8 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 //
 // The printed Excel sheet is authoritative. The contract is enforced by
 // TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go), which builds
-// both numberings from identical entrant sets — including bye-producing, non-power-
-// of-two sizes — and asserts the real-match numbers are identical bout-for-bout.
+// both numberings from identical entrant sets, including bye-producing, non-power-
+// of-two sizes, and asserts the real-match numbers are identical bout-for-bout.
 // If they ever diverge, fix THIS path to match the Excel one.
 //
 // Must run AFTER computeBracketDisplayMetadata, which sets Hidden / DisplayRound.
@@ -304,7 +304,7 @@ func assignBracketMatchNumbers(b *state.Bracket) {
 		}
 	}
 	// Descending DisplayRound (deepest/earliest round first), then ascending
-	// position — mirrors the Excel eliminationMatchRounds walk.
+	// position, mirrors the Excel eliminationMatchRounds walk.
 	sort.SliceStable(real, func(i, j int) bool {
 		if real[i].m.DisplayRound != real[j].m.DisplayRound {
 			return real[i].m.DisplayRound > real[j].m.DisplayRound
@@ -336,7 +336,7 @@ func bracketMatchPosFromID(id string) int {
 // computeBracketDisplayMetadata fills DisplayRound / Hidden / Feeders on every
 // match so the viewer can render effective-round columns identical to the Excel
 // Tree sheet (matches grouped by depth-from-root; structural byes skip a column
-// rather than appearing as empty cards). It is purely additive — the positional
+// rather than appearing as empty cards). It is purely additive, the positional
 // ID + "Winner of rX-mY" resolution scheme used by scoring/scheduling/the pool
 // resolver is untouched.
 //
@@ -349,7 +349,7 @@ func bracketMatchPosFromID(id string) int {
 // outward from the lone real match in the last round.
 //
 // Must run after bye winners have been auto-resolved and propagated (so resolved
-// names already sit in their feeder slots) — i.e. at the end of bracket build.
+// names already sit in their feeder slots), i.e. at the end of bracket build.
 func computeBracketDisplayMetadata(bracket *state.Bracket) {
 	rounds := bracket.Rounds
 	numRounds := len(rounds)

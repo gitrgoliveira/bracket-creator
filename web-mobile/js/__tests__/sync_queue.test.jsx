@@ -13,9 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ---------------------------------------------------------------------------
 // Setup / teardown
-// ---------------------------------------------------------------------------
 
 let mod;
 let API;
@@ -74,9 +72,7 @@ afterEach(() => {
     }
 });
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Resolve all pending microtasks without advancing fake timers. */
 async function flushMicrotasks() {
@@ -91,9 +87,7 @@ async function tick(ms = 0) {
     await flushMicrotasks();
 }
 
-// ---------------------------------------------------------------------------
 // 1. Monotonic revision counter
-// ---------------------------------------------------------------------------
 
 describe('_nextRev via recordScore stamping', () => {
     it('stamps rev on running writes and increments per matchId', async () => {
@@ -126,9 +120,7 @@ describe('_nextRev via recordScore stamping', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // 2. Offline queue: last-write-wins
-// ---------------------------------------------------------------------------
 
 describe('enqueueRunningWrite: last-write-wins semantics', () => {
     it('replaces a stale pending write for the same matchId', async () => {
@@ -151,7 +143,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1, ipponsA: [] }, 'pw');
         await flushMicrotasks(); // immediate flush attempt: fails, queue retains entry
 
-        // Second (newer) write for m1 — replaces the first in the queue.
+        // Second (newer) write for m1; replaces the first in the queue.
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2, ipponsA: ['M'] }, 'pw');
         await flushMicrotasks(); // immediate flush with updated payload: should succeed
 
@@ -185,19 +177,17 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Flush behaviour: 409 → discard, network error → keep + backoff
-// ---------------------------------------------------------------------------
+// 3. Flush behaviour: 409 → discard; network error → keep and backoff
 
 describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () => {
     it('discards a queued write on a real 409 conflict (not retried)', async () => {
-        // The 409 handler calls console.warn for devtools visibility — expect it.
+        // The 409 handler calls console.warn for devtools visibility; expect it.
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         let attempt = 0;
         global.fetch = vi.fn().mockImplementation(() => {
             attempt++;
-            // Always return 409 — simulates a real conflict (ineligible_competitor etc.).
+            // Always return 409: simulates a real conflict (ineligible_competitor etc.).
             return Promise.resolve({
                 ok: false,
                 status: 409,
@@ -209,7 +199,7 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         await flushMicrotasks();
 
         const callsAfterDiscard = attempt;
-        // Advance timers — no retry should fire because the entry was discarded.
+        // Advance timers; no retry should fire because the entry was discarded.
         await tick(1000);
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
 
@@ -222,7 +212,7 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         warnSpy.mockRestore();
     });
 
-    it('discards a queued write on a non-retryable 4xx (e.g. 400) — never retried forever', async () => {
+    it('discards a queued write on a non-retryable 4xx (e.g. 400): never retried forever', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         let attempt = 0;
@@ -240,7 +230,7 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
         await flushMicrotasks();
 
         const callsAfterDiscard = attempt;
-        // Advance well past every backoff step — no retry should ever fire.
+        // Advance well past every backoff step; no retry should ever fire.
         await tick(20000);
         expect(global.fetch).toHaveBeenCalledTimes(callsAfterDiscard);
         // F5: kind is now included in the warn prefix ('score' for running writes).
@@ -287,10 +277,8 @@ describe('_flushQueue: non-retryable 4xx discards, 5xx/429/network retries', () 
     });
 });
 
-// ---------------------------------------------------------------------------
 // 3b. Single-in-flight serialization: overlapping triggers must not start a
 //     second concurrent flush loop or duplicate PUTs.
-// ---------------------------------------------------------------------------
 
 describe('_flushQueue: single-in-flight serialization', () => {
     it('a trigger during an in-flight flush does not overlap or duplicate PUTs', async () => {
@@ -309,11 +297,11 @@ describe('_flushQueue: single-in-flight serialization', () => {
         expect(global.fetch).toHaveBeenCalledTimes(1); // one PUT in flight
 
         // A second enqueue for the SAME match while the flush is in flight must
-        // NOT start an overlapping loop — no duplicate PUT yet. It replaces the
+        // NOT start an overlapping loop; no duplicate PUT yet. It replaces the
         // queued descriptor (last-write-wins, rev:2) and sets the rerun flag.
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2 }, 'pw');
         await flushMicrotasks();
-        expect(global.fetch).toHaveBeenCalledTimes(1); // still one — no overlap
+        expect(global.fetch).toHaveBeenCalledTimes(1); // still one; no overlap
 
         // Resolve the in-flight (rev:1) fetch. The identity check leaves the
         // newer rev:2 descriptor in the queue; the loop reruns once and issues
@@ -330,9 +318,7 @@ describe('_flushQueue: single-in-flight serialization', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // 4. subscribeSyncStatus: state transitions
-// ---------------------------------------------------------------------------
 
 describe('subscribeSyncStatus: state transitions', () => {
     it('replays current status to new subscriber', () => {
@@ -355,7 +341,7 @@ describe('subscribeSyncStatus: state transitions', () => {
 
         expect(states).toContain('syncing');
 
-        // Clean up — let the fetch resolve.
+        // Clean up; let the fetch resolve.
         resolve({ ok: true, json: () => Promise.resolve({}) });
         await flushMicrotasks();
     });
@@ -406,9 +392,7 @@ describe('subscribeSyncStatus: state transitions', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // 5. window.online event flushes the queue
-// ---------------------------------------------------------------------------
 
 describe('window.online event flushes the queue', () => {
     it('triggers a flush when the queue is non-empty', async () => {
@@ -439,9 +423,7 @@ describe('window.online event flushes the queue', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // 6. recordScore: running writes queue on network failure
-// ---------------------------------------------------------------------------
 
 describe('recordScore: queues running writes on network failure', () => {
     it('returns { queued: true } and enqueues on network error for running status', async () => {
@@ -451,7 +433,7 @@ describe('recordScore: queues running writes on network failure', () => {
         expect(result).toMatchObject({ queued: true });
     });
 
-    it('queues completed writes on network failure (F5 — terminal durability)', async () => {
+    it('queues completed writes on network failure (F5: terminal durability)', async () => {
         // F5: completed writes are now queued for durable re-delivery on transient
         // failures (network error, abort, 5xx, 429) instead of throwing. The caller
         // receives { queued: true } so the UI can show a "not yet saved" state.
@@ -478,12 +460,12 @@ describe('recordScore: queues running writes on network failure', () => {
         ).rejects.toThrow('Already fighting in match X');
     });
 
-    it('queues a running 5xx as "syncing" (server up — not "offline" or falsely "synced")', async () => {
+    it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {
         // A 5xx (or 429) for a running write is transient: queue it for retry so
         // the sync pill reflects the unsynced state rather than flipping back to
         // "Synced" (the autosave caller swallows throws). And because the network
         // is UP (the server responded), the pill must be "syncing", never
-        // "offline". Non-retryable 4xx still throw — they won't succeed on retry.
+        // "offline". Non-retryable 4xx still throw; they won't succeed on retry.
         let status = 'synced';
         const unsub = subscribeSyncStatus((s) => { status = s; });
         global.fetch = vi.fn().mockResolvedValue({
@@ -495,7 +477,7 @@ describe('recordScore: queues running writes on network failure', () => {
         const result = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
         await flushMicrotasks(); // let the queued flush attempt run
         expect(result).toMatchObject({ queued: true });
-        expect(status).toBe('syncing'); // server up but erroring — not offline, not synced
+        expect(status).toBe('syncing'); // server up but erroring; not offline, not synced
         unsub();
     });
 
@@ -511,9 +493,7 @@ describe('recordScore: queues running writes on network failure', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // 7. Completed recordScore drains a previously-queued running write
-// ---------------------------------------------------------------------------
 
 describe('recordScore: completed write drains queued running autosave', () => {
     it('a queued running write is removed when a completed write for the same match succeeds', async () => {
@@ -559,7 +539,7 @@ describe('recordScore: completed write drains queued running autosave', () => {
         // F5: a completed write that fails offline is now queued as a terminal
         // entry. It supersedes the running entry for the same key (last-write-wins,
         // terminal takes priority) so only the terminal completed write is flushed
-        // when connectivity returns — the stale running snapshot is not re-sent.
+        // when connectivity returns; the stale running snapshot is not re-sent.
         // The drain of the running entry still happens only after a server-confirmed
         // success (not pre-flight), but here the terminal enqueue replaces it.
         let online = false;
@@ -589,10 +569,8 @@ describe('recordScore: completed write drains queued running autosave', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
 // mp-gpra review fixes: clearQueue (security), rehydrate url validation
 // (security), hasPendingTerminalWrite contract (banner re-hydrate).
-// ---------------------------------------------------------------------------
 
 describe('clearQueue: drops queued writes + persisted store (logout / password_reset)', () => {
     it('empties the queue, removes bc_write_queue, and resets sync status to synced', async () => {
@@ -668,7 +646,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
 
     it('rejects a dot-segment path-traversal url that normalizes outside /api/competitions/', async () => {
         // Passes a naive startsWith('/api/competitions/') but fetch would normalize
-        // it to /api/admin/secrets on the wire — must be rejected.
+        // it to /api/admin/secrets on the wire; must be rejected.
         const bad = [['c1:m5', {
             compID: 'c1', matchID: 'm5', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
@@ -725,7 +703,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
     it('skips malformed persisted entries without dropping valid ones (durability)', async () => {
         // Corrupt/tampered queue: a number, null, a 1-element array, then a VALID
         // terminal entry. A non-array element would throw on destructure and (under
-        // one try/catch) abort the entire rehydrate — the valid entry must survive.
+        // one try/catch) abort the entire rehydrate; the valid entry must survive.
         const mixed = [
             42,
             null,

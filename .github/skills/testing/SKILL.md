@@ -78,12 +78,12 @@ Available factories in [internal/test/helpers.go](../../internal/test/helpers.go
 | `CreateTestTournament()` | `domain.Tournament` | Full tournament with pools and elimination |
 
 ### 3. Assertions
-- `assert.*` — Non-fatal checks (test continues on failure)
-- `require.*` — Fatal checks (test stops immediately on failure)
+- `assert.*`: Non-fatal checks (test continues on failure)
+- `require.*`: Fatal checks (test stops immediately on failure)
 - Use `require` for preconditions, `assert` for actual test checks
 
 ### 4. Mocking
-- Use manual mocks with `testify/mock` — no code generation tools
+- Use manual mocks with `testify/mock`: no code generation tools
 - Use `testing/fstest.MapFS` for filesystem mocking
 - Use `net/http/httptest` for HTTP server/handler testing
 

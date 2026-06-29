@@ -1,7 +1,7 @@
 package helper
 
 // CreatePartialPoolMatches fills each pool's Matches slice with
-// adjacent-neighbour pairings only — for N players it produces N-1
+// adjacent-neighbour pairings only, for N players it produces N-1
 // matches in the sequence (0,1), (1,2), ..., (N-2,N-1). This is the
 // "partial round-robin" / league format selected via
 // state.Competition.PoolFormat == "partial".
@@ -12,7 +12,7 @@ package helper
 // the two endpoints who get one each.
 //
 // Pre-condition: pools[i].Players must be sorted in the order the
-// pairings should follow (typically seed/rank order — the caller in
+// pairings should follow (typically seed/rank order, the caller in
 // engine/pools.go applies PoolSeeding before passing them in).
 func CreatePartialPoolMatches(pools []Pool) {
 	for i := range pools {

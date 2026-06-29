@@ -180,7 +180,7 @@ func TestStartCompetition_CheckInDisabled_IgnoresStaleMarkers(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "checkin-disabled"
 
-	// NOTE: enableCheckIn is deliberately NOT called — CheckInEnabled stays false.
+	// NOTE: enableCheckIn is deliberately NOT called, CheckInEnabled stays false.
 	createTestCompetition(t, store, compID, "league", 3)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"},
@@ -374,7 +374,7 @@ func TestGenerateSwissRound_FrozenFieldIgnoresLateCheckIn(t *testing.T) {
 		}
 	}
 
-	// P5 is checked in AFTER round 1 — a late toggle of mutable state.
+	// P5 is checked in AFTER round 1, a late toggle of mutable state.
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"P1", "P2", "P3", "P4", "P5", "P6"},
 		map[string]bool{"P1": true, "P2": true, "P3": true, "P4": true, "P5": true},

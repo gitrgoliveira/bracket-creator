@@ -4,9 +4,9 @@
 //
 // Motivating problem. A single-file write is already atomic + durable
 // via state/atomic_write.go (write-tmp → fsync → rename → fsync-dir).
-// But a transaction body that writes two or three files in sequence —
+// But a transaction body that writes two or three files in sequence,
 // score handler: pool-matches.csv + competitor-status.yaml +
-// lineups.yaml — has a window between rename N and rename N+1 where
+// lineups.yaml, has a window between rename N and rename N+1 where
 // a crash can leave the half-committed state on disk. The first file
 // reflects the new write; the rest still reflect the old. Replay on
 // restart can't infer the intended end-state from the partial result.
@@ -31,7 +31,7 @@
 //  3. Caller calls Apply, which iterates intents in order and
 //     atomic-writes each one to its target path. If Apply returns an
 //     error mid-way, the WAL stays on disk and the next Scan-replay
-//     finishes the job. Apply is idempotent — replaying a fully-
+//     finishes the job. Apply is idempotent, replaying a fully-
 //     committed WAL just re-writes the same bytes to the same paths.
 //
 //  4. Caller calls Done, which removes the WAL file. After Done the
@@ -119,7 +119,7 @@ func uniqueWALID() string {
 
 // BeginTx opens a fresh WAL with the given id. walDir is created if
 // it doesn't exist. The write function will be called by Apply for
-// each FileIntent — typically state.atomicWriteFile wired in by the
+// each FileIntent, typically state.atomicWriteFile wired in by the
 // state package.
 //
 // No on-disk state is created here. Commit is what publishes the
@@ -149,7 +149,7 @@ func (w *WAL) ID() string { return w.id }
 
 // Append stages a single target write. Coalesces by path: a second
 // call with the same FileIntent.Path replaces the first (last-write-
-// wins). The data + mode are copied/captured directly — callers
+// wins). The data + mode are copied/captured directly, callers
 // don't need to defensively-clone before appending.
 //
 // Returns no error: in-memory operation only.
@@ -198,11 +198,11 @@ func (w *WAL) PendingBytes(path string) ([]byte, bool) {
 }
 
 // WriteFn returns a function that wraps Append in the WriteFn shape.
-// The state package uses this to redirect savers — the savers think
+// The state package uses this to redirect savers, the savers think
 // they're writing to disk, but the WAL captures the bytes for
 // deferred commit.
 //
-// The returned function always returns nil — Append cannot fail
+// The returned function always returns nil, Append cannot fail
 // (it's in-memory).
 func (w *WAL) WriteFn() WriteFn {
 	return func(path string, data []byte, perm os.FileMode) error {
@@ -222,7 +222,7 @@ func (w *WAL) WriteFn() WriteFn {
 // transaction is durable: a crash from this point on will replay the
 // intents on restart.
 //
-// A second Commit re-writes the file with the current intent set —
+// A second Commit re-writes the file with the current intent set,
 // callers should not Append after Commit, but if they do, a second
 // Commit will produce a WAL file with the additional intents.
 func (w *WAL) Commit() error {
@@ -256,7 +256,7 @@ func (w *WAL) Apply() error {
 // Done removes the WAL file. Call after Apply succeeds. A subsequent
 // Scan will not see this WAL.
 //
-// Safe to call when the WAL file doesn't exist (returns nil) — that
+// Safe to call when the WAL file doesn't exist (returns nil), that
 // branch covers the "uncommitted WAL" cleanup case in the abort
 // path of state.WithTransaction.
 func (w *WAL) Done() error {
@@ -272,7 +272,7 @@ func (w *WAL) Done() error {
 // so anything Scan finds is committed and needs Apply + Done.
 //
 // The write function is wired into every returned WAL. A missing
-// walDir returns (nil, nil) — that's the "fresh data folder" case.
+// walDir returns (nil, nil), that's the "fresh data folder" case.
 //
 // Files that fail to parse are skipped with their path included in
 // the returned error chain (so a corrupted log doesn't block other
@@ -291,7 +291,7 @@ func Scan(walDir string, write WriteFn) ([]*WAL, error) {
 	}
 	// Collect names first so we can sort for deterministic replay
 	// order. Use the trimmed id (filename minus ".json") as the
-	// sort key — uniqueWALID's prefix is unix-nanos, so sorting by
+	// sort key, uniqueWALID's prefix is unix-nanos, so sorting by
 	// id is sorting by commit-time.
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -309,7 +309,7 @@ func Scan(walDir string, write WriteFn) ([]*WAL, error) {
 	out := make([]*WAL, 0, len(names))
 	for _, n := range names {
 		path := filepath.Join(walDir, n)
-		raw, rerr := os.ReadFile(path) // #nosec G304 — path is the dir+file we just listed
+		raw, rerr := os.ReadFile(path) // #nosec G304, path is the dir+file we just listed
 		if rerr != nil {
 			// Best-effort: skip unreadable files. A future enhancement
 			// could surface these via a slog warning, but breaking the

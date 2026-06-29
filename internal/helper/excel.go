@@ -19,17 +19,17 @@
 //
 // Row-count thresholds and layout constants are defined in constants.go.
 //
-// CHK037 — Kachinuki Excel rendering decision (T160 + T195–T203):
+// CHK037, Kachinuki Excel rendering decision (T160 + T195–T203):
 //
 // The main Pool Matches / Elimination Matches sheets continue to use the
-// 8-column-per-court layout invariant (CourtsColumnsPerCourt = 8 — see
+// 8-column-per-court layout invariant (CourtsColumnsPerCourt = 8, see
 // constants.go and CLAUDE.md). Variable-bout kachinuki grids would either
 // overflow that budget or force a layout-mode switch the rest of the
 // workbook can't accommodate, so the main sheets carry the team-match
 // row only.
 //
 // Bout-by-bout detail is rendered on a separate "Kachinuki Detail" sheet
-// (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go —
+// (helper.SheetKachinukiDetail). See internal/helper/excel_kachinuki.go,
 // the sheet uses a flexible 8-column layout (NOT bound by
 // CourtsColumnsPerCourt) and is opt-in: the engine export path
 // (internal/engine/export.go → collectKachinukiMatches) emits it only
@@ -166,7 +166,7 @@ type playerMatchRecord struct {
 // strippedLen returns the formula expression
 // LEN(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(<col><row>," ",""),"0",""),"-","")), i.e.
 // the character count of one cell after stripping spaces, zeros, and dashes.
-// Used by the team-summary helpers below — kept as single-cell expressions
+// Used by the team-summary helpers below, kept as single-cell expressions
 // because passing a range to SUBSTITUTE/LEN does not natively iterate as an
 // array in legacy Excel, Google Sheets, or Apple Numbers; only Excel 365 with
 // dynamic-array semantics evaluates the array form correctly.
@@ -203,7 +203,7 @@ func buildTeamWinnersFormula(middleCol, lVCol, lPCol, rVCol, rPCol string, start
 // left=true sums the left side (lVCol+lPCol); false sums the right (rPCol+rVCol).
 //
 // As with buildTeamWinnersFormula, each cell is wrapped in its own
-// LEN(SUBSTITUTE(...)) expression — passing a range to SUBSTITUTE/LEN inside
+// LEN(SUBSTITUTE(...)) expression, passing a range to SUBSTITUTE/LEN inside
 // SUMPRODUCT only iterates in Excel 365 dynamic arrays; Google Sheets and
 // Apple Numbers collapse it to the first element.
 func buildTeamPointsFormula(lVCol, lPCol, rVCol, rPCol string, startRow, endRow int, left bool) string {
@@ -537,7 +537,7 @@ func printTeamIndividualStatsSection(ctx poolResultsCtx, headerRow int, headerRo
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", cols2[4], row2), joinFormulas(plF)))
 
 		// Hierarchical Score Formula
-		// No leading '=' — OOXML <f> elements store the formula body
+		// No leading '=', OOXML <f> elements store the formula body
 		// only. Excel tolerates the prefix, but Google Sheets and Apple
 		// Numbers reject it and produce #ERROR! / blank cells.
 		scoreFormula := fmt.Sprintf("(%s%d*1000000000)-(%s%d*10000000)+(%s%d*100000)+(%s%d*1000)-(%s%d*100)+(%s%d*10)+(%s%d*1)-(%s%d*0.01)",
@@ -629,7 +629,7 @@ func printIndividualResultsTableSection(ctx poolResultsCtx, headerRow int, teamM
 		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, fmt.Sprintf("%s%d", rVCol, row), joinFormulas(plFormulas)))
 
 		// Weighted Score formula
-		// No leading '=' — see the matching note in the team-results
+		// No leading '=', see the matching note in the team-results
 		// scoreFormula above. Google Sheets and Apple Numbers reject
 		// OOXML <f> bodies that begin with '='.
 		scoreFormula := fmt.Sprintf("(%s%d*1000000)-(%s%d*10000)+(%s%d*100)+(%s%d*1)-(%s%d*0.01)",
@@ -1478,7 +1478,7 @@ func handleExcelError(operation string, err error) {
 
 // mustColumnName converts a 1-based column number to an Excel column letter
 // (e.g. 1 → "A", 28 → "AB").  It panics when col ≤ 0, which indicates a
-// programming error in the caller — excelize.ColumnNumberToName only errors
+// programming error in the caller, excelize.ColumnNumberToName only errors
 // for non-positive column numbers.
 func mustColumnName(col int) string {
 	name, err := excelize.ColumnNumberToName(col)

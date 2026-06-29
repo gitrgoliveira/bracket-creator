@@ -26,8 +26,8 @@ const AdminPasswordHashEnv = "TOURNAMENT_ADMIN_PASSWORD_HASH"
 // Tournament.AdminPassword from the store (no env var); locked mode reads
 // the bcrypt hash from TOURNAMENT_ADMIN_PASSWORD_HASH, falling back to the
 // fail-closed unconfigured verifier (503 on gated endpoints) when the env
-// var is absent or malformed. Reading the env here — rather than threading
-// an explicit param through NewRouter — keeps the router signature stable
+// var is absent or malformed. Reading the env here, rather than threading
+// an explicit param through NewRouter, keeps the router signature stable
 // for the many existing callers; file-mode tests never touch the env.
 func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) ElevatedVerifier {
 	if verifier != nil && verifier.Mode() == "locked" {
@@ -44,14 +44,14 @@ func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) Elev
 // NewRouter wires the mobile-app gin engine. The returned *gin.Engine
 // is the HTTP handler; the returned *Hub is exposed so the caller
 // (cmd/mobile_app.go) can call Hub.Close() from a graceful-shutdown
-// hook — without that, http.Server.Shutdown would block forever on
+// hook, without that, http.Server.Shutdown would block forever on
 // the long-lived SSE goroutines. The returned *APIRateLimiter should
 // also be closed on shutdown to stop the per-IP cleanup goroutine.
 func NewRouter(store *state.Store, eng *engine.Engine, res *resources.Resources, verifier PasswordVerifier) (*gin.Engine, *Hub, *APIRateLimiter) {
 	return NewRouterWithHub(store, eng, res, verifier, NewHub(), false)
 }
 
-// NewRouterWithHub is the testable / configurable variant — pass a
+// NewRouterWithHub is the testable / configurable variant, pass a
 // pre-built Hub (e.g. one with NewHubWithLimits) instead of constructing
 // the default. cmd/mobile_app.go uses this to apply the SSE_MAX_CLIENTS
 // override; tests use it to inject a small-capacity hub.
@@ -65,7 +65,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		verifier = NewFileVerifier(store)
 	}
 
-	// Elevated (destructive-ops) password verifier — spec 004 / mp-e21.
+	// Elevated (destructive-ops) password verifier, spec 004 / mp-e21.
 	// Derived from the main verifier's mode; see defaultElevatedVerifier.
 	elevated := defaultElevatedVerifier(verifier, store)
 
@@ -131,7 +131,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		RegisterDisplayHandlers(viewer, store)
 	}
 
-	// Stateless schedule estimator — no auth, no state-store access.
+	// Stateless schedule estimator, no auth, no state-store access.
 	// Registered directly under /api so the path matches the canonical
 	// CLI web-server route exactly (T147a, T152a). Shared by both
 	// `make run` and `make run-mobile` frontends.
@@ -143,10 +143,10 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// (same contract as /api/viewer/*). The write paths for each are on the
 	// admin group below.
 	//
-	// GET /competitions/:id/competitor-status — eligibility state is
+	// GET /competitions/:id/competitor-status, eligibility state is
 	// derivable from public match results; viewer/display surfaces need it
 	// without admin credentials.
-	// GET /competitions/:id/teams/:tid/lineups/:round — lineup assignments
+	// GET /competitions/:id/teams/:tid/lineups/:round, lineup assignments
 	// are visible to coaches and spectators; AdminLineup loads them before
 	// the operator has entered the admin password.
 	RegisterPublicEligibilityHandlers(api, store)
@@ -159,11 +159,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
 
 	// Public password-reset + auth-config endpoints. Both must live
-	// outside the admin group: /reset is the recovery path for a
+	// outside the admin group; /reset is the recovery path for a
 	// forgotten admin password (so requiring the password to use it
 	// would be useless), and /auth-config lets the SPA discover whether
 	// reset is enabled (locked mode disables it). Both 404 / return
-	// inert payloads when locked mode is active — see handlers_reset.go
+	// inert payloads when locked mode is active, see handlers_reset.go
 	// and handlers_auth_config.go.
 	RegisterResetHandlers(api, store, verifier, hub)
 	RegisterAuthConfigHandlers(api, verifier, elevated, scheduleEnabled)
@@ -172,11 +172,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// expected body size so the body cap fires BEFORE AuthMiddleware at
 	// the right granularity for each endpoint tier:
 	//
-	//   adminTinyBody  (4 KB)  — /tournament/announce
-	//   adminSmallBody (1 MB)  — all other admin JSON endpoints
-	//   adminLargeBody (64 MB) — /tournament/import (CSV upload)
+	//   adminTinyBody  (4 KB), /tournament/announce
+	//   adminSmallBody (1 MB), all other admin JSON endpoints
+	//   adminLargeBody (64 MB), /tournament/import (CSV upload)
 	//
-	// Use adminGroup() to wire each group: it enforces the cap→auth ordering
+	// Use adminGroup() to wire each group; it enforces the cap→auth ordering
 	// so new groups can't accidentally reverse it.
 	adminTinyBody := adminGroup(r, AnnouncementMaxBodyBytes, verifier, store)
 	RegisterAnnouncementHandlers(adminTinyBody, store, hub)
@@ -195,21 +195,21 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
 
-	// PDF export — POST body is effectively empty (type in URL param only);
+	// PDF export, POST body is effectively empty (type in URL param only);
 	// uses DefaultMaxBodyBytes for consistency with the other admin JSON tier.
 	RegisterPrintHandlers(adminSmallBody, eng)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
 	RegisterImportHandlers(adminLargeBody, store, hub, elevated)
 
-	// Sponsor uploads (mp-c38) — multipart logo upload needs envelope
-	// headroom for the file plus boundary/form-field overhead, so it gets
+	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
+	// headroom for the file plus boundary/form-field overhead; so it gets
 	// its own 2 MB group separate from the 1 MB JSON tier. DELETE rides
 	// on the same group (DELETE skips the cap by method anyway).
 	adminSponsorBody := adminGroup(r, SponsorMaxBodyBytes, verifier, store)
 	RegisterSponsorHandlers(adminSponsorBody, store)
 
-	// Tournament branding logo (mp-scf) — same 2 MB envelope as sponsors.
+	// Tournament branding logo (mp-scf), same 2 MB envelope as sponsors.
 	adminBrandingBody := adminGroup(r, BrandingMaxBodyBytes, verifier, store)
 	RegisterBrandingHandlers(adminBrandingBody, store)
 
@@ -247,7 +247,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			// Browser-build rewrite: source .jsx files (web-mobile/js/*.jsx)
 			// import siblings via `./X.jsx` paths. esbuild compiles to
 			// .js (web-mobile/dist/*.js) but does NOT rewrite the import
-			// strings — so a browser's `import "./X.jsx"` falls through to
+			// strings, so a browser's `import "./X.jsx"` falls through to
 			// here looking for a non-existent `dist/X.jsx`. Map to the
 			// compiled `.js` sibling. Without this rewrite the SPA fails
 			// to mount because every entry chunk has an unresolved

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 
 // Tests for the "Share registration link" feature added in mp-a1jz:
-// CompCard share-button visibility (canShare predicate) — asserts which
+// CompCard share-button visibility (canShare predicate); asserts which
 // tournament/competition configurations show or hide the share button.
 
 let CompCard;

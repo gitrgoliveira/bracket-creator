@@ -79,10 +79,10 @@ describe('buildPlayerMatchHighlight', () => {
 
 describe('isFollowedPlayer', () => {
   it('matches by UUID first, then falls back to name when ids diverge', () => {
-    // Both sides have ids — same id is a match.
+    // Both sides have ids. Same id is a match.
     const sideA = { id: 'p1', name: 'Alice' };
     expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
-    // Both sides have ids and they differ — the id check fails but the
+    // Both sides have ids and they differ. The id check fails but the
     // name fallback still matches. Documents the two-layer match contract.
     expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true);
   });
@@ -112,14 +112,14 @@ describe('isFollowedPlayer', () => {
 
   it('name fallback is case-insensitive and trims whitespace', () => {
     // Older payloads or manual entries may differ in capitalisation or
-    // have leading/trailing spaces — treat them as the same player.
+    // have leading/trailing spaces. Treat them as the same player.
     expect(isFollowedPlayer({ id: '', name: 'ALICE' }, { id: '', name: 'alice' })).toBe(true);
     expect(isFollowedPlayer({ id: '', name: '  Alice  ' }, { id: '', name: 'Alice' })).toBe(true);
     expect(isFollowedPlayer('alice', { id: '', name: 'ALICE' })).toBe(true);
   });
 });
 
-// FR-025 — MyMatchPanel Queue chip label. Wording mirrors VSchedItem (also in
+// FR-025: MyMatchPanel Queue chip label. Wording mirrors VSchedItem (also in
 // viewer.jsx) so a viewer who looks at "Your next match" then scrolls down to
 // the per-court schedule sees the same label.
 describe('mymatchQueueLabel', () => {
@@ -135,7 +135,7 @@ describe('mymatchQueueLabel', () => {
 
   it('returns null when status === "running" (running state shown by .my-match--running ring)', () => {
     // WatchHeroCard signals the running state via the .my-match--running CSS ring
-    // and label change ("Your match") — the Queue chip must not add a redundant label.
+    // and label change ("Your match"). The Queue chip must not add a redundant label.
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 0 })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running' })).toBeNull();
     expect(mymatchQueueLabel({ status: 'running', queuePosition: 3 })).toBeNull();

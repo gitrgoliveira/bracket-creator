@@ -16,7 +16,7 @@ import (
 // courtCurrentSide mirrors the per-side payload the
 // GET /api/viewer/court/:court/current handler builds via buildSide (see
 // handlers_display.go; documented in specs/openapi.yaml). Kept local to the
-// test file because the handler assembles the JSON inline — there is no
+// test file because the handler assembles the JSON inline, there is no
 // exported production response type to assert against.
 type courtCurrentSide struct {
 	PlayerID    string `json:"playerId"`
@@ -28,7 +28,7 @@ type courtCurrentSide struct {
 
 // courtCurrentResponse mirrors the full current/idle response shape from the
 // contract. Fields that don't appear on the idle branch are zero-valued
-// after json.Unmarshal — the assertions read only what each test cares
+// after json.Unmarshal, the assertions read only what each test cares
 // about.
 type courtCurrentResponse struct {
 	Court       string `json:"court"`
@@ -49,7 +49,7 @@ type courtCurrentResponse struct {
 	Error      string            `json:"error,omitempty"`
 }
 
-// TestCourtCurrentReturnsCurrentPayload — T052
+// TestCourtCurrentReturnsCurrentPayload, T052
 // Setup a tournament with Court A, save a competition, place a match in
 // "running" status on Court A, then GET /api/viewer/court/A/current and
 // assert the contract payload (200 + status=="current" + sides + counts).
@@ -65,7 +65,7 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 
 	comp := state.Competition{
 		ID:     "kyu-individual",
-		Name:   "Individual — Kyu Division",
+		Name:   "Individual, Kyu Division",
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}
@@ -108,7 +108,7 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
 }
 
-// TestCourtCurrentReturnsRunningBracketMatch — mp-9h1f follow-up. A running
+// TestCourtCurrentReturnsRunningBracketMatch, mp-9h1f follow-up. A running
 // KNOCKOUT (bracket) bout must surface as the court's current match; the prior
 // handler scanned only poolMatches, so an elimination bout read as idle. The
 // bracket persists its running score as the formatted ScoreA/ScoreB string, so
@@ -162,9 +162,9 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	assert.Equal(t, 0, resp.HansokuB)
 }
 
-// TestCourtCurrentEmptyIpponsAreArraysNotNull — Copilot review. An unscored
+// TestCourtCurrentEmptyIpponsAreArraysNotNull, Copilot review. An unscored
 // match (here a bracket bout with only a hansoku and no ippons) must encode
-// ipponsA/ipponsB as [] on the wire, not null — the contract models them as
+// ipponsA/ipponsB as [] on the wire, not null, the contract models them as
 // arrays and overlay clients assume []. Asserted on the raw body because the
 // test struct's omitempty can't distinguish [] from null.
 func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
@@ -182,7 +182,7 @@ func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
 			{
 				ID: "m-r1-0", SideA: "Aoi", SideB: "Ken",
 				Status: state.MatchStatusRunning, Court: "A",
-				ScoreA: "(H2)", // hansoku only — no ippons → parseScore returns nil
+				ScoreA: "(H2)", // hansoku only, no ippons → parseScore returns nil
 				ScoreB: "",     // nothing scored yet → nil
 			},
 		}},
@@ -223,7 +223,7 @@ func TestParseScore(t *testing.T) {
 	}
 }
 
-// TestCourtCurrentSurfacesRepPlayersForDaihyosen — mp-62vr.
+// TestCourtCurrentSurfacesRepPlayersForDaihyosen, mp-62vr.
 // A pool daihyosen bout carries TEAM names in sideA/sideB; the representative
 // fighter for each side lives in repPlayerA/repPlayerB. The polled OBS/vMix
 // endpoint must forward those names or the overlay can't show who is fighting.
@@ -239,7 +239,7 @@ func TestCourtCurrentSurfacesRepPlayersForDaihyosen(t *testing.T) {
 
 	comp := state.Competition{
 		ID:     "team-pool",
-		Name:   "Team — Pool",
+		Name:   "Team, Pool",
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}
@@ -273,8 +273,8 @@ func TestCourtCurrentSurfacesRepPlayersForDaihyosen(t *testing.T) {
 		"rep-player B must be forwarded for a pool daihyosen bout")
 }
 
-// TestCourtCurrentReturnsIdleWhenNoCurrent — T053
-// Tournament with Court A but no running match — assert
+// TestCourtCurrentReturnsIdleWhenNoCurrent, T053
+// Tournament with Court A but no running match, assert
 // 200 + {court:"A", status:"idle"}.
 func TestCourtCurrentReturnsIdleWhenNoCurrent(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -302,8 +302,8 @@ func TestCourtCurrentReturnsIdleWhenNoCurrent(t *testing.T) {
 	assert.Nil(t, resp.SideB, "idle payload must not include sideB")
 }
 
-// TestCourtCurrentReturns404ForUnknownCourt — T054
-// Tournament has Courts A,B; GET court Z — assert 404 +
+// TestCourtCurrentReturns404ForUnknownCourt, T054
+// Tournament has Courts A,B; GET court Z, assert 404 +
 // error=="court_not_found", court=="Z".
 func TestCourtCurrentReturns404ForUnknownCourt(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -330,8 +330,8 @@ func TestCourtCurrentReturns404ForUnknownCourt(t *testing.T) {
 		"court field must echo the requested (normalized uppercase) court label")
 }
 
-// TestCourtCurrentRespectsZekkenName — T055
-// Competition has withZekkenName=true; GET — assert sideA.displayName
+// TestCourtCurrentRespectsZekkenName, T055
+// Competition has withZekkenName=true; GET, assert sideA.displayName
 // equals the zekken (different from name).
 func TestCourtCurrentRespectsZekkenName(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -385,13 +385,13 @@ func TestCourtCurrentRespectsZekkenName(t *testing.T) {
 		"sideB.displayName must equal the zekken when withZekkenName=true")
 }
 
-// TestCourtCurrentReturns503WhenNoTournament — T055a
-// No tournament loaded; GET — assert 503 + error=="no_active_tournament".
+// TestCourtCurrentReturns503WhenNoTournament, T055a
+// No tournament loaded; GET, assert 503 + error=="no_active_tournament".
 func TestCourtCurrentReturns503WhenNoTournament(t *testing.T) {
 	r, _, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Intentionally do NOT save a tournament — setupTestRouter starts
+	// Intentionally do NOT save a tournament, setupTestRouter starts
 	// with an empty Store. The contract requires 503 in this case.
 
 	w := httptest.NewRecorder()
@@ -471,7 +471,7 @@ func compIDs(resp courtMatchesResponse) []string {
 	return out
 }
 
-// TestCourtMatches_ListsCompsWithRealMatchOnCourt — a comp with a real pool
+// TestCourtMatches_ListsCompsWithRealMatchOnCourt, a comp with a real pool
 // match on the court appears (with its full per-comp payload); a comp whose
 // match is on another court does not.
 func TestCourtMatches_ListsCompsWithRealMatchOnCourt(t *testing.T) {
@@ -503,7 +503,7 @@ func TestCourtMatches_ListsCompsWithRealMatchOnCourt(t *testing.T) {
 	assert.Equal(t, "A", resp.Competitions[0].PoolMatches[0].Court)
 }
 
-// TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered — the comp's payload
+// TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered, the comp's payload
 // includes ALL its matches (both courts), not just the requested court, so
 // client-side derivations like pool "Match N of M" counts stay correct.
 func TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered(t *testing.T) {
@@ -527,7 +527,7 @@ func TestCourtMatches_ReturnsFullCompMatchDataNotCourtFiltered(t *testing.T) {
 		"full comp match data (both courts) must be returned so pool counts stay correct")
 }
 
-// TestCourtMatches_FollowsMovedMatchNotConfig — the load-bearing case: a comp
+// TestCourtMatches_FollowsMovedMatchNotConfig, the load-bearing case: a comp
 // configured for court A whose match was MOVED to court B appears under B
 // (actual placement), not A (config).
 func TestCourtMatches_FollowsMovedMatchNotConfig(t *testing.T) {
@@ -551,7 +551,7 @@ func TestCourtMatches_FollowsMovedMatchNotConfig(t *testing.T) {
 	assert.Equal(t, []string{"moved"}, compIDs(onB), "actual-court B must list the comp whose match was moved there")
 }
 
-// TestCourtMatches_IncludesBracketMatch — a comp whose only match on the court
+// TestCourtMatches_IncludesBracketMatch, a comp whose only match on the court
 // is a (non-preview) bracket match appears, with its bracket payload.
 func TestCourtMatches_IncludesBracketMatch(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -575,7 +575,7 @@ func TestCourtMatches_IncludesBracketMatch(t *testing.T) {
 	require.Len(t, resp.Competitions[0].Bracket.Rounds, 1)
 }
 
-// TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup — comps whose only
+// TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup, comps whose only
 // court match is an unresolved placeholder, a preview bracket, or that are still
 // in setup, do NOT appear.
 func TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup(t *testing.T) {
@@ -615,7 +615,7 @@ func TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup(t *testing.T) {
 		"placeholder-only, preview-bracket, and setup comps must all be excluded; got %v", compIDs(resp))
 }
 
-// TestCourtMatches_UnknownCourtAndNoTournament — 404 for an unknown court, 503
+// TestCourtMatches_UnknownCourtAndNoTournament, 404 for an unknown court, 503
 // when no tournament is loaded (same contract as /court/:court/current).
 func TestCourtMatches_UnknownCourtAndNoTournament(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

@@ -46,7 +46,7 @@ func individualStandingPoints(s state.PlayerStanding) int {
 //
 // Points encodes the full ordered tiebreak chain (see teamStandingPoints /
 // individualStandingPoints), so equal Points means genuinely tied on every
-// official criterion — for both team and individual competitions. The caller
+// official criterion, for both team and individual competitions. The caller
 // MUST pass standings already sorted by Points descending; the returned indices
 // point straight back into that slice.
 func detectPoolTies(standings []state.PlayerStanding) [][]int {
@@ -86,7 +86,7 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // applyTiebreakSort re-orders each tied group in `sorted` (in place) by per-group
 // win count from the supplementary bouts whose ID satisfies isSupplementaryID
 // (TB ippon-shobu or DH representative). Tied groups are located via
-// detectPoolTies — the single source of the Points-equality walk — so the two
+// detectPoolTies, the single source of the Points-equality walk, so the two
 // callers (TB, DH) share one implementation. Win counts are scoped to bouts
 // between members of the same tied group, so an unrelated group's results never
 // bleed across; a group with no decided supplementary bouts is left untouched.
@@ -116,7 +116,7 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 }
 
 // tiebreakerPairKey returns a canonical (order-independent) key for a
-// pair of player names — used to detect already-existing TB matches.
+// pair of player names, used to detect already-existing TB matches.
 func tiebreakerPairKey(a, b string) string {
 	if a < b {
 		return a + "|" + b
@@ -188,7 +188,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	poolCourt := map[string]string{}
 	// regularIncomplete[pool] becomes true if ANY regular (non-TB) match in the
 	// pool is not yet completed. Tiebreakers must only be injected once a pool's
-	// regular round-robin is finished — otherwise an intermediate, partial-result
+	// regular round-robin is finished, otherwise an intermediate, partial-result
 	// tie (e.g. everyone 0–0 after one match) would spuriously inject TB matches
 	// that a later result then breaks, leaving orphaned scheduled TB matches that
 	// never clear. (The pre-incremental caller enforced this via a comp-wide

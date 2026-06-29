@@ -8,7 +8,7 @@
 # Fails OPEN: if anything is ambiguous (no jq, not a git repo, no path),
 # it allows the edit rather than blocking all work.
 #
-# ACTIVATION (required — the script is inert until registered):
+# ACTIVATION (required, the script is inert until registered):
 # .claude/settings.json is gitignored, so a fresh checkout receives this
 # file but nothing invokes it. To enable the guard, add to your local
 # .claude/settings.json (merge with any existing "hooks"):

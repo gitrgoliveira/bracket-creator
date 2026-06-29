@@ -1,4 +1,4 @@
-// Package domain — glossary.go owns the canonical kendo-term dictionary
+// Package domain, glossary.go owns the canonical kendo-term dictionary
 // used by the Preact <Term> tooltip component (web-mobile/js/glossary.jsx)
 // AND by API error responses (handlers_*.go ResolveReasonHuman).
 //
@@ -41,7 +41,7 @@ type Term struct {
 
 // Glossary is the full term map keyed by lowercase romaji ID. The
 // entries here mirror specs/003-tournament-gap-closure/glossary.md
-// verbatim — tooltips are copied as-is so the spec and code never
+// verbatim, tooltips are copied as-is so the spec and code never
 // drift. Don't paraphrase.
 var Glossary = map[string]Term{
 	// --- Tier 1: every operator sees these during scoring ---
@@ -50,33 +50,33 @@ var Glossary = map[string]Term{
 		ID:      "hikiwake",
 		Kanji:   "引き分け",
 		Short:   "Draw",
-		Tooltip: "The match ended tied — both competitors finished with equal points and no winner is declared. Common in pool matches; knockout matches go to overtime (encho) instead.",
+		Tooltip: "The match ended tied, both competitors finished with equal points and no winner is declared. Common in pool matches; knockout matches go to overtime (encho) instead.",
 		SeeAlso: []string{"encho"},
 	},
 	"encho": {
 		ID:      "encho",
 		Kanji:   "延長",
 		Short:   "Overtime",
-		Tooltip: "Overtime — when a knockout match is tied at the end of regulation, an extra period is played until someone scores. Scoring in Encho follows ippon-shobu rules: first to one point wins.",
+		Tooltip: "Overtime, when a knockout match is tied at the end of regulation, an extra period is played until someone scores. Scoring in Encho follows ippon-shobu rules: first to one point wins.",
 		SeeAlso: []string{"ippon-shobu", "ippon"},
 	},
 	"kiken": {
 		ID:      "kiken",
 		Kanji:   "棄権",
 		Short:   "Withdrawal",
-		Tooltip: "The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31) — permanent disqualification from the competition; Injury (FIK Art. 30) — can be reinstated if a doctor and shinpan permit it. The opponent wins 2–0 by default.",
+		Tooltip: "The competitor withdraws. Two sub-types: Voluntary (FIK Art. 31), permanent disqualification from the competition; Injury (FIK Art. 30), can be reinstated if a doctor and shinpan permit it. The opponent wins 2–0 by default.",
 	},
 	"kiken-voluntary": {
 		ID:      "kiken-voluntary",
 		Kanji:   "棄権",
 		Short:   "Voluntary withdrawal",
-		Tooltip: "FIK Article 31 — the competitor voluntarily withdraws. They forfeit this match (opponent wins 2–0) and are permanently barred from all later matches in this competition.",
+		Tooltip: "FIK Article 31, the competitor voluntarily withdraws. They forfeit this match (opponent wins 2–0) and are permanently barred from all later matches in this competition.",
 	},
 	"kiken-injury": {
 		ID:      "kiken-injury",
 		Kanji:   "棄権",
 		Short:   "Injury withdrawal",
-		Tooltip: "FIK Article 30 — the competitor withdraws due to injury or illness. They forfeit this match (opponent wins 2–0) and are blocked from later matches, but can be reinstated if a doctor and shinpan-in approve.",
+		Tooltip: "FIK Article 30, the competitor withdraws due to injury or illness. They forfeit this match (opponent wins 2–0) and are blocked from later matches, but can be reinstated if a doctor and shinpan-in approve.",
 	},
 	"fusenpai": {
 		ID:      "fusenpai",
@@ -125,7 +125,7 @@ var Glossary = map[string]Term{
 		ID:      "ippon",
 		Kanji:   "一本",
 		Short:   "Point",
-		Tooltip: "A valid point — a clean strike with correct form, posture, and spirit. First competitor to two ippon wins the match (or one in overtime).",
+		Tooltip: "A valid point, a clean strike with correct form, posture, and spirit. First competitor to two ippon wins the match (or one in overtime).",
 	},
 
 	// --- Tier 2: team competitions and overtime contexts ---
@@ -147,32 +147,32 @@ var Glossary = map[string]Term{
 		ID:      "senpo",
 		Kanji:   "先鋒",
 		Short:   "First player",
-		Tooltip: "The team's first player — fights bout 1 in a 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn.",
+		Tooltip: "The team's first player, fights bout 1 in a 5-person team. Senpo must be filled; this position cannot be left vacant, even when a teammate is withdrawn.",
 	},
 	"jiho": {
 		ID:      "jiho",
 		Kanji:   "次鋒",
 		Short:   "Second player",
-		Tooltip: "The team's second player — fights bout 2. If a team is short one player, FIK rules require that the Jiho position is the one left vacant.",
+		Tooltip: "The team's second player, fights bout 2. If a team is short one player, FIK rules require that the Jiho position is the one left vacant.",
 	},
 	"chuken": {
 		ID:      "chuken",
 		Kanji:   "中堅",
 		Short:   "Middle player",
-		Tooltip: "The team's middle player — fights bout 3 in a 5-person team.",
+		Tooltip: "The team's middle player, fights bout 3 in a 5-person team.",
 	},
 	"fukusho": {
 		ID:      "fukusho",
 		Kanji:   "副将",
 		Short:   "Vice-captain",
-		Tooltip: "The team's vice-captain — fights bout 4. If a team is short two players, FIK rules require jiho and Fukusho to be the two vacant positions.",
+		Tooltip: "The team's vice-captain, fights bout 4. If a team is short two players, FIK rules require jiho and Fukusho to be the two vacant positions.",
 		SeeAlso: []string{"jiho"},
 	},
 	"taisho": {
 		ID:      "taisho",
 		Kanji:   "大将",
 		Short:   "Captain",
-		Tooltip: "The team's captain — fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.",
+		Tooltip: "The team's captain, fights the final bout (bout 5). Like senpo, Taisho must be filled; this position cannot be left vacant.",
 		SeeAlso: []string{"senpo"},
 	},
 
@@ -188,7 +188,7 @@ var Glossary = map[string]Term{
 		ID:      "dan",
 		Kanji:   "段",
 		Short:   "Rank",
-		Tooltip: "A competitor's grade — shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form.",
+		Tooltip: "A competitor's grade, shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form.",
 	},
 	"dojo": {
 		ID:      "dojo",
@@ -200,7 +200,7 @@ var Glossary = map[string]Term{
 		ID:      "waza",
 		Kanji:   "技",
 		Short:   "Technique",
-		Tooltip: "The specific type of strike scored — for example, men, kote, or do. Recorded with each ippon for the match record.",
+		Tooltip: "The specific type of strike scored, for example, men, kote, or do. Recorded with each ippon for the match record.",
 		SeeAlso: []string{"ippon"},
 	},
 	"kachinuki-exhaustion": {
@@ -237,7 +237,7 @@ func Lookup(id string) (Term, bool) {
 // reason field is a short phrase that names the canonical decision
 // (kiken / fusenpai / fusensho / daihyosen / kachinuki-exhaustion)
 // followed by `at <matchID>`. Volunteers reading the error in the UI
-// shouldn't have to look up what "kiken at m_12" means — the human
+// shouldn't have to look up what "kiken at m_12" means, the human
 // gloss is rendered alongside (the JSON shape now carries both
 // `reason` and `reasonHuman`).
 var reasonHumanPatterns = []struct {
@@ -301,7 +301,7 @@ var reasonHumanPatterns = []struct {
 // Callers wire this into error responses alongside the raw `reason`
 // field so UIs can show "withdrew from match m_12" instead of "kiken
 // at m_12". Returning "" rather than echoing the input lets the caller
-// decide whether to omit the field or fall back to the raw reason —
+// decide whether to omit the field or fall back to the raw reason,
 // the JSON omitempty tag on ReasonHuman handles the typical case.
 func ResolveReasonHuman(reason string) string {
 	reason = strings.TrimSpace(reason)

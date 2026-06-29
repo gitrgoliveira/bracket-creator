@@ -1,5 +1,5 @@
 // Awards components extracted from viewer.jsx (mp-pxxc step 6).
-// Pure file split — no behaviour change.
+// Pure file split. no behaviour change.
 
 import { WinnerBadge } from './viewer_standings.jsx';
 import { competitionKindLabel } from './viewer_utils.jsx';
@@ -8,13 +8,13 @@ const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const EmptyState = window.EmptyState;
 
 // deriveAwards returns up to four placements for the closing ceremony per
-// FIK convention: 1st, 2nd, and two 3rds (semi-final losers — no bronze match).
+// FIK convention: 1st, 2nd, and two 3rds (semi-final losers: no bronze match).
 // Returns [] when no podium data exists yet.
 // `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
 // Bracket match fields (sideA/sideB/winner) may be either plain strings (raw
 // backend payload) or normalized objects ({id, name, dojo}) as produced by
-// normalizeMatch() in api_serializers.jsx — both shapes are handled.
+// normalizeMatch() in api_serializers.jsx: both shapes are handled.
 // `standings` may be either a flat array (Swiss-shape) or an object keyed by
 // pool name (pools/league shape).
 export function deriveAwards(bracket, standings, pools, nameToPlayer) {
@@ -99,15 +99,15 @@ export function bracketHasDecidedFinal(bracket) {
 // resolveCompetitionAwards: the single source of truth for a competition's
 // podium. Mixed (Pools + Knockout) is a single competition whose knockout fills
 // in place, so its podium is derived from its OWN bracket (the KNOCKOUT result,
-// 1/2/3/3 — never pool standings) once the final is decided.
+// 1/2/3/3: never pool standings) once the final is decided.
 // Returns { state, podium } where state is one of:
-//   'final'       — podium is the final result
-//   'in-progress' — knockout not yet decided (podium [])
-//   'skip'        — linked-playoffs shell (sourceCompID set); caller excludes from results
+//   'final'       : podium is the final result
+//   'in-progress': knockout not yet decided (podium [])
+//   'skip'        : linked-playoffs shell (sourceCompID set); caller excludes from results
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 export async function resolveCompetitionAwards(comp, fetchers) {
   // A linked-playoffs shell (legacy split-comp layout carrying sourceCompID)
-  // derives its podium from its source comp, never standalone — drop it so it
+  // derives its podium from its source comp, never standalone: drop it so it
   // doesn't appear twice in the results summary. buildAllWinnersPublic filters
   // state==="skip". (The current data model no longer emits sourceCompID, so
   // this is defensive parity with the documented behaviour.)
@@ -151,7 +151,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   const [isFs, setIsFs] = useState(false);
   const isLeague = c?.format === "league";
   const isMixed = c?.format === "mixed";
-  // Swiss standings aren't part of the competition-detail payload — they live
+  // Swiss standings aren't part of the competition-detail payload: they live
   // behind /swiss/standings. Fetch them here when the format is swiss so the
   // Awards tab works for Swiss competitions too.
   const [swissStandings, setSwissStandings] = useState(null);
@@ -213,7 +213,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   let awards, resolvedState;
   if (isMixed) {
     if (koAwards === undefined) {
-      // Still loading — show loading spinner below.
+      // Still loading: show loading spinner below.
       awards = [];
       resolvedState = "loading";
     } else {
@@ -264,13 +264,13 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   const second = awards.find(a => a.place === 2) || null;
   const thirds = awards.filter(a => a.place === 3);
 
-  // Shared header (title + place count + fullscreen toggle) — identical for the
+  // Shared header (title + place count + fullscreen toggle): identical for the
   // league and champion-hero layouts.
   const header = (
     <div className="awards__header">
       <div>
         <div className={`section-title awards__title${isFs ? " awards__title--fs" : ""}`}>
-          {c?.name ? `${c.name} — Awards` : "Awards"}
+          {c?.name ? `${c.name}: Awards` : "Awards"}
         </div>
         <div className={isFs ? "awards__subtitle--fs" : "awards__subtitle"}>
           Closing ceremony · {awards.length} place{awards.length === 1 ? "" : "s"}
@@ -283,7 +283,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   );
 
   // League format: keep WinnerBadge above and fall back to the classic podium
-  // row layout — the hero card doesn't fit the league ceremony well.
+  // row layout: the hero card doesn't fit the league ceremony well.
   if (isLeague) {
     return (
       <div
@@ -318,7 +318,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
             );
           })}
         </div>
-        {/* Fighting Spirit awards — distinct section, independent of the podium */}
+        {/* Fighting Spirit awards: distinct section, independent of the podium */}
         <FightingSpiritSection fsAwards={c?.fightingSpiritAwards} isFs={isFs} />
       </div>
     );
@@ -328,7 +328,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   // 1st place → large gold hero card (top, full width).
   // 2nd place → single centered card in its own row.
   // 3rd places → side-by-side equal-width cards in their own row (kendo has two
-  // joint 3rds — both beaten semi-finalists; no 4th, no bronze match).
+  // joint 3rds: both beaten semi-finalists; no 4th, no bronze match).
   return (
     <div
       ref={containerRef}
@@ -342,7 +342,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
     >
       {header}
 
-      {/* 1st place — champion hero */}
+      {/* 1st place: champion hero */}
       {champion && (
         <div
           className="awards-hero"
@@ -358,7 +358,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
         </div>
       )}
 
-      {/* 2nd place — single centered card */}
+      {/* 2nd place: single centered card */}
       {second && (
         <div className="awards-row awards-row--center">
           <div
@@ -376,7 +376,7 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
         </div>
       )}
 
-      {/* 3rd places — side-by-side (kendo: two joint 3rds, no bronze match) */}
+      {/* 3rd places: side-by-side (kendo: two joint 3rds, no bronze match) */}
       {thirds.length > 0 && (
         <div className="awards-row">
           {thirds.map((a, idx) => (
@@ -397,14 +397,14 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
         </div>
       )}
 
-      {/* Fighting Spirit awards — distinct section, independent of the podium */}
+      {/* Fighting Spirit awards: distinct section, independent of the podium */}
       <FightingSpiritSection fsAwards={c?.fightingSpiritAwards} isFs={isFs} />
     </div>
   );
 }
 
 // FightingSpiritSection renders the 🔥 Fighting Spirit subsection inside
-// AwardsView. Distinct from the placement podium — never merged into
+// AwardsView. Distinct from the placement podium: never merged into
 // deriveAwards/podium logic. Renders nothing when the list is empty/absent.
 export function FightingSpiritSection({ fsAwards, isFs }) {
   if (!fsAwards || fsAwards.length === 0) return null;
@@ -453,7 +453,7 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
 }
 
 // ---------------------------------------------------------------------------
-// buildAllWinnersPublic — public-viewer equivalent of admin_shell's
+// buildAllWinnersPublic: public-viewer equivalent of admin_shell's
 // buildAllWinners. Thin orchestrator: filter completed comps (excluding linked
 // playoffs shells whose sourceCompID marks them as driven by a parent mixed
 // competition), resolve each through resolveCompetitionAwards.
@@ -475,7 +475,7 @@ export async function buildAllWinnersPublic(comps, fetchers) {
 }
 
 // ---------------------------------------------------------------------------
-// AllWinnersView — full-page public results summary.  Mirrors the admin
+// AllWinnersView: full-page public results summary.  Mirrors the admin
 // AllWinnersModal rendering but as a full-page view (not a modal), matching
 // the ViewerSchedule / GlossaryPage page pattern. Props: { tournament, onBack, tweaks }.
 // ---------------------------------------------------------------------------
@@ -483,7 +483,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
   const comps = (tournament && tournament.competitions) || [];
   const [viewState, setViewState] = useState({ loading: true, results: [], error: null });
 
-  // Stable signature of every comp's id:status — triggers refetch when any
+  // Stable signature of every comp's id:status: triggers refetch when any
   // competition completes or its knockout resolves (same pattern as admin modal).
   const compsSig = comps.map((c) => `${c.id}:${c.status}`).join("|");
 
@@ -579,7 +579,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
 // AllWinnersView is read off window by app.jsx's public results page;
 // buildAllWinnersPublic is exercised via window by viewer_all_winners.test.jsx.
 // Guarded so importing viewer.jsx (which imports this module) in a non-browser
-// context (tooling/SSR) doesn't ReferenceError — matches viewer.jsx's own guard.
+// context (tooling/SSR) doesn't ReferenceError: matches viewer.jsx's own guard.
 if (typeof window !== 'undefined') {
   window.buildAllWinnersPublic = buildAllWinnersPublic;
   window.AllWinnersView = AllWinnersView;

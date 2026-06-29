@@ -1,5 +1,5 @@
 // mp-xhaa: rate-limited secondary (non-primary) watched-match alert decision.
-// Pure-function tests for computeSecondaryAlert — the anti-storm rule that
+// Pure-function tests for computeSecondaryAlert: the anti-storm rule that
 // keeps a coach watching a whole dojo from getting a banner per student.
 import { describe, it, expect } from 'vitest';
 import { computeSecondaryAlert } from '../viewer.jsx';
@@ -31,14 +31,14 @@ describe('computeSecondaryAlert', () => {
     const r = computeSecondaryAlert(empty, [upnext('mZ'), upnext('mA'), upnext('mM')], 100000, COOLDOWN);
     expect(r.fire).toBe(true);
     // earliest-scheduled fresh match wins; all share 10:00, so it's a stable
-    // pick of the first after sort — assert exactly one fired and the rest are
+    // pick of the first after sort: assert exactly one fired and the rest are
     // marked seen (suppressed).
     expect(r.seen.sort()).toEqual(['mA:upnext', 'mM:upnext', 'mZ:upnext'].sort());
   });
 
   it('suppresses a new match that arrives within the cooldown window', () => {
     const first = computeSecondaryAlert(empty, [upnext('m1')], 100000, COOLDOWN);
-    // m2 appears 5s later — still within cooldown → suppressed, NOT marked seen
+    // m2 appears 5s later: still within cooldown → suppressed, NOT marked seen
     const second = computeSecondaryAlert(first, [upnext('m1'), upnext('m2')], 105000, COOLDOWN);
     expect(second.fire).toBe(false);
     expect(second.seen).not.toContain('m2:upnext'); // left unseen so it can fire later

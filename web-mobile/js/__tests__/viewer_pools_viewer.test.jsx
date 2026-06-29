@@ -73,10 +73,10 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
     // running → "vs", scheduled → "–".
     global.window.matchStateCell = (m, ippB, ippA) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
       : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
@@ -248,7 +248,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
   });
 
   // A pool whose standings exist but are all 0-0-0 (no bout decided yet) must
-  // NOT show rank badges or the green "advancing" highlight — the rank is just
+  // NOT show rank badges or the green "advancing" highlight; the rank is just
   // the seed/draw fallback and asserting placement/qualification pre-scoring is
   // misleading. Provisional ranks appear only once a result exists.
   it('suppresses rank badges + advancing highlight until the pool has a result', () => {
@@ -349,10 +349,10 @@ describe('PoolsViewer league standings label (mp-mnwu)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
     // running → "vs", scheduled → "–".
     global.window.matchStateCell = (m, ippB, ippA) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
       : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
@@ -438,10 +438,10 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     global.window.matchScoreStr = (m, ippB, ippA) =>
       (global.window.teamIVScore(m)) ||
       global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
-    // Mirror the real matchStateCell (bracket.jsx): completed → score||"—",
+    // Mirror the real matchStateCell (bracket.jsx): completed → score||"-",
     // running → "vs", scheduled → "–".
     global.window.matchStateCell = (m, ippB, ippA) =>
-      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '—')
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
       : m?.status === 'running' ? 'vs' : '–';
     global.window.ipponsFromScore = () => [];
     global.window.queueLabel = () => '';
@@ -461,7 +461,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     vi.resetModules();
   });
 
-  it('renders the IV string for a completed team match with subResults (not "—")', () => {
+  it('renders the IV string for a completed team match with subResults (not "-")', () => {
     // Stub teamIVScore to return the IV aggregate (as it would for a real team match)
     global.window.teamIVScore = () => '2–1';
 
@@ -479,12 +479,12 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
     const text = collectText(tree);
-    // Should show "2–1" from teamIVScore, not "—" (the fallback for empty score)
+    // Should show "2–1" from teamIVScore, not "-" (the fallback for empty score)
     expect(text).toContain('2–1');
-    expect(text).not.toContain('—');
+    expect(text).not.toContain('-');
   });
 
-  it('renders "—" for a completed individual match with no subResults when formatIpponsScore returns empty', () => {
+  it('renders "-" for a completed individual match with no subResults when formatIpponsScore returns empty', () => {
     // teamIVScore returns null for individual matches (no subResults)
     global.window.teamIVScore = () => null;
     global.window.formatIpponsScore = () => ''; // also empty
@@ -500,7 +500,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2 });
     const text = collectText(tree);
-    expect(text).toContain('—');
+    expect(text).toContain('-');
   });
 
   it('falls back to formatIpponsScore when teamIVScore returns null', () => {
@@ -555,7 +555,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 // ------------------------------------------------------------------
 // mp-8rc9 Phase 1: poolLabel format-aware label helper
 // ------------------------------------------------------------------
-describe('poolLabel — format-aware phase label (mp-8rc9)', () => {
+describe('poolLabel: format-aware phase label (mp-8rc9)', () => {
   let poolLabel;
 
   beforeEach(async () => {
@@ -594,7 +594,7 @@ describe('poolLabel — format-aware phase label (mp-8rc9)', () => {
   });
 
   // The core terminology rule: a LEAGUE surface must never render the word
-  // "Pool" — leagues are a single table shown as "League table". Pool/mixed
+  // "Pool": leagues are a single table shown as "League table". Pool/mixed
   // surfaces DO render the pool name. poolLabel is the eyebrow path; this
   // guards it against the "Pool" word leaking back in for leagues.
   it('league poolLabel never contains the word "Pool" even when poolName is "Pool A"', () => {
@@ -610,14 +610,14 @@ describe('poolLabel — format-aware phase label (mp-8rc9)', () => {
 });
 
 // ------------------------------------------------------------------
-// mp-8rc9: leagueAwareLabel — single source of truth for the
+// mp-8rc9: leagueAwareLabel: single source of truth for the
 // league-vs-pool heading. Every admin/viewer surface routes its
 // pool-heading through this helper (poolLabel, poolDisplayLabel, the
 // shiaijo phase label, the scoring eyebrow). Pinning the boundary here
 // guards ALL of them: a league must read "League table" and must NEVER
 // contain "Pool"; a pool/mixed surface must surface the pool name.
 // ------------------------------------------------------------------
-describe('leagueAwareLabel — league/pool terminology boundary (mp-8rc9)', () => {
+describe('leagueAwareLabel: league/pool terminology boundary (mp-8rc9)', () => {
   let leagueAwareLabel;
 
   beforeEach(async () => {

@@ -16,7 +16,7 @@ import (
 //
 // Without this helper, operators would have to write a one-off Go program
 // or use third-party tools (htpasswd, online generators, etc.) to produce
-// a bcrypt hash — friction that discourages adoption of the locked-password
+// a bcrypt hash, friction that discourages adoption of the locked-password
 // mode. Bundling it as a subcommand keeps the workflow `bracket-creator
 // hash-password mysecret` → copy the line into the env var.
 //
@@ -57,8 +57,8 @@ func newHashPasswordCmd() *cobra.Command {
 				}
 				// Trim both \n (Unix) and \r\n (Windows CRLF / piped from
 				// PowerShell). Without the \r trim, the hash is generated
-				// for "<password>\r" — the browser then sends "<password>"
-				// at runtime and authentication fails. Don't TrimSpace —
+				// for "<password>\r", the browser then sends "<password>"
+				// at runtime and authentication fails. Don't TrimSpace,
 				// passwords may legitimately contain leading/trailing
 				// whitespace and the runtime auth is exact-string match.
 				plaintext = strings.TrimRight(line, "\r\n")

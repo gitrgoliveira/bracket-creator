@@ -49,7 +49,7 @@ describe('RegistrationForm', () => {
     });
   });
 
-  describe('metadata error (404 — not available)', () => {
+  describe('metadata error (404: not available)', () => {
     it('shows unavailable message when GET returns 404', async () => {
       global.fetch = vi.fn(() =>
         Promise.resolve({ status: 404, ok: false, json: () => Promise.resolve({}) })
@@ -251,10 +251,10 @@ describe('RegistrationForm', () => {
       const displayNameInput = findInputByPlaceholder('e.g. TANAKA');
       expect(displayNameInput.props.value).toBe('');
 
-      // Competition metadata preserved — comp name still visible, no re-fetch
+      // Competition metadata preserved: comp name still visible, no re-fetch
       const text = collectText(runtime.currentTree());
       expect(text).toContain('Open');
-      expect(global.fetch).toHaveBeenCalledTimes(2); // 1 GET meta + 1 POST register — no extra fetch
+      expect(global.fetch).toHaveBeenCalledTimes(2); // 1 GET meta + 1 POST register; no extra fetch
     });
   });
 

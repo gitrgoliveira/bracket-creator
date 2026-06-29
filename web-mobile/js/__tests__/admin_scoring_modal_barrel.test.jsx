@@ -4,7 +4,7 @@
 // module's full named surface and sets window.ScoreEditorModal. This test is
 // intentionally WIRING-focused, not logic-focused: it verifies that every name
 // the surrounding codebase depends on is still exported and that the window
-// bridge is still set. It does NOT test any function behavior — that lives in
+// bridge is still set. It does NOT test any function behavior (that lives in
 // admin_scoring_modal.test.jsx and the per-module suites.
 //
 // Its ongoing role is to fail loudly if a future refactor drops a re-export
@@ -68,18 +68,18 @@ describe('admin_scoring_modal barrel completeness', () => {
     for (const name of EXPECTED_EXPORTS) {
       expect(
         M[name],
-        `Missing export: "${name}" — was it dropped from the barrel?`,
+        `Missing export: "${name}"; was it dropped from the barrel?`,
       ).toBeDefined();
     }
   });
 
-  it('exports no UNEXPECTED symbols (frozen surface — update this list when adding exports)', () => {
+  it('exports no UNEXPECTED symbols (frozen surface; update this list when adding exports)', () => {
     const actual = new Set(Object.keys(M));
     const expected = new Set(EXPECTED_EXPORTS);
     const unexpected = [...actual].filter(k => !expected.has(k));
     expect(
       unexpected,
-      `Unexpected export(s): ${unexpected.join(', ')} — add to EXPECTED_EXPORTS if intentional`,
+      `Unexpected export(s): ${unexpected.join(', ')}; add to EXPECTED_EXPORTS if intentional`,
     ).toHaveLength(0);
   });
 

@@ -63,7 +63,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 				// the bracket store, this loop will pick them up via the
 				// same buildKachinukiDetail helper. For now we render
 				// a single-row section only when the bracket match has
-				// already been finalized via kachinuki-exhaustion — a
+				// already been finalized via kachinuki-exhaustion, a
 				// summary stub so operators at least see the outcome.
 				if bm.Decision != string(domain.DecisionKachinukiExhaustion) {
 					continue
@@ -77,7 +77,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 					Decision: bm.Decision,
 				}
 				detail := buildKachinukiDetail(&stub, fmt.Sprintf("Bracket R%d-M%d", rIdx+1, mIdx+1), positionByPlayer)
-				// No bouts on the bracket stub — skip rather than emit
+				// No bouts on the bracket stub, skip rather than emit
 				// an empty section (renderer also guards against this).
 				if len(detail.Bouts) == 0 {
 					continue
@@ -172,7 +172,7 @@ func matchLineupKey(matchID, team, player string) string {
 // match-scoped entries (mp-825) keyed by matchLineupKey, and
 // round-scoped (legacy) entries keyed by lineupKey as the fallback.
 // resolveKachinukiPosition consults match-scoped first. Missing lineups
-// yield an empty map — positions render as empty strings, the renderer
+// yield an empty map, positions render as empty strings, the renderer
 // handles it.
 func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competition) map[string]string {
 	out := map[string]string{}

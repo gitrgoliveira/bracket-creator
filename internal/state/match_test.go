@@ -12,7 +12,7 @@ import (
 // are derived (not stored) from a list of MatchResult values.
 //
 // Positions are assigned in (status priority, scheduledAt, original index)
-// order within each court — matching ScheduleViewer and the JS SSE recompute.
+// order within each court, matching ScheduleViewer and the JS SSE recompute.
 // Running and completed matches receive 0.
 func TestQueuePositionDerivation(t *testing.T) {
 	input := []MatchResult{
@@ -32,7 +32,7 @@ func TestQueuePositionDerivation(t *testing.T) {
 // TestQueuePositionDerivation_ScheduledAtOrdering verifies that within a court
 // the queue counter increments in scheduledAt order, not slice order.
 // A match at 09:00 that appears after a match at 10:00 in the slice must
-// receive a lower (earlier) queue position — consistent with ScheduleViewer
+// receive a lower (earlier) queue position, consistent with ScheduleViewer
 // and _orderByCourtKey in patch.jsx.
 func TestQueuePositionDerivation_ScheduledAtOrdering(t *testing.T) {
 	input := []MatchResult{

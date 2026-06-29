@@ -1,5 +1,5 @@
 ##############################################################################
-# bracket-creator — Oracle Always-Free Ampere A1 deployment
+# bracket-creator, Oracle Always-Free Ampere A1 deployment
 #
 # Free-forever resources used (current as of 2026-06-15 reduction):
 #   - Ampere A1 Flex: 2 OCPU / 12 GB RAM (Arm64)
@@ -7,12 +7,12 @@
 #   - 10 TB/month egress (effectively unlimited for this workload)
 #   - 1 reserved public IP (Always-Free)
 #
-# A1 is Arm64 — the CI-published multi-arch image must include linux/arm64.
+# A1 is Arm64, the CI-published multi-arch image must include linux/arm64.
 # The VM never builds; it only pulls from GHCR.
 #
-# WARNING — TWO firewall layers must BOTH be open (§6 in ARCHITECTURE.md):
-#   1. OCI Security List (Terraform — this file)
-#   2. In-instance iptables (cloud-init — this file)
+# WARNING, TWO firewall layers must BOTH be open (§6 in ARCHITECTURE.md):
+#   1. OCI Security List (Terraform, this file)
+#   2. In-instance iptables (cloud-init, this file)
 # Forgetting the iptables rules = security list is open but traffic still
 # times out inside the VM.  This is the #1 OCI gotcha.
 ##############################################################################
@@ -28,7 +28,7 @@ terraform {
   }
 }
 
-# OCI provider reads auth from ~/.oci/config (or env vars — see README).
+# OCI provider reads auth from ~/.oci/config (or env vars, see README).
 provider "oci" {
   tenancy_ocid = var.tenancy_ocid
   region       = var.region
@@ -128,7 +128,7 @@ resource "oci_core_security_list" "public" {
     }
   }
 
-  # Inbound: ICMP type 3 code 4 (fragmentation needed) — required for path MTU
+  # Inbound: ICMP type 3 code 4 (fragmentation needed), required for path MTU
   # discovery so large responses are not silently dropped. Matches OCI's own
   # default security-list template.
   ingress_security_rules {
@@ -140,7 +140,7 @@ resource "oci_core_security_list" "public" {
     }
   }
 
-  # Inbound: ICMP type 3 (all codes) from within the VCN — destination
+  # Inbound: ICMP type 3 (all codes) from within the VCN, destination
   # unreachable / network diagnostics between hosts in the network.
   ingress_security_rules {
     protocol = "1"
@@ -161,7 +161,7 @@ resource "oci_core_subnet" "public" {
   dns_label         = "public"
 }
 
-# Reserved public IP — Always-Free; stable across instance stop/start.
+# Reserved public IP, Always-Free; stable across instance stop/start.
 # This means the DNS A record (and Let's Encrypt cert) survive reboots.
 resource "oci_core_public_ip" "app" {
   compartment_id = var.compartment_ocid
@@ -275,7 +275,7 @@ locals {
       # --- Caddyfile (rendered from Caddyfile.tftpl) ---
       - echo ${base64encode(local.caddyfile)} | base64 -d > ${local.app_dir}/Caddyfile
 
-      # --- app.env (chmod 600 — contains secrets) ---
+      # --- app.env (chmod 600, contains secrets) ---
       - |
         cat > ${local.app_dir}/app.env <<'EOF'
         LOCK_PASSWORD=${var.lock_password}
@@ -288,14 +288,14 @@ locals {
       - chown root:root ${local.app_dir}/app.env
 
       # --- Pull image and start the stack ---
-      # No build tooling on the VM — pull only.
+      # No build tooling on the VM, pull only.
       - cd ${local.app_dir} && docker compose pull
       - cd ${local.app_dir} && docker compose up -d
   CLOUDINIT
 }
 
 # ---------------------------------------------------------------------------
-# Compute instance — Ampere A1 Flex (Arm64)
+# Compute instance, Ampere A1 Flex (Arm64)
 # ---------------------------------------------------------------------------
 
 resource "oci_core_instance" "app" {
@@ -312,13 +312,13 @@ resource "oci_core_instance" "app" {
   }
 
   source_details {
-    # Ubuntu 22.04 Minimal for Arm64 — use the OCID from your tenancy's region.
+    # Ubuntu 22.04 Minimal for Arm64, use the OCID from your tenancy's region.
     # List OCIDs: oci compute image list --compartment-id <tenancy-ocid>
     #             --operating-system "Canonical Ubuntu" --shape VM.Standard.A1.Flex
     source_type = "image"
     source_id   = var.instance_image_ocid
 
-    # Boot volume — keep on the Always-Free boot volume pool.
+    # Boot volume, keep on the Always-Free boot volume pool.
     boot_volume_size_in_gbs = 50
   }
 
@@ -339,7 +339,7 @@ resource "oci_core_instance" "app" {
     # empty hash makes the app exit immediately (it fails closed).
     precondition {
       condition     = !var.lock_password || trimspace(var.tournament_password_hash) != ""
-      error_message = "tournament_password_hash must be set when lock_password is true — the app fails closed and exits at startup with an empty hash."
+      error_message = "tournament_password_hash must be set when lock_password is true, the app fails closed and exits at startup with an empty hash."
     }
 
     ignore_changes = [

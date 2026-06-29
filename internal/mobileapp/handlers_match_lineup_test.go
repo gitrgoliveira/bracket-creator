@@ -76,7 +76,7 @@ func TestMatchLineupGET_404WhenAbsent(t *testing.T) {
 // TestMatchLineupPUT_409WhenMatchLive: once the match is running, the
 // match-scoped PUT is refused with 409 ONLY when it changes an already-recorded
 // position. A NEW lineup (no prior entry) while the match is running must
-// succeed — that is the normal "live table entry" flow.
+// succeed, that is the normal "live table entry" flow.
 func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
@@ -85,7 +85,7 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
 	}))
 
-	// First PUT: no prior lineup — new lineup while running must succeed.
+	// First PUT: no prior lineup, new lineup while running must succeed.
 	req := httptest.NewRequest(http.MethodPut,
 		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -115,7 +115,7 @@ func TestMatchLineupPUT_409WhenMatchLive(t *testing.T) {
 
 // TestMatchLineupPUT_ForceOverridesLiveLock: with force=true and a changeReason
 // the operator can still set a lineup on a running match (officiated-mode
-// override) — the same request that 409s without force succeeds with it.
+// override), the same request that 409s without force succeeds with it.
 func TestMatchLineupPUT_ForceOverridesLiveLock(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
@@ -202,7 +202,7 @@ func TestMatchLineupPUT_ForceChangeReasonPersisted(t *testing.T) {
 }
 
 // TestMatchLineupPUT_ForcePreMatchRejected: force=true is rejected (400) when
-// the target match has not started — the override path is mid-match only, so a
+// the target match has not started, the override path is mid-match only, so a
 // client cannot use it (or persist an audit reason) on a normal pre-match edit.
 func TestMatchLineupPUT_ForcePreMatchRejected(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
@@ -258,7 +258,7 @@ func TestMatchLineupPUT_ZeroTeamSize(t *testing.T) {
 
 // TestMatchLineupPUT_ValidationError: a lineup with an INVALID position key
 // (not a recognised FIK name for a 5-person team) → 400. Note: a partial
-// lineup with only valid keys (e.g. only Jiho set) is accepted — completeness
+// lineup with only valid keys (e.g. only Jiho set) is accepted, completeness
 // is not enforced at write time (non-blocking UI warning only).
 func TestMatchLineupPUT_ValidationError(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
@@ -320,7 +320,7 @@ func TestMatchLineupPUT_RequiresAuth(t *testing.T) {
 
 // TestMatchLineupDELETE_RequiresAuth: the match-scoped DELETE is on the
 // admin group. A regression that registered it outside the admin group
-// would let a no-password DELETE through — this asserts it doesn't.
+// would let a no-password DELETE through, this asserts it doesn't.
 func TestMatchLineupDELETE_RequiresAuth(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))

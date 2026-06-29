@@ -11,7 +11,7 @@ import (
 
 // tiedStanding builds a standing with an explicit name and Points value.
 // markTiedStandings only reads Player.Name and Points, so the packed-points
-// chain is irrelevant here — equal Points means tied, by construction.
+// chain is irrelevant here, equal Points means tied, by construction.
 func tiedStanding(name string, points int) state.PlayerStanding {
 	return state.PlayerStanding{Player: domain.Player{Name: name}, Points: points}
 }
@@ -187,7 +187,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 }
 
 // TestMarkTiedStandings_AutoClear confirms that once a tie resolves (Points
-// differ), the rows are no longer flagged — the highlight clears on its own.
+// differ), the rows are no longer flagged, the highlight clears on its own.
 func TestMarkTiedStandings_AutoClear(t *testing.T) {
 	comp := &state.Competition{Format: state.CompFormatMixed}
 	matches := []state.MatchResult{completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "B", "C")}

@@ -3,10 +3,10 @@ import { decideRankCommit, enrichPoolMatchWithComp, buildRunningById, isRanksLoc
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
-//   {action: "noop"}                    — do nothing
-//   {action: "sync", value: <string>}   — setV(value), don't commit
-//   {action: "revert", value: <string>} — setV(value) (visual revert)
-//   {action: "commit", value: <string>} — call onCommit(value)
+//   {action: "noop"}                    : do nothing
+//   {action: "sync", value: <string>}   : setV(value), don't commit
+//   {action: "revert", value: <string>}: setV(value) (visual revert)
+//   {action: "commit", value: <string>}: call onCommit(value)
 //
 // The component test (focus/blur/keydown DOM events) is out of scope for
 // the current vitest setup which mocks React with stub hooks. These pure
@@ -105,7 +105,7 @@ describe('decideRankCommit', () => {
     });
 
     it('handles "5abc" by parsing leading int', () => {
-      // parseInt("5abc") === 5 — user got tired of typing or paste went wrong.
+      // parseInt("5abc") === 5: user got tired of typing or paste went wrong.
       expect(decideRankCommit({ v: "5abc", initial: 2, focusValue: "2", cancelled: false }))
         .toEqual({ action: "commit", value: "5" });
     });
@@ -121,9 +121,9 @@ describe('decideRankCommit', () => {
 
     it('focus-without-edit wins over invalid-input revert', () => {
       // If v === focusValue, we never reach the parseInt branch. (User
-      // didn't type — there's nothing to validate.) This matters for
+      // didn't type: there's nothing to validate.) This matters for
       // an exotic case: focusValue is "0" somehow (shouldn't happen but
-      // defensive) — we still sync rather than revert.
+      // defensive): we still sync rather than revert.
       expect(decideRankCommit({ v: "0", initial: 0, focusValue: "0", cancelled: false }))
         .toEqual({ action: "noop" });
     });
@@ -134,7 +134,7 @@ describe('decideRankCommit', () => {
     // value: "5"} for typed "5abc", RankInput.handleBlur must call BOTH
     // setV(result.value) AND onCommit(result.value). The earlier version only
     // called onCommit, leaving the input displaying "5abc" until the
-    // SSE-driven prop refresh hit useEffectA — a confusing few-hundred-ms
+    // SSE-driven prop refresh hit useEffectA: a confusing few-hundred-ms
     // window where the visible value didn't match what was sent.
     //
     // The handleBlur dispatch lives in admin_pools.jsx:70-91 and can't be
@@ -164,7 +164,7 @@ describe('decideRankCommit', () => {
     it('commit result.value differs from the raw v for the normalization shapes above', () => {
       // Sanity: if these match, the consumer's setV(result.value) is a no-op
       // (whatever was typed is already canonical) and the bug doesn't manifest.
-      // For "5abc" / "  5  " / "5.9" the raw v differs from result.value —
+      // For "5abc" / "  5  " / "5.9" the raw v differs from result.value:
       // these are exactly the inputs where the consumer-side bug surfaces.
       for (const v of ["  5  ", "5abc", "5.9"]) {
         const r = decideRankCommit({ v, initial: 2, focusValue: "2", cancelled: false });

@@ -17,7 +17,7 @@ import (
 // leaf (entrant) names that feed into it. The same bout has the same leaf set in
 // BOTH numbering paths even though the two paths walk different tree structures
 // (the Excel path uses the unbalanced CreateBalancedTree(names); the engine path
-// uses a power-of-two-padded tree). Comparing leaf sets — not positions — lets the
+// uses a power-of-two-padded tree). Comparing leaf sets, not positions, lets the
 // test assert "this physical bout got the same Match N in both paths", which is the
 // AC1 user-facing invariant (on-screen Match N == printed Excel Match N).
 func matchSignature(leaves []string) string {
@@ -141,7 +141,7 @@ func engineNumberBySignature(t *testing.T, players []domain.Player) map[string]i
 // TestMatchNumberingParity_ExcelVsWeb is the equal-by-contract proof for AC1/AC8:
 // the web bracket's MatchNumber equals the printed Excel Tree sheet's "Match N"
 // for every real bout, INCLUDING bye-producing non-power-of-two sizes where the
-// Excel tree inserts shorter branches and the web bracket marks matches Hidden —
+// Excel tree inserts shorter branches and the web bracket marks matches Hidden,
 // the very case where the two numbering schemes could drift.
 //
 // Both paths are exercised end-to-end (the engine path runs StartCompetition;
@@ -152,7 +152,7 @@ func engineNumberBySignature(t *testing.T, players []domain.Player) map[string]i
 func TestMatchNumberingParity_ExcelVsWeb(t *testing.T) {
 	// Sizes chosen to span every bye topology: 3/5/6/7 give shallow byes,
 	// 11/13 give multi-level bye chains, 4/8/16 are clean powers of two
-	// (no byes — the easy baseline).
+	// (no byes, the easy baseline).
 	sizes := []int{3, 4, 5, 6, 7, 8, 11, 13, 16}
 
 	for _, n := range sizes {
@@ -181,7 +181,7 @@ func TestMatchNumberingParity_ExcelVsWeb(t *testing.T) {
 					"bout %q numbered %d in Excel is missing from the web bracket",
 					sig, excelNum)
 				assert.Equalf(t, excelNum, webNum,
-					"bout %q: Excel Match %d but web Match %d — numbering drifted",
+					"bout %q: Excel Match %d but web Match %d, numbering drifted",
 					sig, excelNum, webNum)
 			}
 		})

@@ -17,7 +17,7 @@ func SuggestedMaxCourts(numPlayers int) int {
 // idle because there are not enough players to fill a round.
 //
 // The warning case (numCourts == floor(N/2), no rest between fights) is
-// handled exclusively by the frontend — see admin_competition.jsx.
+// handled exclusively by the frontend, see admin_competition.jsx.
 func ValidateCourtCount(numPlayers, numCourts int) error {
 	hardCap := max(1, numPlayers/2)
 	if numCourts > hardCap {

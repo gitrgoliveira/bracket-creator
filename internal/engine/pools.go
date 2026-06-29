@@ -17,7 +17,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// so a competition started with an unset PoolSize fails as a clean 400
 	// (validationErrorf → *ValidationError) with an actionable message. (mp-ebgz)
 	if comp.PoolSize <= 0 {
-		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d — set a pool size before starting", comp.ID, comp.PoolSize)
+		return validationErrorf("competition %s cannot start: pool size must be at least 1, got %d, set a pool size before starting", comp.ID, comp.PoolSize)
 	}
 
 	// helper.Player is a type alias for domain.Player (NFR-007); the
@@ -35,16 +35,16 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		return err
 	}
 
-	// A "mixed" competition is "Pools + Knockout" by definition — a single
+	// A "mixed" competition is "Pools + Knockout" by definition, a single
 	// pool collapses to a round-robin with a tacked-on 2-player "final", which
 	// is the same shape as `league` and is NOT what an operator picking
 	// "mixed" intends. Refuse to start a mixed competition whose participant
 	// count + PoolSize would produce fewer than 2 pools, so the operator can
 	// either reduce PoolSize, add participants, or switch to `league` format.
-	// (league/swiss legitimately produce 1 pool — exempted.)
+	// (league/swiss legitimately produce 1 pool, exempted.)
 	if comp.Format == state.CompFormatMixed {
 		if len(pools) < 2 {
-			return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools — got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
+			return validationErrorf("mixed (Pools + Knockout) competition %s requires at least 2 pools, got %d with %d participants at PoolSize=%d; reduce PoolSize, add participants, or change format to league", comp.ID, len(pools), len(players), comp.PoolSize)
 		}
 		// Every pool must be able to supply PoolWinners finishers to the knockout.
 		// In "max" mode an odd participant count can leave an under-filled last
@@ -56,7 +56,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		poolWinners := comp.EffectivePoolWinners()
 		for _, p := range pools {
 			if len(p.Players) < poolWinners {
-				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d) — every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
+				return validationErrorf("mixed (Pools + Knockout) competition %s: pool %q has only %d participant(s) but %d advance to the knockout (PoolWinners=%d), every pool needs at least PoolWinners participants; reduce PoolWinners, adjust PoolSize/pool-size-mode, or add participants", comp.ID, p.PoolName, len(p.Players), poolWinners, poolWinners)
 			}
 		}
 	}
@@ -133,7 +133,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				Court:   poolCourts[i%len(poolCourts)],
 				Round:   round,
 				// ScheduledAt is populated below by
-				// assignPoolMatchSlots — uniform start times were
+				// assignPoolMatchSlots, uniform start times were
 				// retired in T150.
 			})
 		}

@@ -36,7 +36,7 @@ func diagnoseFolderError(folder string) string {
 func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 	hint := fmt.Sprintf("Hint: process running as uid=%d gid=%d\n", uid, gid)
 
-	// Prefer statting the folder itself — it often exists as the bind-mount
+	// Prefer statting the folder itself, it often exists as the bind-mount
 	// root even when a sub-directory (competitions/, .wal/) can't be created.
 	// Fall back to the parent when the folder itself doesn't exist yet.
 	target := folder
@@ -44,7 +44,7 @@ func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 	if err != nil {
 		if !os.IsNotExist(err) {
 			// EACCES or other non-NotExist errors mean the folder exists but we
-			// can't inspect it — report that directly rather than silently falling
+			// can't inspect it, report that directly rather than silently falling
 			// back to the parent, which could have different ownership and mislead
 			// the operator about what's wrong.
 			hint += fmt.Sprintf("  %s: could not stat (%v)", folder, err)
@@ -75,7 +75,7 @@ func diagnoseFolderErrorForProcess(folder string, uid, gid int) string {
 
 	hint += fmt.Sprintf("  %s exists, mode=%04o, owner=%d:%d", target, mode, ownerUID, ownerGID)
 
-	if uint32(uid) != ownerUID { // #nosec G115 — POSIX Geteuid() is always >= 0 and fits in uint32
+	if uint32(uid) != ownerUID { // #nosec G115, POSIX Geteuid() is always >= 0 and fits in uint32
 		hint += fmt.Sprintf("\n  → %s is owned by uid %d but the container runs as uid %d", target, ownerUID, uid)
 		hint += fmt.Sprintf("\n  → docker-compose: add `user: \"%d:%d\"` to the mobile-app service,", ownerUID, ownerGID)
 		hint += "\n    OR chown the host folder to match the container's USER"

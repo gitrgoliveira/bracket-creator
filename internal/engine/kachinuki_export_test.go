@@ -196,7 +196,7 @@ func TestCollectKachinukiMatches_PoolMatchesWithBouts(t *testing.T) {
 			},
 		},
 		{
-			// No sub-results — should be skipped.
+			// No sub-results, should be skipped.
 			ID:    "P1-1",
 			SideA: "AlphaTeam",
 			SideB: "BetaTeam",

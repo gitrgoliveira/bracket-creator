@@ -19,7 +19,7 @@ import (
 // setupEligibilityTestRouter builds a router that mirrors the production
 // server.go layout: GET is on the public api group (no auth), POST is on
 // the admin group (AuthMiddleware). Used to verify the auth split is
-// correct — i.e. that the public GET doesn't accidentally sit behind auth.
+// correct, i.e. that the public GET doesn't accidentally sit behind auth.
 func setupEligibilityTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -34,11 +34,11 @@ func setupEligibilityTestRouter(t *testing.T) (*gin.Engine, *state.Store, string
 	r := gin.New()
 	hub := NewHub()
 
-	// Public group — same as production server.go
+	// Public group, same as production server.go
 	api := r.Group("/api")
 	RegisterPublicEligibilityHandlers(api, store)
 
-	// Admin group — AuthMiddleware gates all writes
+	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
 	RegisterEligibilityHandlers(admin, store, hub)

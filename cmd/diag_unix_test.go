@@ -68,7 +68,7 @@ func TestDiagnoseFolderError_OwnerInfo(t *testing.T) {
 
 func TestDiagnoseFolderError_MismatchArrowWhenUIDDiffers(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("running as root — UID mismatch against root-owned dir not testable")
+		t.Skip("running as root, UID mismatch against root-owned dir not testable")
 	}
 	// "/" is always present on any Unix system and owned by root (uid=0).
 	// Inject uid=999 (≠ 0) to trigger the mismatch arrow without needing Docker
@@ -85,7 +85,7 @@ func TestDiagnoseFolderError_MismatchArrowWhenUIDDiffers(t *testing.T) {
 
 func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
 	dir := t.TempDir()
-	// Inject the actual process uid/gid — they match the t.TempDir() owner.
+	// Inject the actual process uid/gid, they match the t.TempDir() owner.
 	result := diagnoseFolderErrorForProcess(dir, os.Geteuid(), os.Getegid())
 
 	if strings.Contains(result, "→") {
@@ -94,7 +94,7 @@ func TestDiagnoseFolderError_NoArrowWhenUIDMatches(t *testing.T) {
 }
 
 // TestDiagnoseFolderError_TrailingSeparatorFallsBackToTrueParent guards against
-// the filepath.Dir quirk where Dir("/x/") returns "/x" rather than "/" — the
+// the filepath.Dir quirk where Dir("/x/") returns "/x" rather than "/", the
 // fallback must Clean before computing the parent, otherwise it would stat the
 // folder itself again.
 func TestDiagnoseFolderError_TrailingSeparatorFallsBackToTrueParent(t *testing.T) {
@@ -128,7 +128,7 @@ func TestDiagnoseFolderError_TargetAndParentMissing(t *testing.T) {
 // TestDiagnoseFolderError_StatErrorReportedDirectly covers the non-IsNotExist
 // branch: when os.Stat returns EACCES (folder exists but is unreadable due to
 // a parent dir we can't traverse), the diagnostic must report the failure on
-// the original folder rather than silently falling back to the parent — the
+// the original folder rather than silently falling back to the parent, the
 // parent's ownership would be misleading in this case.
 func TestDiagnoseFolderError_StatErrorReportedDirectly(t *testing.T) {
 	if os.Geteuid() == 0 {
@@ -151,7 +151,7 @@ func TestDiagnoseFolderError_StatErrorReportedDirectly(t *testing.T) {
 	if !strings.Contains(result, "could not stat") {
 		t.Errorf("expected 'could not stat' for EACCES, got:\n%s", result)
 	}
-	// The hint must reference the target itself, not its parent — falling back
+	// The hint must reference the target itself, not its parent, falling back
 	// to the parent would tell the operator about a different directory's owner.
 	if !strings.Contains(result, child) {
 		t.Errorf("expected target %s in output, got:\n%s", child, result)

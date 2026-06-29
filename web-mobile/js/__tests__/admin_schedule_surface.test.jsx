@@ -1,7 +1,7 @@
 // Surface-contract test for admin_schedule.jsx (mp-d7tl pre-split guard).
 //
-// Purpose: assert the complete public surface — all ES exports AND all
-// window.* assignments — is present after a module import. This is the ONLY
+// Purpose: assert the complete public surface (all ES exports AND all
+// window.* assignments) is present after a module import. This is the ONLY
 // vitest test that catches a dropped window.* assignment; vitest's lenient
 // resolver and esbuild's per-file transpile cannot catch cross-module
 // import/export name mismatches, so this test must stay green before, during,
@@ -78,7 +78,7 @@ describe('admin_schedule window.* assignment surface', () => {
 
 // ── window.API.* contract ───────────────────────────────────────────────────
 // Regression guard (PR #293): the split's copyFromPrevious called
-// window.API.fetchMatchLineupHeaders, a method that never existed — the
+// window.API.fetchMatchLineupHeaders, a method that never existed; the
 // try/catch swallowed the TypeError so the feature silently broke. vitest's
 // fake-React stub never mounts these modules, so nothing else catches a call
 // to an undefined API method. Statically assert every window.API.X referenced
@@ -89,8 +89,8 @@ const jsDir = resolve(__dirname, '..');
 
 describe('admin_schedule window.API.* contract', () => {
   const apiSrc = readFileSync(resolve(jsDir, 'api_client.jsx'), 'utf8');
-  // A method definition is `\n<indent>[async ]name(` — i.e. the name follows
-  // only whitespace after a newline. A call site is `.name(` (a dot precedes
+  // A method definition is `\n<indent>[async ]name(` (i.e., the name follows
+  // only whitespace after a newline). A call site is `.name(` (a dot precedes
   // the name), so this pattern matches definitions but never invocations.
   const isDefined = (name) =>
     new RegExp(`\\n\\s+(async\\s+)?${name}\\s*\\(`).test(apiSrc);

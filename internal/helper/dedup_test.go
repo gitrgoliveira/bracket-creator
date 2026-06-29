@@ -18,19 +18,19 @@ func TestNormalizeParticipantName(t *testing.T) {
 		{"lowercase", "Alice Smith", "alice smith"},
 		{"trim spaces", "  Bob  ", "bob"},
 		{"collapse internal spaces", "Ana  Maria  Rossi", "ana maria rossi"},
-		{"Latin diacritic fold — Müller", "Müller", "muller"},
-		{"Latin diacritic fold — Ï", "Ï", "i"},
-		{"Latin diacritic fold — accented name", "Résumé Café", "resume cafe"},
-		{"Latin diacritic fold — e-acute", "Renée", "renee"},
+		{"Latin diacritic fold, Müller", "Müller", "muller"},
+		{"Latin diacritic fold, Ï", "Ï", "i"},
+		{"Latin diacritic fold, accented name", "Résumé Café", "resume cafe"},
+		{"Latin diacritic fold, e-acute", "Renée", "renee"},
 		// Japanese dakuten combining mark U+3099 is OUTSIDE the stripped range
 		// and MUST survive. が = U+304C (precomposed) or か+U+3099 (combining).
 		// After NFD decompose it becomes か(U+304B) + ゛(U+3099); U+3099 is
 		// outside [U+0300,U+036F] so it is NOT stripped; re-NFC gives が again.
-		{"Japanese dakuten preserved — が", "が", "が"},
-		{"Japanese dakuten preserved — full word", "剣道が好き", "剣道が好き"},
+		{"Japanese dakuten preserved, が", "が", "が"},
+		{"Japanese dakuten preserved, full word", "剣道が好き", "剣道が好き"},
 		// CJK characters must pass through untouched.
-		{"CJK zekken — 渡邉", "渡邉", "渡邉"},
-		{"CJK zekken — 早大 堀池", "早大 堀池", "早大 堀池"},
+		{"CJK zekken, 渡邉", "渡邉", "渡邉"},
+		{"CJK zekken, 早大 堀池", "早大 堀池", "早大 堀池"},
 		{"mixed Latin+diacritic", "São Paulo", "sao paulo"},
 		{"empty string", "", ""},
 		{"already normalized", "alice smith", "alice smith"},
@@ -61,7 +61,7 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 			wantLen: 1,
 		},
 		{
-			desc: "same name different dojo — ALLOWED",
+			desc: "same name different dojo, ALLOWED",
 			entries: [][2]string{
 				{"John Smith", "Wakaba"},
 				{"John Smith", "Tora"},
@@ -69,7 +69,7 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 			wantLen: 0,
 		},
 		{
-			desc: "diacritic fold collision — Müller/muller same dojo",
+			desc: "diacritic fold collision, Müller/muller same dojo",
 			entries: [][2]string{
 				{"Müller", "Wakaba"},
 				{"muller", "Wakaba"},
@@ -87,7 +87,7 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 			wantLen: 1,
 		},
 		{
-			desc: "teams with empty dojo — two Shudokan collide",
+			desc: "teams with empty dojo, two Shudokan collide",
 			entries: [][2]string{
 				{"Shudokan", ""},
 				{"Shudokan", ""},
@@ -95,7 +95,7 @@ func TestCheckDuplicateEntriesByNameDojo(t *testing.T) {
 			wantLen: 1,
 		},
 		{
-			desc: "teams Shudokan A / Shudokan B — different names, ALLOWED",
+			desc: "teams Shudokan A / Shudokan B, different names, ALLOWED",
 			entries: [][2]string{
 				{"Shudokan A", ""},
 				{"Shudokan B", ""},
@@ -173,7 +173,7 @@ func TestFindNearDupWarnings_TokenSubset(t *testing.T) {
 				{"GB women", ""},
 			},
 			// "men" ⊄ {"gb","women"} and "women" ⊄ {"gb","men"}, so no token-subset
-			// and Levenshtein "gb men" vs "gb women" = 2, ratio = 1 - 2/8 = 0.75 < 0.85 — no gate
+			// and Levenshtein "gb men" vs "gb women" = 2, ratio = 1 - 2/8 = 0.75 < 0.85, no gate
 			wantFire: false,
 		},
 		{
@@ -217,9 +217,9 @@ func TestFindNearDupWarnings_Levenshtein(t *testing.T) {
 		{"Yamamoto vs Yamamotoo (lev=1, ratio≈0.89)", "Yamamoto", "Yamamotoo", true},
 		// lev=3 → never fires
 		{"Three edits never fires", "abcdef", "xyz123", false},
-		// Squad suffix suppression: Shobukai A vs Shobukai B — lev=1, ratio high
+		// Squad suffix suppression: Shobukai A vs Shobukai B, lev=1, ratio high
 		// but suppressed by isSingleTrailingTokenDiff.
-		{"Shobukai A vs Shobukai B — suppressed", "Shobukai A", "Shobukai B", false},
+		{"Shobukai A vs Shobukai B, suppressed", "Shobukai A", "Shobukai B", false},
 	}
 
 	for _, tc := range cases {

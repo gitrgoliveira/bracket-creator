@@ -4,7 +4,7 @@ import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 
 // Walks a vnode tree and concatenates all string/number leaves. Child
-// component vnodes (e.g. <TermV>) are NOT executed by the reactive shim,
+// component vnodes (e.g. TermV) are NOT executed by the reactive shim,
 // but their literal children (the term text) still live in props.children,
 // so this captures everything MatchDetailCard renders itself. Mirrors the
 // collectText helper in reset.test.jsx.
@@ -124,10 +124,10 @@ describe('Viewer Utils', () => {
     });
   });
 
-  // T192 (US13 — FR-050e): Swiss standings page header logic. The
+  // T192 (US13: FR-050e): Swiss standings page header logic. The
   // viewer flips its header text from "Standings after round N" to
   // "Final standings" once every configured round has been played
-  // out — and only then declares a winner. Pure helpers so the
+  // out. Only then does it declare a winner. Pure helpers so the
   // conditional can be pinned without mounting SwissStandingsViewer
   // (the React vitest setup stubs hooks at component level).
 
@@ -160,7 +160,7 @@ describe('Viewer Utils', () => {
     });
 
     it('false when final round has not been generated yet (no matches)', () => {
-      // current=total but pool-matches list is empty — this only
+      // current=total but pool-matches list is empty. This only
       // happens transiently between "Generate next round" returning
       // 201 and the SSE-driven refetch. We must not declare a
       // winner during that window.
@@ -178,7 +178,7 @@ describe('Viewer Utils', () => {
     });
   });
 
-  // mp-7e6 — isFollowedPlayer: UUID-first match with name fallback.
+  // mp-7e6: isFollowedPlayer: UUID-first match with name fallback.
   // Pins the two lookup paths so opponents are never resolved to the
   // followed player's own side.
   describe('isFollowedPlayer', () => {
@@ -203,7 +203,7 @@ describe('Viewer Utils', () => {
     });
   });
 
-  // mp-7e6 — compMatches: pool phase/poolName derivation for flat viewer
+  // mp-7e6: compMatches: pool phase/poolName derivation for flat viewer
   // poolMatches that don't carry phase/poolName from the API.
   describe('compMatches', () => {
     const mkComp = (overrides) => ({
@@ -335,13 +335,13 @@ describe('Viewer Utils', () => {
       expect(swissStandingsHeading(c, [])).toBe('Standings after round 2');
     });
 
-    it('"Standings — pending" when no round has been generated yet', () => {
+    it('"Standings: pending" when no round has been generated yet', () => {
       const c = { format: 'swiss', swissRounds: 4, swissCurrentRound: 0 };
-      expect(swissStandingsHeading(c, [])).toBe('Standings — pending');
+      expect(swissStandingsHeading(c, [])).toBe('Standings: pending');
     });
   });
 
-  // mp-8sw — subBoutLabel: the team sub-bout center label. The daihyosen
+  // mp-8sw: subBoutLabel: the team sub-bout center label. The daihyosen
   // (rep bout) is stored with sentinel position -1 and must render as
   // "Daihyosen", not the literal "Match -1" the position||index fallback
   // would produce. Shared by both viewer sub-row sites; the Hantei marker
@@ -365,7 +365,7 @@ describe('Viewer Utils', () => {
   });
 });
 
-// mp-8sw — MatchDetailCard team sub-rows: render-level proof that the
+// mp-8sw: MatchDetailCard team sub-rows: render-level proof that the
 // daihyosen row labels as "Daihyosen" (not "Match -1") and shows the
 // "Hantei" marker only when sub.decidedByHantei. Asserts the actual
 // rendered tree, complementing the subBoutLabel unit tests above.
@@ -375,7 +375,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   let MatchDetailCard;
   // Preserve any pre-existing window globals we stub so we can restore exact
   // state in afterEach. vi.restoreAllMocks() only undoes vi.spyOn, NOT direct
-  // `global.window.x = vi.fn()` assignments — without this the mocked globals
+  // `global.window.x = vi.fn()` assignments: without this the mocked globals
   // leak into later suites and make failures order-dependent.
   const savedGlobals = {};
   const STUBBED = ['formatIpponsScore', 'ipponsFromScore', 'teamIVScore', 'matchScoreStr', 'isHikiwake'];
@@ -429,7 +429,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   });
 
   // mp-13y: MatchDetailCard now delegates the scoreboard to the shared
-  // match_scoreboard.jsx components — TeamScoreboard (team) / IndividualScore
+  // match_scoreboard.jsx components: TeamScoreboard (team) / IndividualScore
   // (individual). These are child component vnodes which the reactive shim does
   // not expand, so we assert delegation (type + props). The scoreboard's own
   // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
@@ -474,7 +474,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
 // mp-116 (Copilot review follow-up): the bracket-tab and pools-tab click sites
 // now enrich the match with phase/round (or poolName) before opening the modal,
 // because raw BracketMatch / pool match objects carry neither. MatchViewerModal's
-// header renders `phase === "pool" ? poolName : round`, so without that metadata
+// header renders `phase === "pool" ? poolName: round`, so without that metadata
 // the header showed a dangling separator with an empty label. These tests lock
 // the modal-header contract the callers must satisfy.
 describe('MatchViewerModal header + team rendering (mp-116)', () => {
@@ -508,7 +508,7 @@ describe('MatchViewerModal header + team rendering (mp-116)', () => {
   });
 
   // mp-13y: the modal now reuses the canonical MatchDetailCard for its body
-  // (DRY — same header, colour badges and BoutSubRow grid as the inline card).
+  // (DRY: same header, colour badges and BoutSubRow grid as the inline card).
   // The header text rendering itself is covered by the MatchDetailCard suite;
   // here we assert the modal delegates with the correct match.
   it('delegates to MatchDetailCard with the round label for a bracket match', () => {
@@ -623,7 +623,7 @@ describe('TournamentInfo', () => {
   });
 });
 
-// mp-f4xo: LeagueMatrix — clickable cross-table cells
+// mp-f4xo: LeagueMatrix: clickable cross-table cells
 describe('LeagueMatrix (mp-f4xo)', () => {
   const realReact = global.React;
   let runtime;
@@ -857,7 +857,7 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
     const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
-    // Column headers always show a visible label — the 1-based draw-order
+    // Column headers always show a visible label: the 1-based draw-order
     // position index when the player has no assigned number.
     expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
 
@@ -899,17 +899,17 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     };
     const tree = runtime.mount(PM, { pool: samePool, matches: [mWin, mLoss], tweaks: {} });
     const labels = allCells(tree).map(c => c.props?.['aria-label']).filter(Boolean);
-    // The id-keyed mapping yields BOTH outcomes for the same name vs Alice —
+    // The id-keyed mapping yields BOTH outcomes for the same name vs Alice:
     // proof the two Tanakas resolved to different matches. The aria-label also
     // carries the disambiguating dojo (a11y: screen readers can't rely on the
     // hover title), so the two Tanakas are distinguishable in the label itself.
-    expect(labels).toContain('Match: Tanaka Kenji (Tokyo) vs Alice (Kyoto) — Win');
-    expect(labels).toContain('Match: Tanaka Kenji (Osaka) vs Alice (Kyoto) — Loss');
+    expect(labels).toContain('Match: Tanaka Kenji (Tokyo) vs Alice (Kyoto): Win');
+    expect(labels).toContain('Match: Tanaka Kenji (Osaka) vs Alice (Kyoto): Loss');
   });
 
   // Regression: the head-to-head between two same-name participants. The
   // winner is stored by name (ambiguous), so rowWon must resolve via
-  // winnerId — otherwise BOTH rows show the same result. (browser-found)
+  // winnerId: otherwise BOTH rows show the same result. (browser-found)
   it('resolves the winner of a same-name head-to-head by id', () => {
     const twoTanaka = {
       poolName: 'Pool A',
@@ -928,7 +928,7 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const bodyCells = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__cell--win') || c.props?.className?.includes('league-matrix__cell--loss'));
     const wins = bodyCells.filter(c => c.props?.className?.includes('--win'));
     const losses = bodyCells.filter(c => c.props?.className?.includes('--loss'));
-    // Exactly one win (T1's row) and one loss (T2's row) — NOT two wins.
+    // Exactly one win (T1's row) and one loss (T2's row): NOT two wins.
     expect(wins).toHaveLength(1);
     expect(losses).toHaveLength(1);
   });
@@ -1012,7 +1012,7 @@ describe('ViewerOverview self-run vs officiated match click (mp-7x4n)', () => {
       tournament: { mode: 'self-run' },
       compId: 'c1',
     });
-    // VSchedItem is a child component — the reactive shim stores it as a
+    // VSchedItem is a child component: the reactive shim stores it as a
     // vnode {type: Function, props: {onClick, ...}} without executing it.
     // Find it by its type being a function with an onClick prop.
     const vsched = findInTree(tree, n => typeof n?.type === 'function' && n?.props?.onClick && n?.props?.m);
@@ -1213,13 +1213,13 @@ describe('isNonPublicOrigin', () => {
     expect(isNonPublicOrigin('http://staging.example.com')).toBe(false);
   });
 
-  it('returns true for IPv6 loopback ::1', () => {
+  it('returns true for IPv6 loopback::1', () => {
     expect(isNonPublicOrigin('http://[::1]')).toBe(true);
   });
 });
 
 
-// VSchedItem live score rendering — T217
+// VSchedItem live score rendering: T217
 // Assertions: running match with ≥1 ippon renders score + .vsched-item__score--live;
 // running match with no score falls through to "vs".
 describe('VSchedItem live score rendering (mp-42rg)', () => {
@@ -1509,7 +1509,7 @@ describe('ViewerHome globalRunning de-dup (mp-42rg)', () => {
       savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
         ? { had: true, val: global.window[k] } : { had: false };
     });
-    // Module-level const bindings — must be set before vi.resetModules + import
+    // Module-level const bindings: must be set before vi.resetModules + import
     global.window.StatusBadge = vi.fn(() => null);
     global.window.formatDate = (d) => d || '';
     global.window.formatLabel = (l) => l || '';

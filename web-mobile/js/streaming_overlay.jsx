@@ -1,4 +1,4 @@
-// streaming_overlay.jsx — OBS/vMix streaming overlay (StreamingOverlay).
+// streaming_overlay.jsx: OBS/vMix streaming overlay (StreamingOverlay).
 // Transparent-background lower-third for broadcast integrations. T066, T067, mp-13y.
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
@@ -7,7 +7,7 @@ import { pickFromLineup } from './lineup_resolver.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
-// overlayPositionLabel — FIK position label for the current bout, used as the
+// overlayPositionLabel: FIK position label for the current bout, used as the
 // fallback when no per-match lineup pins a player name. Mirrors
 // positionLabelFor in admin_scoring_modal.jsx (module-local copy; display.jsx
 // is a separate ES module). Senpo/Jiho/... for 5-person teams, "Daihyosen"
@@ -19,13 +19,13 @@ function overlayPositionLabel(teamSize, index, sub) {
     if (sub && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) return sub.position;
     // FIK named positions exist ONLY for 5-person teams. For 3/7/11/13/15 and
     // kachinuki the app uses numeric positions "1".."N" everywhere
-    // (domain.PositionNumbered, admin_lineup positionsForSize) — so the
+    // (domain.PositionNumbered, admin_lineup positionsForSize): so the
     // overlay falls back to the bare bout number, which scales to any size.
     if (teamSize === 5 && index >= 0 && index < 5) return OVL_POS_LABELS_5[index];
     return String(index + 1);
 }
 
-// findCurrentBoutIndex — returns the 0-based index of the bout that is
+// findCurrentBoutIndex: returns the 0-based index of the bout that is
 // currently being fought (the first UNSCORED regular bout, position != -1).
 // Falls back to 0 on an empty subResults. Used by StreamingOverlay to pick
 // which bout names and score to show.
@@ -36,7 +36,7 @@ function findCurrentBoutIndex(subResults) {
     // these without ippon letters), or a hikiwake. This aligns with
     // TeamScoreboard's isScored logic. When all regular bouts are complete,
     // returns regular.length (= subResults.length excluding any DH row at
-    // position -1) — the caller treats that as the "DH/done" signal.
+    // position -1): the caller treats that as the "DH/done" signal.
     const regular = subResults.filter(s => s.position !== -1);
     for (let i = 0; i < regular.length; i++) {
         const s = regular[i];
@@ -52,7 +52,7 @@ function findCurrentBoutIndex(subResults) {
     return regular.length;
 }
 
-// <StreamingOverlay court="A" position="bottom"> — transparent-background
+// <StreamingOverlay court="A" position="bottom">: transparent-background
 // lower-third for OBS / vMix browser sources (T066, T067).
 //
 // CRITICAL: the page background MUST be transparent so the kendo broadcast
@@ -63,7 +63,7 @@ function findCurrentBoutIndex(subResults) {
 // T067: keep the overlay DOM mounted regardless of running state so the
 // opacity transition can run. Toggle opacity + pointerEvents only.
 //
-// mp-13y: team match lower-third — for team matches the centre holds a
+// mp-13y: team match lower-third. for team matches the centre holds a
 // QR code ("scan for results") flanked by the team names; the current
 // bout's competitor names appear on the outer sides, with a running IV/PW
 // aggregate per side beneath them (mp-13y #10).
@@ -123,7 +123,7 @@ function StreamingOverlay({ court, position, competitions }) {
 
     // Competitor for the current bout: pinned lineup name, else the per-bout
     // competitor stored on the sub (kachinuki), else the FIK POSITION label
-    // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending — never
+    // (Senpo/Jiho/...), else "Daihyosen" when the rep bout is pending; never
     // the team name (that flanks the QR above).
     const subSideName = (v) => (v && v.name) || (typeof v === "string" ? v : "");
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
@@ -134,10 +134,10 @@ function StreamingOverlay({ court, position, competitions }) {
         ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel)
         : (dhPending ? boutPosLabel : '');
 
-    // Bout score for the current sub — ippon letters, "—" (not "0") for an
+    // Bout score for the current sub: ippon letters, "-" (not "0") for an
     // empty side so a kendo score never reads "M – 0".
-    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '—') : '—';
-    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '—') : '—';
+    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '-') : '-';
+    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '-') : '-';
 
     // Team names (outer flanks of QR in team mode).
     const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken) : '';
@@ -154,7 +154,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const compName = comp?.name || '';
 
     // QR target URL: the tournament viewer home page (NOT a per-match deep
-    // link — viewers land on the schedule and navigate themselves). Only
+    // link; viewers land on the schedule and navigate themselves). Only
     // emitted on team matches so the lower-third doesn't crowd the
     // individual-match layout. Uses the current page origin so the QR
     // works on the local network.
@@ -176,7 +176,7 @@ function StreamingOverlay({ court, position, competitions }) {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            // T067: fade in/out — keep the DOM mounted so the transition runs.
+            // T067: fade in/out; keep the DOM mounted so the transition runs.
             // 300ms sits in the middle of the A-6 200–400ms band.
             opacity: hasRunning ? 1 : 0,
             transition: 'opacity 300ms ease-in-out',
@@ -192,13 +192,13 @@ function StreamingOverlay({ court, position, competitions }) {
                 /* mp-13y: team match lower-third.
                    Layout: [Shiro team/bout] [QR] [Aka …]
                    Per side, TWO rows:
-                     • Team row  — the TEAM NAME + the running IV/PW aggregate
+                     • Team row: the TEAM NAME + the running IV/PW aggregate
                        (the team-level result belongs on the team row).
-                     • Bout row  — the current bout's competitor/position + that
+                     • Bout row: the current bout's competitor/position + that
                        competitor's ippon score, so the result lines up with the
                        individual bout it belongs to. */
                 <>
-                    {/* Shiro — left side (white) */}
+                    {/* Shiro: left side (white) */}
                     <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
                             <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamName}</span>
@@ -215,7 +215,7 @@ function StreamingOverlay({ court, position, competitions }) {
                         {qrUrl && <StreamingQR url={qrUrl} label="scan for results" />}
                     </div>
 
-                    {/* Aka — right side (red) */}
+                    {/* Aka: right side (red) */}
                     <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
                             <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
@@ -228,7 +228,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     </div>
                 </>
             ) : (
-                /* Individual match lower-third — unchanged from original. */
+                /* Individual match lower-third: unchanged from original. */
                 <>
                     <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         <span style={{

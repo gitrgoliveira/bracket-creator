@@ -22,7 +22,7 @@ type Tournament struct {
 	// Maximum 30. Use Days() to obtain the derived per-day DD-MM-YYYY list.
 	//
 	// omitempty drops the field only when the value is 0 (Go's zero value),
-	// never when it is 1 — so tournaments saved by this code always persist
+	// never when it is 1; so tournaments saved by this code always persist
 	// an explicit duration_days. The omitempty matters in the reverse
 	// direction: legacy tournament.md files predating this field carry no
 	// duration_days key, so they deserialize to 0 and are migrated to 1 by
@@ -34,13 +34,13 @@ type Tournament struct {
 	// mutations. It is a SEPARATE, higher-privilege credential from
 	// Password (which gates the API as a whole).
 	//
-	// CRITICAL: it is WRITE-ONLY at the API boundary — `json:"-"` means it
+	// CRITICAL: it is WRITE-ONLY at the API boundary; `json:"-"` means it
 	// is never emitted in any response AND never populated by binding a
 	// request body into a Tournament. That is the opposite of Password
 	// (which is a peer of the credential gating /tournament, so returning
 	// it is harmless). AdminPassword is HIGHER privilege than that gate, so
-	// leaking it via GET — or letting a main-password holder overwrite it
-	// via the bulk PUT — would collapse the separation. It is set only via
+	// leaking it via GET; or letting a main-password holder overwrite it
+	// via the bulk PUT; would collapse the separation. It is set only via
 	// the dedicated, elevated-gated PUT /api/auth/admin-password handler.
 	// File mode only; in locked mode the env-var bcrypt hash is
 	// authoritative and any on-disk value here is inert.
@@ -56,13 +56,13 @@ type Tournament struct {
 	ClosingBlock string `yaml:"closing_block,omitempty" json:"closingBlock,omitempty"`
 
 	// ClockToElapsedMultiplier scales the on-clock match duration to
-	// "real elapsed minutes" — coin tosses, scoring transitions, salutes
+	// "real elapsed minutes"; coin tosses, scoring transitions, salutes
 	// and crossings, etc. Defaults to 1.5 via ApplyTournamentDefaults
 	// when zero. FR-055, R9.
 	ClockToElapsedMultiplier float64 `yaml:"clock_to_elapsed_multiplier,omitempty" json:"clockToElapsedMultiplier,omitempty"`
 
 	// SlowestCourtBufferPct is the % buffer added when distributing total
-	// elapsed minutes across N parallel courts — the slowest court usually
+	// elapsed minutes across N parallel courts; the slowest court usually
 	// runs longer than the mean. Defaults to 10 via ApplyTournamentDefaults
 	// when zero. FR-057, R9.
 	SlowestCourtBufferPct int `yaml:"slowest_court_buffer_pct,omitempty" json:"slowestCourtBufferPct,omitempty"`
@@ -252,7 +252,7 @@ func ApplyTournamentDefaults(t *Tournament) {
 // covered by the tournament, derived from Date + DurationDays. The list
 // has exactly DurationDays entries (Day 1 = Date, Day 2 = Date+1, …).
 //
-// Edge cases — never panics:
+// Edge cases; never panics:
 //   - If Date is empty or unparseable, returns nil (no day list available).
 //   - If DurationDays < 1, returns nil.
 //
@@ -275,7 +275,7 @@ func (t *Tournament) Days() []string {
 
 // FightingSpiritAward is an optional, per-competition individual honour
 // (敢闘賞 / kantōshō) independent of the placement podium. Recipient is a
-// plain name string for parity with the rest of the system (no UUID ref) —
+// plain name string for parity with the rest of the system (no UUID ref);
 // it is display-only and matches nothing.
 type FightingSpiritAward struct {
 	Title         string `yaml:"title" json:"title"`
@@ -310,7 +310,7 @@ type Competition struct {
 	MaxEnchoPeriods int `yaml:"max_encho_periods,omitempty" json:"maxEnchoPeriods,omitempty"`
 
 	// TeamMatchType selects the team-match format (FR-044). Empty value
-	// is treated as TeamMatchTypeFixed for backward compatibility — all
+	// is treated as TeamMatchTypeFixed for backward compatibility; all
 	// N×1 bouts are pre-scheduled by position. TeamMatchTypeKachinuki
 	// schedules only the first bout; subsequent bouts are derived
 	// dynamically from prior bout outcomes ("winner stays on"). See
@@ -320,7 +320,7 @@ type Competition struct {
 
 	// Legacy single-phase duration. Captured at unmarshal time and used by
 	// ApplyCompetitionDefaults to populate the per-phase fields above when
-	// they are zero. Not persisted on save — only here so older YAML files
+	// they are zero. Not persisted on save; only here so older YAML files
 	// round-trip through the new schema.
 	MatchDuration int `yaml:"match_duration,omitempty" json:"matchDuration,omitempty"`
 
@@ -351,7 +351,7 @@ type Competition struct {
 	// TeamSize > 0). Allowed values are 3 (default) and 4.
 	//
 	// A "consequential" tied group is one whose position range intersects the
-	// band [1..LeagueTiebreakTopN] — i.e. its best (lowest-numbered) position is
+	// band [1..LeagueTiebreakTopN]; i.e. its best (lowest-numbered) position is
 	// ≤ TopN. For example, with TopN=3 a tie involving teams at positions 1–2 is
 	// consequential (it affects who wins or is runner-up), but a tie at positions
 	// 4–5 is not. When the best-placed team in a tied group finishes WORSE than
@@ -361,7 +361,7 @@ type Competition struct {
 	//
 	// The kendo convention of two joint 3rd places interacts here: when
 	// LeagueTwoThirdPlaces is true and TopN is 3 or 4, a tied group that sits
-	// ENTIRELY at position 3 or below does not need a 3rd-vs-4th decider —
+	// ENTIRELY at position 3 or below does not need a 3rd-vs-4th decider;
 	// both teams are awarded 3rd place and the group is non-consequential.
 	// Zero is treated as the default (3) for a team league (Format == "league"
 	// && Kind == "team") at draw time.
@@ -373,7 +373,7 @@ type Competition struct {
 	//
 	// When true, a tied group whose ENTIRE position range falls at position ≥ 3
 	// (i.e. all tied teams are at 3rd place or below) is treated as
-	// non-consequential — both receive 3rd place and no tie-breaker is required.
+	// non-consequential; both receive 3rd place and no tie-breaker is required.
 	// This implements the standard kendo convention where there is no bronze
 	// match; two teams can share 3rd.
 	//
@@ -552,7 +552,7 @@ type MatchResult struct {
 	Winner string `json:"winner"`
 	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
 	// the winner when available. Sides are stored by name everywhere else,
-	// but a name is not unique within a competition — two participants from
+	// but a name is not unique within a competition; two participants from
 	// different dojos may share a name (CheckDuplicateEntriesByNameDojo only
 	// rejects same-name AND same-dojo). These ids let consumers (e.g. the
 	// league matrix) cross-reference a match cell to the right row/column
@@ -568,7 +568,7 @@ type MatchResult struct {
 	// know the winning SIDE unambiguously (e.g. quick-score, where the
 	// winner is decided by ippon counts, not a name). writeMatchResult uses
 	// it to resolve WinnerID from the stored side ids even when both sides
-	// share a name. Never persisted (json/CSV omit) — it only carries the
+	// share a name. Never persisted (json/CSV omit); it only carries the
 	// side decision from the handler to the id-resolution step.
 	WinnerSide     string           `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
@@ -600,7 +600,7 @@ type MatchResult struct {
 	//
 	// Preserve-on-nil applies ONLY to bracket matches (see
 	// engine/scoring.go:recordBracketMatchResult and
-	// engine/scoring_tx.go's bracket commit branch — both gate the
+	// engine/scoring_tx.go's bracket commit branch; both gate the
 	// assignment on result.DecidedByHantei != nil). Pool matches are
 	// merged with `*r = *result`, so a nil pointer there will clear any
 	// stored value. This is acceptable in practice because FIK rules
@@ -613,7 +613,7 @@ type MatchResult struct {
 	// explicit false.
 	//
 	// Persistence caveat: pool matches are stored in pool-matches.csv,
-	// whose column layout does NOT include this field — so a hantei
+	// whose column layout does NOT include this field; so a hantei
 	// decision on a pool match survives in-memory and on the SSE wire,
 	// but does NOT survive a server restart. Bracket matches are stored
 	// in bracket.json, which serializes the full struct, so the flag
@@ -698,7 +698,7 @@ func (e *EnchoMetadata) Clone() *EnchoMetadata {
 // cloneSubResults deep-copies a sub-result slice so cached state never shares
 // the IpponsA/IpponsB slices or nested Encho pointers with a returned value.
 // Used by both the pool match copy path (copyMatchResults) and the bracket
-// copy path (copyBracket) — keep them aligned. Returns nil for a nil input so
+// copy path (copyBracket); keep them aligned. Returns nil for a nil input so
 // the omitempty/preserve semantics round-trip unchanged.
 func cloneSubResults(subs []SubMatchResult) []SubMatchResult {
 	if subs == nil {
@@ -753,7 +753,7 @@ type BracketMatch struct {
 	IsOverridden  bool   `json:"isOverridden"`
 	QueuePosition int    `json:"queuePosition,omitempty"`
 	// MatchNumber is the sequential bracket match number, matching the
-	// "Match N" label printed on the Excel tree sheet. 0 means unset — for a
+	// "Match N" label printed on the Excel tree sheet. 0 means unset; for a
 	// BracketMatch that is a hidden/bye placeholder, or a legacy bracket saved
 	// before numbering was assigned.
 	MatchNumber int `json:"matchNumber,omitempty"`
@@ -776,7 +776,7 @@ type BracketMatch struct {
 	// matches, persisted in bracket.json for audit. Set when an operator
 	// overwrites a completed result (correction), omitted on first completion.
 	CorrectionReason string `json:"correctionReason,omitempty"`
-	// Display metadata (mp-7f2w) — additive, computed at generation time so the
+	// Display metadata (mp-7f2w); additive, computed at generation time so the
 	// viewer can render the bracket with the SAME effective-round columns as the
 	// printed Excel Tree sheet (matches grouped by depth-from-root, structural
 	// byes skipping a column) instead of the balanced pow2 rounds. These fields
@@ -784,7 +784,7 @@ type BracketMatch struct {
 	// to use the positional ID + "Winner of rX-mY" scheme unchanged.
 	//
 	// DisplayRound is the effective round counted from the final (1 = Final,
-	// 2 = Semifinal, …). 0 means unset — either a legacy bracket generated before
+	// 2 = Semifinal, …). 0 means unset; either a legacy bracket generated before
 	// this field existed (viewer falls back to positional rendering) or a Hidden
 	// phantom match. Hidden marks a structural-bye match (empty-vs-empty dead
 	// match, or a latent bye where one side never had an opponent) that is not a
@@ -801,7 +801,7 @@ type Bracket struct {
 	// Preview marks a bracket whose leaves are pool-origin PLACEHOLDERS
 	// (e.g. "Pool A 1st") rather than resolved players. It is generated on a
 	// mixed (Pools + Knockout) competition at draw time so the operator can
-	// see the elimination structure that the pools feed — mirroring the Excel
+	// see the elimination structure that the pools feed, mirroring the Excel
 	// Tree sheet. A preview bracket is read-only: the actual knockout is
 	// played in the separate playoffs competition created from this source.
 	Preview bool `json:"preview,omitempty"`

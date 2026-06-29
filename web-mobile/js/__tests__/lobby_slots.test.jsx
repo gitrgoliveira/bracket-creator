@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildCourtSlots, LOBBY_ROWS, LobbyMatchCell, LOBBY_COLORS } from '../display.jsx';
 import { IndividualScore } from '../match_scoreboard.jsx';
 
-// Unit tests for buildCourtSlots — the slot-building logic that drives the
+// Unit tests for buildCourtSlots: the slot-building logic that drives the
 // cross-court table in LobbyDisplay (mp-1nf).
 //
 // Three scenarios:
@@ -187,8 +187,8 @@ function makeScheduledSlot() {
     };
 }
 
-// ── LOBBY_COLORS — no amber on next row ──────────────────────────────────────
-describe('LOBBY_COLORS — amber removed from next row (mp-ulh9)', () => {
+// ── LOBBY_COLORS: no amber on next row ──────────────────────────────────────
+describe('LOBBY_COLORS: amber removed from next row (mp-ulh9)', () => {
     it('the NEXT row background (schedBg) does not use the amber hex #fef3c7', () => {
         // NEXT shares the quiet queue background; its only distinct cue is the border.
         expect(LOBBY_COLORS.nextBg).toBeUndefined();
@@ -211,11 +211,11 @@ describe('LOBBY_COLORS — amber removed from next row (mp-ulh9)', () => {
     });
 });
 
-// ── LobbyMatchCell — NOW navy treatment (mp-ulh9) ────────────────────────────
+// ── LobbyMatchCell: NOW navy treatment (mp-ulh9) ────────────────────────────
 // The row-label column already prints "Now" / "Next" / "#3"…, so no inline
 // NOW dot/label is rendered in the cell itself; the navy bg+border carries
 // the live signal.
-describe('LobbyMatchCell — NOW row uses navy treatment, NEXT does not (mp-ulh9)', () => {
+describe('LobbyMatchCell: NOW row uses navy treatment, NEXT does not (mp-ulh9)', () => {
     it('NOW cell uses LOBBY_COLORS.nowBg (navy) and LOBBY_COLORS.nowBorder', () => {
         const tree = LobbyMatchCell({ slot: makeRunningSlot(), rowKind: 'now' });
         const str = treeStr(tree);
@@ -234,11 +234,11 @@ describe('LobbyMatchCell — NOW row uses navy treatment, NEXT does not (mp-ulh9
     });
 });
 
-// ── visibleRows trimming — empty queue rows omitted ─────────────────────────
+// ── visibleRows trimming: empty queue rows omitted ─────────────────────────
 // When all slots >= 2 are null across all visible courts, only the Now and
 // Next anchor rows should appear (slot < 2). Rows with slot >= 2 are included
 // only when at least one court has a non-null entry at that index.
-describe('visibleRows trimming — slot >= 2 rows omitted when all courts have null there', () => {
+describe('visibleRows trimming: slot >= 2 rows omitted when all courts have null there', () => {
     // Replicate the filter logic from LobbyDisplay so we can unit-test it without
     // rendering the full component (consistent with the buildCourtSlots test pattern).
     function computeVisibleRows(courtSlots) {
@@ -248,7 +248,7 @@ describe('visibleRows trimming — slot >= 2 rows omitted when all courts have n
     }
 
     it('only Now and Next rows render when all slot >= 2 entries are null', () => {
-        // Two courts, each with only slot[0] filled (running) — slots 2–5 null.
+        // Two courts, each with only slot[0] filled (running): slots 2–5 null.
         const compA = [makeComp('Open', 'A', [{ status: 'running' }])];
         const compB = [makeComp('Open', 'B', [{ status: 'running' }])];
         const courtSlots = [
@@ -292,16 +292,16 @@ describe('visibleRows trimming — slot >= 2 rows omitted when all courts have n
     });
 });
 
-// ── LobbyMatchCell — hansoku foul marks (mp-0ky7) ───────────────────────────
-// ── LobbyMatchCell — delegates the matchup body to IndividualScore ────────────
+// ── LobbyMatchCell: hansoku foul marks (mp-0ky7) ───────────────────────────
+// ── LobbyMatchCell: delegates the matchup body to IndividualScore ────────────
 // The cell renders one IndividualScore row (same shared component the
-// per-court board and viewer card use). Attribution is positional — Shiro
+// per-court board and viewer card use). Attribution is positional: Shiro
 // ippons next to Shiro name, Aka ippons next to Aka name, hansoku ▲ on the
-// outer edge of the offending side — instead of a centred dash-separated
+// outer edge of the offending side: instead of a centred dash-separated
 // numeric string. No more hand-rolled lobby-only score rendering, no "0"
 // placeholder for empty ippons (kendo isn't numeric), no separate
 // lobby-foul-mark testids.
-describe('LobbyMatchCell — delegates body to IndividualScore (mp-0ky7 / score reuse)', () => {
+describe('LobbyMatchCell: delegates body to IndividualScore (mp-0ky7 / score reuse)', () => {
     const findIndiv = tree => findAll(tree, n => n?.type === IndividualScore);
 
     it('renders exactly one IndividualScore vnode for a running slot', () => {

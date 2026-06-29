@@ -4,7 +4,7 @@ This document explains how the bracket-creator live tournament app is deployed o
 **Google Cloud Always Free tier**, what gets created, and what to expect. For step-by-step
 deployment instructions, see [README.md](README.md).
 
-> Cloud free-tier allowances change over time. The figures below were accurate as of June 2026 —
+> Cloud free-tier allowances change over time. The figures below were accurate as of June 2026,
 > confirm them against Google's current [Free Tier](https://cloud.google.com/free) page before you
 > rely on them.
 
@@ -22,7 +22,7 @@ viewers) we recommend the Oracle Always-Free deployment (`deploy/oracle/`) inste
 | Compute | 1× `e2-micro` (shared vCPU, 1 GB RAM), Always Free | one instance, running 24/7 |
 | Region | `us-west1`, `us-central1`, or `us-east1` only | one of these (enforced by the module) |
 | Disk | 30 GB standard persistent disk | a single boot + data disk |
-| Network egress | 1 GB/month (from North America) | your live-viewer ceiling — see [Capacity](#capacity-and-scale) |
+| Network egress | 1 GB/month (from North America) | your live-viewer ceiling: see [Capacity](#capacity-and-scale) |
 | External IP | ephemeral included free | ephemeral by default; a stable static IP is optional |
 
 > The deployment **only runs in the three free regions above.** Choosing another region would incur
@@ -56,12 +56,12 @@ after a reboot.
 
 ## Networking and HTTPS
 
-- **Automatic HTTPS** is handled by Caddy using Let's Encrypt — no manual certificate management.
+- **Automatic HTTPS** is handled by Caddy using Let's Encrypt: no manual certificate management.
 - The firewall allows inbound HTTP (80), HTTPS (443), and SSH (22). For SSH you can restrict access
   to your own IP range.
 - **DNS:** point an `A` record for your chosen hostname at the instance's public IP. Caddy needs the
   hostname to issue the certificate. If you use the default ephemeral IP, note that it can change if
-  the instance is stopped and started — reserve a static IP if you need a stable address.
+  the instance is stopped and started: reserve a static IP if you need a stable address.
 
 ## Authentication
 

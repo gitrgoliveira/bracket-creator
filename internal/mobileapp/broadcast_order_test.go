@@ -1,4 +1,4 @@
-// Phase 12.C — T214: SSE broadcast ordering guarantees.
+// Phase 12.C, T214: SSE broadcast ordering guarantees.
 //
 // Context per the v3 cross-model review: under multi-operator concurrent
 // scoring, hub.Broadcast(…) calls happen OUTSIDE the per-comp
@@ -9,7 +9,7 @@
 // gap-detect (T217).
 //
 // This test is the contract for the Seq guarantee at the hub layer:
-// every concurrent Broadcast — from any number of goroutines — receives
+// every concurrent Broadcast, from any number of goroutines, receives
 // a unique strictly-monotonic seq, and all live subscribers see the
 // envelopes in that strictly-increasing order.
 package mobileapp
@@ -27,7 +27,7 @@ import (
 var _ = time.Now // keep time import used (the single-goroutine test still uses it)
 
 // TestBroadcastsHaveStrictlyIncreasingSeq is the single-goroutine
-// baseline — broadcast N events from one goroutine and assert every
+// baseline, broadcast N events from one goroutine and assert every
 // envelope received by a subscriber has seq exactly one greater than its
 // predecessor.
 func TestBroadcastsHaveStrictlyIncreasingSeq(t *testing.T) {
@@ -58,7 +58,7 @@ func TestBroadcastsHaveStrictlyIncreasingSeq(t *testing.T) {
 }
 
 // TestConcurrentBroadcastsHaveUniqueMonotonicSeq is the multi-goroutine
-// case — 10 goroutines each broadcast 50 events concurrently. The
+// case, 10 goroutines each broadcast 50 events concurrently. The
 // receiver must see 500 unique seqs in strictly-increasing order. This
 // is the actual A2 closure: it proves the hub stamps + delivers
 // envelopes under one critical section, so even if score-writes from
@@ -72,7 +72,7 @@ func TestConcurrentBroadcastsHaveUniqueMonotonicSeq(t *testing.T) {
 	// Use a hub with ring-buffer capacity ≥ Total so we can verify the
 	// stamping invariant via snapshotHistorySince instead of via a
 	// subscriber channel. The live-streaming path uses a non-blocking
-	// send (cap 100, slow consumers are dropped — documented behaviour
+	// send (cap 100, slow consumers are dropped, documented behaviour
 	// covered by hub_test.go), which is the wrong surface to test the
 	// per-event stamping property at high concurrency. The ring buffer
 	// captures every broadcast exactly once with its assigned seq, so

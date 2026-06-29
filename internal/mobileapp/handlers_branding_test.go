@@ -86,7 +86,7 @@ func TestPostBrandingLogo_HappyPath_JPEG(t *testing.T) {
 }
 
 func TestPostBrandingLogo_ReplacesOtherExt(t *testing.T) {
-	// Upload PNG then JPEG — PNG must be removed.
+	// Upload PNG then JPEG, PNG must be removed.
 	h, dir, cleanup := brandingTestSetup(t)
 	defer cleanup()
 
@@ -112,7 +112,7 @@ func TestPostBrandingLogo_ReplacesOtherExt(t *testing.T) {
 func TestPostBrandingLogo_RejectsBadType(t *testing.T) {
 	h, _, cleanup := brandingTestSetup(t)
 	defer cleanup()
-	// Send plain text — sniff will report text/plain.
+	// Send plain text, sniff will report text/plain.
 	body, ct := buildBrandingUpload(t, "evil.txt", []byte("not an image"))
 	req := httptest.NewRequest(http.MethodPost, "/api/branding/logo", body)
 	req.Header.Set("Content-Type", ct)

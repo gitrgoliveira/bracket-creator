@@ -4,9 +4,9 @@
 // complete named-export surface so existing importers keep resolving.
 //
 // Implementation lives in the sibling modules:
-//   admin_scoring_autosave.jsx   — autosave/sync infra
-//   admin_scoring_team.jsx       — team helpers + TeamScoreEditorModal
-//   admin_scoring_individual.jsx — ScoreEditorModal (individual editor)
+//   admin_scoring_autosave.jsx   : autosave/sync infra
+//   admin_scoring_team.jsx       : team helpers + TeamScoreEditorModal
+//   admin_scoring_individual.jsx: ScoreEditorModal (individual editor)
 
 import { ScoreEditorModal } from './admin_scoring_individual.jsx';
 

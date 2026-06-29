@@ -31,11 +31,11 @@ func setupLineupTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 
 	r := gin.New()
 
-	// Public group — same as production server.go
+	// Public group, same as production server.go
 	api := r.Group("/api")
 	RegisterPublicLineupHandlers(api, store)
 
-	// Admin group — AuthMiddleware gates all writes
+	// Admin group, AuthMiddleware gates all writes
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
 	RegisterLineupHandlers(admin, store, store, store, stubBroadcaster{})
@@ -118,7 +118,7 @@ func TestPublicLineupGET_RedactsChangeReason(t *testing.T) {
 		domain.PosTaisho:  "p5",
 	}
 	// Round-scoped lineup (drives /lineups/:round) and a match-scoped lineup
-	// (drives /match-lineups/:matchId) — different storage keys. Force path is
+	// (drives /match-lineups/:matchId), different storage keys. Force path is
 	// how production persists a ChangeReason.
 	require.NoError(t, store.SetTeamLineupForce("c1", domain.TeamLineup{
 		TeamID: "teamA", CompetitionID: "c1", Round: 1, ChangeReason: secret, Positions: positions,
@@ -333,14 +333,14 @@ func TestLineupPUT_ZeroTeamSize(t *testing.T) {
 
 // TestLineupPUT_ValidationError verifies that a PUT with an invalid position
 // KEY (not a recognised FIK name) returns 400. Note: a partial lineup with
-// only valid keys (e.g. only jiho set, senpo missing) is accepted —
+// only valid keys (e.g. only jiho set, senpo missing) is accepted,
 // completeness is a non-blocking UI warning, not a write-time gate.
 func TestLineupPUT_ValidationError(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
-	// "chudan" is not a valid FIK position name for a 5-person team — key validation must reject it.
+	// "chudan" is not a valid FIK position name for a 5-person team, key validation must reject it.
 	body, _ := json.Marshal(map[string]any{
 		"positions": map[string]string{
 			"chudan": "p1",

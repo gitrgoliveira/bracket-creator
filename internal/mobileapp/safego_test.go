@@ -66,7 +66,7 @@ func TestSafeGo_FirstPanicWins(t *testing.T) {
 	// Use a barrier so both goroutines panic concurrently. The first
 	// CompareAndSwap winner becomes panicRef; the rest are still logged
 	// but don't overwrite. This test just verifies SOMETHING is captured
-	// and the second panic doesn't crash the process — it doesn't pin
+	// and the second panic doesn't crash the process, it doesn't pin
 	// which value wins, because that's a race we intentionally don't
 	// constrain.
 	start := make(chan struct{})
@@ -89,7 +89,7 @@ func TestSafeGo_FirstPanicWins(t *testing.T) {
 
 func TestSafeGo_NilPanicRef_DoesNotCrash(t *testing.T) {
 	var wg sync.WaitGroup
-	// A nil panicRef is allowed — safeGo must still recover the panic
+	// A nil panicRef is allowed, safeGo must still recover the panic
 	// and call wg.Done. Useful for fire-and-forget background work
 	// where the caller doesn't need to surface the failure.
 	safeGo(&wg, nil, func() {

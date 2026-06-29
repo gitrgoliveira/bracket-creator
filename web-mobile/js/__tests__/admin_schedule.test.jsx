@@ -36,7 +36,7 @@ describe('timeEdited', () => {
     });
 
     it('clearing the time (HH:MM → "") is a real edit', () => {
-      // The user explicitly cleared the input — this should fire so the
+      // The user explicitly cleared the input: this should fire so the
       // server can drop the scheduledAt back to null. The naive check
       // ("09:30" !== "") would already catch this; pinning it here so a
       // future refactor that aliases "" to null doesn't break the clear.
@@ -59,7 +59,7 @@ describe('timeEdited', () => {
 });
 
 describe('timeToMinutes', () => {
-  // Sanity coverage for the existing helper — it's been in the file
+  // Sanity coverage for the existing helper: it's been in the file
   // since the split and didn't have a dedicated test. Pinning a few
   // cases so a future "make this more clever" refactor can be checked.
 
@@ -83,7 +83,7 @@ describe('clampMatchDuration', () => {
   // used `Number.isFinite(x) && x >= 1` but no Number.isInteger guard.
   // A user typing "2.5" passed through to:
   //   - addMinutes("00:00", 2.5) → total = 0 + 2.5 = 2.5; mm = 2.5 % 60 = 2.5
-  //     → "00:2.5" — invalid HH:MM string the backend would persist as
+  //     → "00:2.5": invalid HH:MM string the backend would persist as
   //     scheduledAt with weird downstream display
   //   - durationEstimate: diff % 60 with diff=32.5 → "0h 32.5m"
   //
@@ -105,7 +105,7 @@ describe('clampMatchDuration', () => {
     });
 
     it('large valid value → passes through (no max enforcement)', () => {
-      // clampMatchDuration doesn't enforce the form's max=60 — that's the
+      // clampMatchDuration doesn't enforce the form's max=60: that's the
       // form's job. The helper's contract is "non-finite/fractional/<1 → fallback."
       expect(clampMatchDuration(120)).toBe(120);
     });
@@ -298,7 +298,7 @@ describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 re
   //   filtered.filter(m => (m.court || "") === openCourt)
   // before computing prevMatch / nextMatch. This regression test pins
   // the same court-equality contract via the filterMatchesByCourt
-  // helper — they share the same court-equality semantics (case-sensitive
+  // helper: they share the same court-equality semantics (case-sensitive
   // exact match), so a future "simplify the comparison" refactor that
   // breaks the helper would also break the chained-navigation invariant.
   //
@@ -335,7 +335,7 @@ describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 re
   it('next match in sequence is the next Court A match, never a Court B match', () => {
     // Concrete end-to-end shape of the chained-next computation. If the
     // operator clicks Next on mA2 (Court A, index 1 in the same-court
-    // list), the next match must be mA3 (Court A) — NOT mB2 even though
+    // list), the next match must be mA3 (Court A): NOT mB2 even though
     // mB2 might come before mA3 in tournament order.
     const currentMatch = matches[2]; // mA2
     const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
@@ -363,7 +363,7 @@ describe('AdminScoreEditor chained navigation stays on the same shiaijo (T043 re
     // Edge: clicking Next on the last Court A match must stop chaining
     // rather than wrap around to the first Court A match or jump to
     // Court B.
-    const currentMatch = matches[5]; // mA4 — last Court A match
+    const currentMatch = matches[5]; // mA4: last Court A match
     const sameCourt = filterMatchesByCourt(matches, currentMatch.court);
     const openIdx = sameCourt.findIndex((m) => m.id === currentMatch.id);
     const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
@@ -514,7 +514,7 @@ describe('CourtPacePanel timer', () => {
     global.React = realReact;
     // The component's effect cleanup calls clearInterval on an interval
     // created under fake timers, so unmount BEFORE switching back to real
-    // timers — otherwise the cleanup runs against a different timer
+    // timers: otherwise the cleanup runs against a different timer
     // implementation than the one that scheduled it. Order matters.
     runtime.unmount();
     vi.useRealTimers();
@@ -549,7 +549,7 @@ describe('CourtPacePanel timer', () => {
     // mp-pb1 AC #3: the tick must actually re-render the panel, not just
     // schedule a no-op interval. Advance fake timers and assert that the
     // component was re-rendered after the tick fired. This is the real
-    // contract — without it the panel could "tick" silently and the chip
+    // contract: without it the panel could "tick" silently and the chip
     // color would still freeze between SSE events.
     const byCourt = {
       A: [
@@ -607,7 +607,7 @@ describe('allMatchesCompleted', () => {
 
   it('regression: nextMatch is null for the last match in a fully-scored court', () => {
     // When all pool matches are complete, the score editor's sameCourt list
-    // is all-completed. The last (and only remaining) match is at the end —
+    // is all-completed. The last (and only remaining) match is at the end:
     // nextMatch must be null so the modal does not loop back to the start.
     const allDone = [
       { id: 'm1', court: 'A', status: 'completed', compId: 'c1' },
@@ -627,8 +627,8 @@ describe('allMatchesCompleted', () => {
     // sort order is scheduled first, completed last. The one remaining
     // scheduled match sits at index 0; the 6 completed matches follow at
     // indices 1-6. Clicking "Finish + Start Next" from the scheduled match
-    // used to open the first completed match (index 1) as a CORRECTION
-    // — the modal looped back to match 1. The fix is to compute
+    // used to open the first completed match (index 1) as a CORRECTION:
+    // the modal looped back to match 1. The fix is to compute
     // nextActiveMatch = first non-completed match after openIdx, which is
     // null when the remaining scheduled match IS the open one.
     const sorted = [
@@ -644,13 +644,13 @@ describe('allMatchesCompleted', () => {
     const sameCourt = filterMatchesByCourt(sorted, openMatch.court);
     const openIdx = sameCourt.findIndex(m => m.id === openMatch.id);
 
-    // nextMatch (list position) is non-null — this is the source of the bug
+    // nextMatch (list position) is non-null: this is the source of the bug
     // without the nextActiveMatch guard.
     const nextMatch = openIdx >= 0 && openIdx < sameCourt.length - 1 ? sameCourt[openIdx + 1] : null;
-    expect(nextMatch).not.toBeNull(); // m1 (completed) — confirms the bug path
+    expect(nextMatch).not.toBeNull(); // m1 (completed): confirms the bug path
     expect(nextMatch.id).toBe('m1');
 
-    // nextActiveMatch (first non-completed after openIdx) must be null —
+    // nextActiveMatch (first non-completed after openIdx) must be null:
     // this is what Finish+Start Next should use so the modal does not loop.
     const nextActiveMatch = sameCourt.slice(openIdx + 1).find(m => m.status !== 'completed') || null;
     expect(nextActiveMatch).toBeNull();
@@ -659,7 +659,7 @@ describe('allMatchesCompleted', () => {
   // Deep-review (2026-05-22): the AdminScoreEditor banner render is guarded
   // by `statusFilter !== "complete" && allMatchesCompleted(filtered)`. When
   // the operator hits the "Completed" status filter the list is trivially
-  // all-completed — firing the banner there would be misleading because the
+  // all-completed: firing the banner there would be misleading because the
   // user explicitly asked to see only the completed matches; nothing about
   // that view says "every match in this competition is done." The helper
   // itself stays unconditional (it's a pure predicate); the guard lives
@@ -670,7 +670,7 @@ describe('allMatchesCompleted', () => {
       { id: '1', status: 'completed' },
       { id: '2', status: 'completed' },
     ];
-    // Helper says true for an all-completed list — that's correct.
+    // Helper says true for an all-completed list: that's correct.
     expect(allMatchesCompleted(filteredByCompleteStatus)).toBe(true);
     // The actual AdminScoreEditor JSX guards on
     //   statusFilter !== "complete" && allMatchesCompleted(filtered)

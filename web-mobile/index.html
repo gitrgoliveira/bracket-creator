@@ -40,7 +40,7 @@
                     // renders diff Preact's own tree and must NOT be wiped.
                     if (!mounted) {
                         // replaceChildren() is the clean modern API, but fall
-                        // back to innerHTML on the off chance it's missing — this
+                        // back to innerHTML on the off chance it's missing, this
                         // is the critical mount path; it must never throw before
                         // the app renders.
                         if (typeof container.replaceChildren === "function") {
@@ -70,7 +70,7 @@
 
     <!-- Modules that are BOTH script-tagged here AND ES-imported by other modules
          (e.g. patch.jsx imports data.jsx/api_serializers.jsx; app.jsx imports
-         patch.jsx) use the ".jsx" specifier — identical to the import URL — so the
+         patch.jsx) use the ".jsx" specifier, identical to the import URL, so the
          browser keys them as ONE module and evaluates them once. Using ".js?v=5"
          here would be a second, distinct URL → double module-eval (mp-zd1v).
          They keep their early position so the window globals they set are
@@ -89,7 +89,7 @@
     <script type="module" src="/dist/reset.js?v=5"></script>
     <script type="module" src="/dist/registration.js?v=5"></script>
     <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
-         display.js and viewer.js — both consume window.SponsorStrip (mp-c38). -->
+         display.js and viewer.js, both consume window.SponsorStrip (mp-c38). -->
     <script type="module" src="/dist/sponsor_strip.js?v=5"></script>
     <!-- qr.js exposes window.renderQR; must load before display.js so the
          StreamingOverlay's QR ("scan for results") can draw. -->
@@ -102,7 +102,7 @@
          viewer_* helper modules (viewer_utils, viewer_watchlist_core, viewer_alerts,
          viewer_notifications, viewer_match, viewer_standings, viewer_awards,
          viewer_schedule, viewer_competition, viewer_home), so it is the SOLE entry
-         that loads them — they must NOT also have their own <script type="module">
+         that loads them, they must NOT also have their own <script type="module">
          tags. A separate tag uses a different module URL (".js?v=5") than the import
          specifier (".jsx"), which the browser keys as a distinct module and would
          evaluate a SECOND time, doubling the viewer JS download/parse and splitting
@@ -134,10 +134,10 @@
     <script type="module" src="/dist/admin_competition.js?v=6"></script>
     <script type="module" src="/dist/admin_announcement.js?v=5"></script>
     <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
-         (which embeds it inside the Edit Tournament page) — mp-c38. -->
+         (which embeds it inside the Edit Tournament page), mp-c38. -->
     <script type="module" src="/dist/admin_sponsors.js?v=5"></script>
     <!-- admin_branding.js exports BrandingManager. Loaded before admin_setup.js
-         (which embeds it inside the Edit Tournament page) — mp-scf. -->
+         (which embeds it inside the Edit Tournament page), mp-scf. -->
     <script type="module" src="/dist/admin_branding.jsx"></script>
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before

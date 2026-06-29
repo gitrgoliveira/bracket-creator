@@ -9,7 +9,7 @@ import { TvDisplay } from '../../display.jsx';
 // individual scoreboard, NOT the 5-person team grid (which would render empty)
 // and NOT the whole-pool individual feed (which is for genuine individual
 // comps). Mirrors the admin scorer's compKind override in admin_pools.jsx.
-describe('TvDisplay — pool DH/TB rep bout in a team comp renders as individual', () => {
+describe('TvDisplay: pool DH/TB rep bout in a team comp renders as individual', () => {
   function teamCompWithSupplementary(suppId) {
     return {
       name: 'Team Cup', kind: 'team', teamSize: 5, withZekkenName: false,

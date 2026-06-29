@@ -241,7 +241,7 @@ competitions:
 	// Pre-fix, the seeds block silently swallowed three shapes:
 	// (1) missing seeds file, (2) parseSeedsBytes returning err != nil
 	// (currently unreachable but dead branch), and (3) empty parse.
-	// Only (3) is now soft — the other two surface as per-row res.Error,
+	// Only (3) is now soft, the other two surface as per-row res.Error,
 	// matching the participants block's pattern. The user no longer sees
 	// SeedCount=0 with no error message when they named a file that
 	// wasn't in the upload.
@@ -258,7 +258,7 @@ competitions:
 `))
 		playersPart, _ := writer.CreateFormFile("files", "players-only.csv")
 		playersPart.Write([]byte("Player 1,Dojo A\nPlayer 2,Dojo B"))
-		// NOTE: no seeds file added to the multipart — the manifest names
+		// NOTE: no seeds file added to the multipart, the manifest names
 		// "absent-seeds.csv" but it never lands in the upload. Pre-fix
 		// this returned res.SeedCount=0 with no error; post-fix it must
 		// surface "not found in upload" so the user knows the import
@@ -288,7 +288,7 @@ competitions:
 	})
 
 	// Empty seeds parse (header-only file, all rows malformed) is the
-	// soft path — no error, SeedCount=0. Symmetric with how the
+	// soft path, no error, SeedCount=0. Symmetric with how the
 	// participants block treats an empty roster file. Pin so a future
 	// refactor that hardens empty-parse to an error doesn't silently
 	// break legitimate "no seeds yet" imports.
@@ -328,7 +328,7 @@ competitions:
 	// Rollback contract: when SaveCompetition succeeds but a downstream
 	// per-row save (SaveParticipants or SaveSeeds) fails on I/O, the
 	// half-written competition MUST be rolled off disk. Pre-fix, the
-	// row error was surfaced but the config.md stayed — and the
+	// row error was surfaced but the config.md stayed, and the
 	// ID-collision guard on retry then rejected the same manifest with
 	// "competition ID %q already exists", so the operator couldn't
 	// recover without manual file deletion.
@@ -388,7 +388,7 @@ competitions:
 			"rollback must remove the entire comp directory, got stat err=%v", statErr)
 	})
 
-	// Padded YAML string fields persisted unchanged before this fix —
+	// Padded YAML string fields persisted unchanged before this fix,
 	// the import handler bypasses the POST/PUT trim in
 	// handlers_competition.go and writes via SaveCompetitionChanged
 	// directly. Pin the contract so all three write paths stay aligned.
@@ -433,7 +433,7 @@ competitions:
 		// The API response (ImportResult) must also reflect the trimmed
 		// Name, not the raw manifest value. Pre-fix: res.Name = entry.Name
 		// passed the padded "  Padded Cup  " back to the client while the
-		// stored record was "Padded Cup" — admin UI then showed two
+		// stored record was "Padded Cup", admin UI then showed two
 		// different names for the same competition.
 		var resp struct {
 			Results []ImportResult `json:"results"`
@@ -446,7 +446,7 @@ competitions:
 
 	// Cross-file guard symmetry with handlers_competition.go (POST + PUT)
 	// and handlers_tournament.go. A manifest entry with whitespace-only
-	// name trims to "" — without an explicit guard, that would persist
+	// name trims to "", without an explicit guard, that would persist
 	// as Competition.Name = "" and render a blank card in the admin UI.
 	// The error is surfaced per-row in ImportResult.Error rather than
 	// HTTP-failing the whole batch (matches existing behavior for missing
@@ -581,7 +581,7 @@ competitions:
 	})
 
 	// mp-yin4: the import path must enforce number-prefix uniqueness just like
-	// POST/PUT — a manifest row with a duplicate NumberPrefix must land a
+	// POST/PUT, a manifest row with a duplicate NumberPrefix must land a
 	// per-row error and not be persisted.
 	t.Run("Duplicate Number Prefix Across Import And Existing Comp Rejected", func(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -621,7 +621,7 @@ competitions:
 	})
 
 	// Date must be DD-MM-YYYY. Non-canonical formats (e.g. ISO YYYY-MM-DD)
-	// land a per-row error rather than persisting the bad date — matches
+	// land a per-row error rather than persisting the bad date, matches
 	// the POST/PUT 400 contract in handlers_competition.go.
 	t.Run("Non-DMY Date Rejected Per Row", func(t *testing.T) {
 		body := &bytes.Buffer{}
@@ -659,7 +659,7 @@ competitions:
 
 	// Cross-file guard symmetry: POST /competitions and PUT /competitions/:id
 	// call validateCompetitionCourts to reject empty / multi-character /
-	// >26-court manifests. Pre-fix, the import path bypassed this check —
+	// >26-court manifests. Pre-fix, the import path bypassed this check,
 	// so a manifest row could persist court labels that no other write
 	// path would accept. Two failure modes to cover: multi-character label
 	// (court="AA"), and >26 courts.
@@ -759,7 +759,7 @@ competitions:
 	// rather than persisting (FR-050a). This mirrors the
 	// validateCompetitionCourts and validateDateDMY per-row guards
 	// already in importCompetition. T181: swiss is now an accepted
-	// format value — the validation moves to swissRounds >= 1.
+	// format value, the validation moves to swissRounds >= 1.
 	t.Run("Swiss Missing Rounds Rejected Per Row", func(t *testing.T) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)

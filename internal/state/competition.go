@@ -43,7 +43,7 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 }
 
 func parseCompetitionFile(path string) (any, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -97,7 +97,7 @@ func (s *Store) SaveCompetition(c *Competition) error {
 // WITHOUT acquiring the per-competition lock. Caller MUST already hold
 // the per-comp lock (typically via WithTransaction). Bypasses the
 // loadCached path because the caller's lock is what coordinates with
-// concurrent writers — going through the cache would risk reading a
+// concurrent writers, going through the cache would risk reading a
 // snapshot mutated between cache populate and our acquire.
 //
 // Returns (nil, nil) when no file exists for compID, mirroring
@@ -172,7 +172,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 	// mp-p7n / Copilot PR #185 round-9: the participant loader derives
 	// its id-strip decision from Competition.HasParticipantIDs, so a
 	// config write (notably the deferred HasParticipantIDs=true flip)
-	// must invalidate the participant caches — otherwise a coarse-
+	// must invalidate the participant caches; otherwise a coarse-
 	// timestamp filesystem could leave the summed cache mtime unchanged
 	// and keep serving a stale "no-IDs" (column-shifted) parse.
 	// Deterministic regardless of mtime granularity.
@@ -183,7 +183,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 
 // UpdateCompetitionChanged atomically loads the competition with id,
 // calls transform with the loaded record (which may be nil if no file
-// exists yet), and — if transform returns a non-nil *Competition —
+// exists yet), and if transform returns a non-nil *Competition
 // persists it. Returns (changed, err) where changed reports whether
 // the on-disk content actually differs from the prior version (same
 // semantics as SaveCompetitionChanged). The entire load + transform
@@ -216,7 +216,7 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 // lock. It MUST NOT call any other Store method that acquires the same
 // lock (SaveCompetition, SaveCompetitionChanged, SaveParticipants,
 // SavePools, SaveBracket, SavePoolMatches, recursive
-// UpdateCompetitionChanged / UpdateBracket / UpdatePoolMatchByID, etc.) —
+// UpdateCompetitionChanged / UpdateBracket / UpdatePoolMatchByID, etc.);
 // `sync.Mutex` is non-recursive and would deadlock. For cross-file
 // operations (e.g. participants save), perform them AFTER
 // UpdateCompetitionChanged returns.
@@ -229,7 +229,7 @@ func (s *Store) UpdateCompetitionChanged(id string, transform func(current *Comp
 	mu.Lock()
 	defer mu.Unlock()
 
-	// Load directly under the lock (bypass the cached path — the
+	// Load directly under the lock (bypass the cached path; the
 	// per-comp lock is what coordinates with the save below).
 	path := s.compPath(id, "config.md")
 	parsed, err := parseCompetitionFile(path)

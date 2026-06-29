@@ -100,7 +100,7 @@ func TestNewBcryptVerifier_InvalidHash(t *testing.T) {
 
 func TestBcryptVerifier_Verify(t *testing.T) {
 	plain := "mySecret"
-	// Use MinCost to keep the test fast — cost choice doesn't affect the
+	// Use MinCost to keep the test fast, cost choice doesn't affect the
 	// verification contract.
 	hash, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.MinCost)
 	require.NoError(t, err)

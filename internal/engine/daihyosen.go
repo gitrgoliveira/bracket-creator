@@ -1,10 +1,10 @@
-// Package engine — daihyosen (representative-bout) tie-breaker for tied
+// Package engine, daihyosen (representative-bout) tie-breaker for tied
 // knockout-stage team matches.
 //
 // Daihyosen is the FIK tie-breaker for knockout team matches that end
 // with both teams equal on Individual Victories (IV) AND Points Won
 // (PW). Each team sends ONE representative competitor who plays a
-// single one-ippon bout to decide the winner — there are no further
+// single one-ippon bout to decide the winner, there are no further
 // fall-backs once daihyosen is reached.
 //
 // FR-046, data-model §1, CHK026.
@@ -21,7 +21,7 @@ import (
 
 // ErrNotTied is returned by AddDaihyosen when the two TeamSummary
 // values differ on either IV or PW. Callers map this to HTTP 400
-// ("not_tied") — the operator must score the match normally instead.
+// ("not_tied"), the operator must score the match normally instead.
 var ErrNotTied = errors.New("daihyosen requires a tied IV+PW result")
 
 // ErrPoolMatch is returned by AddDaihyosen when the target match is a
@@ -34,13 +34,13 @@ var ErrPoolMatch = errors.New("daihyosen is only valid in knockout matches")
 // both teams have zero eligible competitors remaining (every roster
 // member has kiken'd or otherwise been marked ineligible). Callers map
 // this to HTTP 409 ("insufficient_eligibility") and MUST then record
-// the match result with the opposing team as Winner — per CHK026, a
+// the match result with the opposing team as Winner, per CHK026, a
 // team unable to field a representative forfeits the encounter.
 var ErrInsufficientEligibility = errors.New("daihyosen requires at least one eligible competitor per side")
 
 // TeamSummary captures the two tie-breaker metrics relevant to the
 // daihyosen decision. Fields mirror the corresponding state.PlayerStanding
-// columns produced by computeStandings — callers building this from a
+// columns produced by computeStandings, callers building this from a
 // completed team-match's SubResults can do so directly without going
 // through the standings cache (see ComputeTeamSummary).
 //
@@ -56,7 +56,7 @@ type TeamSummary struct {
 }
 
 // IsTied reports whether two TeamSummary values match on both IV and
-// PW. This is the trigger condition for daihyosen — a team match that
+// PW. This is the trigger condition for daihyosen, a team match that
 // otherwise has a decided IV winner does NOT require daihyosen even
 // when PW is equal.
 func IsTied(a, b TeamSummary) bool {
@@ -190,7 +190,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	poolCourt := map[string]string{}
 	// regularIncomplete[pool] is true if any regular (non-DH) match in the pool
 	// is not yet completed. Daihyosen tie-breaks must only be injected after a
-	// pool's regular round-robin is finished — otherwise a partial-result tie
+	// pool's regular round-robin is finished, otherwise a partial-result tie
 	// would inject DH matches that a later result breaks, orphaning them. (See
 	// the matching guard in InjectTiebreakerMatches.)
 	regularIncomplete := map[string]bool{}
@@ -304,7 +304,7 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 		case sideBWin:
 			b.IndividualWins++
 		}
-		// PW counts every ippon scored regardless of bout outcome —
+		// PW counts every ippon scored regardless of bout outcome,
 		// hikiwake bouts where both sides scored still contribute.
 		a.PointsWon += len(sub.IpponsA)
 		b.PointsWon += len(sub.IpponsB)
@@ -318,10 +318,10 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 //
 // Validation order (matches handler 400 vs 409 mapping):
 //
-//  1. ErrPoolMatch when isPool — daihyosen is knockout-only.
-//  2. ErrNotTied when IV or PW differ — operator must score normally.
+//  1. ErrPoolMatch when isPool, daihyosen is knockout-only.
+//  2. ErrNotTied when IV or PW differ, operator must score normally.
 //  3. ErrInsufficientEligibility when either side has 0 eligible
-//     competitors — caller MUST then record a match result with the
+//     competitors, caller MUST then record a match result with the
 //     opposing team as Winner (CHK026 forfeit rule).
 //
 // The returned SubMatchResult has Position = -1 (a sentinel for "this
@@ -331,7 +331,7 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 // ippon via the score modal.
 //
 // CHK026: when a team has exactly 1 eligible competitor, that
-// competitor MUST be the rep — the operator selects them in the score
+// competitor MUST be the rep, the operator selects them in the score
 // modal. The engine does not enforce that single-choice constraint
 // here (it has no view of the lineup); it only guarantees at least
 // one option exists per side.

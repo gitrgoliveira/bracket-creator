@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>mp-13y mockup — per-match lineup rendering</title>
+<title>mp-13y mockup, per-match lineup rendering</title>
 <style>
   :root { color-scheme: light; }
   body { font-family: -apple-system, system-ui, sans-serif; background:#f3f4f6; margin:0; padding:32px; color:#111; }
@@ -88,14 +88,14 @@
   .tv-board-next .next-teams .aka   { color:#b91c1c; font-weight:600; }
   .tv-board-next .next-teams .vs    { color:#9ca3af; font-size:12px; padding:0 12px; }
 
-  /* TV — variant A: inline 5 names */
+  /* TV, variant A: inline 5 names */
   .tv-lineup-inline { margin-top:14px; border-top:1px solid #1e293b; padding-top:10px; display:grid;
     grid-template-columns: 1fr 70px 1fr; row-gap:4px; font-size:13px; }
   .tv-lineup-inline .pos { text-align:center; color:#94a3b8; font-size:11px; letter-spacing:.04em;}
   .tv-lineup-inline .shiro { text-align:left; }
   .tv-lineup-inline .aka   { text-align:right; color:#fda4af; }
 
-  /* TV — variant B: rotation card */
+  /* TV, variant B: rotation card */
   .tv .rotate-bar { margin-top:14px; border-top:1px solid #1e293b; padding-top:10px; min-height: 60px; display:flex; align-items:center; justify-content:center;}
   .tv .rotate-bar .panel { text-align:center; }
   .tv .rotate-bar .panel .who { font-size:18px; font-weight:600;}
@@ -103,7 +103,7 @@
   .tv .rotate-bar .panel .pos { font-size:11px; color:#93c5fd; letter-spacing:.1em; margin-bottom:4px;}
   .tv .rotation-hint { font-size:10px; color:#64748b; margin-top:8px; text-align:center; letter-spacing:.05em;}
 
-  /* Fake QR code — square checker pattern for mockup purposes */
+  /* Fake QR code, square checker pattern for mockup purposes */
   .qr { width:64px; height:64px; background:#fff;
     background-image:
       linear-gradient(45deg, #000 25%, transparent 25%),
@@ -120,20 +120,20 @@
 </style>
 </head>
 <body>
-  <h1>mp-13y — per-match lineup rendering (rough sketch)</h1>
+  <h1>mp-13y, per-match lineup rendering (rough sketch)</h1>
   <p class="note" style="background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; padding:10px 12px; border-radius:6px;">
-    <strong>⚠ ROUGH ILLUSTRATION — NOT layout-binding.</strong> The team-match display is STRICT. The
+    <strong>⚠ ROUGH ILLUSTRATION, NOT layout-binding.</strong> The team-match display is STRICT. The
     exact layout is governed by the existing in-app components and the official FIK dantai-shiai scoreboard
-    (FIK Regs, Shinpan Management, Table 2, p.16) — NOT by these sketches. Do not copy this geometry into
+    (FIK Regs, Shinpan Management, Table 2, p.16), NOT by these sketches. Do not copy this geometry into
     the implementation. <strong>Scope: team matches only; all three surfaces ship in one bead / one PR.</strong>
   </p>
   <p class="note">
     <strong>Viewer surface</strong> = inject the lineup names into the existing strict match-detail bout
     table (MatchDetailCard viewer.jsx:1860 + MatchViewerModal viewer.jsx:3378) without changing its
-    layout. Not sketched here — follow the existing component.
+    layout. Not sketched here, follow the existing component.
   </p>
 
-  <h2>TV display (TvDisplay) — fullscreen per-court scoreboard</h2>
+  <h2>TV display (TvDisplay), fullscreen per-court scoreboard</h2>
   <p class="note">
     The in-venue scoreboard: white background, large readable text, full team match
     in progress with all 5 individual matches and their scores as they accumulate.
@@ -143,12 +143,12 @@
   <p class="note">
     <strong>Daihyosen (DH) row</strong> appears only when the team match is tied <em>and</em>
     it's a knockout match (not a pool). Pool ties stand; only elimination matches force a rep
-    bout. The DH row's competitors are chosen freely from each team's roster — not necessarily
+    bout. The DH row's competitors are chosen freely from each team's roster, not necessarily
     the same players who fought in the 5 standard matches above.
   </p>
   <p class="note">
     <strong>Upcoming matches:</strong> for <em>team</em> matches the board shows only the
-    single <strong>next</strong> team match — a team match is long (≈5 bouts) so queueing 2–3
+    single <strong>next</strong> team match, a team match is long (≈5 bouts) so queueing 2–3
     ahead adds no value. The "next 2–3 upcoming" rule from §Roles at Each Shiaijo applies to
     <em>individual</em> matches, which are short and turn over fast.
   </p>
@@ -177,17 +177,17 @@
           </tr>
           <tr>
             <td class="shiro">Watanabe Kei</td>
-            <td class="bout-score">— &nbsp;–&nbsp; D</td>
+            <td class="bout-score">, &nbsp;–&nbsp; D</td>
             <td class="aka">Mori Daichi</td>
           </tr>
           <tr>
             <td class="shiro">Nakamura Yui</td>
-            <td class="bout-score">M &nbsp;–&nbsp; —</td>
+            <td class="bout-score">M &nbsp;–&nbsp;,</td>
             <td class="aka">Suzuki Rin</td>
           </tr>
           <tr>
             <td class="shiro">Kobayashi Shun</td>
-            <td class="bout-score">— &nbsp;–&nbsp; M</td>
+            <td class="bout-score">, &nbsp;–&nbsp; M</td>
             <td class="aka">Hayashi Sora</td>
           </tr>
           <tr class="daihyosen now">
@@ -208,11 +208,11 @@
     </div>
   </div>
 
-  <h2>Streaming overlay (StreamingOverlay) — OBS / vMix lower-third</h2>
+  <h2>Streaming overlay (StreamingOverlay), OBS / vMix lower-third</h2>
   <p class="note">
     Transparent-background lower-third the broadcaster keys onto their video feed. <strong>QR in the
     centre</strong> ("scan for results") is the call-to-action to the per-match results page. Team names
-    flank the QR; the current bout's two competitors flank the <strong>bout score</strong> (kept — the
+    flank the QR; the current bout's two competitors flank the <strong>bout score</strong> (kept, the
     team IV score is dropped, it's meaningless mid-match on a lower-third). Bottom-tier names come from
     the per-match lineup; whatever bout is current shows here, including a daihyosen.
   </p>
@@ -239,7 +239,7 @@
 
   <h2>Scope</h2>
   <p class="note">
-    All three surfaces — viewer match-detail (existing components), TvDisplay, StreamingOverlay —
+    All three surfaces, viewer match-detail (existing components), TvDisplay, StreamingOverlay,
     ship under <strong>one bead (mp-13y) and one PR</strong>. Exact layout follows the strict canonical
     format (existing components + FIK Table 2), not these sketches.
   </p>

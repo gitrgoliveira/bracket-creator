@@ -24,9 +24,9 @@ func TestIsReservedParticipantName(t *testing.T) {
 		"Winner of the 2025 Cup",
 		"Pool Shark",
 		"Pool A 1st",       // space before ordinal, no dash
-		"pool a-1st",       // lowercase — regexes require "Pool"/"Winner of" capitalisation, so lowercase never matches
+		"pool a-1st",       // lowercase, regexes require "Pool"/"Winner of" capitalisation, so lowercase never matches
 		"Winner of r1-m0x", // trailing char
-		// "Pool A-0th" intentionally omitted — \d+(th) matches "0th"; that's acceptable
+		// "Pool A-0th" intentionally omitted, \d+(th) matches "0th"; that's acceptable
 		// since no real competitor name takes that form.
 		"",
 	}

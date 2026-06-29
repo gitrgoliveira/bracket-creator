@@ -17,11 +17,11 @@ func TestHub_Subscribe_EnforcesCap(t *testing.T) {
 	require.NotNil(t, b)
 	require.NotNil(t, c)
 
-	// At cap — next subscribe rejected.
+	// At cap, next subscribe rejected.
 	d := hub.Subscribe()
 	assert.Nil(t, d, "expected Subscribe to return nil when MaxClients reached")
 
-	// Existing clients still served (basic sanity — they're real channels).
+	// Existing clients still served (basic sanity, they're real channels).
 	assert.NotNil(t, a)
 	assert.NotNil(t, b)
 	assert.NotNil(t, c)

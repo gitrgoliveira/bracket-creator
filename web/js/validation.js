@@ -126,7 +126,7 @@ export function getParticipantValidationState(playerList, withZekkenName) {
 }
 
 
-// Pure validator for the courts (Shiaijo) field — A-Z hard cap at 26.
+// Pure validator for the courts (Shiaijo) field, A-Z hard cap at 26.
 export function validateCourtsValue(rawCourts) {
     const courts = parseInt(rawCourts, 10);
     if (Number.isNaN(courts) || courts < 1 || courts > 26) {

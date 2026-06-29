@@ -1,5 +1,5 @@
 // Schedule + filter components extracted from viewer.jsx (mp-pxxc step 7).
-// Pure file split — no behaviour change.
+// Pure file split. no behaviour change.
 
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster } from './viewer_watchlist_core.jsx';
@@ -12,7 +12,7 @@ const EmptyState = window.EmptyState;
 // mp-xhaa: the pinned-primary entry key (string), persisted separately from the
 // list so reordering/dedup of the list never disturbs the pin. Only meaningful
 // when the watchlist has ≥2 entries (with exactly one entry the primary is
-// implicit — see effectivePrimaryKey).
+// implicit: see effectivePrimaryKey).
 export const LS_WATCH_PRIMARY = "bc_watch_primary";
 export const WATCHED_UPCOMING_MAX = 6;
 // mp-xhaa: bound on the "watched upcoming" compact list shown below the hero
@@ -22,7 +22,7 @@ export const WATCHED_UPCOMING_LIST_MAX = 10;
 
 // Hook: the pinned-primary entry key (string) backed by localStorage.
 // Empty string = no explicit pin (the effective primary is then implicit when
-// exactly one entry exists — see effectivePrimaryKey).
+// exactly one entry exists: see effectivePrimaryKey).
 export function usePrimaryWatch() {
   const [key, setKey] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -39,14 +39,14 @@ export function usePrimaryWatch() {
     try {
       if (val) window.localStorage.setItem(LS_WATCH_PRIMARY, val);
       else window.localStorage.removeItem(LS_WATCH_PRIMARY);
-    } catch (_e) { /* ignore — in-memory primary selection remains valid for the session */ }
+    } catch (_e) { /* ignore: in-memory primary selection remains valid for the session */ }
   };
   return [key, persist];
 }
 
 // Return up to 6 upcoming matches across any watched player, sorted by
 // scheduledAt ascending (empty/missing times sort last via "99:99" sentinel).
-// "Upcoming" = status !== "completed" — we keep `running` matches in the
+// "Upcoming" = status !== "completed": we keep `running` matches in the
 // list so a coach can spot a watched player who just started.
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
   const watchedIds = new Set();
@@ -100,7 +100,7 @@ const pluralize = window.pluralize;
 const hasBothSides = (m) => window.hasBothSides(m);
 const formatDate = window.formatDate;
 
-// Reusable multi-player filter — used by both viewer & admin schedule pages.
+// Reusable multi-player filter: used by both viewer & admin schedule pages.
 // Picks any number of participants/teams across all competitions; matches are
 // kept if they involve ANY of the picked sides. Free-text dojo search works in parallel.
 export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, setDojoText }) {
@@ -170,7 +170,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
       {open && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")} — type to search`}
+            {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")}: type to search`}
             {(picked.length > 0 || dojoText) && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}
@@ -231,11 +231,11 @@ export function TWMatch({ m, highlight, onClick }) {
   const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
   // Bracket matches carry scoreA/scoreB strings rather than ipponsA/B arrays
   // (see normalizeMatch). Apply the same fallback used in VSchedItem so the
-  // score cell renders the derived winnerPts–loserPts string instead of "—".
+  // score cell renders the derived winnerPts–loserPts string instead of ":".
   const twIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
   const twIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
   const scoreStr = m.status === "completed" ? window.matchScoreStr(m, twIpponsB, twIpponsA) : null;
-  // FR-025: per-court queue position — see VSchedItem for the contract.
+  // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned
   // by display.jsx::queueLabelCompact (bead mp-e3k); we still grab `qp`
@@ -249,7 +249,7 @@ export function TWMatch({ m, highlight, onClick }) {
   return (
     <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
-        <div className="tw-match__time">{m.scheduledAt || "—"}</div>
+        <div className="tw-match__time">{m.scheduledAt || "-"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
           <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>
@@ -279,7 +279,7 @@ export function TWMatch({ m, highlight, onClick }) {
   );
 }
 
-// Tournament-wide schedule (across competitions) — grouped by day, then court swimlanes + filter
+// Tournament-wide schedule (across competitions): grouped by day, then court swimlanes + filter
 export function ScheduleViewer({ tournament, tweaks }) {
   const allMatches = useMemo(() => tournamentMatches(tournament).filter(hasBothSides), [tournament]);
   const courts = tournament.courts || [];
@@ -288,7 +288,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
   // watchlist (resolved to flat players, so dojo entries expand to current
   // members) so the existing matchHighlightedBy / .tw-match--highlight path
   // lights up the rows the viewer cares about. Seeded once from localStorage;
-  // the user can still add or remove chips — we only set the initial value,
+  // the user can still add or remove chips: we only set the initial value,
   // then `picked` is owned by the schedule (no live re-sync, which would
   // fight the user's edits).
   const [watchlist] = useWatchlist();

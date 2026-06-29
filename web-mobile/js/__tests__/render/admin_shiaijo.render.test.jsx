@@ -4,9 +4,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest
 
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
-// must be set before the dynamic import or the module captures undefined.
+// must be set before the dynamic import, or the module captures undefined.
 const STUBBED_GLOBALS = {
-  // MODULE-EVAL-TIME — captured at import; set before dynamic import below
+  // MODULE-EVAL-TIME: captured at import; set before dynamic import below
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,
   ScoreEditorModal: () => <div data-testid="score-editor" />,
@@ -14,7 +14,7 @@ const STUBBED_GLOBALS = {
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
   hasBothSides: () => true,
-  // LAZY — only called in event handlers or guarded effects
+  // LAZY: only called in event handlers or guarded effects
   filterMatchesByCourt: (matches, _court) => matches,
   tournamentMatches: () => [],
   filterMatchesByPhase: (matches) => matches,
@@ -123,7 +123,7 @@ describe('AdminShiaijoPage render-smoke', () => {
   // requestMoveCourt was used in ShiaijoQueueGroup but not passed as a prop,
   // causing a ReferenceError that the fake-React stub suite never caught.
   it('GUARD: a component referencing an undefined prop throws a ReferenceError', () => {
-    // A minimal component that references an undefined variable — simulates
+    // A minimal component that references an undefined variable. Simulates
     // the requestMoveCourt bug class. Real React invokes the function body;
     // the stub suite's createElement never does.
     const BrokenComponent = () => {

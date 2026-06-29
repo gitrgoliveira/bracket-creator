@@ -41,7 +41,7 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	RegisterViewerHandlers(viewer, store, eng)
 	RegisterDisplayHandlers(viewer, store)
 
-	// Stateless schedule estimator — public, no auth.
+	// Stateless schedule estimator, public, no auth.
 	publicAPI := r.Group("/api")
 	RegisterScheduleHandlers(publicAPI)
 	RegisterPublicSwissHandlers(publicAPI, store, eng)
@@ -105,7 +105,7 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	// PUT /api/tournament trims string fields. Sibling of the
-	// comp.Name trim in handlers_competition.go — the CreateTournament
+	// comp.Name trim in handlers_competition.go, the CreateTournament
 	// UI now trims client-side, but older clients and direct API
 	// callers could still send padded values. Date is included for
 	// cross-file guard symmetry with the competition/import paths
@@ -152,7 +152,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// POST /api/tournament also trims. CreateTournament in app.jsx now
 	// validates the trimmed name client-side before submit, but this
 	// regression test covers older cached clients and direct API callers
-	// that can still send padded values — the server-side trim is the
+	// that can still send padded values, the server-side trim is the
 	// canonical defense layer so persisted records are always trimmed.
 	postTour := state.Tournament{Name: "  Posted Tournament  ", Venue: "  Some Venue  ", Date: "  20-07-2026  ", Password: "secret", Courts: []string{"A"}}
 	body, _ = json.Marshal(postTour)
@@ -190,7 +190,7 @@ func TestTournamentHandlers(t *testing.T) {
 	// ISO→DMY at the input boundary; direct API callers must send DMY.
 	for _, method := range []string{"PUT", "POST"} {
 		for _, badDate := range []string{
-			"2026-05-12", // ISO shape — not accepted
+			"2026-05-12", // ISO shape, not accepted
 			"31-02-2026", // Feb 31 semantically invalid
 			"32-01-2026", // day 32 invalid
 			"12-13-2026", // month 13 invalid
@@ -240,13 +240,13 @@ func TestTournamentHandlers(t *testing.T) {
 	// is uninitialized (bootstrap path). If Password == "" lands on
 	// disk, AuthMiddleware's later `password != t.Password` check
 	// vacuously passes for any request with an empty
-	// X-Tournament-Password header — exposing every /api/* endpoint
+	// X-Tournament-Password header, exposing every /api/* endpoint
 	// unauthenticated. Pin the guard here so a future refactor that
 	// drops it surfaces immediately.
 	{
 		os.Remove(filepath.Join(tempDir, "tournament.md"))
 		// Courts populated so the Password check (not Courts validation)
-		// is the rejection reason — handler validates Name → Courts →
+		// is the rejection reason, handler validates Name → Courts →
 		// Password in order, and we're specifically pinning the
 		// Password guard here.
 		emptyPass := state.Tournament{Name: "No Password", Password: "", Courts: []string{"A"}}
@@ -275,7 +275,7 @@ func TestTournamentHandlers(t *testing.T) {
 		seed := state.Tournament{Name: "Preserve Test", Password: "kept-secret", Courts: []string{"A"}}
 		require.NoError(t, store.SaveTournament(&seed))
 
-		// PUT with empty Password — should preserve "kept-secret".
+		// PUT with empty Password, should preserve "kept-secret".
 		update := state.Tournament{Name: "Preserve Test", Venue: "New Venue", Password: "", Courts: []string{"A"}}
 		body, _ := json.Marshal(update)
 		w := httptest.NewRecorder()
@@ -312,7 +312,7 @@ func TestTournamentHandlers(t *testing.T) {
 
 	// PUT /api/tournament when the stored tournament ALSO has an empty
 	// Password (legacy state from a pre-fix install) must reject at
-	// the handler — defense-in-depth for the case where AuthMiddleware
+	// the handler, defense-in-depth for the case where AuthMiddleware
 	// is bypassed (this test setupTestRouter intentionally does NOT
 	// install AuthMiddleware; in production it does, and the middleware
 	// also fails closed on empty-stored-password as of the
@@ -576,7 +576,7 @@ func TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange(t *testing.T) {
 // admin edit form) broadcasts EventPasswordReset alongside
 // EventTournamentUpdated. Without the second event, other logged-in
 // admins keep the stale `bc_password` in localStorage and only
-// notice on their next write that 401s — surprising UX. The /reset
+// notice on their next write that 401s, surprising UX. The /reset
 // endpoint already does this; mirroring it here closes the gap for
 // the in-admin rotation path.
 func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *testing.T) {
@@ -628,7 +628,7 @@ func TestTournamentHandlers_FileMode_PUTPasswordChange_BroadcastsResetEvent(t *t
 		}
 	}
 	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
-	assert.True(t, seen["password_reset"], "password_reset event missing — other admins keep stale credential until next write 401s")
+	assert.True(t, seen["password_reset"], "password_reset event missing, other admins keep stale credential until next write 401s")
 }
 
 // Negative: a PUT that does NOT change the password (e.g. admin
@@ -689,7 +689,7 @@ func TestTournamentHandlers_FileMode_PUTNoPasswordChange_NoResetEvent(t *testing
 // bootstrap, so any non-empty new password broadcast EventPasswordReset.
 // The creating tab's SSE subscription (active from the
 // CreateTournament-screen mount) then received the empty-originator
-// event and immediately cleared the freshly cached password —
+// event and immediately cleared the freshly cached password,
 // kicking the user back to AuthModal moments after they finished
 // bootstrap. POST must only emit password_reset when OVERWRITING an
 // existing record whose password actually changed.
@@ -740,7 +740,7 @@ func TestTournamentHandlers_FileMode_POSTBootstrap_NoResetEvent(t *testing.T) {
 		}
 	}
 	assert.True(t, sawTournamentUpdated, "tournament_updated event expected on bootstrap (so viewers refresh)")
-	assert.False(t, sawPasswordReset, "first-time bootstrap must NOT broadcast password_reset — the creating tab's own SSE would clear the credential it just persisted")
+	assert.False(t, sawPasswordReset, "first-time bootstrap must NOT broadcast password_reset, the creating tab's own SSE would clear the credential it just persisted")
 }
 
 // TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsResetEvent
@@ -803,7 +803,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 		}
 	}
 	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
-	assert.True(t, seen["password_reset"], "password_reset event missing — overwriting an existing tournament's password must clear other admins' cached credentials")
+	assert.True(t, seen["password_reset"], "password_reset event missing, overwriting an existing tournament's password must clear other admins' cached credentials")
 }
 
 // TestTournamentHandlers_ModeSwitchPreservesStoredPassword walks the
@@ -814,7 +814,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 //  2. Switch to locked mode. The on-disk Password is now non-
 //     authoritative (auth uses the env-var bcrypt hash), but the
 //     stored value MUST be preserved on disk so that a future flip
-//     back to file mode is recoverable — the operator might be
+//     back to file mode is recoverable, the operator might be
 //     experimenting with locked mode and need to roll back.
 //  3. Confirm that locked-mode PUTs preserve the stored value
 //     without leaking it through responses.
@@ -943,7 +943,7 @@ func TestTournamentHandlers_ModeSwitchPreservesStoredPassword(t *testing.T) {
 // bcrypt hash) but the handler still preserves it on PUT to avoid
 // clobbering a value that might be carried back if locked mode is
 // later disabled. Pre-fix, that preserved value flowed through the
-// PUT response body — re-exposing an old file-mode credential to any
+// PUT response body, re-exposing an old file-mode credential to any
 // authenticated admin who happened to PUT a name/venue change.
 func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "locked-mode-test-*")
@@ -954,7 +954,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	require.NoError(t, err)
 	hub := NewHub()
 
-	// Seed a tournament with a known stored password — simulating the
+	// Seed a tournament with a known stored password, simulating the
 	// case where an operator originally ran file mode then re-deployed
 	// in locked mode without scrubbing tournament.md.
 	require.NoError(t, store.SaveTournament(&state.Tournament{
@@ -976,7 +976,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	api.Use(AuthMiddleware(bcryptV, store))
 	RegisterTournamentHandlers(api, store, hub, bcryptV)
 
-	// GET /tournament — password must be stripped.
+	// GET /tournament, password must be stripped.
 	getReq := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
 	getReq.Header.Set("X-Tournament-Password", "kotai-A")
 	getW := httptest.NewRecorder()
@@ -987,7 +987,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	assert.Empty(t, getT.Password, "GET response must not leak stored password in locked mode")
 	assert.NotContains(t, getW.Body.String(), "preserved-canary-Aa")
 
-	// PUT /tournament — admin changes the name; response must redact
+	// PUT /tournament, admin changes the name; response must redact
 	// the password that was preserved via the transform.
 	putBody, _ := json.Marshal(state.Tournament{
 		Name:   "Renamed Tournament",
@@ -1007,7 +1007,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 	assert.NotContains(t, putW.Body.String(), "preserved-canary-Aa")
 
 	// And the stored record on disk should still hold the original
-	// password — locked-mode redaction is response-only, not a destructive
+	// password, locked-mode redaction is response-only, not a destructive
 	// rewrite (the operator can flip back to file mode and recover).
 	loaded, err := store.LoadTournament()
 	require.NoError(t, err)
@@ -1018,7 +1018,7 @@ func TestTournamentHandlers_LockedMode_StripPasswordOnResponses(t *testing.T) {
 // TestTournamentHandlers_MaxLengthCaps verifies the defense-in-depth
 // length caps from validation.go are enforced on POST and PUT
 // /tournament. These caps guard against unbounded YAML inflation
-// in tournament.md — a 1MB Name or Venue is silently accepted
+// in tournament.md, a 1MB Name or Venue is silently accepted
 // pre-fix and bloats every subsequent load.
 func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -1106,7 +1106,7 @@ func TestTournamentHandlers_MaxLengthCaps(t *testing.T) {
 // TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost pins the
 // TOCTOU fix in store.UpdateTournamentChanged. Pre-atomic-primitive,
 // the PUT handler called LoadTournament + SaveTournamentChanged
-// sequentially with no shared lock — two concurrent PUTs (one
+// sequentially with no shared lock, two concurrent PUTs (one
 // preserving the password by sending "", one changing the password)
 // could race so the empty-password PUT's late save overwrote the
 // change-password PUT's earlier save, silently losing the password
@@ -1178,13 +1178,13 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 		//     = initialPass, but desired.Password = newPass (no preserve
 		//     needed). Saves newPass + Hall B. Final: newPass + Hall B.
 		// Either way, Password == newPass. The Venue can be either Hall A
-		// or Hall B — the test doesn't constrain that (standard
+		// or Hall B, the test doesn't constrain that (standard
 		// last-write-wins for fields both PUTs explicitly set).
 		stored, err := store.LoadTournament()
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, newPass, stored.Password,
-			"iter %d: B's password-change intent must NEVER be lost — "+
+			"iter %d: B's password-change intent must NEVER be lost,  "+
 				"got %q, expected %q. (Pre-fix: A's late save with preserved "+
 				"initial password could clobber B's saved new password.)",
 			i, stored.Password, newPass)
@@ -1206,7 +1206,7 @@ func TestTournamentHandlers_ConcurrentPUT_PasswordChangeNotLost(t *testing.T) {
 // status and 400s with "cannot be completed/invalidated from status X".
 //
 // 20 iterations to exercise the scheduler. Assertion: regardless of
-// arrival order, the final stored Status is one of {invalid, complete} —
+// arrival order, the final stored Status is one of {invalid, complete},
 // never the original "pools". One of the two requests succeeds
 // (200), the other is 400-rejected (precondition no longer holds).
 func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
@@ -1244,7 +1244,7 @@ func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
 		// Exactly one should succeed (200), the other should reject
 		// with 400 (precondition Status=="pools" no longer holds
 		// after the first commit). Note: which of the two wins is
-		// undefined — they're racing.
+		// undefined, they're racing.
 		successes := 0
 		if codeInvalidate == http.StatusOK {
 			successes++
@@ -1256,7 +1256,7 @@ func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
 			"iter %d: exactly one of invalidate/complete should succeed (got invalidate=%d, complete=%d)",
 			i, codeInvalidate, codeComplete)
 
-		// Final stored Status must reflect whichever request won —
+		// Final stored Status must reflect whichever request won,
 		// never the original "pools" (that would mean BOTH writes
 		// lost their mutation, which is the pre-fix bug we're
 		// proving is closed).
@@ -1264,7 +1264,7 @@ func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Contains(t, []state.CompetitionStatus{state.CompStatusInvalid, state.CompStatusComplete}, stored.Status,
-			"iter %d: Status must be Invalid or Complete (got %q — neither write landed?)",
+			"iter %d: Status must be Invalid or Complete (got %q, neither write landed?)",
 			i, stored.Status)
 
 		os.RemoveAll(tempDir)
@@ -1275,11 +1275,11 @@ func TestCompetitionHandlers_ConcurrentInvalidateVsComplete(t *testing.T) {
 // rename-uniqueness atomicity fix. Pre-fix, two concurrent PUTs
 // renaming different competitions to the same new name each loaded
 // the OTHER comp to do the uniqueness check, saw it still had its
-// old name, passed the check, and both landed — leaving two
+// old name, passed the check, and both landed, leaving two
 // competitions on disk with the same Name.
 //
 // An earlier attempt folded the check into UpdateCompetitionChanged's
-// per-comp lock transform — deadlocked AB-BA (each goroutine holds
+// per-comp lock transform, deadlocked AB-BA (each goroutine holds
 // its own comp's write lock and tries to read-lock the other to
 // check uniqueness). The fix is a separate global mutex
 // (state.Store.WithCompetitionRenameLock) that serializes only the
@@ -1484,7 +1484,7 @@ func TestPOSTCompetition_RejectsExistingID(t *testing.T) {
 // (handlers_import_test.go Import Rollback On SaveSeeds I/O Failure).
 //
 // Forces a deterministic SaveParticipants I/O failure by pre-creating
-// a directory where participants.csv is supposed to be a file — on
+// a directory where participants.csv is supposed to be a file, on
 // macOS/Linux/Windows, os.WriteFile against a directory path returns
 // EISDIR / equivalent reliably.
 func TestPOSTCompetition_RollbackOnSaveParticipantsFailure(t *testing.T) {
@@ -1557,7 +1557,7 @@ func TestPOSTTournament_ValidatesCourts(t *testing.T) {
 		{"multi-char label", []string{"AA", "B"}, "must be a single character"},
 		{"empty label", []string{"A", ""}, "cannot be empty"},
 		// Duplicate labels are rejected because the frontend keys per-court
-		// rendering and `byCourt` bucketing on the label string — duplicates
+		// rendering and `byCourt` bucketing on the label string, duplicates
 		// collapse two courts' matches into one lane and trigger React
 		// duplicate-key warnings. The admin UI generates unique A,B,C,...
 		// so duplicates only arise via direct API/import callers.
@@ -1628,7 +1628,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// POST /api/competitions (no ID — auto-generated from name)
+	// POST /api/competitions (no ID, auto-generated from name)
 	body, _ = json.Marshal(state.Competition{Name: "Missing ID"})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
@@ -1649,7 +1649,7 @@ func TestCompetitionHandlers(t *testing.T) {
 
 	// GET /api/competitions (list error) - removing failing chmod test
 
-	// DELETE /api/competitions/:id (idempotent — non-existent ID returns 204)
+	// DELETE /api/competitions/:id (idempotent, non-existent ID returns 204)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/competitions/not-exists", nil)
 	r.ServeHTTP(w, req)
@@ -1664,7 +1664,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// DELETE /api/competitions/:id (already started — rejected; must invalidate first)
+	// DELETE /api/competitions/:id (already started, rejected; must invalidate first)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/competitions/c1", nil)
 	r.ServeHTTP(w, req)
@@ -1690,7 +1690,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	// POST /api/competitions (save error)
 	os.RemoveAll(filepath.Join(tempDir, "competitions"))
 	os.WriteFile(filepath.Join(tempDir, "competitions"), []byte("not a dir"), 0644)
-	// Name must be non-empty post-trim — the handler now rejects
+	// Name must be non-empty post-trim, the handler now rejects
 	// empty-after-trim Name with a 400 before reaching the save path,
 	// which would mask this 500-from-save-error test.
 	comp = state.Competition{ID: "fail", Name: "Save Error Comp"}
@@ -1713,7 +1713,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	os.Remove(filepath.Join(tempDir, "competitions"))
 	os.Mkdir(filepath.Join(tempDir, "competitions"), 0755)
 	// PUT /api/competitions/:id (update existing)
-	// Re-seed c1 first — the test deleted it above (line 907) and the
+	// Re-seed c1 first, the test deleted it above (line 907) and the
 	// PUT handler now correctly returns 404 for missing competitions
 	// (settings-only update, never creates; OpenAPI documents this and
 	// pre-fix the handler would silently create via
@@ -1732,7 +1732,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-	// PUT /api/competitions/:id (not found — never creates per OpenAPI)
+	// PUT /api/competitions/:id (not found, never creates per OpenAPI)
 	missing := state.Competition{ID: "never-existed", Name: "Phantom"}
 	body, _ = json.Marshal(missing)
 	w = httptest.NewRecorder()
@@ -1745,7 +1745,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	// PUT /api/competitions/:id (missing target, but body name collides
 	// with an existing competition). Pre-fix the uniqueness check ran
 	// BEFORE the existence check, so this returned 400 "name already
-	// exists" — making it impossible to distinguish "the target doesn't
+	// exists", making it impossible to distinguish "the target doesn't
 	// exist" from "the name is taken." Post-fix the existence check
 	// runs first, so a missing target is always reported as 404
 	// regardless of the body's Name.
@@ -1825,7 +1825,7 @@ func TestParticipantHandlers(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	os.RemoveAll(path)
 
-	// POST /api/competitions/:id/participants — dojo is required (matches the
+	// POST /api/competitions/:id/participants, dojo is required (matches the
 	// single-add path and the documented CSV schema), so the smoke payload
 	// supplies one. A blank dojo is rejected with 400; see
 	// TestBatchPostBlankDojo_400.
@@ -2050,7 +2050,7 @@ func TestMatchHandlers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
-	// PUT /api/competitions/:id/matches/:mid/score (not found — match doesn't exist → 404)
+	// PUT /api/competitions/:id/matches/:mid/score (not found, match doesn't exist → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/c1/matches/not-exists/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2061,7 +2061,7 @@ func TestMatchHandlers(t *testing.T) {
 	updatedMatches, _ := store.LoadPoolMatches("c1")
 	assert.Equal(t, "A", updatedMatches[0].Winner)
 
-	// PUT /api/competitions/:id/matches/:mid/score (invalid competition — not found → 404)
+	// PUT /api/competitions/:id/matches/:mid/score (invalid competition, not found → 404)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/not-exists/matches/PoolA-1/score", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -2413,7 +2413,7 @@ func TestCompetitionHandlers_DefaultDate_IsDay1(t *testing.T) {
 		ID:     "c-default-date",
 		Name:   "Default Date Test",
 		Courts: []string{"A"},
-		// Date intentionally empty — should default to tournament Day 1
+		// Date intentionally empty, should default to tournament Day 1
 	}
 	body, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()

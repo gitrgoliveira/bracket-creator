@@ -1,4 +1,4 @@
-// Package engine — kachinuki "winner-stays-on" team match advancement.
+// Package engine, kachinuki "winner-stays-on" team match advancement.
 //
 // FR-044, data-model §4.1.
 //
@@ -10,11 +10,11 @@
 //   - On a hikiwake (draw) BOTH players retire and the next pair from
 //     each remaining roster advance.
 //   - The team match ends when one side has no remaining un-retired
-//     players — the other side wins by exhaustion
+//     players, the other side wins by exhaustion
 //     (domain.DecisionKachinukiExhaustion).
 //
 // AdvanceKachinuki encapsulates the pure decision logic. Callers
-// (typically a score handler — see handlers_match.go) pass a snapshot
+// (typically a score handler, see handlers_match.go) pass a snapshot
 // of the just-completed bout plus the remaining un-retired roster per
 // side, and the engine returns either the next bout to schedule or a
 // MatchEnded sentinel.
@@ -29,7 +29,7 @@ import (
 )
 
 // AdvanceKachinukiInput is the minimal snapshot AdvanceKachinuki needs.
-// The engine deliberately does NOT load the full match — callers pass
+// The engine deliberately does NOT load the full match, callers pass
 // the completed bout plus the un-retired roster per team so this
 // function stays free of I/O and trivially unit-testable.
 //
@@ -51,7 +51,7 @@ type AdvanceKachinukiInput struct {
 //
 //   - Next: when non-nil, the next bout to schedule. Position is set to
 //     LastBout.Position + 1; SideA/SideB carry the next pair of player
-//     names. Other fields are left zero — the score handler will fill
+//     names. Other fields are left zero, the score handler will fill
 //     them as the bout is played.
 //   - MatchEnded: true when one team has no remaining un-retired
 //     players. Next is nil. WinningSide is "A" or "B"; Decision is
@@ -78,7 +78,7 @@ type AdvanceKachinukiResult struct {
 //  4. Either side's queue is empty → MatchEnded=true, the non-empty
 //     side wins by exhaustion. If BOTH are empty (no one left to
 //     advance after a hikiwake), Side A is treated as the winner
-//     defensively — log + return — but this is an unusual path because
+//     defensively, log + return, but this is an unusual path because
 //     the caller should have detected the previous-bout exhaustion
 //     first.
 //
@@ -91,7 +91,7 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	// Hikiwake: explicit "hikiwake" decision is the canonical signal.
 	// We deliberately don't treat "empty Winner + any decision" as a
 	// draw because a non-hikiwake decision (kiken, fusenpai, …) should
-	// have a Winner assigned by the score handler — an empty Winner
+	// have a Winner assigned by the score handler, an empty Winner
 	// there is malformed input, not a draw.
 	hikiwake := state.IsDraw(last.Decision)
 
@@ -107,7 +107,7 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// side. Treat as a no-op (no advancement) so callers fall
 		// back to manual scheduling instead of silently producing a
 		// wrong pairing.
-		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome — winner=%q sideA=%q sideB=%q decision=%q; no advancement",
+		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
 			last.Winner, last.SideA, last.SideB, last.Decision)
 		return AdvanceKachinukiResult{}
 	}
@@ -119,7 +119,7 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 // just for the exhaustion-end path's WinningSide field.
 func advanceWinnerStays(stayingName string, lastPos int, oppQueue []string, winnerSide string) AdvanceKachinukiResult {
 	if len(oppQueue) == 0 {
-		// Opposing team is exhausted — current side wins.
+		// Opposing team is exhausted, current side wins.
 		return AdvanceKachinukiResult{
 			MatchEnded:  true,
 			WinningSide: winnerSide,
@@ -154,7 +154,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	case len(in.SideA) == 0 && len(in.SideB) == 0:
 		// Both teams ran out simultaneously after a draw. The team
 		// match ends; without a tiebreak in scope here, default to
-		// SideA winning and log — operators can review and override.
+		// SideA winning and log, operators can review and override.
 		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d; defaulting WinningSide=A",
 			in.LastBout.Position)
 		return AdvanceKachinukiResult{
@@ -190,7 +190,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 // player name; presence == retired.
 //
 // Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from
-// a roster — they subtract retired names from the initial roster to
+// a roster, they subtract retired names from the initial roster to
 // derive the remaining un-retired queue.
 //
 // teamAName / teamBName are the parent MatchResult.SideA / SideB
@@ -266,7 +266,7 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 //  2. Load the just-recorded MatchResult; bail if its last SubResults
 //     entry has no final outcome (still in progress).
 //  3. Build the remaining-roster snapshot per side. The Slice-7.C
-//     first-cut leaves the FULL roster lookup to the lineup slice —
+//     first-cut leaves the FULL roster lookup to the lineup slice,
 //     for now we treat the (currently-unset) Player.Side rosters as
 //     unavailable and only act on the per-player winner path that
 //     keeps the previous bout's stayer on for the next position. The
@@ -278,7 +278,7 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 //     Decision=kachinuki-exhaustion, Winner=team-name).
 //
 // Returns (changed, error). `changed` indicates whether SubResults or
-// the parent match was mutated — handler uses it to decide whether to
+// the parent match was mutated, handler uses it to decide whether to
 // emit an additional match-updated SSE event with the freshly-derived
 // bout list.
 //
@@ -298,7 +298,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	// Locate the parent match. Kachinuki is currently only meaningful
 	// for pool matches (round-robin team matches), but check the
 	// bracket too so a future playoffs integration doesn't silently
-	// skip — the lookup is cheap.
+	// skip, the lookup is cheap.
 	parent, isBracket, err := e.findTeamMatch(compID, matchID)
 	if err != nil {
 		return false, err
@@ -316,7 +316,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 	}
 
 	// Build remaining-roster snapshot. Without TeamLineup data we
-	// cannot enumerate the full team roster — see the TODO. The
+	// cannot enumerate the full team roster, see the TODO. The
 	// first-cut behaviour: skip when we don't have rosters to feed
 	// AdvanceKachinuki. The handler's responsibility is to detect this
 	// and surface a log line; live competitions with kachinuki will
@@ -439,7 +439,7 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 }
 
 // kachinukiRemainingRoster derives the remaining un-retired roster per
-// side for a team match. Returns (sideA, sideB, available) — `available`
+// side for a team match. Returns (sideA, sideB, available); `available`
 // is false when the roster source is not yet wired in (Slice 7.C
 // first-cut, see TODO in MaybeAdvanceKachinuki).
 //

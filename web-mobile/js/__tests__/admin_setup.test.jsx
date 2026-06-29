@@ -33,7 +33,7 @@ describe('pickStackPredecessor', () => {
 
   it('Copilot finding: drops competitions with a malformed start time', () => {
     // A legacy/imported competition with an unparseable StartTime must not
-    // become `latest` — otherwise addMinutes() would emit "NaN:NaN".
+    // become `latest`; otherwise addMinutes() would emit "NaN:NaN".
     const comps = [
       { id: 'good', date: day, startTime: '09:00' },
       { id: 'bad', date: day, startTime: 'garbage' },
@@ -56,7 +56,7 @@ describe('deriveCompetitionName', () => {
   //   const finalName = name || <kind/gender default>
   // where `name` was the raw input. A whitespace-only string ("   ") is
   // truthy, so it would slip past the default-fallback and be sent to the
-  // backend, which trims `comp.Name` on save — landing a competition with
+  // backend, which trims `comp.Name` on save; landing a competition with
   // an empty canonical name. It also bypassed the JS-side uniqueness
   // check ("  Men's Cup  ".toLowerCase() !== "men's cup") so two
   // competitions with the same effective name could be created.
@@ -147,7 +147,7 @@ describe('validatePoolSettings', () => {
   describe('playoffs format short-circuits', () => {
     it('format=playoffs ignores pool fields entirely', () => {
       // Knockout-only competitions don't render the pool inputs, so
-      // their state can legitimately be NaN/0/whatever — don't block.
+      // their state can legitimately be NaN/0/whatever; don't block.
       expect(validatePoolSettings('playoffs', NaN, NaN)).toEqual({ ok: true, error: null });
       expect(validatePoolSettings('playoffs', 0, 0)).toEqual({ ok: true, error: null });
       expect(validatePoolSettings('playoffs', 3, 2)).toEqual({ ok: true, error: null });
@@ -285,7 +285,7 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
 
 describe('normalizeTheme (mp-sspn dirty tracking)', () => {
   // Copilot PR #266 round 2: branding colours/title ride on "Save changes" via
-  // theme, so they must count toward the dirty cue — but the raw tournament.theme
+  // theme, so they must count toward the dirty cue; but the raw tournament.theme
   // and BrandingManager's mount-synced (defaults-filled) object differ, which
   // would false-dirty on load. normalizeTheme normalizes both to the same shape.
 

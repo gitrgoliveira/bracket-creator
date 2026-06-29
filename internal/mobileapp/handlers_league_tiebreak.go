@@ -1,7 +1,7 @@
-// Package mobileapp — handlers_league_tiebreak.go owns the four operator
+// Package mobileapp, handlers_league_tiebreak.go owns the four operator
 // endpoints for league tie-breaker management (Phase 3b, mp-8rc9):
 //
-//	GET  /api/competitions/:cid/league-tiebreak/candidates  (public — no auth)
+//	GET  /api/competitions/:cid/league-tiebreak/candidates  (public, no auth)
 //	POST /api/competitions/:cid/league-tiebreak             (admin-gated)
 //	DELETE /api/competitions/:cid/league-tiebreak           (admin-gated)
 //	POST /api/competitions/:cid/league-tiebreak/finalize    (admin-gated)
@@ -86,7 +86,7 @@ func dedupedNameSet(names []string) (set map[string]bool, hadDuplicate bool) {
 //
 //	GET /competitions/:id/league-tiebreak/candidates
 //
-// No Broadcaster is needed — this is a pure read.
+// No Broadcaster is needed, this is a pure read.
 // Callers pass *engine.Engine and *state.Store which satisfy the local
 // interfaces by structural match.
 func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore) {
@@ -202,7 +202,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 		// Validate the selection against LeagueTiebreakCandidates BEFORE calling
 		// GenerateLeagueTiebreakMatches. The engine does not validate this
-		// constraint itself — the handler is the gate.
+		// constraint itself, the handler is the gate.
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
 			var notFound *engine.NotFoundError
@@ -379,7 +379,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			}
 
 			// Refuse removal if any match in the group is in progress or has been
-			// scored — deleting a running DH match would orphan the operator's
+			// scored, deleting a running DH match would orphan the operator's
 			// open scoring session.
 			for _, m := range groupDH {
 				if m.Winner != "" || m.Status == state.MatchStatusCompleted || m.Status == state.MatchStatusRunning {
@@ -494,7 +494,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 				hub.Broadcast(EventScheduleUpdated, nil)
 			case engine.AutoCompleteNoChange:
-				// Not all matches complete yet — finalize flag is set but
+				// Not all matches complete yet, finalize flag is set but
 				// the competition cannot transition until all matches finish.
 				hub.Broadcast(EventScheduleUpdated, nil)
 			default:

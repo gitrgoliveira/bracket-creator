@@ -215,7 +215,7 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 	}))
 
 	// Team match is a draw (Winner==""), one sub-bout is also a draw:
-	// 1-1 ippons with time expired — valid in best-of-3 (neither side
+	// 1-1 ippons with time expired, valid in best-of-3 (neither side
 	// reached 2 before the clock ran out).
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{

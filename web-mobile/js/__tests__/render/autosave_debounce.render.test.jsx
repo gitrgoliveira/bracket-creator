@@ -14,9 +14,9 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
-// ─── window globals required by admin_scoring_modal.jsx ──────────────────────
+// window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
-// (only called from event handlers / async effects). Both must be set before
+// (only called from event handlers or async effects). Both must be set before
 // the dynamic import below, because some are captured at module-evaluation time
 // (e.g. `const TEAM_POSITIONS = Array.from({length: window.MAX_TEAM_SIZE}, ...)`).
 
@@ -52,7 +52,7 @@ beforeAll(async () => {
     originals[k] = { had: k in window, value: window[k] };
     window[k] = v;
   }
-  // admin_helpers.jsx sets MAX_TEAM_SIZE etc. at module evaluation time —
+  // admin_helpers.jsx sets MAX_TEAM_SIZE etc. at module evaluation time;
   // already loaded by vitest.setup.render.js, so no re-import needed here.
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
@@ -76,7 +76,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// Helpers
 
 function makeRunningMatch(overrides = {}) {
   return {
@@ -125,24 +125,24 @@ function renderModal(match, extraProps = {}) {
   );
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
+// Tests
 
-describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => {
+describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
 
   it('an ippon tap on a RUNNING match triggers exactly ONE debounced write after 300ms', async () => {
     renderModal(makeRunningMatch());
 
     // Tap an "M" (Men) ippon button. Both sides render an identical M button;
-    // this test is side-agnostic — any ippon tap on a running match must
-    // schedule exactly one debounced autosave — so we click the first one.
+    // this test is side-agnostic: any ippon tap on a running match must
+    // schedule exactly one debounced autosave, so we click the first one.
     const menButtons = screen.getAllByText('M');
     expect(menButtons.length).toBeGreaterThanOrEqual(1);
 
-    // Tap: updates local state immediately (optimistic) — no network call yet.
+    // Tap: updates local state immediately (optimistic). No network call yet.
     await act(async () => { fireEvent.click(menButtons[0]); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
 
-    // Advance past the 300ms debounce — the trailing-edge timer fires.
+    // Advance past the 300ms debounce; the trailing-edge timer fires.
     await act(async () => { vi.advanceTimersByTime(350); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
 
@@ -161,7 +161,7 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
 
     // The match is completed out from under the operator (an SSE update or
-    // another operator) BEFORE the 300ms debounce fires — re-render completed.
+    // another operator) BEFORE the 300ms debounce fires; re-render completed.
     const completed = { ...running, status: 'completed' };
     await act(async () => {
       rerender(
@@ -190,7 +190,7 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
     await act(async () => {
       fireEvent.click(menButtons[0]);
     });
-    // Advance only 100ms — still within debounce window; timer should reset.
+    // Advance only 100ms; still within debounce window. Timer should reset.
     await act(async () => { vi.advanceTimersByTime(100); });
     // The second tap resets the debounce (ScoreEditorModal caps at 2 ippons
     // per side, so use a different letter to ensure the second tap is accepted).
@@ -249,27 +249,27 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
       await act(async () => { fireEvent.click(confirmBtn); });
     }
 
-    // Now advance past the debounce window — the cancelled timer must NOT fire.
+    // Now advance past the debounce window; the cancelled timer must NOT fire.
     await act(async () => { vi.advanceTimersByTime(500); });
 
     // The explicit onSubmit was called (via Finish), but the autosave should
     // NOT have added an extra call. Any call from the debounce after the
-    // explicit submit would mean double-write — check total calls:
+    // explicit submit would mean double-write; check total calls:
     // Either 1 (Finish armed only) or 2 (arm + confirm) depending on UI flow,
     // but the autosave debounce must NOT add an extra call on top.
     // We verify by checking that every call had the patch from the explicit
-    // submit path — none should have come from the debounce firing AFTER
+    // submit path; none should have come from the debounce firing AFTER
     // the explicit submit. The simplest assertion: at most 2 total calls
     // (arm + confirm), NOT 3 (arm + confirm + stale debounce).
     expect(onSubmit.mock.calls.length).toBeLessThanOrEqual(2);
     // And no call should be the stale "running" autosave AFTER the explicit
-    // submit — the last call (if any) must not be a running-status patch
+    // submit; the last call (if any) must not be a running-status patch
     // that arrived post-submit.
     const calls = onSubmit.mock.calls;
     if (calls.length > 0) {
       // All completed-or-armed calls should NOT be the stale debounce. If the
       // last call has status "running" it means the debounce fired after the
-      // explicit Finish — that's the bug we're guarding against.
+      // explicit Finish. That's the bug we're guarding against.
       const lastPatch = calls[calls.length - 1][0];
       // After Finish, the patch should be "completed" or the arm triggered the
       // 2-tap guard and the patch is pending. Either way it must NOT be a
@@ -316,7 +316,7 @@ describe('C1 debounced autosave — ScoreEditorModal (individual match)', () => 
   });
 });
 
-describe('C1 debounced autosave — TeamScoreEditorModal (team match)', () => {
+describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
 
   function makeRunningTeamMatch(overrides = {}) {
     return {

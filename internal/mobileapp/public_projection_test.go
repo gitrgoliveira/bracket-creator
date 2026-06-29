@@ -13,7 +13,7 @@ import (
 // (CorrectionReason / DecisionReason / ChangeReason) must be stripped before any
 // payload leaves the server on an unauthenticated channel (viewer REST + SSE),
 // while the caller's original (already persisted) value is left untouched.
-// DecisionBy (an enum) is NOT audit free-text — it drives viewer winner/label
+// DecisionBy (an enum) is NOT audit free-text, it drives viewer winner/label
 // rendering and must be preserved.
 
 func TestMatchForBroadcast_StripsAuditAndCopies(t *testing.T) {
@@ -31,7 +31,7 @@ func TestMatchForBroadcast_StripsAuditAndCopies(t *testing.T) {
 	assert.Empty(t, got.DecisionReason, "broadcast copy must not carry the decision reason (can name competitors / carry medical detail)")
 	assert.Zero(t, got.Rev, "broadcast copy must not carry internal write-ordering Rev")
 	assert.Empty(t, got.RevSession, "broadcast copy must not leak the client RevSession identifier")
-	assert.Equal(t, "aka", got.DecisionBy, "DecisionBy is an enum that drives rendering — must be preserved")
+	assert.Equal(t, "aka", got.DecisionBy, "DecisionBy is an enum that drives rendering, must be preserved")
 	assert.Equal(t, "Pool A-0", got.ID, "non-audit fields preserved")
 	assert.Equal(t, "wrong waza entered", orig.CorrectionReason, "caller's original must be untouched")
 	assert.Equal(t, "kiken: medial knee injury to Tanaka", orig.DecisionReason, "caller's original must be untouched")

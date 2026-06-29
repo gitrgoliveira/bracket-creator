@@ -4,7 +4,7 @@ import "gopkg.in/yaml.v3"
 
 // Decision identifies how a match was concluded.
 //
-// FR-030, NFR-011, FR-044 — see data-model §1.
+// FR-030, NFR-011, FR-044, see data-model §1.
 type Decision string
 
 const (
@@ -37,7 +37,7 @@ func (d Decision) Valid() bool {
 
 // IsKikenDecision reports whether d is any kiken variant (legacy,
 // voluntary, or injury). Use this instead of comparing against
-// DecisionKiken alone — the legacy value is kept for backward
+// DecisionKiken alone, the legacy value is kept for backward
 // compatibility but new code should use the specific sub-types.
 func IsKikenDecision(d Decision) bool {
 	return d == DecisionKiken || d == DecisionKikenVoluntary || d == DecisionKikenInjury

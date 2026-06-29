@@ -95,7 +95,7 @@ func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
 	// Scoring a match sends names only (no ids). Verify the backfill in
 	// writeMatchResult preserves the generation-time SideAID/SideBID rather
 	// than wiping them via the whole-struct `*r = *result` overwrite, and
-	// resolves WinnerID from the WinnerSide hint — the only way to tell apart
+	// resolves WinnerID from the WinnerSide hint, the only way to tell apart
 	// the winner when both sides share a name (this is exactly the A-0
 	// Tanaka-vs-Tanaka match).
 	first := matches[0]
@@ -195,7 +195,7 @@ func TestStartCompetition_MixedFormat_WithSeeds(t *testing.T) {
 	// 9 players, pool size 3 min → 3 pools
 	assert.Len(t, pools, 3)
 
-	// The seeded players should have been distributed — verify they're not
+	// The seeded players should have been distributed, verify they're not
 	// all in the same pool. PoolSeeding with 3 seeds and 3 pools puts one seed per pool.
 	seedsByPool := map[string][]string{}
 	for _, p := range pools {
@@ -478,7 +478,7 @@ func TestStartCompetition_PlayoffsFormat_PowerOf2(t *testing.T) {
 	assert.Len(t, bracket.Rounds[1], 2)
 	assert.Len(t, bracket.Rounds[2], 1)
 
-	// No byes — all first-round matches should have both sides
+	// No byes, all first-round matches should have both sides
 	for _, m := range bracket.Rounds[0] {
 		assert.NotEmpty(t, m.SideA)
 		assert.NotEmpty(t, m.SideB)
@@ -687,7 +687,7 @@ func TestRecordBracketMatchResult_DecidedByHantei_RoundTrips(t *testing.T) {
 	assert.False(t, bracket.Rounds[0][1].DecidedByHantei, "untouched bracket match must remain non-hantei")
 
 	// A re-score that omits DecidedByHantei (nil *bool) must PRESERVE the stored
-	// flag rather than silently clearing it — the *bool tri-state API contract.
+	// flag rather than silently clearing it, the *bool tri-state API contract.
 	// Additionally, the engine must PROJECT the persisted value back into the
 	// in-memory result so the HTTP response + SSE broadcast reflect committed
 	// state (without projection, clients would see the match flip non-hantei
@@ -1026,7 +1026,7 @@ func TestCalculatePoolStandings_IpponDifferentialTiebreak(t *testing.T) {
 
 	for _, poolStandings := range standings {
 		if len(poolStandings) == 3 {
-			// All have 1 win, 1 loss — sort by ippons given
+			// All have 1 win, 1 loss, sort by ippons given
 			// Alice: gave 2 ippons (M, K vs Bob)
 			// Bob: gave 1 ippon (M vs Charlie)
 			// Charlie: gave 1 ippon (M vs Alice)
@@ -1052,7 +1052,7 @@ func TestCalculatePoolStandings_IncompleteMatches(t *testing.T) {
 	})
 	require.NoError(t, eng.StartCompetition(compID))
 
-	// Don't score any matches — all still scheduled
+	// Don't score any matches, all still scheduled
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
 
@@ -1141,7 +1141,7 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "team-scoring"
 
-	// Single-pool round-robin among 3 teams — semantically a league, not the
+	// Single-pool round-robin among 3 teams, semantically a league, not the
 	// "Pools + Knockout" shape (mixed needs ≥2 pools by invariant).
 	comp := &state.Competition{
 		ID:           compID,
@@ -1213,9 +1213,9 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 		if len(poolStandings) != 3 {
 			continue
 		}
-		// TeamA: 2W, 0L — IV: 5W 1L, PW: 9 given 2 taken
-		// TeamB: 1W, 1L — IV: 3W 2L 1D, PW: 5 given 5 taken
-		// TeamC: 0W, 2L — IV: 1W 6L, PW: 4 given 11 taken
+		// TeamA: 2W, 0L, IV: 5W 1L, PW: 9 given 2 taken
+		// TeamB: 1W, 1L, IV: 3W 2L 1D, PW: 5 given 5 taken
+		// TeamC: 0W, 2L, IV: 1W 6L, PW: 4 given 11 taken
 		assert.Equal(t, "TeamA", poolStandings[0].Player.Name)
 		assert.Equal(t, 2, poolStandings[0].Wins)
 		assert.Equal(t, 5, poolStandings[0].IndividualWins)
@@ -1662,13 +1662,13 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	createTestCompetition(t, store, compID, "playoffs", 3)
 	// 8 players → a full 3-round bracket with no byes, so every first-round match
 	// has two real players. (With non-power-of-2 rosters the byes are distributed
-	// to the top seeds — mp-sess — and those top seeds play no first-round match.)
+	// to the top seeds, mp-sess, and those top seeds play no first-round match.)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "P3", "P4", "P5", "P6", "P7", "P8"})
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, _ := store.LoadBracket(compID)
 	// Pick any first-round match with two real players and override its winner to
-	// the LOWER side (SideB) — this exercises the branch where the overridden
+	// the LOWER side (SideB), this exercises the branch where the overridden
 	// winner is NOT the left-hand/default side, a stronger regression than SideA.
 	var matchID, winner string
 	for _, m := range bracket.Rounds[0] {
@@ -1865,7 +1865,7 @@ func TestStartCompetition_TeamSizeFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "team-comp"
 
-	// Tests TeamSize defaulting — format is incidental. Uses league so we don't
+	// Tests TeamSize defaulting, format is incidental. Uses league so we don't
 	// need to satisfy the ≥2-pools mixed invariant for what is really a
 	// single-pool fixture.
 	comp := &state.Competition{
@@ -1980,7 +1980,7 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-bracket"
 
-	// 2 courts with playoffs and 8 players — bracket court distribution.
+	// 2 courts with playoffs and 8 players, bracket court distribution.
 	comp := &state.Competition{
 		ID: compID, Name: "Court Dist Bracket", Kind: "individual",
 		Format: "playoffs", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
@@ -2098,10 +2098,10 @@ func TestStartCompetition_AutoDefaultsTeamSize(t *testing.T) {
 }
 
 // TestStartCompetition_PreservesExplicitTeamSize pins the "TeamSize
-// already set explicitly survives start" path — exercises the merge
+// already set explicitly survives start" path, exercises the merge
 // branch where current.TeamSize == loadedTeamSize but != 0, so the
 // pipeline's auto-default isn't applied. Pre-fix, the transform
-// unconditionally assigned `current.TeamSize = comp.TeamSize` —
+// unconditionally assigned `current.TeamSize = comp.TeamSize`,
 // correct for this case (loaded==comp==7) but wrong for the
 // concurrent-admin-change case (loaded=0, comp=5, current=9 would
 // clobber to 5 instead of preserving admin's 9).
@@ -2214,7 +2214,7 @@ func TestStartCompetition_LeagueMultiCourt_ThreeCourts(t *testing.T) {
 // TestStartCompetition_PreservesNumberPrefix pins the NumberPrefix /
 // StartTime / RoundRobin additions to the StartCompetition transform's
 // field-mismatch validation. With these fields in the validation list,
-// a happy-path start (no drift) must succeed — these tests are the
+// a happy-path start (no drift) must succeed, these tests are the
 // "validation list doesn't reject valid starts" guard. The drift-
 // detection direction (concurrent change DOES reject) isn't pinned
 // here because reproducing the race deterministically would require
@@ -2224,7 +2224,7 @@ func TestStartCompetition_PreservesNumberPrefix(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "prefix-test"
 
-	// Tests NumberPrefix preservation across the atomic commit — format is
+	// Tests NumberPrefix preservation across the atomic commit, format is
 	// incidental. Uses league so we don't need ≥2 pools (mixed invariant).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:           compID,

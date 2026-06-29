@@ -6,7 +6,7 @@ variable "tenancy_ocid" {
 variable "compartment_ocid" {
   description = <<-EOT
     OCID of the compartment to deploy into.
-    The root compartment OCID equals tenancy_ocid — acceptable for personal
+    The root compartment OCID equals tenancy_ocid, acceptable for personal
     accounts.  Organisations typically use a dedicated child compartment.
   EOT
   type        = string
@@ -15,7 +15,7 @@ variable "compartment_ocid" {
 variable "region" {
   description = <<-EOT
     OCI region identifier, e.g. "us-ashburn-1".
-    Always-Free A1 capacity is per-tenancy home region — deploying to your
+    Always-Free A1 capacity is per-tenancy home region, deploying to your
     home region is recommended.  Availability varies; see README for the
     "Out of capacity" retry note.
   EOT
@@ -37,7 +37,7 @@ variable "instance_image_ocid" {
     List: oci compute image list --compartment-id <tenancy-ocid> \
            --operating-system "Canonical Ubuntu" \
            --shape VM.Standard.A1.Flex --query 'data[].id'
-    OCIDs are region-specific — use the one that matches var.region.
+    OCIDs are region-specific, use the one that matches var.region.
   EOT
   type        = string
 }
@@ -53,14 +53,14 @@ variable "hostname" {
     # Must begin with a letter: the hostname is also used to derive the OCI
     # dns_label / hostname_label, which must start with a letter (RFC 952).
     condition     = can(regex("^[a-zA-Z][a-zA-Z0-9.-]*[a-zA-Z0-9]$", var.hostname))
-    error_message = "hostname must be a valid FQDN beginning with a letter (letters, digits, dots, and hyphens only — no spaces, newlines, or shell metacharacters)."
+    error_message = "hostname must be a valid FQDN beginning with a letter (letters, digits, dots, and hyphens only, no spaces, newlines, or shell metacharacters)."
   }
 }
 
 variable "image_ref" {
   description = <<-EOT
     Multi-arch Docker image to deploy (must include linux/arm64).
-    Defaults to the PDF-capable image — Oracle A1 has 12 GB RAM, so
+    Defaults to the PDF-capable image, Oracle A1 has 12 GB RAM, so
     LibreOffice headless fits comfortably.
     The arm64 layer is published by the CI workflow (docker-publish.yaml /
     docker-release.yaml) via native ubuntu-24.04-arm runners.
@@ -88,7 +88,7 @@ variable "tournament_password_hash" {
     Bcrypt hash of the admin password, used when lock_password = true.
     Generate: htpasswd -bnBC 12 "" '<password>' | tr -d ':\n'
     Written to app.env (chmod 600, root-owned) by cloud-init.
-    Mark sensitive in your tfvars — never commit the plaintext.
+    Mark sensitive in your tfvars, never commit the plaintext.
   EOT
   type        = string
   default     = ""
@@ -154,7 +154,7 @@ variable "ssh_pubkey" {
 variable "operator_cidrs" {
   description = <<-EOT
     List of CIDR ranges allowed to reach port 22 (SSH).
-    Empty list allows SSH from 0.0.0.0/0 — acceptable for personal use;
+    Empty list allows SSH from 0.0.0.0/0, acceptable for personal use;
     tighten for production.  Ports 80 and 443 are always open to 0.0.0.0/0.
   EOT
   type        = list(string)

@@ -13,7 +13,7 @@ import (
 )
 
 // LoadSeeds and SaveSeeds use the PER-COMPETITION lock (not the store-wide
-// `s.mu`) so they serialize against other per-comp readers/writers — in
+// `s.mu`) so they serialize against other per-comp readers/writers. In
 // particular against the StartCompetition transform held by
 // UpdateCompetitionChanged. Pre-fix, SaveSeeds took `s.mu.Lock()`
 // (store-wide) and the StartCompetition transform took the per-comp lock,
@@ -22,7 +22,7 @@ import (
 // but BEFORE the status commit, leaving status=Pools on disk with
 // seeds.csv reflecting roster the engine never read.
 //
-// Switching to per-comp locking ALSO improves scalability — concurrent
+// Switching to per-comp locking ALSO improves scalability; concurrent
 // seed saves for DIFFERENT comps no longer block each other on the
 // global store mutex. Same locking strategy participants.csv and
 // pools.csv already use.

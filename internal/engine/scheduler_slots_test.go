@@ -174,7 +174,7 @@ func TestAssignSlotsSkipsLunchBlock(t *testing.T) {
 	assert.Equal(t, "11:39", matches[1].ScheduledAt)
 	assert.Equal(t, "11:48", matches[2].ScheduledAt)
 	// The 4th match would naturally land at 11:57, NOT inside the
-	// 12:00–13:00 lunch window — the previous match's END
+	// 12:00–13:00 lunch window, the previous match's END
 	// (11:57+9=12:06) crosses into lunch. We expect the SLOT START
 	// at 11:57 to NOT be skipped (it's pre-lunch). Verify the test
 	// reflects the actual contract: skip only when the START falls
@@ -224,7 +224,7 @@ func TestAssignSlotsNoMatchInsideCeremony(t *testing.T) {
 	}
 }
 
-// TestAssignSlotsRespectsClockToElapsedMultiplier — doubling the
+// TestAssignSlotsRespectsClockToElapsedMultiplier, doubling the
 // multiplier roughly doubles the gap between consecutive slots on
 // the same court. T150.
 func TestAssignSlotsRespectsClockToElapsedMultiplier(t *testing.T) {
@@ -302,7 +302,7 @@ func TestAssignSlotsLegacyMatchDurationFallback(t *testing.T) {
 }
 
 // TestAssignSlotsBracketByesSkipCursor verifies that bracket
-// matches auto-completed as byes do not advance the court cursor —
+// matches auto-completed as byes do not advance the court cursor,
 // otherwise a half-empty bracket would inherit phantom 5-minute
 // delays from each byte. T150.
 func TestAssignSlotsBracketByesSkipCursor(t *testing.T) {
@@ -425,8 +425,8 @@ func TestParseClockHHMM_FallbackTo0900(t *testing.T) {
 
 // TestAssignSlots_EmptyReturnsStartAnchorNotZero pins the hardened contract:
 // with a valid comp but no matches/rounds, the returned end-cursor is the
-// per-court start anchor (dayStart + OpeningBlock) — matching where the first
-// match would have started and EstimateForCounts(0,…) — so a post-draw
+// per-court start anchor (dayStart + OpeningBlock), matching where the first
+// match would have started and EstimateForCounts(0,…), so a post-draw
 // consumer's cursor.Sub(dayStart) yields the opening offset (0 with no opening),
 // never a bogus ~1-year duration. A zero time.Time is returned only when comp
 // is nil.

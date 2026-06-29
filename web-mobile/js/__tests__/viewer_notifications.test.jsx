@@ -1,6 +1,6 @@
 // mp-xhaa: unit tests for notifEnable/notifDisable helpers.
 // These pure helpers drive AnnBellBtn and the
-// NOTIF_SYNC_EVENT broadcast — cover every return value branch.
+// NOTIF_SYNC_EVENT broadcast: cover every return value branch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { notifEnable, notifDisable, NOTIF_SYNC_EVENT } from '../viewer.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from '../notification_keys.jsx';
@@ -11,7 +11,7 @@ function installLS(mock) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — shared setup/teardown in parent describe
+// Tests: shared setup/teardown in parent describe
 // ---------------------------------------------------------------------------
 
 describe('notification helpers', () => {
@@ -141,7 +141,7 @@ describe('notification helpers', () => {
 
       const enableResult = notifEnable();
       notifDisable(); // sets notifCancelled = true while dialog is pending
-      resolvePermission('granted'); // user approves — but already cancelled
+      resolvePermission('granted'); // user approves: but already cancelled
 
       const result = await enableResult;
       expect(result).toBe('off');

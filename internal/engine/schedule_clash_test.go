@@ -107,7 +107,7 @@ func TestDetectClashes_UnplaceableTargetReturnsEmpty(t *testing.T) {
 
 func TestDetectClashes_NilCourtsResolveToDefault(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	// Two competitions with NO explicit courts (nil) — legacy data saved before
+	// Two competitions with NO explicit courts (nil), legacy data saved before
 	// court materialization. Both must resolve to the default ["A"] (no tournament
 	// saved) and therefore clash at the same date/time, rather than being silently
 	// skipped because their court lists are empty.

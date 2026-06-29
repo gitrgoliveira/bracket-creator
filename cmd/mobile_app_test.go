@@ -69,7 +69,7 @@ func TestMobileAppOptions_RunError(t *testing.T) {
 // Fail-closed: --lock-password without TOURNAMENT_PASSWORD_HASH must
 // refuse to start. The alternative (silent fall-through to file mode)
 // would let an operator believe they were running in locked mode while
-// the server actually serves the tournament.md plaintext password —
+// the server actually serves the tournament.md plaintext password,
 // exactly the misconfiguration the flag was added to prevent.
 func TestMobileAppOptions_LockPasswordRequiresHash(t *testing.T) {
 	t.Setenv("TOURNAMENT_PASSWORD_HASH", "")
@@ -115,7 +115,7 @@ func TestMobileAppOptions_RunReachesServer(t *testing.T) {
 		port:        99999, // >65535: net.Listen fails immediately
 	}
 	err := o.run(nil, nil)
-	// The server fails to bind — expect a non-nil listen error.
+	// The server fails to bind, expect a non-nil listen error.
 	require.Error(t, err)
 }
 
@@ -136,7 +136,7 @@ func TestMobileAppOptions_RunSSEMaxClientsValid(t *testing.T) {
 // LOCK_PASSWORD env var is parsed via strconv.ParseBool so that values
 // like "TRUE", "True", "1", "t" all activate locked mode (not just "true").
 // Invalid values (e.g. "yes", "enabled") must produce a clear startup
-// error rather than being silently treated as false — an operator who
+// error rather than being silently treated as false, an operator who
 // typo'd the env var should get a loud rejection, not a server that
 // quietly starts in the wrong mode.
 func TestMobileAppOptions_LockPasswordEnvVarFormats(t *testing.T) {

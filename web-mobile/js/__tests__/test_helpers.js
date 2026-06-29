@@ -37,7 +37,7 @@ export function makeThrowingLocalStorageMock() {
   };
 }
 
-// Both setItem and removeItem throw — simulates a fully locked/corrupted storage profile.
+// Both setItem and removeItem throw. Simulates a fully locked/corrupted storage profile.
 export function makeFullyLockedLocalStorageMock(initial = {}) {
   const store = { ...initial };
   return {

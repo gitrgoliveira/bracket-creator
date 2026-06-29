@@ -7,7 +7,7 @@ import (
 
 // Public-projection helpers strip operator-only audit justifications from
 // match and lineup data before it leaves the server on a PUBLIC
-// (unauthenticated) channel — the viewer REST endpoints and the SSE stream.
+// (unauthenticated) channel, the viewer REST endpoints and the SSE stream.
 //
 // CorrectionReason and DecisionReason (MatchResult/BracketMatch) and ChangeReason
 // (TeamLineup) are free-text fields an operator types to justify a score

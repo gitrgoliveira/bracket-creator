@@ -65,7 +65,7 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 
 	// 9 players, poolSize 3 min-mode, RR, 2 winners → 3 pools of 3,
 	// pool matches = 3*C(3,2)=9, bracket = bracketMatchCount(6)=5
-	// (pow2=8, byes=2 distributed to top seeds — mp-sess — so real=N-1=5).
+	// (pow2=8, byes=2 distributed to top seeds, mp-sess, so real=N-1=5).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:                   compID,
 		Format:               state.CompFormatMixed,
@@ -90,7 +90,7 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 
 	// Cross-check: direct call with expected counts must match.
 	// 3 pools × 2 winners = 6 finalists; bracketMatchCount(6) = 5
-	// (pow2=8, byes=2 distributed to top seeds — mp-sess — so real=N-1=5).
+	// (pow2=8, byes=2 distributed to top seeds, mp-sess, so real=N-1=5).
 	comp, _ := store.LoadCompetition(compID)
 	tourn, _ := store.LoadTournament()
 	direct := EstimateForCounts(9, 5, comp, tourn)
@@ -184,7 +184,7 @@ func TestEstimateScheduleForCompetition_ZeroParticipants(t *testing.T) {
 
 // TestEstimateParticipantCount_CheckInFilter verifies that when CheckInEnabled is
 // true and at least one player is checked in, estimateParticipantCount returns
-// only the checked-in count — mirroring filterCheckedIn (competition.go:387).
+// only the checked-in count, mirroring filterCheckedIn (competition.go:387).
 //
 // Opt-in semantics: if nobody is checked in, the full roster is returned.
 //
@@ -306,7 +306,7 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 // (total slot count). Since mp-5ng7 the draw uses StandardSeeding +
 // CreateBalancedTree + TreeToLeafArray, clustering structural byes where the
 // tree is asymmetric. This produces "" vs "" double-bye slots and later-round
-// "" vs "Winner of…" latent byes — all auto-completed at generation time so
+// "" vs "Winner of…" latent byes, all auto-completed at generation time so
 // they do not consume court time. The real count remains the N-1 identity.
 //
 // The test runs the REAL draw pipeline via eng.StartCompetition, counts the
@@ -315,7 +315,7 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
 	tests := []struct {
 		name        string
-		compID      string // alphanumeric/hyphen only — no spaces or parens
+		compID      string // alphanumeric/hyphen only, no spaces or parens
 		playerCount int
 		wantBracket int // real court-time matches = N-1 (distributed byes)
 	}{
@@ -401,7 +401,7 @@ func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
 func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 	tests := []struct {
 		name         string
-		compID       string // alphanumeric/hyphen only — no spaces or parens
+		compID       string // alphanumeric/hyphen only, no spaces or parens
 		playerCount  int
 		poolSize     int
 		poolSizeMode string
@@ -420,7 +420,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 		{
 			// 9 players, poolSize 3 min-mode, RR, 2 winners.
 			// 3 pools of 3 → pool matches: 3*C(3,2)=9; finalists=6, bracketMatchCount(6)=5.
-			// (pow2=8, byes=2 distributed to top seeds — mp-sess — so real=N-1=5)
+			// (pow2=8, byes=2 distributed to top seeds, mp-sess, so real=N-1=5)
 			name: "9p size3 min rr winners2", compID: "mixed-9p-s3",
 			playerCount: 9, poolSize: 3, poolSizeMode: "min", poolWinners: 2, roundRobin: true,
 			wantPools: 9, wantBracket: 5,
@@ -519,7 +519,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, bracket)
 
-			// Count only non-auto-resolved (real) matches — same as
+			// Count only non-auto-resolved (real) matches, same as
 			// TestEstimateMatchCounts_vs_RealPlayoffsDraw (Finding 3).
 			realPlayableCount := 0
 			for _, round := range bracket.Rounds {

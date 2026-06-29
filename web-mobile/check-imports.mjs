@@ -3,10 +3,10 @@
 //
 // Validates that every named import from a sibling .jsx module is actually
 // exported by that module. Catches the ESM blind spot: esbuild transpile-only
-// and vitest do NOT fail on a missing named export — only native browser ESM
+// and vitest do NOT fail on a missing named export, only native browser ESM
 // does. This script gives the same check deterministically in CI.
 //
-// No npm dependencies — uses Node.js built-ins only.
+// No npm dependencies, uses Node.js built-ins only.
 //
 // Usage:   node web-mobile/check-imports.mjs
 // Exit 0   all imports resolved
@@ -27,7 +27,7 @@ function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
 
-// Modules introduced by the mp-zac3 split — the ones whose imports we verify.
+// Modules introduced by the mp-zac3 split, the ones whose imports we verify.
 // Add entries here if more sibling splits are made.
 const CHECK_MODULES = [
   'admin_scoring_modal.jsx',
@@ -49,7 +49,7 @@ const CHECK_MODULES = [
 function extractExports(src) {
   const names = new Set();
 
-  // export { a, b as c, … }  — possibly multiline
+  // export { a, b as c, … }, possibly multiline
   for (const m of src.matchAll(/export\s*\{([^}]+)\}/gs)) {
     for (const item of stripComments(m[1]).split(',')) {
       // 'local as exported' → exported is what importers see
@@ -109,9 +109,9 @@ for (const modName of CHECK_MODULES) {
   const modPath = resolve(JS_DIR, modName);
   if (!existsSync(modPath)) {
     // A listed split module that has vanished almost always means a bad
-    // rename/move — failing the check is correct, not a soft skip, otherwise
+    // rename/move, failing the check is correct, not a soft skip, otherwise
     // js/validate would go green on a broken refactor.
-    console.error(`  ✗ ${modName}: listed in CHECK_MODULES but file not found — bad rename/move?`);
+    console.error(`  ✗ ${modName}: listed in CHECK_MODULES but file not found, bad rename/move?`);
     totalErrors++;
     continue;
   }
@@ -120,7 +120,7 @@ for (const modName of CHECK_MODULES) {
   const siblingImports = extractSiblingImports(src);
   if (siblingImports.length === 0) {
     // A module with no relative imports (e.g. admin_scoring_autosave.jsx, which
-    // pulls everything from React window globals) has nothing to verify — but
+    // pulls everything from React window globals) has nothing to verify, but
     // say so explicitly, so the output accounts for every CHECK_MODULES entry
     // rather than silently omitting it.
     console.log(`  – ${modName}: no sibling imports to check`);
@@ -144,7 +144,7 @@ for (const modName of CHECK_MODULES) {
     const exported = getCachedExports(sibPath);
     for (const name of importedNames) {
       if (!exported.has(name)) {
-        console.error(`  ✗ ${modName}: imports "${name}" from "${sibName}" — not exported by "${sibName}"`);
+        console.error(`  ✗ ${modName}: imports "${name}" from "${sibName}", not exported by "${sibName}"`);
         modErrors++;
         totalErrors++;
       }
@@ -157,7 +157,7 @@ for (const modName of CHECK_MODULES) {
 }
 
 if (totalErrors > 0) {
-  console.error(`\n${totalErrors} import mismatch(es) — fix exports or imports before merging.`);
+  console.error(`\n${totalErrors} import mismatch(es), fix exports or imports before merging.`);
   process.exit(1);
 }
 

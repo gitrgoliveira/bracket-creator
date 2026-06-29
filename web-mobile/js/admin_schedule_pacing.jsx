@@ -5,12 +5,12 @@ import { formatMinutes, timeToMinutes } from './admin_schedule_utils.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
-// filterMatchesByCourt(matches, courtParam) — pure list filter.
+// filterMatchesByCourt(matches, courtParam): pure list filter.
 //
 // FR-001 / T040 (US1, SC-001): bookmark `/admin/schedule?court=A` to scope
 // an operator's view to a single shiaijo. Returns matches unchanged when no
 // filter is set ("", null, undefined, or "all"); otherwise returns only
-// matches whose `m.court` exactly equals courtParam (case-sensitive — the
+// matches whose `m.court` exactly equals courtParam (case-sensitive: the
 // app's canonical court labels are uppercase A–Z per the Excel layout).
 // Pure and DOM-free so the helper is unit-testable from jsdom without
 // mounting AdminSchedulePage.
@@ -20,24 +20,24 @@ export function filterMatchesByCourt(matches, courtParam) {
   return matches.filter((m) => m.court === c);
 }
 
-// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) — deterministic
+// computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes): deterministic
 // when nowMinutes is supplied; non-deterministic (reads wall-clock via
 // `new Date()`) when omitted.
 //
 // For each court, derive:
-//   court               — the court label (e.g. "A")
-//   completedCount      — matches that are neither scheduled nor running (i.e. the slot is consumed)
-//   remainingCount      — matches NOT yet completed
-//   estimatedRemainingMin — remainingCount × perMatchMinutes
-//   plannedRemainingMin   — time from now to the *end* of the last scheduled
+//   court               : the court label (e.g. "A")
+//   completedCount      : matches that are neither scheduled nor running (i.e. the slot is consumed)
+//   remainingCount      : matches NOT yet completed
+//   estimatedRemainingMin: remainingCount × perMatchMinutes
+//   plannedRemainingMin   : time from now to the *end* of the last scheduled
 //                           match on the court (latestMin + perMatchMinutes
 //                           − nowMin, floored at 0). Falls back to
 //                           estimatedRemainingMin when no scheduled times exist.
-//   delta               — estimatedRemainingMin − plannedRemainingMin
+//   delta               : estimatedRemainingMin − plannedRemainingMin
 //                         positive = behind schedule, negative = ahead
 //
 // nowMinutes is optional; defaults to the current wall-clock (read via
-// `new Date()`). CourtPacePanel omits it — the 60 s tick forces a re-render
+// `new Date()`). CourtPacePanel omits it: the 60 s tick forces a re-render
 // so this helper re-reads fresh wall-clock time on each tick.
 // Tests pass nowMinutes explicitly for determinism.
 //
@@ -56,7 +56,7 @@ export function computeCourtPaceStats(byCourt, perMatchMinutes, nowMinutes) {
   })();
 
   return Object.entries(byCourt).map(([court, matches]) => {
-    // Count any match that is not scheduled or running as "consumed" — this
+    // Count any match that is not scheduled or running as "consumed": this
     // mirrors the courtOrder sort which maps unknown statuses to the completed
     // bucket.  The backend only emits scheduled/running/completed today, but
     // treating the two active statuses as the set to exclude is more defensive
@@ -130,13 +130,13 @@ export function PerCourtBreakdown({ perCourtMinutes }) {
   );
 }
 
-// CourtPacePanel — admin-only collapsible card showing per-court pace status
+// CourtPacePanel: admin-only collapsible card showing per-court pace status
 // and a rebalancing suggestion. Never rendered in viewer or display views.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
   // setTick forces a re-render every 60 s so computeCourtPaceStats re-reads
   // the current wall-clock time. paceByCourt is rebuilt on every parent render
-  // so useMemo would never skip the call anyway — compute stats directly.
+  // so useMemo would never skip the call anyway: compute stats directly.
   const [, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
@@ -153,7 +153,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const stats = computeCourtPaceStats(byCourt, safeMatchDuration);
 
   // Drop courts with zero matches so the cards (and the rebalance heuristic)
-  // ignore empty buckets — e.g. a configured court the user hasn't placed
+  // ignore empty buckets: e.g. a configured court the user hasn't placed
   // anything on yet, or every non-A court when the operator has applied
   // ?court=A scope to the page. Otherwise those courts render confusing
   // "0/0 done · Done" tiles.

@@ -16,7 +16,7 @@ type CourtOccupancy struct {
 // Lock discipline: each competition's data is loaded under its own
 // per-comp READ lock (via the public Load* methods). The caller MUST NOT
 // already hold the write lock for any competition that this method
-// scans — that would deadlock the non-reentrant RWMutex. On the
+// scans, that would deadlock the non-reentrant RWMutex. On the
 // StartMatchTx path the caller holds compID_X's write lock, so
 // skipCompID must be set to compID_X; that competition is checked by
 // the caller via StoreTx instead.
@@ -83,9 +83,9 @@ func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, e
 // receive 0.
 //
 // Ordering: within each court, positions are assigned in
-// (status priority, scheduledAt, original index) order — the same
+// (status priority, scheduledAt, original index) order, the same
 // basis used by ScheduleViewer (viewer.jsx) and the client-side SSE
-// recompute (_orderByCourtKey in patch.jsx) — so "Next up / N before
+// recompute (_orderByCourtKey in patch.jsx), so "Next up / N before
 // yours" labels are consistent between server responses and the
 // post-SSE client view.
 //

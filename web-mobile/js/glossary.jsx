@@ -1,4 +1,4 @@
-// glossary.jsx — the <Term> tooltip component and the /glossary page.
+// glossary.jsx: the <Term> tooltip component and the /glossary page.
 //
 // Slice U1 (003-tournament-gap-closure). Source of truth lives in
 // internal/domain/glossary.go; this module reads it via the generated
@@ -6,7 +6,7 @@
 //
 // Display rule (locked, per glossary.md §Display rule):
 //   <Term name="kiken">Kiken</Term>
-// renders ONLY the children — the gloss "Withdrawal" never appears
+// renders ONLY the children; the gloss "Withdrawal" never appears
 // inline. The hover/tap popover is the sole gloss surface. Volunteers
 // learn the term via the tooltip; /glossary is the deep-context page.
 
@@ -18,7 +18,7 @@ const { useState: useStateT, useEffect: useEffectT, useId: useIdT, useRef: useRe
 // preact/compat aliases it to a deterministic-per-mount counter so the
 // ARIA wiring stays valid across re-renders without depending on the
 // child text. Falls back to a Math.random suffix for the very old
-// preact/compat build that pre-dates useId (defensive — current
+// preact/compat build that pre-dates useId (defensive: current
 // vendored build has it).
 function useStableId(prefix) {
   if (typeof useIdT === 'function') {
@@ -44,7 +44,7 @@ function useStableId(prefix) {
 // over their prefixes (e.g. "ippon") so a tooltip that legitimately
 // mentions both still renders the compound first. The matching keeps
 // the original casing from the tooltip for display ("Ippon-shobu"
-// stays "Ippon-shobu") — we never lower-case the visible text.
+// stays "Ippon-shobu"); we never lower-case the visible text.
 function renderTooltipBody(tooltipText, seeAlso) {
   if (!seeAlso || seeAlso.length === 0) return tooltipText;
   // Sort by descending length so compound terms win when an ID is a
@@ -71,7 +71,7 @@ function renderTooltipBody(tooltipText, seeAlso) {
   });
   return tokens.map((tok, i) => {
     if (typeof tok === 'string') return tok;
-    // Nested <Term> — recursive render so the inner popover works.
+    // Nested <Term>: recursive render so the inner popover works.
     return React.createElement(Term, { key: i, name: tok.id, nested: true }, tok.label);
   });
 }
@@ -80,7 +80,7 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Term — the actual component. Renders children inside a
+// Term: the actual component. Renders children inside a
 // <span tabindex=0 aria-describedby={tooltipId} class="tw-term"> plus
 // a hidden tooltip span. Visibility is CSS-driven: the popover is
 // always in the DOM for screen-reader access (`role="tooltip"`), CSS
@@ -95,11 +95,11 @@ function escapeRegex(s) {
 // render with an EMPTY seeAlso list so the recursive tooltip rendering
 // can't loop: encho → ippon-shobu → encho → … would otherwise blow
 // the stack. The nested term still has its own popover (with the
-// tooltip text) — it just doesn't try to further deepen.
+// tooltip text); it just doesn't try to further deepen.
 function Term({ name, children, nested }) {
   const term = lookupTerm(name);
   // Defensive: if a wrap site references a missing term, render the
-  // children as plain text — better than crashing. Log so the
+  // children as plain text; better than crashing. Log so the
   // operator-time debug ladder catches the drift.
   if (!term) {
     if (typeof console !== 'undefined') {
@@ -138,7 +138,7 @@ function Term({ name, children, nested }) {
   const tooltipBody = nested ? term.tooltip : renderTooltipBody(term.tooltip, term.seeAlso);
 
   const handleClick = (e) => {
-    // Don't propagate the click outside — keeps a Term inside a
+    // Don't propagate the click outside; keeps a Term inside a
     // clickable card (e.g. a match row) from triggering the row click.
     e.stopPropagation();
     setOpen((v) => !v);
@@ -184,7 +184,7 @@ function Term({ name, children, nested }) {
   );
 }
 
-// GlossaryPage — the /glossary viewer surface. Lists terms in a flat
+// GlossaryPage: the /glossary viewer surface. Lists terms in a flat
 // alphabetical layout so volunteers can browse the full register. Wired
 // into the router via app.jsx's parsePath ("/glossary" → viewer mode
 // with viewerScreen='glossary').
@@ -218,7 +218,7 @@ function GlossaryPage({ onBack }) {
                   <header className="glossary-entry__head">
                     <span className="glossary-entry__romaji">{entry.id.split('-').map(capitalise).join('-')}</span>
                     {entry.kanji && <span className="glossary-entry__kanji"><span aria-hidden="true"> · </span>{entry.kanji}</span>}
-                    <span className="glossary-entry__short"> — {entry.short}</span>
+                    <span className="glossary-entry__short">: {entry.short}</span>
                   </header>
                   <p className="glossary-entry__tooltip">
                     {renderTooltipBody(entry.tooltip, entry.seeAlso)}
@@ -259,7 +259,7 @@ function capitalise(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// GlossaryHint — a standalone ？ icon that carries the glossary tooltip
+// GlossaryHint: a standalone ？ icon that carries the glossary tooltip
 // for a given term. Renders as a sibling next to a button so the tooltip
 // is accessible without wrapping (and potentially blocking) the button's
 // click target.

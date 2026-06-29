@@ -40,7 +40,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # opt-in: uncomment the service below if you need PDF export.
-  # WARNING: pulls in LibreOffice headless (~500 MB+) — do NOT enable unless
+  # WARNING: pulls in LibreOffice headless (~500 MB+), do NOT enable unless
   # the PDF feature is required. The two services above use lean scratch images
   # and MUST remain the default.
   #

@@ -138,25 +138,27 @@ The dashboard lists all competitions. Each card shows the competition type, numb
 
 Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status; Swiss-format competitions run live under the `pools` status.
 
-#### The 3-Column Participant Dashboard
+#### The Participant Setup View
 
-The participant setup view has a modern, highly productive 3-column layout:
-* **Left Column (Check-in List)**: Only visible when **Enable check-in** is turned on in the competition settings. Displays the list of imported participants with real-time check-in check-boxes. Provides a "Show unchecked" / "Show all" filter toggle and a "Check in all" action button.
-* **Centre Column (Participants & Seeds)**: Displays the roster of all saved players. This column is drag-and-drop enabled, allowing the operator to drag rows to assign seeding ranks. Ranks can also be typed manually in the seed column, and a "Shuffle unseeded" button is available to randomize the initial starting positions of unseeded competitors.
-* **Right Column (Bulk Import & Textarea)**: Contains a `LinedTextarea` with line numbers, where operators can paste newline-separated CSV participant rosters.
+The participant setup view places two panels side by side:
+
+* **Check-in & Seeding panel** (titled **Seeding** when check-in is off, **Check-in & Seeding** when it is on): the working roster of all saved players.
+    * When **Enable check-in** is turned on in the competition settings, each row gains a check-in check-box, and the panel adds a "Show unchecked" / "Show all" filter toggle plus a "Check in all" button.
+    * The roster is drag-and-drop enabled: drag rows to assign seeding ranks, or type ranks manually in the seed column. A "Shuffle unseeded" button randomizes the starting positions of unseeded competitors, and "Import seeds (CSV)" / "Clear seeds" manage ranks in bulk.
+* **Participant list panel** (titled **Team list** for team competitions): contains a `LinedTextarea` with line numbers where operators paste newline-separated CSV participant rosters, plus a "Paste clipboard" helper that converts tab-separated values (for example, from Excel) to CSV.
 
 Format for bulk paste:
 * Without Zekken: `Name, Dojo[, Dan grade]`
 * With Zekken: `Name, Zekken display name, Dojo[, Dan grade]`
 
-To save the bulk import, click the **Apply changes** button at the bottom of the right column.
+To save the bulk import, click the **Apply changes** button at the bottom of the Participant list panel.
 
 #### Participant Edit Modal
 
 To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
-1. Click the edit pencil icon next to the participant's name in the Centre Column.
+1. Click the edit pencil icon next to the participant's name in the Check-in & Seeding panel. Editing is available during setup only; once the draw is generated (status `draw-ready`) the pencil is disabled, so discard the draw first to make corrections.
 2. In the modal that appears, modify the name, dojo, dan grade, or display name.
-3. Click **Save changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Centre Column (Participants & Seeds) described above, via drag-and-drop or the seed-rank input, not in a separate tab.
+3. Click **Save changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Check-in & Seeding panel described above, via drag-and-drop or the seed-rank input, not in a separate tab.
 
 #### Optional Check-in Workflow
 

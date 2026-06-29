@@ -581,8 +581,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             if (dhMatches.length === 0) return null;
             const pending = dhMatches.filter(m => m.status !== "completed" || !m.winner);
             const label = pending.length > 0
-              ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending : teams tied on all 8 criteria`
-              : "Daihyosen complete : standings updated";
+              ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending: teams tied on all 8 criteria`
+              : "Daihyosen complete: standings updated";
             const color = pending.length > 0 ? "var(--warn-bg, #fffbe6)" : "var(--ok-bg, #e8f5e9)";
             const border = pending.length > 0 ? "1px solid var(--warn, #e6a817)" : "1px solid var(--ok, #4caf50)";
             return (

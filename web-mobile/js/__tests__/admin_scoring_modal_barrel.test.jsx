@@ -68,18 +68,18 @@ describe('admin_scoring_modal barrel completeness', () => {
     for (const name of EXPECTED_EXPORTS) {
       expect(
         M[name],
-        `Missing export: "${name}" (was it dropped from the barrel?`,
+        `Missing export: "${name}"; was it dropped from the barrel?`,
       ).toBeDefined();
     }
   });
 
-  it('exports no UNEXPECTED symbols (frozen surface (update this list when adding exports)', () => {
+  it('exports no UNEXPECTED symbols (frozen surface; update this list when adding exports)', () => {
     const actual = new Set(Object.keys(M));
     const expected = new Set(EXPECTED_EXPORTS);
     const unexpected = [...actual].filter(k => !expected.has(k));
     expect(
       unexpected,
-      `Unexpected export(s): ${unexpected.join(', ')} (add to EXPECTED_EXPORTS if intentional`,
+      `Unexpected export(s): ${unexpected.join(', ')}; add to EXPECTED_EXPORTS if intentional`,
     ).toHaveLength(0);
   });
 

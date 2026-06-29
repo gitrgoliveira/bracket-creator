@@ -450,7 +450,7 @@ paths:
       summary: Public auth-mode metadata
       description: |
         Reports the active authentication mode. Used by the SPA on first load to decide
-        whether to surface the password-reset UI. Public (no auth header required);         the response carries no secret material, only the operator-visible toggle bits.
+        whether to surface the password-reset UI. Public (no auth header required); the response carries no secret material, only the operator-visible toggle bits.
 
         `mode` is one of:
           * `file`; admin password lives in `tournament.md` (plaintext). Default.
@@ -939,7 +939,7 @@ paths:
         Returns 404 when the competition does not exist (this endpoint
         never creates).
 
-        Server-managed fields; `status`, `hasParticipantIDs: are
+        Server-managed fields `status` and `hasParticipantIDs` are
         IGNORED in the body. Use the dedicated transition endpoints
         (`/start`, `/complete`, `/invalidate`) to change status.
 
@@ -1540,7 +1540,7 @@ paths:
                     UUID or, for legacy UUID-less rosters, the composite
                     `name|dojo` key (the same identifier the web client builds).
                     Unlike the single-participant `{pid}` path parameter, each
-                    entry here is capped at 64 chars and validated server-side;                     a legacy `name|dojo` composite longer than 64 is rejected
+                    entry here is capped at 64 chars and validated server-side; a legacy `name|dojo` composite longer than 64 is rejected
                     with 400.
                   items:
                     type: string
@@ -2181,7 +2181,7 @@ paths:
       tags: [competitions]
       summary: List consequential league tie-breaker tied groups
       description: >
-        Returns the consequential tied groups for a team-league competition;         groups of teams tied on all official criteria whose finishing positions
+        Returns the consequential tied groups for a team-league competition; groups of teams tied on all official criteria whose finishing positions
         fall within the configured tie-breaker band (`leagueTiebreakTopN`, honouring
         `leagueTwoThirdPlaces`). Public read (no auth): derived from the
         already-public standings. Returns an empty list for non-team-league
@@ -2501,8 +2501,8 @@ paths:
       description: >
         Returns the same per-competition payload as GET /api/viewer/competitions
         (config + poolMatches + bracket), but ONLY for competitions that have at
-        least one real (both-sides-resolved) match; pool or non-preview bracket
-        ; physically placed on the given court right now. Keyed on actual match
+        least one real (both-sides-resolved) match, pool or non-preview bracket,
+        physically placed on the given court right now. Keyed on actual match
         placement (not competition court config) so the feed stays correct after
         an operator moves a match to another shiaijo. Per-competition match data
         is full (not court-filtered) so client-side derivations like pool
@@ -2894,8 +2894,8 @@ components:
           description: >
             Unique competition identifier. Must start with an alphanumeric
             character, contain only alphanumerics / hyphens / underscores,
-            and be at most 64 chars (same rule as the `:id` path parameter
-            ; see CompetitionId).
+            and be at most 64 chars (same rule as the `:id` path parameter;
+            see CompetitionId).
             Optional on POST; the server derives a slug from `name` when omitted.
         name:
           type: string
@@ -3095,7 +3095,7 @@ components:
           readOnly: true
           description: >
             True when the participant has checked in. Read-only in the
-            `POST /api/competitions/{id}/participants` request body;             the server preserves existing check-in state on bulk import
+            `POST /api/competitions/{id}/participants` request body; the server preserves existing check-in state on bulk import
             and ignores any incoming `checkedIn` value. Use the dedicated
             check-in endpoints (`PUT /…/participants/{pid}/checkin`,
             `POST /…/participants/checkin-bulk`,
@@ -3214,13 +3214,13 @@ components:
           type: string
           description: >
             Decision code for the match outcome. Extended set:
-            `none`/`""`; no decision recorded; `fought: resolved by scoring;
-            `hikiwake`; draw/tie; `kiken: withdrawal (legacy, maps to kiken-voluntary);
-            `kiken-voluntary`; voluntary withdrawal (FIK Art. 31, permanent);
-            `kiken-injury`; injury withdrawal (FIK Art. 30, reinstateable);
-            `fusenpai`; forfeit loss; `fusensho: forfeit win;
-            `daihyosen`; resolved by representative bout;
-            `kachinuki-exhaustion`; kachinuki team match ended with one side exhausted.
+            `none`/`""` (no decision recorded); `fought` (resolved by scoring);
+            `hikiwake` (draw/tie); `kiken` (withdrawal, legacy, maps to kiken-voluntary);
+            `kiken-voluntary` (voluntary withdrawal, FIK Art. 31, permanent);
+            `kiken-injury` (injury withdrawal, FIK Art. 30, reinstateable);
+            `fusenpai` (forfeit loss); `fusensho` (forfeit win);
+            `daihyosen` (resolved by representative bout);
+            `kachinuki-exhaustion` (kachinuki team match ended with one side exhausted).
           enum: [none, fought, hikiwake, kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, daihyosen, kachinuki-exhaustion]
         decisionBy:
           type: string

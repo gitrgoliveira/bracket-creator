@@ -272,7 +272,10 @@ For large individual tournaments using the **Swiss** format:
 
 ### Export & print
 
-Download the `.xlsx` bracket file at any time via **Export & print**.
+A competition's **Export & print** offers two formats:
+
+- **Excel (`.xlsx`)**: the print-ready bracket workbook (pool draws, schedules, and trees). Always available, with no extra dependencies.
+- **PDF** (competitor tags, name sheets, and bracket trees): an admin-only export that renders the spreadsheets through **LibreOffice**, so the server needs `soffice` available. Use the PDF-enabled image `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest`, or install LibreOffice on the host. The default lean image omits it to stay small; without LibreOffice the app returns a clear message rather than a broken file.
 
 ## Data format
 

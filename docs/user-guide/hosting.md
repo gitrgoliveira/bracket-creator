@@ -19,6 +19,9 @@ Each option below links to its full guide on **GitHub**, where the Compose and T
 
 The Docker baseline is the reusable core: the GCP and Oracle Terraform modules render the same Compose file and Caddyfile onto a cloud VM via cloud-init. Each guide includes the full prerequisites and a one-command Terraform (or Compose) flow.
 
+!!! note "PDF export needs the PDF-enabled image"
+    The lean default image cannot generate PDFs (competitor tags, name sheets, trees), it ships without LibreOffice to stay small. If your operators export PDFs, run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` image variant instead. Excel export works on every image.
+
 ## Security
 
 Any deployment reachable over the internet should run in **locked-password mode** rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and disables the public password-reset endpoint. See [Admin authentication](mobile-app.md) in the mobile app guide for the setup steps.

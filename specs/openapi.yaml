@@ -21,6 +21,14 @@ info:
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
+
+    **Self-run mode.** When the tournament is created with `mode: self-run`, the
+    main-password gate is bypassed for the operational play surface (scoring, check-in,
+    start/complete, generate-draw, etc.) so participants can drive their own flow without
+    an organiser at a table. Destructive routes (delete competition, invalidate, discard
+    draw, result overrides, roster mutations, import) and organiser-owned setup
+    (tournament/competition config) stay gated. In the default `officiated` mode every
+    `/api/` route keeps requiring `X-Tournament-Password` as described above.
   version: 2.1.0
 
 servers:
@@ -2871,19 +2879,6 @@ components:
             (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
             field is accepted but silently ignored; the `TOURNAMENT_ADMIN_PASSWORD_HASH`
             env var is the authoritative elevated credential.
-        checkInWindowStart:
-          type: string
-          maxLength: 5
-          pattern: '^\d{2}:\d{2}$'
-          description: >
-            Global check-in window open time (HH:MM). Displayed in the viewer as a status
-            banner ("pending / open / closed"). Informational only; does not block
-            check-in API calls outside the window.
-        checkInWindowEnd:
-          type: string
-          maxLength: 5
-          pattern: '^\d{2}:\d{2}$'
-          description: Global check-in window close time (HH:MM).
 
     Competition:
       type: object

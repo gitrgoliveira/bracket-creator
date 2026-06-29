@@ -164,7 +164,6 @@ To edit details of a single competitor (for spelling corrections, dojo transfers
 
 You can enable check-in for any competition in its **Settings** tab. When check-in is enabled:
 - A check-in panel displays in the viewer roster screen.
-- A **Check-in window** (configurable via tournament settings as `Check-in window start/end`) displays a status banner indicating if the window is pending, open, or closed.
 - Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check in all** to check in everyone.
 - Check-in affects the draw with **opt-in semantics**: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included, so simply enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
 

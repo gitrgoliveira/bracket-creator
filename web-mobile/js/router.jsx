@@ -15,7 +15,7 @@
 // useQuery() returns the parsed `?key=value` parameters as a plain
 // object. It re-runs on every history change because preact-router fires
 // a popstate-equivalent on its own route() calls. To keep the hook cheap
-// we re-parse on each render rather than caching — query strings here
+// we re-parse on each render rather than caching: query strings here
 // are short and the parse cost is negligible.
 
 const PreactRouter = window.preactRouter;
@@ -23,7 +23,7 @@ const _Router = PreactRouter ? PreactRouter.Router : null;
 const _Link = PreactRouter ? PreactRouter.Link : null;
 const _getCurrentUrl = PreactRouter ? PreactRouter.getCurrentUrl : (() => (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/'));
 
-// <Router> — wrapper that simply forwards to preact-router's Router.
+// <Router>: wrapper that simply forwards to preact-router's Router.
 // We keep it as a thin pass-through so callers can later swap the
 // implementation (e.g. for SSR or static rendering) without changing
 // import sites across the app.
@@ -37,7 +37,7 @@ function Router(props) {
     return React.createElement(_Router, props, props.children);
 }
 
-// <Route component={X} path="/foo" /> — preact-router accepts this shape
+// <Route component={X} path="/foo" />: preact-router accepts this shape
 // when nested inside <Router>. Components matched by path receive the
 // route params as props.
 function Route(props) {
@@ -50,7 +50,7 @@ function Route(props) {
 // preact-router's route() only mutates history when canRoute(url) finds a
 // MOUNTED <Router> that matches the path. This app renders entirely from its
 // own state machine (app.jsx) and never mounts a <Router>, so canRoute() is
-// always false and preact-router's route() silently no-ops — leaving the
+// always false and preact-router's route() silently no-ops: leaving the
 // address bar stuck while the view changes. That broke back/forward and
 // shareable deep links (mp-dd3).
 //
@@ -59,7 +59,7 @@ function Route(props) {
 // handles browser back/forward via its own popstate listener.
 //
 // We dispatch a popstate event after mutating history so listeners that
-// rely on a history-change signal — notably useQuery() below — re-parse
+// rely on a history-change signal: notably useQuery() below: re-parse
 // and react to programmatic navigation. The native History API does NOT
 // fire popstate on pushState/replaceState, but preact-router's route()
 // does, and useQuery() / display surfaces were written against that
@@ -69,7 +69,7 @@ function Route(props) {
 // location.pathname and setMode/setAdminView/setViewerCompId accordingly.
 // Because route() is only called from the state->URL sync effect AFTER
 // the state already matches the new URL, parsePath returns the same
-// state that's already set — React bails on identical setState values,
+// state that's already set: React bails on identical setState values,
 // and the URL-sync effect's `location.pathname !== url` guard prevents
 // any re-entry on a possible re-render.
 function route(url, replace = false) {
@@ -80,8 +80,8 @@ function route(url, replace = false) {
             window.dispatchEvent(new PopStateEvent('popstate'));
         } catch {
             // PopStateEvent unavailable (very old / non-standard environments).
-            // Fall back to a plain Event so popstate listeners — useQuery(),
-            // app.jsx's back/forward handler — still receive the navigation
+            // Fall back to a plain Event so popstate listeners: useQuery(),
+            // app.jsx's back/forward handler: still receive the navigation
             // signal. Any environment where window.history exists also has the
             // base Event constructor, so this branch cannot throw.
             window.dispatchEvent(new Event('popstate'));
@@ -112,7 +112,7 @@ function parseSearch(search) {
     return params;
 }
 
-// useQuery() — parse the current URL's query string into a plain object,
+// useQuery(): parse the current URL's query string into a plain object,
 // re-rendering the calling component on history-stack changes. We
 // subscribe to `popstate` explicitly rather than calling preact-router's
 // useRouter() purely for its side effect, because conditional hook calls

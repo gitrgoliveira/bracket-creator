@@ -19,7 +19,7 @@ import (
 )
 
 // setupPrintTestRouter builds a minimal router that wires the print
-// handler behind AuthMiddleware — mirroring the production server.go
+// handler behind AuthMiddleware,  mirroring the production server.go
 // setup (adminSmallBody group). The tournament is pre-configured with
 // password "secret" so callers can send X-Tournament-Password: secret.
 func setupPrintTestRouter(t *testing.T) (*gin.Engine, *state.Store, *engine.Engine, string) {
@@ -59,7 +59,7 @@ func sofficeAvailable() bool {
 	return err == nil || !errors.Is(err, pdf.ErrSofficeNotFound)
 }
 
-// TestPrintHandler_UnknownType validates that an unrecognised :type
+// TestPrintHandler_UnknownType validates that an unrecognised: type
 // parameter is rejected with HTTP 400 before the endpoint attempts any
 // PDF work.
 func TestPrintHandler_UnknownType(t *testing.T) {
@@ -112,7 +112,7 @@ func TestPrintHandler_ValidRequest(t *testing.T) {
 
 	// Use a real competition with started brackets so the PDF pipeline has
 	// something to work with when soffice IS available. For the soffice-absent
-	// branch this is irrelevant — the handler errors before touching workbooks.
+	// branch this is irrelevant,  the handler errors before touching workbooks.
 	r, store, _, _ := setupPrintTestRouter(t)
 
 	// Seed a minimal started competition. The export path only needs the
@@ -146,7 +146,7 @@ func TestPrintHandler_ValidRequest(t *testing.T) {
 			// 422 is valid when the competition has no bracket pages yet
 			// (e.g. pools not drawn); that is a real result, not a failure.
 			if w.Code == http.StatusUnprocessableEntity {
-				t.Logf("type=%s: 422 (no PDF pages produced) — competition has no drawn pools/brackets; skipping ZIP check", printType)
+				t.Logf("type=%s: 422 (no PDF pages produced),  competition has no drawn pools/brackets; skipping ZIP check", printType)
 				return
 			}
 

@@ -332,7 +332,7 @@ func TestEstimateMatchCounts_League(t *testing.T) {
 // TestEstimateMatchCounts_Swiss verifies the Swiss-format match count:
 // SwissRounds * ceil(playerCount/2) matches total.
 //
-// The bye match (when playerCount is odd) is included in the count —
+// The bye match (when playerCount is odd) is included in the count,
 // the engine persists it in pool-matches.csv just like any other match
 // (see buildSwissMatches in swiss.go) so the scheduler must allocate a
 // slot for it.
@@ -486,7 +486,7 @@ func TestEstimateMatchCounts_CrossCheck_MatchesCreatePools(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// --- Real draw path ---
 			// Use distinct names and distinct dojos so discoverPool never
-			// hits a conflict — ensuring the pool sizes are determined purely
+			// hits a conflict, ensuring the pool sizes are determined purely
 			// by the target-size/forcePoolSize logic, not by dojo avoidance.
 			players := make([]Player, tc.playerCount)
 			for i := range players {

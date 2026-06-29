@@ -59,7 +59,7 @@ func (s *stubLeagueTiebreakStore) WithTransaction(compID string, fn func(tx stat
 
 // stubLeagueTiebreakTx satisfies state.StoreTx by embedding the interface (so
 // the type checks) and implementing only the methods the DELETE handler calls.
-// Any other method would panic — none are reached by these tests.
+// Any other method would panic, none are reached by these tests.
 type stubLeagueTiebreakTx struct {
 	state.StoreTx
 	store *stubLeagueTiebreakStore
@@ -139,7 +139,7 @@ func leagueTiebreakRouter(eng LeagueTiebreakEngine, store LeagueTiebreakStore, h
 	g := r.Group("/api")
 	// Public (unauthenticated) read endpoint.
 	RegisterPublicLeagueTiebreakHandlers(g, eng, store)
-	// Mutation endpoints — no auth middleware here; business logic only.
+	// Mutation endpoints, no auth middleware here; business logic only.
 	RegisterLeagueTiebreakHandlers(g, eng, store, hub)
 	return r
 }
@@ -554,8 +554,8 @@ func TestLeagueTiebreakFinalize_MaybeAutoCompleteError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Still returns 200 with the finalized flag (same pattern as tryAutoCompletePools
-	// — the score itself succeeded; the auto-complete failure is a background concern
+	// Still returns 200 with the finalized flag (same pattern as tryAutoCompletePools,
+	// the score itself succeeded; the auto-complete failure is a background concern
 	// surfaced via the error header).
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, AutoCompleteErrorValue, w.Header().Get(AutoCompleteErrorHeader))
@@ -586,7 +586,7 @@ func TestLeagueTiebreakFinalize_NoChange(t *testing.T) {
 // Additional error-path tests to bring internal/mobileapp to ≥85% coverage
 // ---------------------------------------------------------------------------
 
-// GET — LoadCompetition returns an error (500).
+// GET, LoadCompetition returns an error (500).
 func TestLeagueTiebreakCandidates_LoadError(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{loadErr: fmt.Errorf("disk I/O failure")}
@@ -599,7 +599,7 @@ func TestLeagueTiebreakCandidates_LoadError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// GET — LeagueTiebreakCandidates returns *engine.NotFoundError (404).
+// GET, LeagueTiebreakCandidates returns *engine.NotFoundError (404).
 func TestLeagueTiebreakCandidates_EngineNotFound(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{
 		candidatesErr: &engine.NotFoundError{Msg: "competition not in engine"},
@@ -614,14 +614,14 @@ func TestLeagueTiebreakCandidates_EngineNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// GET — requireValidCompID returns false (empty :id → 400).
+// GET, requireValidCompID returns false (empty: id → 400).
 func TestLeagueTiebreakCandidates_InvalidID(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// A route param that fails ValidateCompetitionID (e.g. empty string via
-	// a sub-path that doesn't carry :id — use a contrived bad value).
+	// a sub-path that doesn't carry: id, use a contrived bad value).
 	req := httptest.NewRequest("GET", "/api/competitions/%00/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -632,7 +632,7 @@ func TestLeagueTiebreakCandidates_InvalidID(t *testing.T) {
 	assert.NotEqual(t, http.StatusInternalServerError, w.Code)
 }
 
-// POST — LeagueTiebreakCandidates returns *engine.NotFoundError (404).
+// POST, LeagueTiebreakCandidates returns *engine.NotFoundError (404).
 func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{
 		candidatesErr: &engine.NotFoundError{Msg: "competition not in engine"},
@@ -649,7 +649,7 @@ func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// POST — GenerateLeagueTiebreakMatches returns *engine.NotFoundError (404).
+// POST, GenerateLeagueTiebreakMatches returns *engine.NotFoundError (404).
 func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
@@ -673,7 +673,7 @@ func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// POST — GenerateLeagueTiebreakMatches returns a generic error (500).
+// POST, GenerateLeagueTiebreakMatches returns a generic error (500).
 func TestLeagueTiebreakPost_GenerateInternalError(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
@@ -697,7 +697,7 @@ func TestLeagueTiebreakPost_GenerateInternalError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// DELETE — LoadPoolMatches returns an error (500).
+// DELETE, LoadPoolMatches returns an error (500).
 func TestLeagueTiebreakDelete_LoadMatchesError(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{
@@ -715,7 +715,7 @@ func TestLeagueTiebreakDelete_LoadMatchesError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// DELETE — SavePoolMatches returns an error after removal (500).
+// DELETE, SavePoolMatches returns an error after removal (500).
 func TestLeagueTiebreakDelete_SaveError(t *testing.T) {
 	existing := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusScheduled},
@@ -737,7 +737,7 @@ func TestLeagueTiebreakDelete_SaveError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// DELETE — bad request body (400).
+// DELETE, bad request body (400).
 func TestLeagueTiebreakDelete_BadBody(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
@@ -751,7 +751,7 @@ func TestLeagueTiebreakDelete_BadBody(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-// Finalize — UpdateCompetitionChanged returns an error (500).
+// Finalize, UpdateCompetitionChanged returns an error (500).
 func TestLeagueTiebreakFinalize_UpdateError(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{
@@ -767,7 +767,7 @@ func TestLeagueTiebreakFinalize_UpdateError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-// Finalize — AutoCompleteTransitioned broadcasts EventCompetitionCompleted.
+// Finalize, AutoCompleteTransitioned broadcasts EventCompetitionCompleted.
 func TestLeagueTiebreakFinalize_BroadcastsCompleted(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{
 		autoOutcome: engine.AutoCompleteTransitioned,
@@ -795,7 +795,7 @@ func TestLeagueTiebreakFinalize_BroadcastsCompleted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Auth-split tests — verify GET is public and POST is admin-gated.
+// Auth-split tests, verify GET is public and POST is admin-gated.
 //
 // These tests use a real state.Store (temporary directory) and the real
 // AuthMiddleware, mirroring the pattern in handlers_eligibility_test.go.
@@ -822,11 +822,11 @@ func setupLeagueTiebreakAuthRouter(t *testing.T) (*gin.Engine, *state.Store) {
 	eng := &stubLeagueTiebreakEngine{candidates: nil}
 	hub := stubBroadcaster{}
 
-	// Public group — GET /candidates is unauthenticated.
+	// Public group, GET /candidates is unauthenticated.
 	api := r.Group("/api")
 	RegisterPublicLeagueTiebreakHandlers(api, eng, store)
 
-	// Admin-gated group — mutations require X-Tournament-Password.
+	// Admin-gated group, mutations require X-Tournament-Password.
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
 	RegisterLeagueTiebreakHandlers(admin, eng, store, hub)
@@ -861,7 +861,7 @@ func TestLeagueTiebreakCandidates_IsPublic(t *testing.T) {
 }
 
 // TestLeagueTiebreakPost_RequiresAuth verifies that the POST mutation returns
-// 401 when called without X-Tournament-Password — i.e. the route is still on
+// 401 when called without X-Tournament-Password, i.e. the route is still on
 // the admin-gated group after the public/admin split.
 func TestLeagueTiebreakPost_RequiresAuth(t *testing.T) {
 	r, store := setupLeagueTiebreakAuthRouter(t)
@@ -919,7 +919,7 @@ func TestLeagueTiebreakFinalize_RequiresAuth(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// recordingBroadcaster — captures broadcast calls for assertions.
+// recordingBroadcaster, captures broadcast calls for assertions.
 // ---------------------------------------------------------------------------
 
 type recordingBroadcaster struct {
@@ -959,7 +959,7 @@ func TestLeagueTiebreakPost_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeagueTiebreakDelete_DuplicateNames — DELETE must reject duplicates too.
+// TestLeagueTiebreakDelete_DuplicateNames, DELETE must reject duplicates too.
 func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
@@ -975,7 +975,7 @@ func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeagueTiebreakDelete_PartialGroup — naming only part of a tie-breaker group
+// TestLeagueTiebreakDelete_PartialGroup, naming only part of a tie-breaker group
 // (a DH match with exactly one side in the request) must be rejected so the
 // remaining round-robin bouts aren't orphaned.
 func TestLeagueTiebreakDelete_PartialGroup(t *testing.T) {
@@ -1002,7 +1002,7 @@ func TestLeagueTiebreakDelete_PartialGroup(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "complete tie-breaker group")
 }
 
-// TestLeagueTiebreakDelete_RunningMatch — an in-progress DH match must block
+// TestLeagueTiebreakDelete_RunningMatch, an in-progress DH match must block
 // deletion (409), not be silently removed out from under the scoring session.
 func TestLeagueTiebreakDelete_RunningMatch(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}

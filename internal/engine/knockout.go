@@ -26,7 +26,7 @@ func isUnresolvedBracketSide(side string) bool {
 
 // bracketMatchPlayable reports whether a bracket match can be scored: both sides
 // must be resolved competitors. This is the per-match replacement for the old
-// bracket-wide Preview gate — a knockout match becomes playable as soon as both
+// bracket-wide Preview gate, a knockout match becomes playable as soon as both
 // its feeder pools (or feeder matches) have produced real competitors, with NO
 // wait for the rest of the pool phase. Standalone (knockout-only) competitions
 // satisfy this from draw time because their round-1 leaves are real players.
@@ -54,7 +54,7 @@ func bracketHasPoolPlaceholders(b *state.Bracket) bool {
 // completedPoolNames returns poolName → isComplete for every pool in compID. A
 // pool is complete when all of its matches (regular + any tiebreaker/daihyosen)
 // are completed with a winner, no further tiebreaker/DH injection is pending for
-// it, and — for team competitions — its daihyosen results actually broke the
+// it, and, for team competitions, its daihyosen results actually broke the
 // ties (no cycle). Tiebreaker/DH injection runs comp-wide first (idempotent).
 func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map[string]bool, error) {
 	isTeam := comp != nil && comp.TeamSize > 0
@@ -109,7 +109,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 	// 0/1, so a lone qualifier legitimately produces zero matches and is already
 	// decided (they are the pool's 1st place). A 0-participant pool, or a ≥2-player
 	// pool with no matches yet (draw not generated / mid-generation), is NOT
-	// complete — otherwise the mixed comp could get stuck in `pools` forever (a
+	// complete, otherwise the mixed comp could get stuck in `pools` forever (a
 	// single-competitor pool's placeholder would never resolve).
 	for pn := range done {
 		if !seen[pn] {
@@ -154,12 +154,12 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // deterministic placeholder template (the same GenerateFinals → CreateBalancedTree
 // → ApplyPoolAdjustments → TreeToLeafArray pipeline used at draw) and resolves the
 // running bracket against it BY POSITION. So if an operator re-scores a completed
-// pool match after that pool was already seeded — changing the 1st/2nd finisher —
+// pool match after that pool was already seeded, changing the 1st/2nd finisher,
 // the new finisher overwrites the stale name in the same slot, instead of being
 // silently dropped (the live side no longer holds the placeholder string, but the
 // template still does). Pools and PoolWinners are fixed after the draw, so the
 // template's shape is identical to the running bracket's. The bracket's court/time
-// slots are assigned at draw time and never change here — only competitor labels.
+// slots are assigned at draw time and never change here, only competitor labels.
 //
 // Known limitation (mp-e2k1): re-seeding repaints round-0 leaves and
 // bye-propagated sides, but does NOT invalidate a DOWNSTREAM knockout match that
@@ -168,7 +168,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 //
 // Returns (resolvedNow, allResolved): how many bracket sides changed THIS call,
 // and whether the bracket now has zero pool-origin placeholders left (every pool
-// seeded). No-op (0, false, nil) for non-mixed competitions — standalone playoffs
+// seeded). No-op (0, false, nil) for non-mixed competitions, standalone playoffs
 // brackets carry no pool placeholders.
 func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
@@ -187,7 +187,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	// defend against legacy/hand-edited data so we never seed a degenerate
 	// single-pool "knockout".
 	if len(pools) < 2 {
-		return 0, false, validationErrorf("mixed competition %s has only %d pool(s) — at least 2 are required for a knockout phase; this competition should be 'league' format", compID, len(pools))
+		return 0, false, validationErrorf("mixed competition %s has only %d pool(s), at least 2 are required for a knockout phase; this competition should be 'league' format", compID, len(pools))
 	}
 
 	completed, err := e.completedPoolNames(compID, comp)
@@ -312,7 +312,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		}
 		resolvedNow = n
 		// The bracket is now (partially) live; the legacy global Preview flag is
-		// obsolete — playability is per-match from here on.
+		// obsolete, playability is per-match from here on.
 		bracket.Preview = false
 		return nil
 	})

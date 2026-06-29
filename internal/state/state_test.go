@@ -317,7 +317,7 @@ func TestStore_ParticipantsCSV_WithZekkenName(t *testing.T) {
 
 	compID := "zekken"
 	// SaveParticipants now consults the competition record for WithZekkenName
-	// to pick the canonical CSV column layout — must be set before the save.
+	// to pick the canonical CSV column layout, must be set before the save.
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, WithZekkenName: true}))
 
 	players := []domain.Player{
@@ -615,7 +615,7 @@ func TestStore_PoolMatches_EmptyIppons(t *testing.T) {
 	loaded, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
-	// Empty ippons stored as [""] when split — verify this doesn't cause issues
+	// Empty ippons stored as [""] when split, verify this doesn't cause issues
 	assert.Equal(t, "Pool A-0", loaded[0].ID)
 }
 
@@ -878,7 +878,7 @@ func TestStore_Seeds_NotExists(t *testing.T) {
 // transform held by UpdateCompetitionChanged. Pin two contracts:
 //
 //  1. The validateCompetitionID precondition fires on bogus IDs before
-//     any disk I/O — proves the new per-comp locking path runs the
+//     any disk I/O, proves the new per-comp locking path runs the
 //     same validation the other per-comp Load/Save methods do (and
 //     guards against the path-traversal class).
 //  2. Concurrent SaveSeeds on DIFFERENT comps don't block each other.
@@ -892,7 +892,7 @@ func TestStore_Seeds_PerCompLocking(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	// (1) Bogus comp ID — must surface as a validation error, same as
+	// (1) Bogus comp ID, must surface as a validation error, same as
 	// LoadParticipants / LoadPools / etc.
 	_, err = store.LoadSeeds("../escape")
 	assert.Error(t, err, "LoadSeeds must validate the comp ID")
@@ -1036,7 +1036,7 @@ func TestIsDraw(t *testing.T) {
 	assert.False(t, IsDraw("hikewake"), "legacy misspelling no longer accepted")
 	assert.False(t, IsDraw(""))
 	assert.False(t, IsDraw("ippon"))
-	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive — wire format is lowercase")
+	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive, wire format is lowercase")
 }
 
 // --- UpdateTournamentChanged ---

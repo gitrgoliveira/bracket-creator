@@ -17,7 +17,7 @@ import (
 // flipHasParticipantIDs sets Competition.HasParticipantIDs=true after a
 // successful non-empty roster save. It's a package var (not an inline
 // closure) so tests can inject a deterministic failure without relying
-// on filesystem-race timing — see
+// on filesystem-race timing, see
 // TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500. mp-p7n /
 // Copilot PR #185 round-9.
 var flipHasParticipantIDs = func(store *state.Store, id string) error {
@@ -60,7 +60,7 @@ func slugifyID(name string) string {
 //
 // IMPORTANT: this function is intended for CREATE paths only (POST
 // /competitions). On a SaveParticipants failure AFTER SaveCompetitionChanged
-// succeeded, it rolls back by calling DeleteCompetition — without that
+// succeeded, it rolls back by calling DeleteCompetition, without that
 // rollback, the ID-collision check at the top of POST /competitions would
 // block retries because the orphaned config.md is on disk but
 // participants.csv isn't. Calling this on an UPDATE path would delete the
@@ -68,7 +68,7 @@ func slugifyID(name string) string {
 // existing competition must use store.SaveParticipants directly (see the
 // PUT /competitions/:id handler, which writes participants after the
 // transform commits and treats save errors as retriable since PUT is
-// idempotent — no ID-collision trap).
+// idempotent, no ID-collision trap).
 func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bool, error) {
 	if len(comp.Players) > 0 {
 		comp.HasParticipantIDs = true // participants.csv always written with UUID IDs
@@ -93,8 +93,8 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
 		// SaveSeeds is best-effort by historical contract (the same
 		// Printf-warning pattern is used in the PUT handler's
-		// participants block). seeds.csv missing is recoverable
-		// — the operator can re-set seeds without re-creating the
+		// participants block). seeds.csv missing is recoverable,
+		// the operator can re-set seeds without re-creating the
 		// competition. No rollback to avoid surprising the caller
 		// with a deleted record over a non-critical write.
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
@@ -119,14 +119,14 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 //   - comp.Date is in the derived day list → return nil.
 //   - comp.Date is NOT in the derived day list → return a descriptive error.
 //
-// errcheck: no bare ignored returns — always propagated by callers.
+// errcheck: no bare ignored returns, always propagated by callers.
 func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.Tournament) error {
 	if comp.Date == "" || tourn == nil || tourn.Date == "" {
 		return nil
 	}
 	days := tourn.Days()
 	if len(days) == 0 {
-		// Tournament date unparseable or DurationDays < 1 — skip range check.
+		// Tournament date unparseable or DurationDays < 1, skip range check.
 		return nil
 	}
 	for _, d := range days {
@@ -205,7 +205,7 @@ func validateSwissConfig(comp *state.Competition) error {
 //
 // Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
 // on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so a comp with
-// TeamSize > 0 but Kind == "" cannot be persisted — the Kind check alone is
+// TeamSize > 0 but Kind == "" cannot be persisted, the Kind check alone is
 // sufficient to identify a team league here.
 func validateLeagueTiebreakConfig(comp *state.Competition) error {
 	if comp.Format != state.CompFormatLeague || comp.Kind != "team" {
@@ -308,7 +308,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// with handlers_import.go (which trims all 7 string fields). The
 		// admin UI sends these via dropdowns / time / date inputs that
 		// don't pad, but a hand-crafted POST could send "  individual  "
-		// as Kind — downstream switch statements would silently fall
+		// as Kind, downstream switch statements would silently fall
 		// through to "unknown kind" semantics.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
@@ -325,7 +325,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Reject whitespace-only Name. The admin_setup.jsx Create form
 		// validates this client-side (deriveCompetitionName + the
 		// empty-name check), but hand-crafted POSTs with an explicit
-		// `id` bypass the slugifyID empty-name fallback below — so
+		// `id` bypass the slugifyID empty-name fallback below, so
 		// without this guard, an explicit-ID request with Name="   "
 		// lands as Name="" on disk and renders a blank competition
 		// card. Cross-file guard symmetry with handlers_tournament.go
@@ -341,7 +341,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// POST /competitions can land with an embedded roster via
-		// saveCompetitionWithPlayers — same required-field and length
+		// saveCompetitionWithPlayers, same required-field and length
 		// caps as the roster-PUT branch and POST /participants.
 		for i, p := range comp.Players {
 			if err := validatePlayerRequired(p.Name, p.Dojo); err != nil {
@@ -374,7 +374,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Default the competition date to the tournament's Day 1 when the
 		// client sends an empty date. Pre-fix: the frontend seeded the date
 		// from tournament.date directly (JS), but the backend defaulted to
-		// today when it was empty — using Day 1 is the correct multi-day
+		// today when it was empty, using Day 1 is the correct multi-day
 		// behaviour and also keeps server and client in sync.
 		if comp.Date == "" && createTourn != nil && createTourn.Date != "" {
 			comp.Date = createTourn.Date
@@ -449,7 +449,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Derive ID from name BEFORE acquiring the rename lock — the ID
+		// Derive ID from name BEFORE acquiring the rename lock, the ID
 		// derivation has no concurrency concern (pure function of Name)
 		// and an empty derived ID should fast-fail without holding the
 		// global mutex.
@@ -463,11 +463,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Validate the derived OR caller-supplied ID upfront with a 400.
 		// Without this, a non-empty but invalid ID (e.g. "../../etc/passwd"
 		// or "foo bar") would skip the derive block, then LoadCompetition
-		// would silently drop the validation error (`_, _ :=`), and the
+		// would silently drop the validation error (`_, _:=`), and the
 		// SaveCompetitionChanged inside saveCompetitionWithPlayers would
-		// surface "invalid competition ID" as a 500 — masking malformed
+		// surface "invalid competition ID" as a 500, masking malformed
 		// input as a server failure. The middleware.requireValidCompID
-		// helper does the equivalent check for routes that take :id in
+		// helper does the equivalent check for routes that take: id in
 		// the URL; this is the body-supplied-id sibling.
 		if err := state.ValidateCompetitionID(comp.ID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -542,7 +542,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
-	// GET /competitions/:id/schedule/estimate — pre-draw schedule estimate
+	// GET /competitions/:id/schedule/estimate, pre-draw schedule estimate
 	// for a specific competition. Read-only; main-password gated (registered
 	// under adminGroup via RegisterCompetitionHandlers) but does NOT require
 	// elevated auth. Returns a ScheduleEstimate JSON body; 404 for unknown
@@ -570,7 +570,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, estimate)
 	})
 
-	// GET /competitions/:id/schedule/clashes — court (shiaijo) scheduling
+	// GET /competitions/:id/schedule/clashes, court (shiaijo) scheduling
 	// conflicts between this competition and every other one (same day, shared
 	// court, overlapping time windows). Read-only, main-password gated. Returns
 	// a (possibly empty) ClashWarning array; 404 for an unknown competition.
@@ -630,13 +630,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		comp.Name = strings.TrimSpace(comp.Name)
-		// See POST handler comment — same trim is needed here so the
+		// See POST handler comment, same trim is needed here so the
 		// SETTINGS edit path can't persist whitespace-padded prefixes.
 		comp.NumberPrefix = strings.TrimSpace(comp.NumberPrefix)
 		// Cross-file guard symmetry with handlers_import.go and the POST
 		// handler above. The admin UI uses dropdowns for Kind/Format/
-		// PoolSizeMode and date/time pickers for StartTime/Date — none
-		// of which produce padded values — but defense-in-depth against
+		// PoolSizeMode and date/time pickers for StartTime/Date, none
+		// of which produce padded values, but defense-in-depth against
 		// hand-crafted PUT requests.
 		comp.Kind = strings.TrimSpace(comp.Kind)
 		comp.Format = strings.TrimSpace(comp.Format)
@@ -665,7 +665,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 		}
 
-		// Settings-specific validations — gate on comp.Players == nil
+		// Settings-specific validations, gate on comp.Players == nil
 		// (settings-only PUT). Roster-only PUTs (comp.Players != nil)
 		// carry a stale-snapshot of settings fields from the frontend
 		// (AdminParticipants spreads `{ ...c, players: np }` over a
@@ -674,7 +674,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// legacy/stale settings value (e.g. a pre-DMY-canonical Date
 		// like `2026-05-12`) made the roster save fail with
 		// "date must be DD-MM-YYYY" even though the date wasn't being
-		// edited — the validators ran before the branch decision and
+		// edited, the validators ran before the branch decision and
 		// rejected on a field the request was about to ignore. Moving
 		// these behind `comp.Players == nil` keeps the defense-in-depth
 		// against bad settings PUTs and unblocks roster saves on legacy
@@ -683,7 +683,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// Reject whitespace-only Name (see POST handler above). The
 			// admin SETTINGS edit path (AdminSettings.saveNow in
 			// admin_competition.jsx) empty-checks the name client-side
-			// first — defense-in-depth for direct API callers.
+			// first, defense-in-depth for direct API callers.
 			if comp.Name == "" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "competition name is required"})
 				return
@@ -705,7 +705,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// lock during I/O. Tournament load is read-only and idempotent,
 			// so the window between load and the lock acquisition is safe
 			// (the worst case is a missed tournament date update, which
-			// would just skip the range check — a harmless skip vs. a
+			// would just skip the range check, a harmless skip vs. a
 			// deadlock is the right trade-off).
 			putTourn, putTournErr := store.LoadTournament()
 			if putTournErr != nil {
@@ -791,20 +791,20 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//    had its old name) and both landed. The dedicated rename
 		//    mutex (different from any per-comp lock) serializes the
 		//    check+save for uniqueness. An earlier attempt folded the
-		//    check into UpdateCompetitionChanged's per-comp transform —
+		//    check into UpdateCompetitionChanged's per-comp transform,
 		//    deadlocked AB-BA because each goroutine held its own
 		//    comp's per-comp write lock and tried to read-lock the
 		//    other to do the check.
 		//
 		// 2. 404 on missing: pre-fix, saveCompetitionWithPlayers
-		//    would CREATE the record if id didn't exist on disk —
+		//    would CREATE the record if id didn't exist on disk,
 		//    contradicting the OpenAPI-documented 404 response and
 		//    surprising clients that expected idempotent "edit only".
 		//    UpdateCompetitionChanged's transform now returns
 		//    notFoundFlag for current == nil.
 		//
 		// 3. Settings-only merge for non-participants fields: pre-fix,
-		//    the PUT body REPLACED the whole config — including
+		//    the PUT body REPLACED the whole config, including
 		//    Status / HasParticipantIDs that AdminSettings doesn't
 		//    manage. If the JSON omitted Status (e.g. the new
 		//    admin_competition.jsx saveNow whitelist that genuinely
@@ -854,13 +854,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 						drawReadyFlag = true
 						return nil, nil
 					}
-					// Roster-only PUT — do NOT flip HasParticipantIDs
+					// Roster-only PUT, do NOT flip HasParticipantIDs
 					// here. Pre-fix, the transform committed the flag
 					// (HasParticipantIDs=true) BEFORE the post-transform
 					// SaveParticipants call. If that save failed (disk
 					// full, EISDIR, etc.) the config on disk would carry
 					// HasParticipantIDs=true while participants.csv
-					// retained the OLD non-UUID format — and the
+					// retained the OLD non-UUID format, and the
 					// list-view's HasIDs hint would then misparse the
 					// file (trying to extract UUID prefix from each
 					// non-UUID row). Defer the flag flip to the
@@ -883,7 +883,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// mirrors the participant/seed 409s in handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
 					// Compare the EFFECTIVE (about-to-be-applied) values
-					// directly — no zero/empty sentinels. The settings merge
+					// directly, no zero/empty sentinels. The settings merge
 					// below is a full replace, so a caller that sets an
 					// output-affecting field TO its zero/empty value (e.g.
 					// format:"" or poolFormat:"", both accepted by
@@ -920,10 +920,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompFields BEFORE the transform, so a PUT to
-				// a missing :id whose body Name happened to collide with
+				// a missing: id whose body Name happened to collide with
 				// an existing competition would 400 "name already exists"
 				// instead of the documented 404 missing. Folding the
-				// check into the transform — after current == nil — is
+				// check into the transform, after current == nil, is
 				// safe under WithCompetitionRenameLock: the rename mutex
 				// serializes rename ops, so the LoadCompetition calls on
 				// OTHER comp IDs that checkUniqueCompFields performs can't
@@ -948,7 +948,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the body. Status is managed via dedicated endpoints
 				// (start/complete/invalidate). Players is persisted
 				// separately to participants.csv (see post-transform
-				// block below). HasParticipantIDs is auto-managed —
+				// block below). HasParticipantIDs is auto-managed,
 				// only set to true in the roster-only branch above when
 				// participants are being saved.
 				current.Name = comp.Name
@@ -1000,7 +1000,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			})
 			return updateErr
 		})
-		// 404 before 400 — with the uniqueness check now inside the
+		// 404 before 400, with the uniqueness check now inside the
 		// transform (after current == nil), notFoundFlag and validationErr
 		// are mutually exclusive. Order kept defensive in case either flag
 		// escapes the transform unexpectedly.
@@ -1020,7 +1020,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Participants/seeds save (separate file) — runs whenever the
+		// Participants/seeds save (separate file), runs whenever the
 		// PUT body PRESENT (non-nil) Players field, including an
 		// explicit empty `players: []` payload to CLEAR the roster.
 		// AdminParticipants uses `{ ...c, players: np }` to either
@@ -1038,7 +1038,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// participants."
 		participantsChanged := false
 		// Tier-2 near-duplicate warnings (non-blocking). Computed server-side
-		// so the PUT roster path — the SPA's primary import flow — is the
+		// so the PUT roster path, the SPA's primary import flow, is the
 		// authoritative source; attached to the response below.
 		nearDupWarnings := []helper.NearDupWarning{}
 		if comp.Players != nil {
@@ -1049,7 +1049,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			nearDupWarnings = helper.FindNearDupWarnings(entries)
 			if err := store.SaveParticipants(id, comp.Players); err != nil {
 				// Tier-1: a perfect (name, dojo) duplicate is a client error,
-				// not a server fault — surface it as 409 so the operator sees
+				// not a server fault, surface it as 409 so the operator sees
 				// which entry collided.
 				if errors.Is(err, state.ErrDuplicateName) {
 					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
@@ -1066,7 +1066,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if err := store.SaveSeeds(id, assignments); err != nil {
 				fmt.Printf("Warning: failed to save seeds: %v\n", err)
 			}
-			// Deferred HasParticipantIDs flip — runs ONLY after the
+			// Deferred HasParticipantIDs flip, runs ONLY after the
 			// participants file lands successfully. See the roster-only
 			// branch in the transform above for the pre-fix bug shape
 			// (flag committed before save → mismatch on disk when save
@@ -1075,7 +1075,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// a consistent (flag, file) pair.
 			//
 			// mp-p7n / Copilot PR #185 round-6: this flip is now part
-			// of the roster-write contract — not best-effort. With
+			// of the roster-write contract, not best-effort. With
 			// loadParticipantsNoLock's default branch keyed off
 			// Competition.HasParticipantIDs, a stale `false` flag on
 			// disk causes every subsequent no-hint reader (viewer
@@ -1085,12 +1085,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// continue" rationale was based on the older readers that
 			// derived the hint per-record from uuidRE; that's no
 			// longer how the load works. If the flip fails, return
-			// 500 so the operator retries (idempotent — the same body
+			// 500 so the operator retries (idempotent, the same body
 			// re-applied will re-save the file and re-attempt the
 			// flip).
 			if len(comp.Players) > 0 {
 				if fierr := flipHasParticipantIDs(store, id); fierr != nil {
-					fmt.Printf("Warning: PUT /api/competitions/%s — failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
+					fmt.Printf("Warning: PUT /api/competitions/%s, failed to flip HasParticipantIDs after SaveParticipants: %v\n", id, fierr)
 					c.JSON(http.StatusInternalServerError, gin.H{
 						"error": "roster saved but failed to update HasParticipantIDs flag; retry the request (idempotent): " + fierr.Error(),
 					})
@@ -1105,7 +1105,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Re-load to return the actual on-disk state (with non-settings
 		// fields preserved from current) rather than the partial body.
 		// LoadCompetition doesn't repopulate Players from participants.csv,
-		// so we ALWAYS need to populate Players on the response — otherwise
+		// so we ALWAYS need to populate Players on the response, otherwise
 		// admin.jsx's updateCompetition merges `{ ...c, ...updated }` with
 		// `updated.players: null` (Go nil slice → JSON null), wiping the
 		// frontend's local roster and crashing render paths that read
@@ -1117,13 +1117,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if comp.Players != nil {
 			// Roster-PUT: re-load from disk so the response reflects what
-			// actually landed in participants.csv — the canonical on-disk
+			// actually landed in participants.csv, the canonical on-disk
 			// shape after the save round-trip (merged seeds, tag column,
 			// any empty-id rows that the saver minted a fresh UUID for).
 			// mp-p7n: client-supplied ids (UUID or not) are preserved
 			// verbatim on save, and the loader strips column 0 by trusting
 			// HasParticipantIDs, so the re-loaded ids match what the client
-			// sent — no normalisation churn.
+			// sent, no normalisation churn.
 			//
 			// AdminParticipants's clear-roster path sends [] and the
 			// re-loaded roster will also be [] (LoadParticipants returns
@@ -1133,12 +1133,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// mp-p7n: pass HasIDs=&true explicitly when we just
 			// persisted a non-empty roster. We can rely on the
 			// HasParticipantIDs flag being already set on disk by
-			// this point (round-6 made the flip part of the contract
-			// — flip failures return 500 above and never reach this
+			// this point (round-6 made the flip part of the contract,
+			// flip failures return 500 above and never reach this
 			// reload), so the loader's default branch would resolve
 			// the same way. The explicit hint is purely declarative:
 			// it pins the call-site invariant ("we just wrote a non-
-			// empty roster — every row has an id in column 0") at
+			// empty roster, every row has an id in column 0") at
 			// the reader, so future refactors that move or weaken
 			// the flip guarantee can't silently regress this reload
 			// to the no-hint auto-detect path.
@@ -1150,11 +1150,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if players, lerr := store.LoadParticipantsOpt(id, updated.WithZekkenName, loadOpts); lerr == nil {
 				updated.Players = players
 			} else {
-				fmt.Printf("Warning: PUT /api/competitions/%s — failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
+				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
 			}
 		} else {
-			// Settings-only PUT — load the on-disk roster for the
+			// Settings-only PUT, load the on-disk roster for the
 			// response so the merge doesn't push null into local state.
 			// Falling back to an empty slice on load failure is safer
 			// than nil (which JSON-encodes as null).
@@ -1210,7 +1210,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// a TOCTOU window: a concurrent
 		// MaybeAutoCompletePools (triggered by a score-save from the
 		// last pool match) could move Status to "complete" between
-		// our read and write — admin's "invalidate" would then
+		// our read and write, admin's "invalidate" would then
 		// silently revert to "complete".
 		var compOut *state.Competition
 		var statusErr error
@@ -1276,7 +1276,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// A pools competition that generated zero matches (e.g. single
 		// participant) has nothing to score, so trip the auto-complete check
 		// at start time. The non-zero case will trip via score handlers.
-		// Same sanitized-header contract as tryAutoCompletePools — see
+		// Same sanitized-header contract as tryAutoCompletePools, see
 		// AutoCompleteErrorHeader/Value in hub.go.
 		if outcome, err := eng.MaybeAutoCompletePools(id); err != nil {
 			log.Printf("MaybeAutoCompletePools(%s) after start: %v", id, err)
@@ -1354,7 +1354,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// LoadCompetition + saveCompetitionWithPlayers sequence had
 		// a TOCTOU window where a concurrent invalidate (or a score-
 		// save's MaybeAutoCompletePools) could move Status between
-		// our read and write — losing one of the two mutations.
+		// our read and write, losing one of the two mutations.
 		var compOut *state.Competition
 		var statusErr error
 		var notFoundFlag bool
@@ -1440,7 +1440,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
 			return
 		}
-		// Absolute overflow guard — defense-in-depth against weird
+		// Absolute overflow guard, defense-in-depth against weird
 		// stale-pool or LoadPools-error edge cases. The real semantic
 		// validation against the pool's actual size happens below.
 		if req.Rank > helper.MaxRankOverride {
@@ -1462,10 +1462,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Pool-size validation: rank within a pool is bounded by the
 		// number of players in that pool. Load the comp's pools and
-		// look up the target pool by name (the URL :poolId matches
+		// look up the target pool by name (the URL: poolId matches
 		// Pool.PoolName). Pre-fix, the only check was an absolute 1000
 		// cap which let a stale/hand-crafted request store
-		// rank=500 against a 4-player pool — meaningless override
+		// rank=500 against a 4-player pool, meaningless override
 		// values were silently accepted. Cost: one LoadPools per
 		// override request. Rank overrides are rare admin actions, so
 		// the extra read is negligible.

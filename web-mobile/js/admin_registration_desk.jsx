@@ -1,4 +1,4 @@
-// Registration Desk — cross-competition check-in surface for operators (mp-25bk).
+// Registration Desk: cross-competition check-in surface for operators (mp-25bk).
 //
 // Reached from the Admin dashboard "Registration desk" card. Gathers every
 // competition's roster into one place so the desk never has to hop between
@@ -14,12 +14,12 @@
 //
 // Backend facts this relies on (see internal/mobileapp/handlers_participants.go):
 //   - check-in (PUT/DELETE/bulk) is NOT status-gated and NOT gated on
-//     checkInEnabled — anyone can be checked in for any competition at any time
+//     checkInEnabled: anyone can be checked in for any competition at any time
 //     (latecomers included).
 //   - walk-up add (POST single) needs the elevated password and only works
 //     while a competition is in "setup" status.
 //
-// SSE: when this view is mounted, AdminApp renders ONLY this page — neither the
+// SSE: when this view is mounted, AdminApp renders ONLY this page: neither the
 // dashboard's nor the competition-view's SSE subscription is active. So this
 // page owns its own freshness: optimistic local writes for snappy feedback, a
 // participants_updated subscription that reconciles other desks' changes, and
@@ -33,7 +33,7 @@ const StatusBadgeRD = window.StatusBadge;
 const pluralizeRD = window.pluralize;
 
 // ---------------------------------------------------------------------------
-// Pure helpers (no React) — kept module-scoped so they're unit-testable.
+// Pure helpers (no React): kept module-scoped so they're unit-testable.
 // ---------------------------------------------------------------------------
 
 // Shared normalization for fuzzy matching and person identity. Falls back to a
@@ -54,7 +54,7 @@ function rdPersonKey(p) {
 // optimistic-update matching, which must use the same value symmetrically).
 // Prefers the stable UUID; for legacy UUID-less rows it falls back to the
 // composite "name|dojo" key the server resolves on (resolveParticipantIndex in
-// internal/state/participants.go) — the (name, dojo) pair, not name alone, is
+// internal/state/participants.go): the (name, dojo) pair, not name alone, is
 // the uniqueness invariant. Kept inline (not via window.checkinPid) so the
 // standalone unit tests work under vitest, where window helpers are absent;
 // keep it identical to checkinPid in data.jsx.
@@ -65,7 +65,7 @@ function rdPid(p) {
 // Subsequence score for one token against a normalized haystack. Returns null
 // when the token isn't even a subsequence; otherwise a score where lower is a
 // better match (contiguous substrings beat scattered subsequences, and earlier
-// positions beat later ones). This is what makes the search genuinely fuzzy —
+// positions beat later ones). This is what makes the search genuinely fuzzy:
 // "tnk" finds "Tanaka", "sato a" finds "Aiko Sato".
 function rdTokenScore(needle, hay) {
   if (!needle) return 0;
@@ -194,12 +194,12 @@ function RdPencilIcon() {
 }
 
 // ---------------------------------------------------------------------------
-// Player-tag pill — the hand-over element. Loud for individuals' numbers and
+// Player-tag pill: the hand-over element. Loud for individuals' numbers and
 // team names; nothing before the draw assigns a number (no placeholder noise).
 // ---------------------------------------------------------------------------
 function RdPlayerTag({ comp, player, size }) {
   const tag = rdPlayerTag(comp, player);
-  // Before the draw there's no number to hand over — render nothing rather than
+  // Before the draw there's no number to hand over: render nothing rather than
   // a "not assigned yet" placeholder.
   if (tag.kind === "pending") return null;
   const cls = `rd-tag rd-tag--${tag.kind}${size === "lg" ? " rd-tag--lg" : ""}`;
@@ -211,7 +211,7 @@ function RdPlayerTag({ comp, player, size }) {
 }
 
 // ---------------------------------------------------------------------------
-// Rail — competition selector. Pinned "All competitions" entry on top, then one
+// Rail: competition selector. Pinned "All competitions" entry on top, then one
 // row per competition with a check-in progress meter.
 // ---------------------------------------------------------------------------
 function RdRail({ comps, allStats, selected, onSelect }) {
@@ -256,7 +256,7 @@ function RdRail({ comps, allStats, selected, onSelect }) {
 }
 
 // ---------------------------------------------------------------------------
-// Other-competition chips — shown on a row to reveal the person's footprint.
+// Other-competition chips: shown on a row to reveal the person's footprint.
 // Each chip carries its own check status; clicking checks them into that
 // competition too (the cross-competition convenience).
 // ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
             disabled={busy}
-            title={checked ? `Checked in — ${comp.name}` : `Check in for ${comp.name}`}
+            title={checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`}
             onClick={() => !checked && onToggle(comp.id, rdPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -371,7 +371,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
 }
 
 // ---------------------------------------------------------------------------
-// Walk-up add — inline panel. Setup-only (the add endpoint rejects started
+// Walk-up add: inline panel. Setup-only (the add endpoint rejects started
 // competitions). For team competitions the "name" is the team name.
 // ---------------------------------------------------------------------------
 function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
@@ -397,7 +397,7 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
       if (!isTeam && dan.trim()) payload.danGrade = dan.trim();
       if (!isTeam && comp.withZekkenName && zekken.trim()) payload.displayName = zekken.trim();
       const added = await window.API.addParticipant(comp.id, payload, password, admin);
-      // Check them in straight away — they're standing at the desk.
+      // Check them in straight away: they're standing at the desk.
       let checkInOk = false;
       try {
         await window.API.toggleCheckIn(comp.id, rdPid(added), true, password);
@@ -450,7 +450,7 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
 }
 
 // ---------------------------------------------------------------------------
-// Inline edit — fix a wrong name / dojo / zekken on an existing entry without
+// Inline edit: fix a wrong name / dojo / zekken on an existing entry without
 // leaving the desk. Operates on one (competition, participant); editing here
 // changes only that competition's record (the per-competition data model). Uses
 // the same elevated-password gate and replace endpoint as the Participants tab.
@@ -553,7 +553,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   const mountedRef = useRefRD(true);
   useEffectRD(() => () => { mountedRef.current = false; }, []);
 
-  // Autofocus search on mount and whenever the selected competition changes —
+  // Autofocus search on mount and whenever the selected competition changes:
   // the desk's first move is always to type a name.
   useEffectRD(() => { searchRef.current && searchRef.current.focus(); }, [selected]);
 
@@ -577,7 +577,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     if (!window.API || typeof window.API.subscribeToEvents !== "function") return;
     let timer = null;
     const fire = () => {
-      // Don't reconcile while our own writes are mid-flight — wait for them to
+      // Don't reconcile while our own writes are mid-flight: wait for them to
       // settle so the refetch can't transiently revert an optimistic check-in.
       if (inFlightRef.current > 0) { timer = setTimeout(fire, 300); return; }
       timer = null;
@@ -631,7 +631,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     }
   };
 
-  // Core "set this person's check-in across every competition they entered" —
+  // Core "set this person's check-in across every competition they entered":
   // optimistic local writes + parallel API calls, returning the failure count.
   // No busy/refresh side effects so callers can coordinate one bulk operation
   // around many people without each clearing the shared busy flag early.
@@ -657,7 +657,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const { failed, total } = await checkPersonEntries(rec, makeChecked);
       if (total === 0) return;
-      if (failed) showToast(`${failed} of ${total} check-ins failed — reloading`, "error");
+      if (failed) showToast(`${failed} of ${total} check-ins failed: reloading`, "error");
       else if (makeChecked) {
         announceHandoff(rec.name, rec.entries.map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
       }
@@ -669,7 +669,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 
   // Bulk-check a whole dojo of people into all their competitions ("all" mode).
   // One coordinated operation: busy is set once, every person's writes run
-  // concurrently, and a single refresh reconciles — instead of N independent
+  // concurrently, and a single refresh reconciles: instead of N independent
   // togglePerson calls each racing the shared busy flag.
   const bulkCheckPeople = async (recs) => {
     const pending = recs.filter((rec) => rdPresence(rec.entries) !== "all");
@@ -679,7 +679,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
       const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
-      if (failed) showToast(`${failed} check-in(s) failed — reloading`, "error");
+      if (failed) showToast(`${failed} check-in(s) failed: reloading`, "error");
       await refresh();
     } finally {
       inFlightRef.current -= 1;
@@ -696,9 +696,9 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const res = await window.API.bulkCheckIn(compId, pids, password);
       // A 200 can still report unmatched ids (e.g. legacy name-keyed pids the
-      // server couldn't resolve) — surface that rather than silently dropping it.
+      // server couldn't resolve): surface that rather than silently dropping it.
       if (res && res.notFound && res.notFound.length) {
-        showToast(`${res.notFound.length} not matched — reloading`, "error");
+        showToast(`${res.notFound.length} not matched: reloading`, "error");
       }
       await refresh();
     } catch (e) {
@@ -780,7 +780,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     return { present: players.filter((p) => p.checkedIn).length, total: players.length, noun: comp && comp.kind === "team" ? "teams" : "competitors" };
   }, [selected, comps, allStats]);
 
-  // Enter on the search box checks in the single top hit — the arrival loop.
+  // Enter on the search box checks in the single top hit: the arrival loop.
   const onSearchKeyDown = (e) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
@@ -894,7 +894,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
                 return (
                   <div className="rd-handoff" role="status" aria-live="polite">
                     <button type="button" className="rd-handoff__close" aria-label="Dismiss" onClick={() => setHandoff(null)}>×</button>
-                    <div className="rd-handoff__lead"><RdCheckIcon /> Checked in — <strong>{handoff.name}</strong></div>
+                    <div className="rd-handoff__lead"><RdCheckIcon /> Checked in : <strong>{handoff.name}</strong></div>
                     {visibleTags.length > 0 && (
                       <div className="rd-handoff__tags">
                         {visibleTags.map((t, i) => (
@@ -976,7 +976,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 }
 
 // ---------------------------------------------------------------------------
-// Roster list — flat or grouped-by-dojo, with empty / no-match / all-done states.
+// Roster list: flat or grouped-by-dojo, with empty / no-match / all-done states.
 // ---------------------------------------------------------------------------
 function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp, onOpenWalkUp, onPrimary, onToggleChip, onEdit, onBulkDojo }) {
   const rowOf = (row, isLast) => {
@@ -1048,7 +1048,7 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
   if (groupByDojo) {
     const groups = new Map();
     rows.forEach((row) => {
-      const dojo = (mode === "all" ? row.rec.dojo : row.player.dojo) || "—";
+      const dojo = (mode === "all" ? row.rec.dojo : row.player.dojo) || ":";
       if (!groups.has(dojo)) groups.set(dojo, []);
       groups.get(dojo).push(row);
     });

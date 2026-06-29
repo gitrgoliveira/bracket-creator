@@ -1,4 +1,4 @@
-// mp-yin4: ?playerNumber= deep-link resolution in the public viewer.
+// mp-yin4: playerNumber deep-link resolution in the public viewer.
 import { describe, it, expect } from 'vitest';
 import { resolveDeepLink } from '../viewer.jsx';
 
@@ -9,7 +9,7 @@ const roster = [
   { id: 'uuid-004', name: 'Dave Ito',     number: '' },   // no prefix
 ];
 
-describe('resolveDeepLink — ?playerNumber=', () => {
+describe('resolveDeepLink: ?playerNumber=', () => {
   it('resolves a numbered player by exact match', () => {
     const result = resolveDeepLink('?playerNumber=K1', roster);
     expect(result).not.toBeNull();

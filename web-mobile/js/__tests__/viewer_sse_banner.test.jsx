@@ -29,7 +29,7 @@ function findByClass(tree, cls) {
   });
 }
 
-// Minimal tournament fixture — empty competitions so useMemo filters are no-ops.
+// Minimal tournament fixture: empty competitions so useMemo filters are no-ops.
 const TOURNAMENT = { name: 'Test Tournament', date: '10-06-2026', venue: 'Budokan', competitions: [] };
 const NOOP = () => {};
 

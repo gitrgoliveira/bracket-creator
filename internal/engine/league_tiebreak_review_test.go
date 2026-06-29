@@ -10,7 +10,7 @@ import (
 )
 
 // TestLeagueTiebreakCandidates_EmptyUntilRegularComplete pins the Copilot fix:
-// candidates must be empty while any regular league match is still pending —
+// candidates must be empty while any regular league match is still pending,
 // otherwise provisional mid-league standings (everyone tied at 0 points) would
 // surface a spurious "everyone tied" group and pop the banner prematurely.
 func TestLeagueTiebreakCandidates_EmptyUntilRegularComplete(t *testing.T) {

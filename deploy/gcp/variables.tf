@@ -6,7 +6,7 @@ variable "project" {
 variable "region" {
   description = <<-EOT
     GCP region for the e2-micro instance.  MUST be one of us-west1,
-    us-central1, or us-east1 — these are the only regions where the e2-micro
+    us-central1, or us-east1, these are the only regions where the e2-micro
     is part of the Always-Free tier.  Any other region silently incurs charges.
   EOT
   type        = string
@@ -40,7 +40,7 @@ variable "zone" {
 variable "hostname" {
   description = <<-EOT
     Fully-qualified domain name for the deployment, e.g. "tournament.example.com".
-    Caddy uses this to obtain a Let's Encrypt TLS certificate — the DNS A record
+    Caddy uses this to obtain a Let's Encrypt TLS certificate, the DNS A record
     must point at the instance IP before the stack starts.
   EOT
   type        = string
@@ -49,7 +49,7 @@ variable "hostname" {
     # Must begin with a letter: the hostname is also used to derive GCP
     # resource names (RFC 1035), which may not start with a digit.
     condition     = can(regex("^[a-zA-Z][a-zA-Z0-9.-]*[a-zA-Z0-9]$", var.hostname))
-    error_message = "hostname must be a valid FQDN beginning with a letter (letters, digits, dots, and hyphens only — no spaces, newlines, or shell metacharacters)."
+    error_message = "hostname must be a valid FQDN beginning with a letter (letters, digits, dots, and hyphens only, no spaces, newlines, or shell metacharacters)."
   }
 }
 
@@ -85,7 +85,7 @@ variable "tournament_password_hash" {
     Bcrypt hash of the admin password, used when lock_password = true.
     Generate with: htpasswd -bnBC 12 "" '<password>' | tr -d ':\n'
     This value is written to app.env (chmod 600, root-owned) on the VM.
-    Mark as sensitive in your tfvars — never commit the plaintext.
+    Mark as sensitive in your tfvars, never commit the plaintext.
   EOT
   type        = string
   default     = ""
@@ -96,7 +96,7 @@ variable "sse_max_clients" {
   description = <<-EOT
     Maximum concurrent live-update (SSE) connections. Application default is
     5000. On the e2-micro the practical limit for a public event is the free
-    monthly network allowance (1 GB egress) rather than this cap — see README.
+    monthly network allowance (1 GB egress) rather than this cap, see README.
   EOT
   type        = number
   default     = 5000
@@ -157,7 +157,7 @@ variable "ssh_pubkey" {
 variable "operator_cidrs" {
   description = <<-EOT
     List of CIDR ranges allowed to reach port 22 (SSH).
-    Empty list allows SSH from 0.0.0.0/0 — acceptable for personal use;
+    Empty list allows SSH from 0.0.0.0/0, acceptable for personal use;
     tighten for production deployments.
     Ports 80 and 443 are always open to 0.0.0.0/0.
   EOT
@@ -170,7 +170,7 @@ variable "reserve_static_ip" {
     Reserve a static external IP address.  The address is free while attached
     to a running instance; it is billed (~$0.01/hr) if the instance is stopped
     and the IP remains reserved.  Without a static IP, the instance's external
-    IP changes on each stop/start — requiring a DNS update and a new TLS cert.
+    IP changes on each stop/start, requiring a DNS update and a new TLS cert.
   EOT
   type        = bool
   default     = false

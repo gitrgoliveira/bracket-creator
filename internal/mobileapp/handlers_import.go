@@ -33,7 +33,7 @@ type ImportManifestComp struct {
 	Mirror         bool     `yaml:"mirror"`
 	StartTime      string   `yaml:"start_time"`
 	Date           string   `yaml:"date"`
-	// SwissRounds — number of Swiss rounds to play when format=swiss
+	// SwissRounds, number of Swiss rounds to play when format=swiss
 	// (FR-050a). Ignored for other formats.
 	SwissRounds int `yaml:"swiss_rounds"`
 	// File names relative to the uploaded set
@@ -114,7 +114,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// Pre-trim Name so the ImportResult returned to the client matches
 	// the canonical record we save. Pre-fix: res.Name = entry.Name kept
 	// any leading/trailing whitespace from the manifest, so the import
-	// API reported "  Cup  " while the persisted record was "Cup" —
+	// API reported "  Cup  " while the persisted record was "Cup",
 	// admin UI then showed two different names for the same competition.
 	trimmedName := strings.TrimSpace(entry.Name)
 	res := ImportResult{ID: entry.ID, Name: trimmedName}
@@ -142,7 +142,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// The POST/PUT handlers in handlers_competition.go trim
 	// comp.Name + comp.NumberPrefix; importCompetition bypasses those
 	// handlers (writes via store.SaveCompetitionChanged directly), so
-	// it needs its own trim. Cross-file guard symmetry —
+	// it needs its own trim. Cross-file guard symmetry,
 	// three sibling write paths, all three trim.
 	comp := &state.Competition{
 		ID:             entry.ID,
@@ -176,10 +176,10 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// PUT /competitions/:id handlers, which call validateCompetitionCourts
 	// to reject empty / multi-character / >26-court manifests. Pre-fix the
 	// import path bypassed this check and could land a Competition with
-	// court labels that no other write path would accept — e.g. a manifest
+	// court labels that no other write path would accept, e.g. a manifest
 	// row with 30 courts or court="AA" would persist via SaveCompetition
 	// here while the same value via the REST API would 400. Empty courts
-	// are permitted here — resolveCompetitionCourts (below, once the
+	// are permitted here, resolveCompetitionCourts (below, once the
 	// tournament is loaded) inherits the tournament's courts, matching the
 	// POST/PUT handlers. Per-row res.Error to match the other patterns.
 	if err := validateCompetitionCourts(comp.Courts); err != nil {
@@ -189,7 +189,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Reject non-canonical Date format (see validateDateDMY in
 	// handlers_tournament.go). Per-row res.Error to match the existing
-	// missing-id / invalid-id / save-error patterns — doesn't HTTP-fail
+	// missing-id / invalid-id / save-error patterns, doesn't HTTP-fail
 	// the batch.
 	if err := validateDateDMY(comp.Date); err != nil {
 		res.Error = err.Error()
@@ -223,7 +223,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// be rejected via the REST API. PoolFormat is not in
 	// ImportManifestComp (always ""), so only comp.Format needs checking
 	// here. FR-050a: swiss is accepted but additionally requires
-	// swissRounds >= 1 — validateSwissConfig enforces that below.
+	// swissRounds >= 1, validateSwissConfig enforces that below.
 	if _, err := validateCompetitionFormat(comp.Format, ""); err != nil {
 		res.Error = "format: " + err.Error()
 		return res
@@ -242,7 +242,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Parse participants AND seeds BEFORE saving the competition config.
 	// Pre-fix, the config was saved first and the participants parse
-	// happened after — so a malformed participants file left a half-
+	// happened after, so a malformed participants file left a half-
 	// written competition on disk (config.md present, no participants.
 	// csv). The ID-collision guard then made retries impossible: the
 	// next attempt with the same manifest ID got "already exists" even
@@ -278,14 +278,14 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 
 	// Seeds parse: mirror the participants block's error-handling pattern.
 	// Pre-fix this swallowed THREE shapes silently:
-	//   (1) entry.Seeds named a file that wasn't in the upload — user
+	//   (1) entry.Seeds named a file that wasn't in the upload, user
 	//       got SeedCount=0 with no error and assumed the import worked.
-	//   (2) parseSeedsBytes returned err != nil — currently unreachable
+	//   (2) parseSeedsBytes returned err != nil, currently unreachable
 	//       (parseSeedsBytes never produces a non-nil err) but the dead
 	//       branch documented "errors are OK to ignore" which would
 	//       silently regress the moment parseSeedsBytes started surfacing
 	//       parse failures.
-	//   (3) The file was present but parsed to zero assignments — kept
+	//   (3) The file was present but parsed to zero assignments, kept
 	//       as a soft no-op (legitimate "header-only" / "no seeds yet"
 	//       intent; symmetric with empty participants file → 0 players).
 	// Only (1) and (2) become hard errors here; (3) stays soft.
@@ -316,7 +316,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// the uniqueness check + save run under WithCompetitionRenameLock
 	// so two concurrent imports (or an import racing against a POST)
 	// can't both land competitions with the same Name. Per-row error
-	// lands in res.Error rather than aborting the batch — matches the
+	// lands in res.Error rather than aborting the batch, matches the
 	// existing missing-id / invalid-id / save-error patterns.
 	if err := store.WithCompetitionRenameLock(func() error {
 		// ID-collision check (cross-file guard symmetry with the POST
@@ -327,7 +327,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		// existing record. POST is documented as CREATE, so an
 		// existing ID is a 400-ish conflict. Retry-after-failure is
 		// safe because the participants/seeds parse above happens
-		// pre-save — a parse failure aborts the row before this guard
+		// pre-save, a parse failure aborts the row before this guard
 		// runs, so the disk stays clean and the retry's collision
 		// check passes on a never-saved ID.
 		if existing, _ := store.LoadCompetition(comp.ID); existing != nil {
@@ -352,18 +352,18 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 	// If the uniqueness check failed, res.Error was set inside the
-	// closure — abort the row before participants/seeds save below.
+	// closure, abort the row before participants/seeds save below.
 	if res.Error != "" {
 		return res
 	}
 
-	// Save participants — already parsed pre-save, so this is a pure
+	// Save participants, already parsed pre-save, so this is a pure
 	// disk write that can only fail on I/O.
 	//
 	// Atomicity: SaveCompetition above has already written config.md
 	// (the visible "this competition exists" marker, enforced by the
 	// ID-collision check at the top of the lock). If SaveParticipants
-	// or SaveSeeds below fails, the config is orphaned — and the
+	// or SaveSeeds below fails, the config is orphaned, and the
 	// ID-collision check now blocks retries with the same manifest
 	// (the row says "save participants: …" but the disk says "ID
 	// already exists" on the next attempt). Roll back the config on
@@ -380,12 +380,12 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		res.ParticipantCount = len(parsedPlayers)
 	}
 
-	// Save seeds — already parsed pre-save. Surface SaveSeeds I/O errors
+	// Save seeds, already parsed pre-save. Surface SaveSeeds I/O errors
 	// to res.Error rather than swallowing them: pre-fix `_ = SaveSeeds(...)`
 	// followed by `res.SeedCount = N` would claim N seeds imported even
 	// when disk write failed (permission denied, no space, etc.), so the
 	// admin UI showed a green "import successful" while seeds.csv was
-	// empty / missing. Mirror the SaveParticipants pattern above —
+	// empty / missing. Mirror the SaveParticipants pattern above,
 	// errors abort the row with a clear message AND roll back so a
 	// retry isn't blocked by the ID-collision check.
 	if len(parsedSeeds) > 0 {

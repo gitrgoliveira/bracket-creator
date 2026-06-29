@@ -1,4 +1,4 @@
-// Package mobileapp — handlers_eligibility.go owns the
+// Package mobileapp, handlers_eligibility.go owns the
 // `/api/competitions/:cid/competitor-status` endpoints (T091).
 //
 // GET returns every persisted status entry for the competition; POST
@@ -30,7 +30,7 @@ type CompetitorStatusRequest struct {
 
 // Validate enforces persisted-string caps on the request shape. The
 // domain.CompetitorStatus.Validate path covers presence (PlayerID,
-// Reason on ineligible) but not length — this fills that gap so a
+// Reason on ineligible) but not length, this fills that gap so a
 // 1MB reason can't bloat competitor_status.yaml.
 func (r *CompetitorStatusRequest) Validate() error {
 	if err := validateMaxLen("playerId", r.PlayerID, MaxLenEntityID); err != nil {

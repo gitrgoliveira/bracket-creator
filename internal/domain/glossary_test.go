@@ -82,12 +82,12 @@ func TestGlossaryIDsAreLowercase(t *testing.T) {
 // references via SeeAlso (the JSX renders them as nested <Term>
 // popovers); we surface any OTHER glossary term that appears in the
 // tooltip text without being declared in SeeAlso. The check is
-// best-effort — it catches "tooltip mentions ippon-shobu but SeeAlso
+// best-effort, it catches "tooltip mentions ippon-shobu but SeeAlso
 // is empty" and similar drift.
 //
 // Compound terms: when a tooltip mentions "ippon-shobu", we don't
 // also flag a missing SeeAlso entry for the bare "ippon" hit inside
-// the compound — the compound covers the volunteer's lookup path.
+// the compound, the compound covers the volunteer's lookup path.
 // We strip every SeeAlso'd compound from the tooltip before scanning
 // for bare prefixes.
 func TestGlossaryTooltipNoUntranslatedTerms(t *testing.T) {
@@ -122,7 +122,7 @@ func TestGlossaryTooltipNoUntranslatedTerms(t *testing.T) {
 	}
 }
 
-// TestGlossaryHasAtLeast22Terms is the count guard — the spec ships at
+// TestGlossaryHasAtLeast22Terms is the count guard, the spec ships at
 // least the agreed 22 terms (current count is 23 after the kachinuki-
 // exhaustion addition). A future deletion that drops below 22 should
 // fail loudly so it gets reviewed against the spec.
@@ -173,7 +173,7 @@ func TestResolveReasonHuman(t *testing.T) {
 		{"daihyosen at match", "daihyosen at r3-m1", "representative bout at match r3-m1"},
 		{"kachinuki-exhaustion at match", "kachinuki-exhaustion at k_5", "team exhausted at match k_5"},
 
-		// Bare-term fallback path — when the engine emits just the
+		// Bare-term fallback path, when the engine emits just the
 		// canonical decision name without a match context.
 		{"bare kiken", "kiken", "withdrawal"},
 		{"bare fusenpai", "fusenpai", "no-show forfeit"},
@@ -213,6 +213,6 @@ func findGlossarySpec(t *testing.T) string {
 		}
 		dir = parent
 	}
-	t.Skipf("specs/003-tournament-gap-closure/glossary.md not found from %s (gitignored in checkout — run locally with full spec tree)", filepath.Dir(file))
+	t.Skipf("specs/003-tournament-gap-closure/glossary.md not found from %s (gitignored in checkout, run locally with full spec tree)", filepath.Dir(file))
 	return ""
 }

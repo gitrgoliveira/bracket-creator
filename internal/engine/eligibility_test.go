@@ -23,7 +23,7 @@ func TestStartMatchBlockedByIneligibleCompetitor(t *testing.T) {
 
 	createTestCompetition(t, store, compID, "league", 2)
 
-	// Seed participants with explicit UUIDs — state.LoadParticipants
+	// Seed participants with explicit UUIDs, state.LoadParticipants
 	// only treats the first column as an ID when it parses as UUID v4.
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -115,7 +115,7 @@ func TestRecordDecision_KikenUndo(t *testing.T) {
 
 	t.Run("undo locked when a subsequent match has started for either side", func(t *testing.T) {
 		eng, store, compID, _, _ := setup(t)
-		// Mark Pool A-1 (Alice vs Carol) as running — that's a
+		// Mark Pool A-1 (Alice vs Carol) as running, that's a
 		// subsequent match involving Alice.
 		matches, err := store.LoadPoolMatches(compID)
 		require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	require.NoError(t, err)
 
 	// Second operator attempts kiken on Alice (decisionBy=shiro → Alice is loser) in Pool A-1.
-	// Alice is already ineligible from Pool A-0 — different match.
+	// Alice is already ineligible from Pool A-0, different match.
 	_, _, err = eng.RecordDecision(compID, "Pool A-1", "kiken", "shiro", "concurrent", nil, false)
 	require.Error(t, err)
 
@@ -239,7 +239,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 	assert.Equal(t, aliceID, alreadyErr.PlayerID)
 	assert.Equal(t, "Pool A-0", alreadyErr.MatchID)
 
-	// Same match should NOT be blocked — that's the undo path (T103).
+	// Same match should NOT be blocked, that's the undo path (T103).
 	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "re-record same match", nil, false)
 	assert.NoError(t, err, "re-recording the same match must not trigger AlreadyIneligibleError")
 
@@ -257,7 +257,7 @@ func TestRecordDecision_ConcurrentKiken(t *testing.T) {
 // TestRecordDecision_ConcurrentKikenRace verifies K2/CHK047: when two
 // goroutines race to kiken the same player on different matches, the
 // atomic check-and-set inside recordIneligibilityFromDecision serializes
-// them on the per-comp lock — exactly one succeeds and the loser sees
+// them on the per-comp lock, exactly one succeeds and the loser sees
 // *AlreadyIneligibleError. This exercises the post-pre-check race
 // window that the synchronous pre-check alone can't close.
 func TestRecordDecision_ConcurrentKikenRace(t *testing.T) {
@@ -348,7 +348,7 @@ func TestRecordDecision_FusenshoSkipsConcurrentCheck(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now record fusensho on Alice in Pool A-1. This should NOT trip the
-	// concurrent-kiken guard — fusensho doesn't write ineligibility.
+	// concurrent-kiken guard, fusensho doesn't write ineligibility.
 	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "shiro", "default win", nil, false)
 	assert.NoErrorf(t, err, "fusensho on an already-ineligible player must not trigger AlreadyIneligibleError; got %v", err)
 }
@@ -856,8 +856,8 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	// Deterministically target whoever the generator placed as SideA of the
 	// SECOND bracket match, and pre-mark that competitor ineligible from a
 	// DIFFERENT match (the first match). This is what makes the test always
-	// exercise the BRACKET rollback path (recordBracketMatchResultTx) — the
-	// path the nil-preserve bug lives in — regardless of how the generator
+	// exercise the BRACKET rollback path (recordBracketMatchResultTx), the
+	// path the nil-preserve bug lives in, regardless of how the generator
 	// seeds sides. (The earlier version fell back to a pool-match rollback
 	// when Alice happened not to land in the second match, which silently
 	// stopped proving the bracket behaviour.)
@@ -895,7 +895,7 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 
 	// The bracket match must have been rolled back. Critically, both
 	// nil-preserve fields written as part of the failed score attempt
-	// must NOT persist — the prior had nil SubResults and (via HanteiPtr)
+	// must NOT persist, the prior had nil SubResults and (via HanteiPtr)
 	// nil DecidedByHantei, and the rollback must normalize those to an
 	// explicit empty slice / false to clear them.
 	bracket, err = store.LoadBracket(compID)
@@ -964,7 +964,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 		}))
 
 		// A-0: Alice vs Bob (Running). A-1: Charlie vs Bob (Scheduled).
-		// Bob (SideB of A-0) is running — starting A-1 should be blocked.
+		// Bob (SideB of A-0) is running, starting A-1 should be blocked.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
 			{ID: "A-1", SideA: "Charlie", SideB: "Bob", Status: state.MatchStatusScheduled},
@@ -1129,7 +1129,7 @@ func TestStartMatch_CourtExclusivity(t *testing.T) {
 			{ID: "P-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
-		// P-1 is on court A which is free — but Alice is also in P-0 on court B.
+		// P-1 is on court A which is free, but Alice is also in P-0 on court B.
 		// Court check passes, but player simultaneity should block it.
 		err := eng.StartMatch(compID, "P-1")
 		require.Error(t, err, "Alice is already fighting; StartMatch should return an error")
@@ -1202,7 +1202,7 @@ func TestStartMatchTx_CourtExclusivity(t *testing.T) {
 
 		// StartMatchTx only performs the intra-comp check; it should NOT return
 		// ErrCourtBusy for a cross-comp conflict (that is caught pre-tx by
-		// CheckCrossCompCourtBusy — tested below).
+		// CheckCrossCompCourtBusy, tested below).
 		var engErr error
 		txErr := store.WithTransaction("comp2", func(tx state.StoreTx) error {
 			engErr = eng.StartMatchTx(tx, "comp2", "P-0")
@@ -1235,7 +1235,7 @@ func TestCheckCrossCompCourtBusy(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches("comp2", []state.MatchResult{
 			{ID: "P-0", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B"},
 		}))
-		// Court A is busy in comp1 but comp2's match is on court B — no conflict.
+		// Court A is busy in comp1 but comp2's match is on court B, no conflict.
 		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp2", "P-0"))
 	})
 

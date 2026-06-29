@@ -14,7 +14,7 @@
 ARG GO_VERSION=1.26.4
 
 # ---------------------------------------------------------------------------
-# Build stage — identical to Dockerfile.mobile
+# Build stage, identical to Dockerfile.mobile
 # ---------------------------------------------------------------------------
 FROM golang:${GO_VERSION} AS builder
 
@@ -46,7 +46,7 @@ COPY . .
 RUN make go/build
 
 # ---------------------------------------------------------------------------
-# Final stage — Debian slim + LibreOffice headless
+# Final stage, Debian slim + LibreOffice headless
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim
 

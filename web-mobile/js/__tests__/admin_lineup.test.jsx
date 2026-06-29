@@ -8,7 +8,7 @@ import { canRevise, rosterFor, mergeRosterWithAssigned, teamIdOf, positionsForSi
 // camelCase/PascalCase tolerance (rosterFor, teamIdOf) without
 // mounting the component (the React mock in vitest.setup.js doesn't
 // run hooks for real, so component-level rendering tests don't pay
-// their way here — pure helpers do).
+// their way here: pure helpers do).
 
 describe('canRevise', () => {
   // window.compMatches is the projection helper viewer.jsx installs to
@@ -102,7 +102,7 @@ describe('canRevise', () => {
     });
 
     it('returns false when current-round matches are scheduled but not yet played', () => {
-      // All roundIndex=0 matches still scheduled — round not complete → block.
+      // All roundIndex=0 matches still scheduled: round not complete → block.
       window.compMatches = () => [
         { id: 'm1', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
         { id: 'm2', phase: 'bracket', roundIndex: 0, status: 'scheduled' },
@@ -147,8 +147,8 @@ describe('canRevise', () => {
 
 describe('rosterFor', () => {
   // Player team objects historically come in two casings:
-  //   - Go JSON marshaller default: `Metadata` (PascalCase) — older builds
-  //   - api_serializers.jsx normalised: `metadata` (camelCase) — current
+  //   - Go JSON marshaller default: `Metadata` (PascalCase): older builds
+  //   - api_serializers.jsx normalised: `metadata` (camelCase): current
   // The helper must accept either and fall back to empty array.
 
   it('accepts camelCase metadata', () => {
@@ -220,7 +220,7 @@ describe('mergeRosterWithAssigned', () => {
     const base = ['Tanaka', 'Sato'];
     const lineup = { positions: { p1: 'tanaka', p2: 'Newcomer', p3: 'NEWCOMER' } };
     // "tanaka" collides with base "Tanaka"; second "NEWCOMER" collides with the
-    // first "Newcomer" — both dropped.
+    // first "Newcomer": both dropped.
     expect(mergeRosterWithAssigned(base, lineup)).toEqual(['Tanaka', 'Sato', 'Newcomer']);
   });
 
@@ -258,7 +258,7 @@ describe('mergeRosterWithAssigned', () => {
 describe('teamIdOf', () => {
   // Stable team identifier resolution. The backend uses player.id (UUID
   // assigned at first persist), older code paths emit `ID`, and a
-  // pre-persist team has neither — fall back to name.
+  // pre-persist team has neither: fall back to name.
 
   it('returns team.id when present (canonical case)', () => {
     expect(teamIdOf({ id: 'uuid-1', name: 'Tora A' })).toBe('uuid-1');
@@ -296,7 +296,7 @@ describe('teamIdOf', () => {
 
   it('treats empty-string id as falsy and falls through to name', () => {
     // The chain uses `||` so empty strings short-circuit to the next
-    // option — necessary because the backend has been observed to emit
+    // option: necessary because the backend has been observed to emit
     // an empty `id` on pre-persist teams alongside a real Name.
     expect(teamIdOf({ id: '', name: 'Tora A' })).toBe('Tora A');
   });
@@ -310,7 +310,7 @@ describe('positionsForSize', () => {
   it('returns the canonical FIK 5-position labels for teamSize=5', () => {
     // U1: each FIK position carries an optional `termId` so the label
     // can be wrapped in a <Term> tooltip on render. Numeric sizes
-    // (positionsForSize(3) etc.) intentionally omit termId — there is
+    // (positionsForSize(3) etc.) intentionally omit termId: there is
     // no canonical kendo term for "Match 3".
     expect(positionsForSize(5)).toEqual([
       { key: 'senpo', label: 'Senpo', termId: 'senpo' },

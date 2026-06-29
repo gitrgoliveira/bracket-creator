@@ -21,7 +21,7 @@ import (
 //   - "bottomTie": Alpha 1st, Beta 2nd; Gamma and Delta share 3rd (tied at bottom).
 //   - "threeWay":  Alpha, Beta, Gamma all tied at the top; Delta last.
 //   - "belowBand": Alpha 1st, Beta 2nd; Gamma and Delta share 5th (more than 4 teams needed
-//     for this — use sixTeamLeagueComp for that scenario instead).
+//     for this, use sixTeamLeagueComp for that scenario instead).
 func setupTeamLeagueComp(t *testing.T, compID string, scenario string, opts ...func(*state.Competition)) (*Engine, *state.Store) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
@@ -83,7 +83,7 @@ func setupTeamLeagueComp(t *testing.T, compID string, scenario string, opts ...f
 		// Make standings different by giving Alpha one extra win over everyone else.
 		// The match set above already achieves this: Alpha(3W) > Beta(2W) > Gamma(1W) > Delta(0W).
 	case "bottomTie":
-		// Alpha 1st, Beta 2nd; Gamma and Delta share 3rd (both 0 wins, all losses — drew each other).
+		// Alpha 1st, Beta 2nd; Gamma and Delta share 3rd (both 0 wins, all losses, drew each other).
 		matches = teamLeagueMatchSet([]teamLeagueResult{
 			{"Pool A-0", "Alpha", "Beta", "Alpha", "", [][]string{{"Alpha", "Beta", "Alpha", ""}, {"Alpha", "Beta", "Alpha", ""}}},
 			{"Pool A-1", "Alpha", "Gamma", "Alpha", "", [][]string{{"Alpha", "Gamma", "Alpha", ""}, {"Alpha", "Gamma", "Alpha", ""}}},
@@ -172,7 +172,7 @@ func TestLeagueTiebreakCandidates_NonLeague(t *testing.T) {
 }
 
 // TestLeagueTiebreakCandidates_IndividualLeague verifies that an individual-format
-// league (TeamSize==0) returns no candidates — league playoff is team-only.
+// league (TeamSize==0) returns no candidates, league playoff is team-only.
 func TestLeagueTiebreakCandidates_IndividualLeague(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -248,7 +248,7 @@ func TestLeagueTiebreakCandidates_BottomTieTwoThirdsFalse(t *testing.T) {
 }
 
 // TestLeagueTiebreakCandidates_BottomTieTwoThirdsTrue verifies that a tie at
-// positions 3–4 is NOT consequential when LeagueTwoThirdPlaces is true — both
+// positions 3–4 is NOT consequential when LeagueTwoThirdPlaces is true, both
 // teams share 3rd place and no decider is needed.
 func TestLeagueTiebreakCandidates_BottomTieTwoThirdsTrue(t *testing.T) {
 	eng, _ := setupTeamLeagueComp(t, "league-bottomtie-twothirds", "bottomTie",
@@ -264,7 +264,7 @@ func TestLeagueTiebreakCandidates_BottomTieTwoThirdsTrue(t *testing.T) {
 }
 
 // TestLeagueTiebreakCandidates_BelowBandWithTopN4 verifies that a tie at positions
-// 5–6 is NOT consequential when TopN=4 — those teams sit outside the tie-break band.
+// 5–6 is NOT consequential when TopN=4, those teams sit outside the tie-break band.
 // Uses a 6-team league where Alpha/Beta/Gamma/Delta occupy the top 4 and
 // Epsilon/Zeta tie at 5th.
 func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
@@ -525,8 +525,8 @@ func TestEffectiveTopN(t *testing.T) {
 }
 
 // TestIsConsequentialTie_BandBoundaryEdgeCases focuses on the exact boundary
-// where MinPosition == TopN (still consequential — within the band) vs
-// MinPosition == TopN+1 (NOT consequential — one step outside), for both
+// where MinPosition == TopN (still consequential, within the band) vs
+// MinPosition == TopN+1 (NOT consequential, one step outside), for both
 // TopN=3 and TopN=4.
 func TestIsConsequentialTie_BandBoundaryEdgeCases(t *testing.T) {
 	tests := []struct {
@@ -705,7 +705,7 @@ func TestLeagueTiebreakCandidates_BelowBandSharedRanks(t *testing.T) {
 			candidates, err := eng.LeagueTiebreakCandidates(compID)
 			require.NoError(t, err)
 			assert.Empty(t, candidates,
-				"5th/6th tie is below topN=%d band — league should complete with shared ranks", topN)
+				"5th/6th tie is below topN=%d band, league should complete with shared ranks", topN)
 		})
 	}
 }

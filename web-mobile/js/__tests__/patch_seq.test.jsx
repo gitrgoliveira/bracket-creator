@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { applyPatchOrdered, checkSeqGap } from '../patch.jsx';
 
-// T218 / Phase 12.D — gap detection on the SSE consumer side.
+// T218 / Phase 12.D: gap detection on the SSE consumer side.
 //
 // The backend now stamps every envelope with a monotonic `seq`
 // (mobileapp.SSEEvent.Seq, T215). The frontend wraps applyPatch with
@@ -58,7 +58,7 @@ describe('applyPatchOrdered', () => {
       seq: 10,
       data: { result: { id: "p1", winner: "Alice" } },
     }, state, onGap);
-    // Still applies the current patch — the latest state is
+    // Still applies the current patch. The latest state is
     // authoritative even when intermediate events were lost.
     expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
     expect(state.lastSeq).toBe(10);
@@ -71,7 +71,7 @@ describe('applyPatchOrdered', () => {
     const state = { lastSeq: 10 };
     const onGap = vi.fn();
     // A replayed event (seq <= lastSeq) is silently dropped. Return
-    // value must be `prev` identity-equal — the caller's render
+    // value must be `prev` identity-equal; the caller's render
     // memoisation depends on this.
     const next = applyPatchOrdered(prev, {
       type: "match_updated",
@@ -97,7 +97,7 @@ describe('applyPatchOrdered', () => {
     expect(onGap).not.toHaveBeenCalled();
   });
 
-  it('passes through events without a seq field (additive — old envelopes)', () => {
+  it('passes through events without a seq field (additive: old envelopes)', () => {
     // Backward-compatibility: an old server without T215 emits events
     // without a `seq` field. applyPatchOrdered falls back to plain
     // applyPatch and does not update lastSeq.
@@ -120,9 +120,9 @@ describe('applyPatchOrdered', () => {
     const events = [
       { type: "match_updated", seq: 1, data: { result: { id: "p1", winner: "A" } } },
       { type: "match_updated", seq: 2, data: { result: { id: "p2", winner: "B" } } },
-      // Gap (3, 4 missing) — onGap fires once with {3, 4}.
+      // Gap (3, 4 missing): onGap fires once with {3, 4}.
       { type: "match_updated", seq: 5, data: { result: { id: "p1", winner: "C" } } },
-      // Replay of seq 2 (duplicate) — dropped.
+      // Replay of seq 2 (duplicate): dropped.
       { type: "match_updated", seq: 2, data: { result: { id: "p2", winner: "OLD" } } },
       // Normal continuation.
       { type: "match_updated", seq: 6, data: { result: { id: "p2", winner: "D" } } },
@@ -160,7 +160,7 @@ describe('applyPatchOrdered', () => {
 
   it('still applies competitor_status_updated patches via the underlying applyPatch', () => {
     // competitor_status_updated returns prev unchanged but dispatches a
-    // window CustomEvent — applyPatchOrdered must not short-circuit
+    // window CustomEvent: applyPatchOrdered must not short-circuit
     // that. We verify by checking the event handler fires.
     const prev = makeState();
     const state = {};

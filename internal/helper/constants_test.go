@@ -6,7 +6,7 @@ import "testing"
 // mirrored client-side in web-mobile/js/admin_helpers.jsx and asserted
 // there with the same literal value. If you bump a constant on this
 // side, the JS pin test breaks; if you bump it on the JS side, this
-// pin test breaks. That's the lockstep guarantee — drift fails CI
+// pin test breaks. That's the lockstep guarantee, drift fails CI
 // rather than waiting for a downstream UX bug to surface.
 //
 // Do NOT change a literal here without bumping the matching constant

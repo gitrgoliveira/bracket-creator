@@ -20,7 +20,7 @@ import (
 // roster + settings and streams it back as an .xlsx download. It is the single
 // source of truth behind both the `serve` web app (POST /create) and the
 // mobile-app server (POST /create), so the in-app "Download .xlsx" button runs
-// the EXACT same generator the standalone web form does — building pools and
+// the EXACT same generator the standalone web form does, building pools and
 // matches in one pass (helper.CreatePool*Matches → helper.PrintPoolMatches),
 // which keeps the player↔match pointer link the scoring/ranking formulas rely
 // on. The engine's stored-pool export path (internal/engine) cannot, because a
@@ -39,7 +39,7 @@ func createTournamentHandler(c *gin.Context) {
 	}
 	// Normalize line endings before splitting: textarea/form submissions
 	// commonly arrive CRLF, which would otherwise leave a trailing "\r" on
-	// every entry — bypassing the exact-match duplicate check and turning a
+	// every entry, bypassing the exact-match duplicate check and turning a
 	// blank "\r" line into a phantom entry. The downstream field parser
 	// TrimSpace's individual columns, but the entry-level dedup does not.
 	text = strings.ReplaceAll(text, "\r\n", "\n")
@@ -170,7 +170,7 @@ func createTournamentHandler(c *gin.Context) {
 		if err != nil {
 			// Generation failures here are overwhelmingly caused by invalid
 			// request input (pool-size/winners constraints, participant
-			// validation), so report 400 rather than 500 — the body carries
+			// validation), so report 400 rather than 500, the body carries
 			// the specific reason for the caller to surface.
 			log.Printf("failed to create pools: %s", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -196,7 +196,7 @@ func createTournamentHandler(c *gin.Context) {
 		err := o.createPlayoffs(entries)
 		if err != nil {
 			// As with pools, playoff generation failures are typically
-			// request-caused (invalid roster, seed validation) — report 400.
+			// request-caused (invalid roster, seed validation), report 400.
 			log.Printf("failed to create playoffs: %s", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("Failed to create playoffs: %s", err.Error()),

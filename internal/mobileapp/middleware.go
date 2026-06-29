@@ -13,7 +13,7 @@ import (
 // (parts above the threshold spill to disk rather than RAM) and does
 // not by itself limit total request size. Keeping MaxImportBodyBytes
 // at the same numeric value just lets the two layers reason about
-// "64 MB" consistently — but the request-size cap lives here, in the
+// "64 MB" consistently, but the request-size cap lives here, in the
 // MaxBodyBytes middleware applied to the import group in server.go.
 const (
 	// AnnouncementMaxBodyBytes caps POST /api/tournament/announce.
@@ -26,7 +26,7 @@ const (
 	// Worst-case JSON: password 256 chars × 6 bytes/escape + originatorId
 	// 128 × 6 + overhead ≈ 2344 bytes; 4096 gives ≈1.7× headroom. Applied
 	// inside the handler (not as group middleware) to preserve the locked-mode
-	// 404 response before any body is read — a per-group cap would reveal the
+	// 404 response before any body is read, a per-group cap would reveal the
 	// route's existence via 413 vs 404 on locked deployments.
 	ResetMaxBodyBytes int64 = 4096
 
@@ -40,7 +40,7 @@ const (
 
 	// MaxImportBodyBytes is the request-size cap for /tournament/import.
 	// The handler's ParseMultipartForm(64<<20) is a memory threshold, not
-	// a request-size cap — without this middleware-level limit a client
+	// a request-size cap, without this middleware-level limit a client
 	// could stream a 10 GB body that the form parser would happily spill
 	// to disk. 64 MB is sized for a worst-case full-roster CSV plus
 	// metadata; raise here if real tournaments outgrow it.
@@ -71,18 +71,18 @@ const BrandingMaxFileBytes int64 = 1 << 20 // 1 MB
 // MaxBodyBytes returns a Gin middleware that rejects requests whose
 // body exceeds n bytes. Two checks, in order of cost:
 //
-//  1. Fast path — if Content-Length is set and > n, return 413 before
+//  1. Fast path, if Content-Length is set and > n, return 413 before
 //     reading a single byte (defends against malicious clients that
 //     truthfully advertise a huge body so we can drop them cheaply).
-//  2. Defensive wrap — replace c.Request.Body with http.MaxBytesReader
+//  2. Defensive wrap, replace c.Request.Body with http.MaxBytesReader
 //     so handlers that don't trust Content-Length (or where the client
 //     lied / used chunked encoding) still trip the limit during
 //     reading. Handlers that read past n get an *http.MaxBytesError
 //     surfaced via c.ShouldBindJSON; the existing 500 path renders the
-//     error reasonably even if not optimally — a follow-up could map
+//     error reasonably even if not optimally, a follow-up could map
 //     that specific error to 413 inside BindJSON wrappers.
 //
-// Skips GET/HEAD/DELETE/OPTIONS — those don't carry a body in
+// Skips GET/HEAD/DELETE/OPTIONS, those don't carry a body in
 // practice and wrapping a nil body would surface false errors.
 func MaxBodyBytes(n int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -121,21 +121,21 @@ func adminGroup(r *gin.Engine, capBytes int64, verifier PasswordVerifier, store 
 //   - any character outside [a-zA-Z0-9_-]
 //   - a leading non-alphanumeric character (so "_foo", "-foo" are
 //     rejected even though "_" and "-" are allowed elsewhere in the
-//     string — the regex is ^[a-zA-Z0-9][a-zA-Z0-9_-]*$)
+//     string, the regex is ^[a-zA-Z0-9][a-zA-Z0-9_-]*$)
 //
 // On invalid input, writes a 400 response and returns ("", false); the
 // caller should `return` immediately.
 //
 // Every handler that reads `c.Param("id")` and passes it to
 // store.compPath(id, ...) must use this helper. compPath does
-// filepath.Clean(filepath.Join(folder, "competitions", id, ...)) — an
+// filepath.Clean(filepath.Join(folder, "competitions", id, ...)), an
 // id like "../../../etc/passwd" would cleanly escape the data dir.
 //
 // Called from BOTH authenticated routes (handlers_competition.go gated
 // by AuthMiddleware via X-Tournament-Password) AND the public viewer
 // detail route (handlers_viewer.go GET /api/viewer/competitions/:id,
 // no auth). Path-traversal defense therefore matters on unauthenticated
-// inputs too — anyone on the network can hit the viewer route. Keep
+// inputs too, anyone on the network can hit the viewer route. Keep
 // the regex narrow and apply at every handler entry point.
 func requireValidCompID(c *gin.Context) (string, bool) {
 	id := c.Param("id")
@@ -148,7 +148,7 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 
 // RequireElevatedPassword gates destructive operations behind a SECOND
 // password supplied in the X-Admin-Password header (spec 004 / mp-e21). It
-// is layered on top of AuthMiddleware — the route group already verified the
+// is layered on top of AuthMiddleware, the route group already verified the
 // main password, so this only adds the second factor. Attach it per-route to
 // the gated subset (competition delete / invalidate / draw / overrides,
 // participant roster mutations, CSV import) rather than to the whole group,
@@ -165,7 +165,7 @@ func requireValidCompID(c *gin.Context) (string, bool) {
 //   - otherwise               → Verify(X-Admin-Password); 401 on mismatch.
 //
 // Per the product decision (re-prompt every time) there is no elevation
-// token or session — the password travels on each gated request.
+// token or session, the password travels on each gated request.
 func RequireElevatedPassword(ev ElevatedVerifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !enforceElevated(c, ev) {
@@ -179,16 +179,16 @@ func RequireElevatedPassword(ev ElevatedVerifier) gin.HandlerFunc {
 // enforceElevated runs the elevated-password gate decision and returns true
 // when the request may proceed. On a blocked request it writes the
 // appropriate response (503 unconfigured / 401 wrong / 500 verify-error) and
-// returns false — the caller must stop (Abort in middleware, or `return` in a
+// returns false, the caller must stop (Abort in middleware, or `return` in a
 // handler).
 //
-// It exists as a standalone function — not just the middleware closure —
+// It exists as a standalone function, not just the middleware closure,
 // because some gated mutations can't be caught by route-level middleware:
 // PUT /api/competitions/:id persists the roster (SaveParticipants/SaveSeeds)
 // only when the bound body has a non-nil Players field, so its gate must run
 // INSIDE the handler after binding. Sharing this one decision keeps the
 // inline check and the middleware byte-for-byte identical (same status codes,
-// same fail-closed semantics) — Copilot PR #193 caught that gating only the
+// same fail-closed semantics), Copilot PR #193 caught that gating only the
 // dedicated participant endpoints left the bulk-PUT roster path open.
 func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 	if !ev.GateActive() {
@@ -230,33 +230,33 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
 		http.MethodPost + " /api/tournament",                                   // Fix 3329416167: re-bootstrap overwrite when tournament already exists
 		http.MethodPut + " /api/tournament",                                    // tournament name/password/courts/check-in windows
-		http.MethodPost + " /api/competitions",                                 // create a competition (category) — setup
-		http.MethodPut + " /api/competitions/:id",                              // edit competition config — setup
+		http.MethodPost + " /api/competitions",                                 // create a competition (category), setup
+		http.MethodPut + " /api/competitions/:id",                              // edit competition config, setup
 		http.MethodPost + " /api/tournament/announce",                          // Fix 3329416176: organiser config, not operational play
 		http.MethodDelete + " /api/announcements/:id",                          // Fix 3329416176: organiser config, not operational play
 		http.MethodDelete + " /api/announcements",                              // Fix 3329416176: organiser config, not operational play
 		http.MethodPut + " /api/auth/admin-password",                           // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
 		http.MethodPut + " /api/competitions/:id/schedule",                     // Fix 3330063192: organiser schedule setup, not operational play
-		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner", // Fix 3330080949: result correction — organiser, not participant play
-		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",  // Fix 3330080949: standings correction — organiser, not participant play
-		http.MethodPost + " /api/competitions/:id/competitor-status",           // Fix 3331033814: eligibility mutation — organiser decision, not operational play
-		http.MethodGet + " /api/competitions/:id/export",                       // Fix 3332740291: xlsx export — admin/CPU-heavy, not operational play
-		http.MethodPut + " /api/competitions/:id/matches/:mid/court",           // court assignment — organiser coordination
-		http.MethodPut + " /api/competitions/:id/matches/:mid/time",            // match time — organiser coordination
-		http.MethodPut + " /api/competitions/:id/seeds",                        // seeding — organiser pre-draw setup
-		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",  // kiken-injury reinstatement — organiser decision
-		// Forward check-in (single PUT + bulk POST /checkin-bulk) is intentionally ungated —
+		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner", // Fix 3330080949: result correction, organiser, not participant play
+		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",  // Fix 3330080949: standings correction, organiser, not participant play
+		http.MethodPost + " /api/competitions/:id/competitor-status",           // Fix 3331033814: eligibility mutation, organiser decision, not operational play
+		http.MethodGet + " /api/competitions/:id/export",                       // Fix 3332740291: xlsx export, admin/CPU-heavy, not operational play
+		http.MethodPut + " /api/competitions/:id/matches/:mid/court",           // court assignment, organiser coordination
+		http.MethodPut + " /api/competitions/:id/matches/:mid/time",            // match time, organiser coordination
+		http.MethodPut + " /api/competitions/:id/seeds",                        // seeding, organiser pre-draw setup
+		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",  // kiken-injury reinstatement, organiser decision
+		// Forward check-in (single PUT + bulk POST /checkin-bulk) is intentionally ungated,
 		// participants and desk staff can check in without the main admin password.
 		// Only reversal (DELETE) requires it.
-		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin",         // check-in reversal — organiser correction
-		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management — organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management — organiser
-		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup — organiser
-		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup — organiser
+		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin",         // check-in reversal, organiser correction
+		http.MethodPut + " /api/competitions/:id/teams/:tid/lineups/:round",            // team lineup management, organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management, organiser
+		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup, organiser
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup, organiser
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
-		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload — organiser setup, not operational play
-		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion — organiser setup, not operational play
-		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export — admin/CPU-heavy, not operational play
+		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
+		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion, organiser setup, not operational play
+		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export, admin/CPU-heavy, not operational play
 		return true
 	default:
 		return false
@@ -268,7 +268,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 // so file-based and locked (bcrypt-env-var) modes share a single middleware.
 //
 // The store reference is needed for the "uninitialized tournament"
-// bootstrap branch — that gate fires when no tournament.md exists and we
+// bootstrap branch, that gate fires when no tournament.md exists and we
 // must let through the very first POST /api/tournament. The verifier
 // owns the policy: file verifier allows anonymous bootstrap (no
 // credential exists yet); bcrypt verifier requires the env-var password
@@ -285,7 +285,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 
 		// If no tournament config exists yet (or it's the default blank one in file mode),
 		// only allow creating one. In locked mode the stored Password is always empty
-		// (auth is bcrypt from env) so the name+password sentinel must be suppressed —
+		// (auth is bcrypt from env) so the name+password sentinel must be suppressed,
 		// otherwise a legitimately-named "New Tournament" record written during locked
 		// bootstrap would permanently appear uninitialized (Password == "" matches).
 		// EnforceEmptyStoredGuard() is true only in file mode, so the compound check
@@ -324,15 +324,15 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		}
 
 		// Self-run mode (mp-7h7): skip the main-password gate for operational
-		// routes (scoring, check-in, start, complete, generate draw, etc.) —
+		// routes (scoring, check-in, start, complete, generate draw, etc.),
 		// there is no dedicated table operator, so participants drive their own
 		// flow. Destructive routes (delete competition, invalidate, draw,
 		// overrides, participant roster mutations, import) remain gated by the
 		// EXISTING RequireElevatedPassword / enforceElevated decorators that
 		// already fire downstream on those specific routes. No new allowlist
-		// needed — the elevated-decorator set IS the allowlist (DRY).
+		// needed, the elevated-decorator set IS the allowlist (DRY).
 		//
-		// Exception — configuration/setup mutations stay main-gated even in
+		// Exception, configuration/setup mutations stay main-gated even in
 		// self-run mode (see isSelfRunMainGatedConfigRoute). These routes
 		// mutate organiser-owned setup (tournament name/password/courts/
 		// check-in windows; competition creation and competition config) as
@@ -356,7 +356,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 
 		// Defense-in-depth for the F4 sentinel-into-auth-field scenario
 		// (file mode only). The plaintext comparison done by the file
-		// verifier is satisfied vacuously when both sides are "" — an
+		// verifier is satisfied vacuously when both sides are "", an
 		// unauthenticated client sending no `X-Tournament-Password`
 		// header would match an empty stored password and reach c.Next().
 		// The POST + PUT handlers in handlers_tournament.go block writes
@@ -364,16 +364,16 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// operator who manually edits tournament.md (or any out-of-band
 		// write bypassing the handlers) could still land an empty
 		// Password on disk. The uninitialized branch above only covers
-		// the literal "New Tournament" + empty case — a real-named
+		// the literal "New Tournament" + empty case, a real-named
 		// tournament with empty Password is a misconfiguration, and
 		// refusing to authorize is the safer fail-closed choice. The
 		// 403 message tells the operator to fix the password rather than
-		// the misleading 401 ("invalid tournament password" — which
+		// the misleading 401 ("invalid tournament password", which
 		// would imply the request is wrong, not the server state).
 		//
 		// In locked mode the stored Password is irrelevant (auth comes
 		// from the bcrypt env-var hash), so this guard is suppressed via
-		// verifier.EnforceEmptyStoredGuard() — otherwise it would 403
+		// verifier.EnforceEmptyStoredGuard(), otherwise it would 403
 		// every request whenever the operator leaves the on-disk
 		// password empty (or migrates from a fresh install).
 		//

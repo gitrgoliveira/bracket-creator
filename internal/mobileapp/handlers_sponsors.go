@@ -84,7 +84,7 @@ func RegisterPublicSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 // RegisterSponsorHandlers wires admin-gated mutation endpoints onto the
 // supplied admin router group (which already carries body-cap + auth
 // middleware). The caller must use a group whose body cap is at least
-// SponsorMaxBodyBytes (2 MB) — the in-handler file size check at
+// SponsorMaxBodyBytes (2 MB),  the in-handler file size check at
 // SponsorMaxFileBytes still applies separately.
 func RegisterSponsorHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.POST("/sponsors", handleSponsorUpload(store))
@@ -121,7 +121,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 
 		// Sniff first 512 bytes per http.DetectContentType contract.
 		// Don't trust the Content-Type header. fileHeader.Open() returns
-		// mime/multipart.File, which embeds io.ReadSeeker — so src.Seek
+		// mime/multipart.File, which embeds io.ReadSeeker,  so src.Seek
 		// below is part of the type and cannot fail at compile time.
 		sniffBuf := make([]byte, 512)
 		nRead, rerr := io.ReadFull(src, sniffBuf)
@@ -144,7 +144,7 @@ func handleSponsorUpload(store *state.Store) gin.HandlerFunc {
 		}
 
 		// Server-generated random filename: 16 hex chars + sniffed ext.
-		// Each upload gets a unique URL — see mp-c38 plan §2.
+		// Each upload gets a unique URL,  see mp-c38 plan §2.
 		nameBytes := make([]byte, 8)
 		if _, err := rand.Read(nameBytes); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -50,7 +50,7 @@ func SheetRanges(pdfPath string) ([]SheetRange, error) {
 	for _, b := range bms {
 		thru := b.PageThru
 		if thru < b.PageFrom {
-			// Final (unbounded) bookmark — extend to end of document.
+			// Final (unbounded) bookmark, extend to end of document.
 			thru = total
 		}
 		ranges = append(ranges, SheetRange{

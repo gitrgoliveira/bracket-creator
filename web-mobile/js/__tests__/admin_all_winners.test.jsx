@@ -43,7 +43,7 @@ function findAll(node, pred) {
 // ── module setup / teardown ───────────────────────────────────────────────────
 
 // Every global this suite stubs lives here so beforeAll can snapshot the prior
-// value and afterAll can restore (or delete) it — otherwise stubs like
+// value and afterAll can restore (or delete) it; otherwise stubs like
 // window.API / window.deriveAwards leak into later suites and cause
 // order-dependent flakes.
 const STUBBED_GLOBALS = {
@@ -169,7 +169,7 @@ describe('buildAllWinners', () => {
     const comp = { id: 'running-1', name: 'In Progress', format: 'playoffs', status: 'pools', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: comp, players: [] });
 
-    // Caller passes only completed comps — if we pass none the result is empty.
+    // Caller passes only completed comps; if we pass none the result is empty.
     const results = await window.buildAllWinners([], {
       fetchCompetitionDetails,
       swissStandings: null,
@@ -236,7 +236,7 @@ describe('AllWinnersModal', () => {
     const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'playoffs', players: [] };
     const vnode = window.AllWinnersModal({ comps: [comp], onClose: vi.fn() });
     const text = collectText(vnode);
-    // Initial state is loading:true — should render loading text
+    // Initial state is loading:true: should render loading text
     expect(text).toContain('Loading results');
   });
 

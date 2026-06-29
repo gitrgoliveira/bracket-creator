@@ -13,7 +13,7 @@ import (
 
 // TestSaveParticipants_CanonicalizesSource pins that marshalParticipantsCSV
 // normalizes Source (trim + lower-case) on write regardless of the casing the
-// caller supplied — so participants.csv never carries "Manual"/" registered "
+// caller supplied, so participants.csv never carries "Manual"/" registered "
 // variants that would split filter buckets or get mis-parsed on reload.
 func TestSaveParticipants_CanonicalizesSource(t *testing.T) {
 	dir, err := os.MkdirTemp("", "participants-canon-*")
@@ -182,7 +182,7 @@ func TestLoadParticipantsOpt_WithSeeds(t *testing.T) {
 	}
 	require.NoError(t, store.SaveParticipants(compID, players))
 
-	// WithSeeds: true (default path) — must return players
+	// WithSeeds: true (default path), must return players
 	loaded, err := store.LoadParticipantsOpt(compID, false, LoadParticipantsOpts{WithSeeds: true})
 	require.NoError(t, err)
 	require.Len(t, loaded, 2)
@@ -215,7 +215,7 @@ func TestLoadParticipantsOpt_HasIDsHint(t *testing.T) {
 // Regression: helper.CreatePlayers auto-populates DisplayName in the
 // non-zekken branch (= SanitizeName(Name)). Before the fix, SaveParticipants
 // wrote a 3-column row for that auto-derived display name, and the next
-// LoadParticipants(_, withZekkenName=false) re-parsed column 2 as Dojo —
+// LoadParticipants(_, withZekkenName=false) re-parsed column 2 as Dojo,
 // pushing the real Dojo into Metadata and silently corrupting the roster
 // (the trigger path exercised by the mobile-app import handler).
 //
@@ -429,7 +429,7 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 
 	path := filepath.Join(dir, "competitions", compID, "participants.csv")
 
-	// 3-col UUID row: uuid, Name, Dojo — "checked_in" is the Dojo value, not a marker.
+	// 3-col UUID row: uuid, Name, Dojo, "checked_in" is the Dojo value, not a marker.
 	require.NoError(t, os.WriteFile(path,
 		[]byte("550e8400-e29b-41d4-a716-446655440000, Alice, checked_in\n"), 0600))
 	loaded, err := store.LoadParticipants(compID, false)
@@ -439,7 +439,7 @@ func TestCheckedInColumnBasedDetectionUUIDRows(t *testing.T) {
 	assert.Equal(t, "checked_in", loaded[0].Dojo, "dojo value must be preserved for 3-part UUID row")
 	assert.Equal(t, "550e8400-e29b-41d4-a716-446655440000", loaded[0].ID)
 
-	// 4-col UUID row: uuid, Name, Dojo, checked_in — trailing checked_in IS a valid marker.
+	// 4-col UUID row: uuid, Name, Dojo, checked_in, trailing checked_in IS a valid marker.
 	require.NoError(t, os.WriteFile(path,
 		[]byte("550e8400-e29b-41d4-a716-446655440001, Bob, Suigetsu, checked_in\n"), 0600))
 	loaded2, err := store.LoadParticipants(compID, false)
@@ -485,8 +485,8 @@ func TestSaveParticipants_RejectsDuplicateNameDojo(t *testing.T) {
 	compID := "bulk-dup"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Bulk Dup"}))
 
-	// Perfect (name, dojo) duplicate within one bulk import — including a
-	// diacritic/whitespace/case variant — must be rejected.
+	// Perfect (name, dojo) duplicate within one bulk import, including a
+	// diacritic/whitespace/case variant, must be rejected.
 	err = store.SaveParticipants(compID, []domain.Player{
 		{Name: "Müller", Dojo: "Wakaba"},
 		{Name: "muller ", Dojo: "wakaba"},
@@ -611,14 +611,14 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 	}
 	require.NotEmpty(t, bobID)
 
-	// Renaming Bob to "Alice " (trailing space) must be rejected — same name+dojo.
+	// Renaming Bob to "Alice " (trailing space) must be rejected, same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "Alice "
 		return nil
 	})
 	assert.ErrorIs(t, err, ErrDuplicateName, "trailing-space rename colliding with existing name+dojo must be rejected")
 
-	// Renaming Bob to "alice" (case variant) must also be rejected — same name+dojo.
+	// Renaming Bob to "alice" (case variant) must also be rejected, same name+dojo.
 	_, err = store.UpdateParticipant(compID, bobID, false, func(p *domain.Player) error {
 		p.Name = "alice"
 		return nil
@@ -631,7 +631,7 @@ func TestUpdateParticipant_WhitespaceDuplicateGuard(t *testing.T) {
 // AND Source is non-empty (e.g. the "manual" default applied by the single-add
 // endpoint) used to produce a 4-field row [id, Name, Dojo, Source] that
 // CreatePlayersFromRecords(_, true) misparsed as
-// (Name, DisplayName=Dojo, Dojo=Source) — silently corrupting the row.
+// (Name, DisplayName=Dojo, Dojo=Source), silently corrupting the row.
 // The writer now always emits the DisplayName column for zekken comps.
 func TestZekkenWithSourceDoesNotCorruptCSV(t *testing.T) {
 	dir := t.TempDir()
@@ -642,7 +642,7 @@ func TestZekkenWithSourceDoesNotCorruptCSV(t *testing.T) {
 		ID: compID, Name: "Zekken Source", WithZekkenName: true,
 	}))
 
-	// DisplayName left blank — SaveParticipants must still write the
+	// DisplayName left blank, SaveParticipants must still write the
 	// DisplayName column for zekken comps so the row is round-trip safe.
 	// Source="manual" mirrors what the single-add endpoint defaults to.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -679,7 +679,7 @@ func TestReplaceParticipant_SeedsCSVEscaping(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice", SeedRank: 1}}))
 
-	// Rename Alice → "Smith, John" — the comma MUST be CSV-escaped in seeds.csv,
+	// Rename Alice → "Smith, John", the comma MUST be CSV-escaped in seeds.csv,
 	// otherwise ParseSeedsFile splits "Smith" / " John" / "1" into the wrong slots.
 	_, err = store.ReplaceParticipant(compID, added.ID, false, func(p *domain.Player) error {
 		p.Name = "Smith, John"
@@ -690,7 +690,7 @@ func TestReplaceParticipant_SeedsCSVEscaping(t *testing.T) {
 	// Verify seeds.csv reloads cleanly with the comma preserved.
 	seeds, err := store.LoadSeeds(compID)
 	require.NoError(t, err)
-	require.Len(t, seeds, 1, "seed must survive the rename — a broken CSV would drop it")
+	require.Len(t, seeds, 1, "seed must survive the rename, a broken CSV would drop it")
 	assert.Equal(t, "Smith, John", seeds[0].Name, "comma in renamed seed name must round-trip through CSV escaping")
 	assert.Equal(t, 1, seeds[0].SeedRank)
 }
@@ -713,7 +713,7 @@ func TestAddParticipant_RejectedAfterStart(t *testing.T) {
 
 // TestReplaceParticipant_RejectedAfterStart pins the same in-lock guard for
 // the rename/replace path. UpdateParticipant (the check-in toggle path) must
-// stay unconditional — that's verified by the existing UpdateParticipant
+// stay unconditional, that's verified by the existing UpdateParticipant
 // tests, which never set Status to anything other than empty/setup.
 func TestReplaceParticipant_RejectedAfterStart(t *testing.T) {
 	dir := t.TempDir()

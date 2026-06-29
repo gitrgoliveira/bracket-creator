@@ -1,7 +1,7 @@
 // mp-xhaa: hardened logic layer for the unified watchlist.
 // Covers polymorphic (player + dojo) entries, idempotent legacy migration,
 // dojo-aware resolution, primary selection (implicit/pinned/stale), and the
-// primary hero next-match builder. Pure functions only — no DOM, no hooks.
+// primary hero next-match builder. Pure functions only: no DOM, no hooks.
 import { describe, it, expect } from 'vitest';
 import {
   entryKey,
@@ -20,7 +20,7 @@ const roster = [
   { id: 'a1', name: 'Akira', dojo: 'Hagane Dojo', checkedIn: true },
   { id: 'a2', name: 'Aoi', dojo: 'Hagane Dojo', checkedIn: false },
   { id: 'b1', name: 'Botan', dojo: 'Tsubaki Kenyukai', checkedIn: false },
-  { id: 'x1', name: 'Xeno', dojo: '' }, // empty dojo — never matched by a dojo entry
+  { id: 'x1', name: 'Xeno', dojo: '' }, // empty dojo: never matched by a dojo entry
 ];
 
 describe('entryKey', () => {
@@ -64,7 +64,7 @@ describe('normalizeWatchlist', () => {
     const out = normalizeWatchlist([
       { id: 'a1', name: 'Akira' },
       { type: 'dojo', dojo: 'Hagane Dojo' },
-      { id: 'a1', name: 'DUPLICATE' }, // dedup — first wins
+      { id: 'a1', name: 'DUPLICATE' }, // dedup: first wins
       { name: 'garbage' },             // dropped
       { type: 'dojo', dojo: 'Hagane Dojo' }, // dedup
     ]);
@@ -92,7 +92,7 @@ describe('migrateWatchlistOnLoad', () => {
     expect(list[0]).toEqual({ type: 'player', id: 'a1', name: 'Akira', dojo: '' });
     expect(list).toHaveLength(2);
   });
-  it('is idempotent — already-present legacy id is a no-op', () => {
+  it('is idempotent: already-present legacy id is a no-op', () => {
     const existing = [{ id: 'a1', name: 'Akira' }];
     const { list, migrated } = migrateWatchlistOnLoad(existing, 'a1', 'Akira');
     expect(migrated).toBe(false);

@@ -133,7 +133,7 @@ func setupTestTournamentData(t *testing.T) string {
 
 	// League format: this fixture tests Print/PDF store construction, not
 	// mixed-knockout semantics. League produces a single pool (mixed would
-	// need ≥2 pools by invariant).
+	// need >=2 pools by invariant).
 	comp := &state.Competition{
 		ID:           "test-comp",
 		Name:         "Test Competition",
@@ -279,7 +279,7 @@ func TestPrintInputDirSingleType(t *testing.T) {
 	dir := t.TempDir()
 	// Copy the example xlsx into a temp dir so collectWorkbooks finds it.
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304 — test-only read of a repo asset
+	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 
@@ -302,7 +302,7 @@ func TestPrintInputDirSingleTypeWithOutput(t *testing.T) {
 	xlsx := findExampleXLSXForCmd(t)
 	dir := t.TempDir()
 	xlsxDst := filepath.Join(dir, "example.xlsx")
-	data, err := os.ReadFile(xlsx) // #nosec G304 — test-only read of a repo asset
+	data, err := os.ReadFile(xlsx) // #nosec G304, test-only read of a repo asset
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(xlsxDst, data, 0o644))
 

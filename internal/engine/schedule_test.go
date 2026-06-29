@@ -12,7 +12,7 @@ import (
 
 // TestScheduleEstimatorClockMultiplier covers FR-055: a 3-minute on-clock
 // match with the canonical 1.5x multiplier produces a 4.5-minute elapsed
-// slot. Allow rounding to either neighbouring integer (4 or 5) — the
+// slot. Allow rounding to either neighbouring integer (4 or 5), the
 // estimator returns int-minutes for wire shape simplicity.
 func TestScheduleEstimatorClockMultiplier(t *testing.T) {
 	result := EstimateSchedule(EstimateInput{
@@ -111,8 +111,8 @@ func TestEstimateScheduleCeremonyAddsToTotal(t *testing.T) {
 	assert.Equal(t, noCeremony.TotalDurationMinutes+60, cer.TotalDurationMinutes)
 }
 
-// TestEstimateScheduleCourtsClampedToOne defends against a 0-court input
-// — we clamp rather than divide by zero.
+// TestEstimateScheduleCourtsClampedToOne defends against a 0-court input,
+// we clamp rather than divide by zero.
 func TestEstimateScheduleCourtsClampedToOne(t *testing.T) {
 	result := EstimateSchedule(EstimateInput{
 		MatchDurationClockMinutes: 3,
@@ -178,7 +178,7 @@ func TestGenerateSchedule_BracketFormat(t *testing.T) {
 	for _, e := range entries {
 		assert.Equal(t, "bracket", e.MatchType)
 	}
-	// B2 has no court — should default to "A"
+	// B2 has no court, should default to "A"
 	var b2Entry state.ScheduleEntry
 	for _, e := range entries {
 		if e.MatchRef == "R1-MB2" {
@@ -341,14 +341,14 @@ func TestEstimateForCounts_PerPhaseSplit(t *testing.T) {
 // TestEstimateForCounts_PoolThenPlayoffSequential pins the intentional
 // pools-then-playoffs sequencing: a court runs its pool matches AND its playoff
 // matches on the same advancing cursor, so the combined estimate is the SUM of
-// the two phases — not the max() of them. This is the contract a post-draw
+// the two phases, not the max() of them. This is the contract a post-draw
 // estimate (mp-zoh) must reproduce by summing the two slot-assigner cursors
 // rather than maxing them. See the EstimateForCounts doc comment.
 func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
 	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
 	tourn := newTournament(1.0, 10, "", "", "") // 1.0x, explicit 10% buffer
 
-	// pool: 2*3=6 ; playoff: 2*5=10 ; sequential sum = 16 ; *1.10 = 17.6 → 18.
+	// pool: 2*3=6; playoff: 2*5=10; sequential sum = 16; *1.10 = 17.6 → 18.
 	combined := EstimateForCounts(2, 2, comp, tourn)
 	poolOnly := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
 	playoffOnly := EstimateForCounts(0, 2, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
@@ -391,8 +391,8 @@ func TestEstimateForCounts_TeamComp(t *testing.T) {
 }
 
 // TestEstimateForCounts_TeamDefaultsTeamSize verifies that a team competition
-// with an omitted TeamSize (0) is estimated using the FIK 5-person default —
-// matching competition.go (StartCompetition) and swiss.go — rather than falling
+// with an omitted TeamSize (0) is estimated using the FIK 5-person default,
+// matching competition.go (StartCompetition) and swiss.go, rather than falling
 // through to the individual-match formula (Copilot review #3328463582).
 func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
 	base := func(teamSize int) *state.Competition {
@@ -502,7 +502,7 @@ func TestEstimateForCounts_BufferIncreasesTotal(t *testing.T) {
 }
 
 // TestEstimateForCounts_BufferExcludesFixedBlocks verifies the slowest-court
-// buffer is applied to MATCH time only — never to the fixed OpeningBlock offset.
+// buffer is applied to MATCH time only, never to the fixed OpeningBlock offset.
 // 1 court, 30m opening, 10 matches × (4min×1.5=6min) = 60 match-min, 10% buffer:
 //
 //	total = 30 (unbuffered opening) + round(60 × 1.10) = 30 + 66 = 96.
@@ -524,8 +524,8 @@ func TestEstimateForCounts_NilComp(t *testing.T) {
 }
 
 // TestEstimateForCounts_NoCourts verifies that an empty courts slice defaults to
-// a single court — matching the assigners (pools.go / bracket.go) and
-// EstimateSchedule's NumCourts clamp — rather than returning a zero estimate
+// a single court, matching the assigners (pools.go / bracket.go) and
+// EstimateSchedule's NumCourts clamp, rather than returning a zero estimate
 // (Copilot review #3328447507). The result must equal the explicit 1-court case.
 func TestEstimateForCounts_NoCourts(t *testing.T) {
 	empty := newIndivComp([]string{}, 3, 3, "09:00")
@@ -554,7 +554,7 @@ func TestEstimateForCounts_NegativeCountsClamped(t *testing.T) {
 
 // TestEstimateForCounts_CourtsClampedToMax verifies an oversized Courts slice is
 // clamped to MaxCourts (the A–Z cap), guarding the per-court allocations against
-// a malformed/hostile Competition — same defensive bound as EstimateSchedule
+// a malformed/hostile Competition, same defensive bound as EstimateSchedule
 // (Copilot review #3328458139).
 func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {
 	courts := make([]string, MaxCourts+50)

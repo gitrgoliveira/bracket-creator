@@ -61,7 +61,7 @@ func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
 		StartTime: "09:00",
 		Status:    state.CompStatusSetup,
 	}))
-	// Strip IDs before saving — players with non-UUID IDs confuse the CSV
+	// Strip IDs before saving, players with non-UUID IDs confuse the CSV
 	// hasIDs detector and corrupt names on reload. Let the store mint UUIDs.
 	stripped := make([]domain.Player, len(players))
 	for i, p := range players {
@@ -86,13 +86,13 @@ func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
 	require.NotEmpty(t, bracket.Rounds)
 
 	// Round 0 is the first round (closest to leaves). Collect the two sides
-	// of every match in order — this reconstructs the pow2 leaf array.
+	// of every match in order, this reconstructs the pow2 leaf array.
 	pow2 := helper.NextPow2(len(players))
 	leaves := make([]string, pow2)
 	for i, m := range bracket.Rounds[0] {
 		sideA := m.SideA
 		sideB := m.SideB
-		// Strip "Winner of…" placeholders — those are non-leaf slots that arose
+		// Strip "Winner of…" placeholders, those are non-leaf slots that arose
 		// from latent byes; treat them as "" (structural bye) for leaf comparison.
 		if strings.HasPrefix(sideA, "Winner of") {
 			sideA = ""
@@ -122,7 +122,7 @@ func engineMixedLeaves(t *testing.T, pools []helper.Pool, poolWinners int) []str
 
 	compID := fmt.Sprintf("identity-mixed-%d-%d", len(pools), poolWinners)
 	// PoolSize == poolWinners so each pool is populated with exactly PoolWinners
-	// participants — a valid mixed config (every pool can supply PoolWinners
+	// participants, a valid mixed config (every pool can supply PoolWinners
 	// finishers). This still produces len(pools) pools, so the preview bracket's
 	// placeholder topology ("Pool A-1st" …) is identical to the Excel reference.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -240,7 +240,7 @@ func enginePlayoffsBracket(t *testing.T, players []domain.Player) *state.Bracket
 		stripped[i] = domain.Player{Name: p.Name, Dojo: p.Dojo}
 	}
 	require.NoError(t, store.SaveParticipants(compID, stripped))
-	// Seeds are stored separately (seeds.csv) and merged at load — extract them
+	// Seeds are stored separately (seeds.csv) and merged at load, extract them
 	// from the player Seed field so the seeded test cases actually exercise
 	// seeded generation rather than silently running unseeded.
 	var seeds []domain.SeedAssignment

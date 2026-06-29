@@ -17,7 +17,7 @@ func (s *Store) LoadBracket(compID string) (*Bracket, error) {
 }
 
 func parseBracketFile(path string) (any, error) {
-	raw, err := os.ReadFile(path) // #nosec G304 — path built by compPath which calls filepath.Clean
+	raw, err := os.ReadFile(path) // #nosec G304, path built by compPath which calls filepath.Clean
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Bracket{Rounds: [][]BracketMatch{}}, nil
@@ -60,7 +60,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		copy(res.Rounds[i], round)
 		// The shallow copy above aliases the Encho pointer, SubResults slice
 		// (and its nested IpponsA/B/Encho), and the Feeders slice with the
-		// cached bracket, so a caller mutating a returned match could corrupt
+		// cached bracket; so a caller mutating a returned match could corrupt
 		// cached state without going through SaveBracket/UpdateBracket.
 		// Deep-copy them to match the pool match copy path (copyMatchResults).
 		for j := range res.Rounds[i] {
@@ -77,7 +77,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	// Defense-in-depth: validate compID before acquiring the lock and
 	// writing via compPath. StartCompetition can reach this path via
-	// generatePlayoffs(comp.ID, ...) — a corrupted or out-of-band edit
+	// generatePlayoffs(comp.ID, ...), a corrupted or out-of-band edit
 	// to config.md with a traversal-shaped ID could otherwise make
 	// bracket.json land outside the competition directory. Sibling
 	// LoadBracket and UpdateBracket already validate; align with them.
@@ -94,7 +94,7 @@ func (s *Store) SaveBracket(compID string, b *Bracket) error {
 // loadBracketLocked reads the bracket directly from disk WITHOUT
 // acquiring the per-competition lock. Caller MUST already hold the
 // per-comp lock (typically via WithTransaction). Bypasses the cache for
-// the same reason UpdateBracket does: the caller's lock is what
+// the same reason UpdateBracket does; the caller's lock is what
 // coordinates with concurrent writers.
 //
 // Returns an empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file
@@ -118,12 +118,12 @@ func (s *Store) loadBracketLocked(compID string) (*Bracket, error) {
 // lock) and UpdateBracket (which holds the lock across
 // load + mutate + save).
 //
-// The write parameter routes the actual file write: directWrite
+// The write parameter routes the actual file write; directWrite
 // (default) goes straight to atomicWriteFile, while a WAL-capturing
 // writer (from storeTx) stages the bytes in the transaction's
 // intent log for deferred commit. The cache refresh runs in BOTH
-// modes — readers within the same tx body need to see the staged
-// bytes via the cache because the on-disk file hasn't moved yet,
+// modes, readers within the same tx body need to see the staged
+// bytes via the cache because the on-disk file hasn't moved yet;
 // and the cache mtime is updated using the LOCAL file's mtime which
 // is unchanged in WAL mode (so a follow-up cache-aware Load will
 // re-parse from the cached copy without going to disk). T211/T212.
@@ -148,16 +148,16 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 }
 
 // UpdateBracket atomically loads the bracket for compID, calls mutate
-// with the loaded bracket (always non-nil — parseBracketFile returns an
-// empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file exists yet,
+// with the loaded bracket (always non-nil, parseBracketFile returns an
+// empty `&Bracket{Rounds: [][]BracketMatch{}}` when no file exists yet;
 // so callers can rely on a non-nil receiver and an empty Rounds slice
-// as the "no bracket yet" sentinel), and — if mutate returns nil —
+// as the "no bracket yet" sentinel), and, if mutate returns nil,
 // persists the bracket. The entire load + mutate + save sequence runs
 // under the per-competition lock so concurrent calls serialize
 // correctly.
 //
 // mutate may modify the bracket arbitrarily (e.g. update one match AND
-// propagate the winner to the next round) — this is the more general
+// propagate the winner to the next round), this is the more general
 // primitive that supports recordBracketMatchResult's
 // propagateBracketWinner behavior. For single-match mutations, see
 // also engine.withBracketMatch which delegates to this.
@@ -166,7 +166,7 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 // is returned unchanged (callers can use errors.Is to discriminate
 // not-found vs validation vs I/O). Importantly, returning errors from
 // mutate is how callers signal "match not found, don't save the
-// unchanged bracket back" — the alternative ("found" bool) would
+// unchanged bracket back", the alternative ("found" bool) would
 // either save unnecessarily or duplicate the not-found error path
 // at every caller.
 //
@@ -174,7 +174,7 @@ func (s *Store) saveBracketLocked(compID string, b *Bracket, write writeFn) erro
 // lock. It MUST NOT call any other Store method that acquires the
 // same lock (SavePoolMatches, SaveBracket, SaveCompetitionChanged,
 // recursive UpdateBracket / UpdatePoolMatchByID / UpdateBracket calls,
-// etc.) — `sync.Mutex` is non-recursive and would deadlock.
+// etc.), `sync.Mutex` is non-recursive and would deadlock.
 func (s *Store) UpdateBracket(compID string, mutate func(*Bracket) error) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
@@ -207,7 +207,7 @@ func (s *Store) updateBracketLocked(compID string, mutate func(*Bracket) error, 
 		return err
 	}
 
-	// bracket is always non-nil here — parseBracketFile returns an empty
+	// bracket is always non-nil here, parseBracketFile returns an empty
 	// `&Bracket{...}` on missing file (never nil). The nil-check would be
 	// dead code; trust the contract from parseBracketFile.
 	return s.saveBracketLocked(compID, bracket, write)

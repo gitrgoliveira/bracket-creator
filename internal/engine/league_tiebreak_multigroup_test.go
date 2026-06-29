@@ -110,7 +110,7 @@ func TestMaybeAutoCompletePools_MultipleConsequentialGroups(t *testing.T) {
 	// Resolve ONLY the top group.
 	scoreGroupDH(t, eng, store, compID, []string{"Alpha", "Beta"}, "Alpha")
 
-	// Must STILL block — the 3rd–4th tie is unresolved. (Pre-fix: this returned
+	// Must STILL block, the 3rd–4th tie is unresolved. (Pre-fix: this returned
 	// AutoCompleteTransitioned, completing with an unresolved consequential tie.)
 	outcome, err = eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)

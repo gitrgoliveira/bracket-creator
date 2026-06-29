@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDaihyosenAddableOnlyWhenTied covers T125 — the engine-side
+// TestDaihyosenAddableOnlyWhenTied covers T125, the engine-side
 // validation gate for adding a daihyosen bout. Each subtest exercises
 // one branch of AddDaihyosen so the error → HTTP-status mapping in the
 // handler is unambiguous (400 not_tied, 400 pool_match, 409
@@ -168,7 +168,7 @@ func TestComputeTeamSummaryFromSubResults(t *testing.T) {
 		{Position: 2, SideA: sideA, SideB: sideB, IpponsA: []string{"M"}, IpponsB: []string{"D", "K"}, Winner: sideB},
 		// Draw 1-1
 		{Position: 3, SideA: sideA, SideB: sideB, IpponsA: []string{"M"}, IpponsB: []string{"K"}, Winner: ""},
-		// Daihyosen placeholder — must be skipped
+		// Daihyosen placeholder, must be skipped
 		{Position: -1, Decision: string(domain.DecisionDaihyosen)},
 	}
 

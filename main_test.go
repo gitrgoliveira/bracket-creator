@@ -30,7 +30,7 @@ func TestEmbed_ExcludesNpmAndTestArtefacts(t *testing.T) {
 		}
 		for _, f := range forbidden {
 			if strings.Contains(path, f) {
-				t.Errorf("embed.FS contains forbidden entry %q (matches %q) — production binary leak", path, f)
+				t.Errorf("embed.FS contains forbidden entry %q (matches %q), production binary leak", path, f)
 			}
 		}
 		return nil

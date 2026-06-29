@@ -34,7 +34,7 @@ describe('buildWatchlistUpcoming', () => {
     const sorted = [...times].sort();
     expect(times).toEqual(sorted);
 
-    // The earliest is m8 (07:30) — both p1 and p2 are watched.
+    // The earliest is m8 (07:30): both p1 and p2 are watched.
     expect(upcoming[0].id).toBe('m8');
   });
 
@@ -68,7 +68,7 @@ describe('buildWatchlistUpcoming', () => {
 
   it('keeps `running` matches in the upcoming list', () => {
     // A watched player who is mid-match is exactly what a coach wants to
-    // see surfaced — treat `running` as upcoming, exclude only `completed`.
+    // see surfaced: treat `running` as upcoming, exclude only `completed`.
     const watched = [{ id: 'p1' }];
     const all = [
       { id: 'live', sideAId: 'p1', sideBId: 'x', status: 'running', scheduledAt: '09:00' },
@@ -78,7 +78,7 @@ describe('buildWatchlistUpcoming', () => {
     expect(upcoming.map((m) => m.id)).toEqual(['live']);
   });
 
-  // mp-42rg: verifies the de-duplication contract — running matches in the
+  // mp-42rg: verifies the de-duplication contract: running matches in the
   // watched-upcoming list carry stable composite keys (compId:id) that
   // ViewerHome uses to filter them out of the global NOW section. Without this,
   // the same match appears 3× on a 375px viewport.
@@ -104,7 +104,7 @@ describe('buildWatchlistUpcoming', () => {
 
   it('cross-competition collision: same match id in different comps are not confused', () => {
     // "Pool A-0" is a common id; comp-B has its own unrelated running match with
-    // the same id but a different compId — it must NOT be filtered out.
+    // the same id but a different compId: it must NOT be filtered out.
     const watched = [{ id: 'p1' }];
     const all = [
       { id: 'Pool A-0', compId: 'comp-A', sideAId: 'p1', sideBId: 'x', status: 'running', scheduledAt: '09:00' },

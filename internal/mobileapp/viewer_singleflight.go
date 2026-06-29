@@ -20,7 +20,7 @@ var errNotFound = errors.New("not found")
 // caller is still executing. The moment it finishes, the result is returned
 // to all waiters and the key is removed. A subsequent request (e.g. the next
 // SSE fan-out wave) always re-executes. This means the maximum response age
-// is the latency of one build, not a fixed TTL — there is never stale data
+// is the latency of one build, not a fixed TTL, there is never stale data
 // served across SSE boundaries.
 //
 // Scalability goal (P2, mp-9afd): 1000 concurrent GET /api/viewer/competitions
@@ -54,7 +54,7 @@ func newViewerSingleFlight() *viewerSingleFlight {
 func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte, err error) {
 	g.mu.Lock()
 	if c, ok := g.calls[key]; ok {
-		// A call for this key is already in-flight — attach and wait.
+		// A call for this key is already in-flight, attach and wait.
 		g.mu.Unlock()
 		c.wg.Wait()
 		return c.val, c.err
@@ -64,18 +64,18 @@ func (g *viewerSingleFlight) Do(key string, fn func() ([]byte, error)) (v []byte
 	g.calls[key] = c
 	g.mu.Unlock()
 
-	// We are the elected caller — execute fn and broadcast to waiters.
+	// We are the elected caller, execute fn and broadcast to waiters.
 	// Deferred cleanup guarantees key removal + wg.Done even on panic.
 	// ORDERING: delete the key under the mutex BEFORE calling wg.Done.
 	// If wg.Done ran first, a new caller could find the key in the map,
 	// call c.wg.Wait() (which returns immediately since the WaitGroup is
-	// already at zero), and receive the old result — violating the
+	// already at zero), and receive the old result, violating the
 	// guarantee that each SSE wave re-executes fn for fresh data.
 	defer func() {
 		if r := recover(); r != nil {
 			c.err = fmt.Errorf("singleflight: fn panicked: %v", r)
 			err = c.err // set named return so the elected caller also gets the error
-			// Log with stack trace so production crashes are diagnosable —
+			// Log with stack trace so production crashes are diagnosable,
 			// mirrors the safeGo pattern in safego.go. The error returned
 			// to handlers becomes a generic 500, which would otherwise mask
 			// the root cause entirely.

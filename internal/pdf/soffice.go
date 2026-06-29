@@ -104,7 +104,7 @@ func LocateSoffice() (string, error) {
 // isExecutableFile reports whether path is an existing regular file that can
 // be executed. On POSIX systems the check uses executable permission bits. On
 // Windows, os.Stat does not set +x, so any regular file is considered
-// executable — the OS itself decides based on the .exe/.bat extension and ACLs.
+// executable, the OS itself decides based on the .exe/.bat extension and ACLs.
 func isExecutableFile(path string) bool {
 	info, err := os.Stat(path) // #nosec G304 G703 -- path is from a fixed candidate list or $LIBREOFFICE_PATH/$PATH lookup, not request data.
 	if err != nil || info.IsDir() {

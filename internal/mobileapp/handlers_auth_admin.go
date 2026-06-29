@@ -15,14 +15,14 @@ import (
 //     cannot silently re-set the elevated secret (spec 004 Finding 2). On
 //     first-time set (TOFU) it is ignored.
 //
-// Neither value is ever echoed back — the elevated password is write-only at
+// Neither value is ever echoed back, the elevated password is write-only at
 // the API boundary (Tournament.AdminPassword has json:"-").
 type adminPasswordRequest struct {
 	NewPassword     string `json:"newPassword"`
 	CurrentPassword string `json:"currentPassword,omitempty"`
 }
 
-// RegisterAdminPasswordHandler wires PUT /api/auth/admin-password — the only
+// RegisterAdminPasswordHandler wires PUT /api/auth/admin-password, the only
 // way to set or rotate the file-mode elevated password (spec 004 §6a). It is
 // registered inside the admin group, so AuthMiddleware has already verified
 // the MAIN password before this runs.
@@ -53,7 +53,7 @@ func RegisterAdminPasswordHandler(r *gin.RouterGroup, store *state.Store, ev Ele
 		}
 
 		// NewPassword is NOT trimmed (passwords may legitimately contain
-		// whitespace; the auth comparison is exact-string match — same
+		// whitespace; the auth comparison is exact-string match, same
 		// policy as the main password).
 		if req.NewPassword == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "newPassword is required"})
@@ -69,7 +69,7 @@ func RegisterAdminPasswordHandler(r *gin.RouterGroup, store *state.Store, ev Ele
 		}
 
 		// A tournament record must exist before an admin password can be
-		// attached to it — otherwise the set would land on a non-existent
+		// attached to it, otherwise the set would land on a non-existent
 		// record (and the bulk PUT/POST guards require a name anyway).
 		t, err := store.LoadTournament()
 		if err != nil {
@@ -99,7 +99,7 @@ func RegisterAdminPasswordHandler(r *gin.RouterGroup, store *state.Store, ev Ele
 		}
 
 		// Persist under the store's write lock. The desired struct's other
-		// fields are irrelevant — the transform copies everything from the
+		// fields are irrelevant, the transform copies everything from the
 		// current record forward and changes only AdminPassword, so a
 		// concurrent bulk PUT can't be clobbered by a stale desired here.
 		_, err = store.UpdateTournamentChanged(t, func(current, desired *state.Tournament) error {

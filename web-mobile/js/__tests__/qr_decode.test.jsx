@@ -3,7 +3,7 @@ import jsQR from 'jsqr';
 import { _buildQR_test as buildQR } from '../qr.jsx';
 
 // Roundtrip decode test: encode a URL with our QR generator, decode with
-// jsQR (devDependency only — never shipped), assert decoded text matches.
+// jsQR (devDependency only; never shipped), assert decoded text matches.
 // This proves our encoder faithfully encodes the input and cannot
 // substitute a different URL.
 

@@ -129,7 +129,7 @@ describe('filterActiveAnnouncements', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Overlay render tests — verify the new stacked-cards structure via the
+// Overlay render tests; verify the new stacked-cards structure via the
 // global React mock (plain-object tree). Real hooks don't run in this
 // environment; we verify structure and wire up the timer effect manually.
 // ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
     expect(capturedCallbacks.length).toBeGreaterThanOrEqual(1);
     // Run each captured callback; the expired card must trigger onDismiss.
     // The timer effect creates a real setInterval and returns a clearInterval
-    // cleanup — capture and run every cleanup so no live interval leaks past
+    // cleanup; capture and run every cleanup so no live interval leaks past
     // this test (a leaked interval can hang Vitest or fire stray callbacks).
     let dismissed = false;
     const cleanups = [];
@@ -253,7 +253,7 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
 
     // Run all captured callbacks (the timer effect sets up the interval but
     // the first tick should NOT dismiss since diff > 0). A future card's
-    // interval never self-clears, so run the returned cleanup to clear it —
+    // interval never self-clears, so run the returned cleanup to clear it;
     // otherwise the live setInterval leaks past this test.
     for (const cb of capturedCallbacks) {
       const cleanup = cb();
@@ -286,14 +286,14 @@ describe('AnnouncementCard dismiss and per-card timer', () => {
     // Each callback fires for its own card id only
     expect(onDismiss1).toHaveBeenCalledWith('c1');
     expect(onDismiss2).toHaveBeenCalledWith('c2');
-    // And they are independent — c1's dismiss did not fire c2's and vice versa
+    // And they are independent; c1's dismiss did not fire c2's and vice versa
     expect(onDismiss1).not.toHaveBeenCalledWith('c2');
     expect(onDismiss2).not.toHaveBeenCalledWith('c1');
   });
 });
 
 // ---------------------------------------------------------------------------
-// fireBrowserNotifications — unit tests for the notification diff helper.
+// fireBrowserNotifications; unit tests for the notification diff helper.
 // These cover the four guard conditions and the happy path.
 // ---------------------------------------------------------------------------
 
@@ -398,7 +398,7 @@ describe('fireBrowserNotifications', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Snapshot-diff logic — exercises the REAL diffAnnouncementSnapshot helper.
+// Snapshot-diff logic; exercises the REAL diffAnnouncementSnapshot helper.
 // Models a plain { current } object for the ref, matching the useRef shape.
 //
 // Intended call sequence (app.jsx):
@@ -407,13 +407,13 @@ describe('fireBrowserNotifications', () => {
 //      pendingSseAnnouncements and replayed (second call) after step 1. This
 //      allows announcements added in the mount→fetch race window to fire.
 //   3. fetchAnnouncements() HTTP failure + buffered SSE → first call → seeds
-//      from SSE (no notifications — pre-existing from SSE perspective).
+//      from SSE (no notifications; pre-existing from SSE perspective).
 //   4. HTTP failure + nothing buffered → ref stays null; first subsequent SSE
 //      call seeds (original spam-prevention fallback).
 // ---------------------------------------------------------------------------
 
 describe('diffAnnouncementSnapshot', () => {
-  it('identifies additions correctly — only ids not in the already-seeded set', () => {
+  it('identifies additions correctly; only ids not in the already-seeded set', () => {
     const ref = { current: new Set(['existing-1', 'existing-2']) };
     const additions = diffAnnouncementSnapshot(ref, [
       { id: 'existing-1', message: 'Old' },
@@ -453,7 +453,7 @@ describe('diffAnnouncementSnapshot', () => {
 
   // --- Seeding (null-ref first-call behaviour) ---
 
-  it('the first call against an unseeded (null) ref always seeds — no additions returned', () => {
+  it('the first call against an unseeded (null) ref always seeds; no additions returned', () => {
     // In app.jsx this first call comes from fetchAnnouncements() HTTP success.
     // SSE snapshots that arrive before this point are buffered externally and
     // replayed after seeding.
@@ -585,7 +585,7 @@ describe('diffAnnouncementSnapshot', () => {
     const mountMs = Date.parse('2026-05-30T13:00:00.500Z'); // ~500ms after the hour
     const ref = { current: null };
 
-    // ann-1 sentAt is the same second but without fractional — pre-existing (sentAt < mountMs)
+    // ann-1 sentAt is the same second but without fractional; pre-existing (sentAt < mountMs)
     const httpList = [
       { id: 'ann-1', sentAt: '2026-05-30T13:00:00Z', message: 'Pre-existing, no frac seconds' },
     ];
@@ -597,7 +597,7 @@ describe('diffAnnouncementSnapshot', () => {
     expect(additions).toHaveLength(0);
   });
 
-  it('sentAt filter: missing sentAt treated as pre-existing (conservative — no spam)', () => {
+  it('sentAt filter: missing sentAt treated as pre-existing (conservative; no spam)', () => {
     const mountMs = Date.parse('2026-05-30T13:00:00.000Z');
     const ref = { current: null };
 
@@ -610,7 +610,7 @@ describe('diffAnnouncementSnapshot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// notificationSupported helper — pure export, no component needed.
+// notificationSupported helper; pure export, no component needed.
 // ---------------------------------------------------------------------------
 
 describe('notificationSupported', () => {
@@ -630,7 +630,7 @@ describe('notificationSupported', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AnnBellBtn — live production component for bell-based notification opt-in.
+// AnnBellBtn; live production component for bell-based notification opt-in.
 // Uses makeReactive() because AnnBellBtn uses a lazy useState initializer and
 // its state transitions are driven by NOTIF_SYNC_EVENT dispatch.
 // ---------------------------------------------------------------------------

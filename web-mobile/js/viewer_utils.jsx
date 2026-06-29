@@ -1,14 +1,14 @@
-// viewer_utils.jsx — utility helpers extracted from viewer.jsx (mp-pxxc step 1).
+// viewer_utils.jsx: utility helpers extracted from viewer.jsx (mp-pxxc step 1).
 // Pure file split: no behaviour change.
 //
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module — do NOT give it its own <script type="module">
+// index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 
-// TermV — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
 // U1 / glossary.md.
 export function TermV(props) {
@@ -25,7 +25,7 @@ export function competitionKindLabel(c) {
   return base;
 }
 
-// leagueAwareLabel — the single source of truth for the pool-vs-league heading.
+// leagueAwareLabel: the single source of truth for the pool-vs-league heading.
 // A league is one round-robin table spanning the whole roster, so calling it
 // "Pool A" is wrong; show "League table" instead. Non-league formats fall back
 // to the pool name (or the given fallback when that's empty).
@@ -35,26 +35,26 @@ export const poolLabel = (m) => leagueAwareLabel(m.compFormat, m.poolName);
 // Publish to window so viewer_watchlist.js (and the admin scoring/shiaijo/pools
 // surfaces) can read these at RENDER time without an explicit import. Load order
 // is irrelevant: each consumer reads the global when it renders, by which point
-// viewer.js — which evaluates this module — has run.
+// viewer.js: which evaluates this module: has run.
 if (typeof window !== 'undefined') {
   window.poolLabel = poolLabel;
   window.leagueAwareLabel = leagueAwareLabel;
 }
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
-// is attached by admin_helpers.jsx, whose <script> tag loads AFTER viewer.js —
+// is attached by admin_helpers.jsx, whose <script> tag loads AFTER viewer.js:
 // safe because this proxy is only invoked at render time (after every module tag
 // has executed). Kept here so both viewer_schedule.jsx and viewer_home.jsx import
 // a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
 
-// Private helper for compMatches below — detects pool-daihyosen match IDs.
+// Private helper for compMatches below: detects pool-daihyosen match IDs.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
 export function compMatches(c) {
   const out = [];
 
-  // Setup status: no public data yet — draw is admin-only preview.
+  // Setup status: no public data yet: draw is admin-only preview.
   // draw-ready is allowed through: pool/bracket structure is already
   // persisted and returned by handlers_viewer.go unconditionally, so
   // spectators can see the pool draw before the first match is called.
@@ -63,7 +63,7 @@ export function compMatches(c) {
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
   // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
-  // individual matches even in team competitions — override compKind and teamSize
+  // individual matches even in team competitions: override compKind and teamSize
   // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,
   // routing to the individual ScoreEditorModal and rendering individual match UI.
   // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
@@ -77,7 +77,7 @@ export function compMatches(c) {
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
   // placeholders ("Pool A-1st") with assigned scheduled times. It must
   // NOT contribute to the global match list that feeds Find-My-Matches /
-  // Watchlist / schedule / TV displays — those treat every bracket match
+  // Watchlist / schedule / TV displays: those treat every bracket match
   // as a real, scheduled bout. The viewer aggregate endpoint already
   // strips it server-side; this is defense-in-depth for older caches and
   // any code path that bypasses the aggregator.
@@ -89,7 +89,7 @@ export function compMatches(c) {
     round: window.roundLabel(ri, rounds.length),
     phaseName: window.roundLabel(ri, rounds.length),
     // Raw 0-based round index alongside the display label so consumers
-    // (useTeamLineups) need not parse the label — now a bracket-size string
+    // (useTeamLineups) need not parse the label: now a bracket-size string
     // ("Round 16") that a "Round N"→N-1 parse would misread as round 15.
     roundIndex: ri,
     compId: c.id,
@@ -105,7 +105,7 @@ export function compMatches(c) {
   // poolCount is the number of REGULAR round-robin matches with the same
   // poolName, which equals N*(N-1)/2 for a pool of N players. Tiebreak
   // ("-TB-") and pool-daihyosen ("-DH-") bouts are NOT part of the RR schedule,
-  // so they are excluded here — counting them would inflate poolCount and shift
+  // so they are excluded here: counting them would inflate poolCount and shift
   // "Match N of M" for the regular bouts. Such bouts simply get no position.
   const NON_RR_ID_RE = /-(?:TB|DH)-\d+$/;
   // Null-prototype: poolName is user-controlled, so a pool literally named
@@ -239,7 +239,7 @@ export function TournamentInfo({ tournament }) {
         </>}
         {t.rulesURL && <>
           <dt className="tournament-info__label">Rules</dt>
-          <dd className="tournament-info__value">{isHttpURL(t.rulesURL) ? <a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a> : t.rulesURL}</dd>
+          <dd className="tournament-info__value">{isHttpURL(t.rulesURL) ? <a href={t.rulesURL} className="tournament-info__link" target="_blank" rel="noopener noreferrer">{t.rulesURL.replace(/^https?:\/\//i, "")}</a>: t.rulesURL}</dd>
         </>}
         {t.infoNotes && <>
           <dt className="tournament-info__label">Notes</dt>

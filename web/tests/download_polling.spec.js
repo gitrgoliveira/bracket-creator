@@ -44,7 +44,7 @@ function makeTimers() {
 
 describe("startDownloadPoll", () => {
     afterEach(() => {
-        // Defensive — don't leak across tests.
+        // Defensive, don't leak across tests.
         stopActivePoll();
     });
 
@@ -62,7 +62,7 @@ describe("startDownloadPoll", () => {
         const firstPoll = getActivePoll();
 
         startDownloadPoll("second-token", { fetchStatus, timers });
-        // Exactly one active interval + timeout — the first pair was cleared.
+        // Exactly one active interval + timeout, the first pair was cleared.
         expect(timers.intervals.size).toBe(1);
         expect(timers.timeouts.size).toBe(1);
         const secondPoll = getActivePoll();
@@ -85,7 +85,7 @@ describe("startDownloadPoll", () => {
 
         startDownloadPoll("tok", { fetchStatus, timers, onReady, onError, onTimeout });
 
-        // Fire the interval body twice — second call resolves to ready.
+        // Fire the interval body twice, second call resolves to ready.
         const tick = [...timers.intervals.values()][0];
         tick();
         await flushMicrotasks();

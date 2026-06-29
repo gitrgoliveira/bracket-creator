@@ -109,7 +109,7 @@ describe('buildAllWinnersPublic', () => {
     expect(results[0].podium).toHaveLength(4);
   });
 
-  it('filters out linked playoffs comp (sourceCompID set) — not fetched or returned', async () => {
+  it('filters out linked playoffs comp (sourceCompID set); not fetched or returned', async () => {
     const mixedComp = { id: 'mixed-1', name: 'Pools+KO', format: 'mixed', status: 'completed' };
     const playoffComp = { id: 'po-1', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-1', status: 'completed' };
     const bracket = {
@@ -125,7 +125,7 @@ describe('buildAllWinnersPublic', () => {
       swissStandings: null,
     });
 
-    // shell comp must be filtered out entirely — never fetched, never returned
+    // shell comp must be filtered out entirely (never fetched, never returned)
     expect(fetchCompetitionDetails).not.toHaveBeenCalledWith('po-1');
     expect(results.find(r => r.comp.id === 'po-1')).toBeUndefined();
     // parent mixed comp is resolved normally
@@ -248,7 +248,7 @@ describe('AllWinnersView', () => {
       onBack: vi.fn(),
     });
     const text = collectText(vnode);
-    // Initial state is loading:true — should render loading text
+    // Initial state is loading:true. Should render loading text
     expect(text).toContain('Loading results');
   });
 

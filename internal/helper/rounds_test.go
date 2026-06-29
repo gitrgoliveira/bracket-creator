@@ -168,7 +168,7 @@ func TestCircleMethodRounds_Parametric(t *testing.T) {
 // --- PathGraphRounds tests ---
 
 func TestPathGraphRounds_Four(t *testing.T) {
-	// n=4: matches (0,1),(1,2),(2,3) — 3 total
+	// n=4: matches (0,1),(1,2),(2,3), 3 total
 	// Round 0 (even-indexed): (0,1),(2,3)
 	// Round 1 (odd-indexed):  (1,2)
 	rounds := PathGraphRounds(4)
@@ -179,9 +179,9 @@ func TestPathGraphRounds_Four(t *testing.T) {
 }
 
 func TestPathGraphRounds_Six(t *testing.T) {
-	// n=6: matches (0,1),(1,2),(2,3),(3,4),(4,5) — 5 total, 2 rounds
-	// Round 0: (0,1),(2,3),(4,5) — even-indexed (0,2,4)
-	// Round 1: (1,2),(3,4)      — odd-indexed  (1,3)
+	// n=6: matches (0,1),(1,2),(2,3),(3,4),(4,5), 5 total, 2 rounds
+	// Round 0: (0,1),(2,3),(4,5), even-indexed (0,2,4)
+	// Round 1: (1,2),(3,4)      , odd-indexed  (1,3)
 	rounds := PathGraphRounds(6)
 	require.Len(t, rounds, 2, "n=6 should produce 2 rounds")
 	assertValidRounds(t, rounds, 6, 5)

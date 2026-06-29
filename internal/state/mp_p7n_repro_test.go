@@ -18,7 +18,7 @@ import (
 //     hasParticipantIDs=true.
 //   - User clicks Apply with clean 2-col text "Aaron Adams, Team Alpha".
 //   - After Apply the textarea regenerates as
-//     "Asddasd-P1, Aaron Adams, Team Alpha" — name and dojo shifted one
+//     "Asddasd-P1, Aaron Adams, Team Alpha", name and dojo shifted one
 //     column right, with the participant id leaking into Name (and
 //     getting title-cased: "asddasd-p1" → "Asddasd-P1").
 //
@@ -86,14 +86,14 @@ func TestMpP7nRepro_NonUUIDIDCausesColumnShift(t *testing.T) {
 	assert.Equal(t, "Team Alpha", loaded[0].Dojo,
 		"Dojo must be 'Team Alpha', not 'Aaron Adams' (shifted from the Name column)")
 	assert.Empty(t, loaded[0].Metadata,
-		"Metadata must be empty — pre-bug it contains ['Team Alpha'] (shifted from the Dojo column)")
+		"Metadata must be empty, pre-bug it contains ['Team Alpha'] (shifted from the Dojo column)")
 }
 
 func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 	// mp-p7n: the loader now trusts the HasIDs hint and strips column
 	// 0 regardless of UUID shape. Together with the no-regeneration
 	// save path, that means a client-supplied non-UUID id round-trips
-	// intact — important for joining with other persisted state that
+	// intact, important for joining with other persisted state that
 	// references the player by id (CompetitorStatus.PlayerID, team lineup
 	// PlayerIDs). Copilot PR #185 round-3 finding: regenerating ids would
 	// silently orphan those references.
@@ -123,7 +123,7 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 	assert.Equal(t, "Team Alpha", loaded[0].Dojo)
 	assert.Empty(t, loaded[0].Metadata)
 	assert.Equal(t, "asddasd-p1", loaded[0].ID,
-		"original id must survive the round-trip — regenerating it would orphan competitor_status references")
+		"original id must survive the round-trip, regenerating it would orphan competitor_status references")
 }
 
 // mp-p7n / Copilot PR #185 round-4 + round-9: closes the cache-
@@ -141,7 +141,7 @@ func TestMpP7nRepro_NonUUIDID_PreservesOriginalID(t *testing.T) {
 //
 // Fix: saveCompetitionChangedLocked explicitly invalidates the
 // participant cache variants on every config write (round-9). This is
-// deterministic regardless of filesystem timestamp granularity — note
+// deterministic regardless of filesystem timestamp granularity, note
 // this test does NOT sleep between the roster save and the flag flip,
 // so a coarse-mtime filesystem that left the summed cache mtime
 // unchanged would still pass (pre-round-9, this test needed a 20ms
@@ -170,7 +170,7 @@ func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
 	assert.Equal(t, "Race-P1", loadedPre[0].Name,
 		"pre-flip load takes the auto-detect path and mis-loads (column shift)")
 
-	// Flip the flag — simulating the deferred HasParticipantIDs=true
+	// Flip the flag, simulating the deferred HasParticipantIDs=true
 	// that lands after the first roster save succeeds. NO sleep: the
 	// round-9 explicit cache invalidation must work even when this
 	// config write shares participants.csv's coarse mtime.
@@ -195,7 +195,7 @@ func TestMpP7nRepro_CacheInvalidatedOnHasParticipantIDsFlip(t *testing.T) {
 // mp-p7n / Copilot PR #185 round-6: the participant cache key must
 // split by HasIDs parse mode. Without the split, a no-hint
 // auto-detect load that lands a "no-IDs" parse can poison the same
-// cache entry that a later HasIDs=&true call reads — the hinted call
+// cache entry that a later HasIDs=&true call reads, the hinted call
 // would return the cached shifted rows instead of stripping column 0.
 func TestMpP7nRepro_CacheKeySplitsByParseMode(t *testing.T) {
 	dir := t.TempDir()
@@ -203,7 +203,7 @@ func TestMpP7nRepro_CacheKeySplitsByParseMode(t *testing.T) {
 	require.NoError(t, err)
 	compID := "cache-mode"
 
-	// HasParticipantIDs=false on disk — auto-detect path will fall back
+	// HasParticipantIDs=false on disk, auto-detect path will fall back
 	// to uuidRE-on-row-0, which fails for the non-UUID id below and
 	// returns the column-shifted view.
 	require.NoError(t, store.SaveCompetition(&Competition{
@@ -233,14 +233,14 @@ func TestMpP7nRepro_CacheKeySplitsByParseMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loadedHint, 1)
 	assert.Equal(t, "Aaron Adams", loadedHint[0].Name,
-		"hinted load must NOT serve the auto-detect cache entry — distinct cache key per parse mode")
+		"hinted load must NOT serve the auto-detect cache entry, distinct cache key per parse mode")
 	assert.Equal(t, "Team Alpha", loadedHint[0].Dojo)
 	assert.Equal(t, "cache-mode-p1", loadedHint[0].ID)
 }
 
 func TestMpP7nRepro_UUIDIDIsFine(t *testing.T) {
 	// Sanity: with proper UUIDv4 IDs, the round-trip is clean. This
-	// test should PASS both pre-fix and post-fix — it isolates the bug
+	// test should PASS both pre-fix and post-fix, it isolates the bug
 	// to the non-UUID id case.
 	dir := t.TempDir()
 	store, err := NewStore(dir)

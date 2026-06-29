@@ -29,7 +29,7 @@ func TestScheduleEstimateEndpoint(t *testing.T) {
 		req, _ := http.NewRequest("GET",
 			"/api/schedule/estimate?matchDuration=3&multiplier=1.5&numMatches=20&courts=2&buffer=10",
 			nil)
-		// Deliberately no X-Tournament-Password — endpoint is public.
+		// Deliberately no X-Tournament-Password,  endpoint is public.
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
 

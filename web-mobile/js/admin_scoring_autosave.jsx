@@ -12,17 +12,17 @@ export const AUTOSAVE_DEBOUNCE_MS = 300;
 // Small indicator rendered in the scoring-panel header while a match is
 // running. Subscribes to the write-queue sync status from api_client.jsx
 // (via window.subscribeSyncStatus) and reflects:
-//   synced     — last write landed; no queue pending
-//   syncing    — write in flight / in queue
-//   offline    — network down; queue retrying with backoff
+//   synced     : last write landed; no queue pending
+//   syncing    : write in flight / in queue
+//   offline    : network down; queue retrying with backoff
 //
 // COPY RULE: NEVER use the word "live" in user-facing strings.
-// Colors use design tokens only (var(--...)) — no hardcoded hex.
+// Colors use design tokens only (var(--...)): no hardcoded hex.
 // ---------------------------------------------------------------------------
 
-// Module-level const — hoisted so the object is not rebuilt on every render.
+// Module-level const: hoisted so the object is not rebuilt on every render.
 const SYNC_PILL_CONFIG = {
-  synced:  { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
+  synced: { label: 'Synced',   cls: 'sync-pill--synced',  dot: '●' },
   syncing: { label: 'Syncing…', cls: 'sync-pill--syncing', dot: '◌' },
   offline: { label: 'Offline',  cls: 'sync-pill--offline', dot: '●' },
 };
@@ -30,7 +30,7 @@ const SYNC_PILL_CONFIG = {
 export function SyncStatusPill({ isRunning }) {
   // The component always mounts and subscribes to sync status (the subscription
   // is a single Set entry and replays the current value on subscribe). It only
-  // renders a VISIBLE pill while the match is running — autosave fires only on
+  // renders a VISIBLE pill while the match is running: autosave fires only on
   // running matches, so the pill carries no meaning otherwise. The render guard
   // is the `if (!isRunning) return null` below.
   const [status, setStatus] = useStateA('synced');
@@ -56,7 +56,7 @@ export function SyncStatusPill({ isRunning }) {
 export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, mountedRef }) {
   const timerRef = useRefA(null);
 
-  // cancelDebounce — call this before any explicit submit (Start / Finish /
+  // cancelDebounce: call this before any explicit submit (Start / Finish /
   // Hantei / Decision) so the queued timer can't fire afterward.
   const cancelDebounce = () => {
     if (timerRef.current !== null) {
@@ -68,7 +68,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
   // Clear on unmount so the closure can't fire after the component is gone.
   useEffectA(() => () => { cancelDebounce(); }, []);
 
-  // markDirty — call from every user-driven mutation handler (addPt,
+  // markDirty: call from every user-driven mutation handler (addPt,
   // removePt, foul increment/decrement, draw toggle, encho change, team
   // sub-bout edits). Do NOT call from prop/SSE-driven state writes.
   const markDirty = () => {
@@ -80,7 +80,7 @@ export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmit
       // gate 3: re-check running at FIRE time. If the match was completed
       // during the debounce window (this operator's Finish cancels the timer,
       // but an SSE update or another operator can complete it out from under
-      // us), isRunningRef has flipped false on re-render — sending a
+      // us), isRunningRef has flipped false on re-render: sending a
       // status:"running" autosave now would regress the completed result.
       if (!isRunningRef.current) return;
       // Fire-and-forget: errors swallowed; operator's explicit Finish is

@@ -2,7 +2,7 @@
 // that previously had zero render coverage (mp-d7tl pre-split gate).
 //
 // Goal: each component mounts under real React 18 + jsdom without throwing
-// and renders a key landmark. These are SHALLOW smoke tests — they do NOT
+// and renders a key landmark. These are SHALLOW smoke tests; they do NOT
 // test interaction or deep behaviour. The browser smoke pass (make run-mobile)
 // is the authoritative end-to-end gate.
 //
@@ -11,7 +11,7 @@
 // It only catches gross missing-window-ref / crash-on-mount failures that
 // the unit suite's fake-React stub cannot see.
 //
-// Globals strategy: set ALL required window.* before the dynamic import so
+// Globals strategy: set all required window.* before the dynamic import so
 // module-level `const X = window.X` captures pick up the stubs. We use a
 // beforeAll / afterAll restore pattern copied from autosave_debounce.render.test.jsx.
 
@@ -21,9 +21,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 // ── window stubs ─────────────────────────────────────────────────────────────
 // Split into:
-//   MODULE_LEVEL — captured by `const X = window.X` at module eval time;
-//                  must be set before the await import below.
-//   BODY_LEVEL   — read directly in render/useMemo bodies (also set early).
+//   MODULE_LEVEL: captured by `const X = window.X` at module eval time;
+//                 must be set before the await import below.
+//   BODY_LEVEL:   read directly in render/useMemo bodies (also set early).
 
 const Stub = (name) => function StubComp() {
   return React.createElement('div', { 'data-testid': name });
@@ -39,13 +39,13 @@ const STUBBED_GLOBALS = {
   hasBothSides:    (m) => !!(m?.sideA?.id && m?.sideB?.id),
   getScoreBtnClass: () => '',
 
-  // BODY_LEVEL — called during initial render of AdminSchedulePage
+  // BODY_LEVEL: called during initial render of AdminSchedulePage
   tournamentMatches: () => [],
   applyFilters:      (arr) => arr,
   StableInput:       (props) => React.createElement('input', { 'data-testid': 'stable-input', type: props.type }),
   PlayerMultiFilter: Stub('player-multi-filter'),
 
-  // BODY_LEVEL — called during initial render of AdminScoreEditor
+  // BODY_LEVEL: called during initial render of AdminScoreEditor
   // (rendered by AdminScoreEditorPage)
   compMatches: () => [],
 };

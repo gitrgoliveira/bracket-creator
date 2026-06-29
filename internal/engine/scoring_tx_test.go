@@ -58,7 +58,7 @@ func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 	assert.Equal(t, "kiken", matches[0].Decision)
 	assert.Equal(t, state.MatchStatusCompleted, matches[0].Status)
 	// The default-win ippon slots carry the FIK maru "○" marker, not a
-	// waza letter — no technique was struck (mp-lybf). Bob (shiro/SideB)
+	// waza letter, no technique was struck (mp-lybf). Bob (shiro/SideB)
 	// is the survivor, so the fill lands on IpponsB.
 	assert.Equal(t, []string{"○", "○"}, matches[0].IpponsB)
 	assert.Empty(t, matches[0].IpponsA)
@@ -126,7 +126,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("RecordDecisionTx deadlocked — concurrent kiken under WithTransaction did not return within 5s")
+		t.Fatal("RecordDecisionTx deadlocked, concurrent kiken under WithTransaction did not return within 5s")
 	}
 
 	var winners, losers []res
@@ -168,7 +168,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 }
 
 // TestRecordDecisionTx_KikenUndoSucceeds verifies that the T103 kiken-
-// undo path works correctly under the tx-aware variant — both the
+// undo path works correctly under the tx-aware variant, both the
 // downstream-match lock check and the prior-loser eligibility restore
 // dispatch through the supplied StoreTx without re-acquiring the lock.
 func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
@@ -195,7 +195,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 		return err
 	})
 
-	// Now undo — flip decisionBy so Bob is the new loser.
+	// Now undo, flip decisionBy so Bob is the new loser.
 	var (
 		result *state.MatchResult
 		status *domain.CompetitorStatus
@@ -241,7 +241,7 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil, false)
 	require.NoError(t, err)
 
-	// Now try the undo via the tx variant — should hit ErrDecisionLocked.
+	// Now try the undo via the tx variant, should hit ErrDecisionLocked.
 	var engErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "shiro", "undo", nil, false)
@@ -315,7 +315,7 @@ func TestRecordMatchResultWithIneligibilityTx_PreservesSideIDs(t *testing.T) {
 			SideAID: aID, SideBID: bID, Status: state.MatchStatusScheduled},
 	}))
 
-	// Score via the Tx path with NAMES only (no ids) — exactly what /score sends.
+	// Score via the Tx path with NAMES only (no ids), exactly what /score sends.
 	result := &state.MatchResult{
 		ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Tanaka Kenji",
 		Winner: "Tanaka Kenji", WinnerSide: "A", IpponsA: []string{"M"},
@@ -387,7 +387,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 }
 
 // TestStoreTxUpdatePoolMatchByIDLockFree pins that calling
-// tx.UpdatePoolMatchByID inside a WithTransaction does NOT deadlock —
+// tx.UpdatePoolMatchByID inside a WithTransaction does NOT deadlock,
 // proves the lock-free dispatch on the storeTx side is wired up.
 func TestStoreTxUpdatePoolMatchByIDLockFree(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -562,7 +562,7 @@ func TestPoolRescore_NoFinisherChange_Allowed(t *testing.T) {
 	})
 	require.NoError(t, txErr)
 
-	// RE-SCORE Pool A — A1 still wins, just with a different ippons count.
+	// RE-SCORE Pool A, A1 still wins, just with a different ippons count.
 	// The finisher set is unchanged, so the guard must NOT fire.
 	var rescore error
 	txErr = store.WithTransaction(compID, func(tx state.StoreTx) error {
@@ -594,7 +594,7 @@ func TestPoolRescore_FinisherFlip_LeafScheduled_Allowed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, allResolved)
 
-	// Do NOT score the knockout leaf — it stays scheduled.
+	// Do NOT score the knockout leaf, it stays scheduled.
 
 	// RE-SCORE Pool A to flip finisher (A2 now wins).
 	var rescore error
@@ -746,7 +746,7 @@ func TestPoolRescore_NonMixedComp_GuardIsNoOp(t *testing.T) {
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 
-	// Re-score to flip winner — should succeed with no guard.
+	// Re-score to flip winner, should succeed with no guard.
 	var rescore error
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", &state.MatchResult{
@@ -813,7 +813,7 @@ func TestPoolRescore_TeamMixed_GuardFires(t *testing.T) {
 // TestPoolRescore_CorruptBracket_FailsClosed verifies the guard does NOT fail
 // open when the bracket can't be read. A displacing re-score whose verification
 // hits a corrupt bracket.json must be rejected (error surfaced) and the prior
-// pool result preserved — never silently committed. (Copilot review, PR #246.)
+// pool result preserved, never silently committed. (Copilot review, PR #246.)
 func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
 	compID := "guard-corrupt"
@@ -878,8 +878,8 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 }
 
 // TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher verifies the helper
-// returns the displaced name actually sitting in the started match — not just
-// the first input name — so the 409 payload's Finisher stays consistent with
+// returns the displaced name actually sitting in the started match, not just
+// the first input name, so the 409 payload's Finisher stays consistent with
 // MatchID when more than one finisher is displaced (poolWinners > 1).
 // (Copilot review, PR #246.)
 func TestHasStartedKnockoutMatchTx_ReportsMatchedFinisher(t *testing.T) {
@@ -954,7 +954,7 @@ func TestKnockoutRescore_NotGatedAsPoolMatch(t *testing.T) {
 	}))
 
 	// RE-SCORE the same knockout match (flip to B1). The pool guard must not
-	// engage for a bracket match — the re-score is allowed.
+	// engage for a bracket match, the re-score is allowed.
 	var rescore error
 	require.NoError(t, store.WithTransaction(compID, func(tx state.StoreTx) error {
 		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, knockoutMatchID, &state.MatchResult{

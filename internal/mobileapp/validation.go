@@ -1,4 +1,4 @@
-// Package mobileapp — see validation.go for the Validate() error
+// Package mobileapp, see validation.go for the Validate() error
 // pattern that request bodies use after JSON binding (Slice 0 / NFR-004).
 //
 // Pattern (used by `c.ShouldBindJSON(&req); req.Validate()`):
@@ -6,11 +6,11 @@
 //  1. Define the body as a struct with explicit JSON tags.
 //  2. Implement `Validate() error` on the struct (pointer receiver
 //     when the struct is large) and return a typed `ValidationError`
-//     describing the first failed field. Stop on the first failure —
+//     describing the first failed field. Stop on the first failure,
 //     handlers map ValidationError to HTTP 400 with the embedded message.
 //  3. Handlers call `req.Validate()` immediately after `ShouldBindJSON`.
 //     Anything more semantic (e.g. cross-resource lookups, store reads)
-//     stays in the handler — Validate() handles only request-shape
+//     stays in the handler, Validate() handles only request-shape
 //     invariants that don't need I/O.
 //
 // ScoreRequest is the example implementation. Other handler families
@@ -29,7 +29,7 @@ import (
 // MaxLen* caps the byte length of persisted user-string fields. Picked
 // loose enough that no realistic operator hits them, tight enough that
 // abusive inputs are rejected fast on the write path. Defense-in-depth
-// against unbounded YAML/CSV inflation — Findings #2 reinterpretation
+// against unbounded YAML/CSV inflation, Findings #2 reinterpretation
 // from the security review (the recommended HTML-sanitization path was
 // rejected; render-time encoding via Preact JSX is already in place).
 const (
@@ -84,7 +84,7 @@ const (
 
 	// MaxLenMatchID caps the byte length of the "mid" path parameter accepted
 	// by the score endpoint. Match IDs legitimately contain spaces (e.g.
-	// "Pool A-1"), so a charset regex is inappropriate — a length cap is the
+	// "Pool A-1"), so a charset regex is inappropriate, a length cap is the
 	// right defense-in-depth guard against abusive keys growing runningRevStore
 	// unbounded. 128 bytes covers any realistic match ID.
 	MaxLenMatchID = 128
@@ -103,7 +103,7 @@ const (
 )
 
 // validateMaxLen returns a ValidationError when val exceeds max bytes.
-// Empty strings pass — required-field checks live separately so callers
+// Empty strings pass, required-field checks live separately so callers
 // can compose presence and length independently. Byte length (not rune
 // count) is the right measure here: the cap is about disk/parse cost,
 // which scales with bytes, not display width. Caller is responsible for
@@ -158,7 +158,7 @@ func validateURLHasHost(field, val string) error {
 // validateSubBout enforces FIK sub-bout invariants on a single SubMatchResult.
 // Both encho and hantei are valid ONLY for the daihyosen representative bout
 // (Position == -1): regular numbered bouts have fixed regulation time and are
-// never decided by hantei. Hantei does NOT require encho, though — a tied
+// never decided by hantei. Hantei does NOT require encho, though, a tied
 // daihyosen may be decided by judges directly (the encho gate was removed).
 //
 // The winner/tied-scoreline/decision checks here intentionally mirror the
@@ -169,7 +169,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	// Encho period counts are bounded two ways. A negative count is never
 	// valid on any bout (it would slip past the > 0 guards below and be
 	// silently treated as "no encho", bypassing the cap check). On a
-	// numbered bout, ANY non-zero count is rejected — a regular bout has
+	// numbered bout, ANY non-zero count is rejected, a regular bout has
 	// fixed regulation time and cannot go to overtime; only the daihyosen
 	// representative bout (Position == -1) may carry encho.
 	if sr.Encho != nil {
@@ -199,7 +199,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires winner to be set"}
 	}
 	if len(sr.IpponsA) != len(sr.IpponsB) {
-		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline — ippon counts must be equal"}
+		return &ValidationError{Field: prefix + "decidedByHantei", Message: "requires a tied scoreline, ippon counts must be equal"}
 	}
 	switch sr.Decision {
 	case "", "fought", "daihyosen":
@@ -207,7 +207,7 @@ func validateSubBout(prefix string, sr *state.SubMatchResult) error {
 	default:
 		return &ValidationError{
 			Field:   prefix + "decidedByHantei",
-			Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
+			Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '', 'fought', or 'daihyosen'", sr.Decision),
 		}
 	}
 	return nil
@@ -228,7 +228,7 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
 		return err
 	}
-	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names,
 	// cap them like the match sides to keep the appended pool-matches.csv
 	// columns bounded.
 	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
@@ -278,8 +278,8 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 // A blank dojo is the silent-corruption signature of a misformatted roster
 // row (e.g. a two-column "Name, Dojo" line in a zekken competition, which the
 // SPA parser maps to {displayName: dojo, dojo: ""}). Shared by every endpoint
-// that persists an embedded roster — POST /participants (batch), POST
-// /competitions, and the roster-PUT branch of PUT /competitions/:id — so the
+// that persists an embedded roster, POST /participants (batch), POST
+// /competitions, and the roster-PUT branch of PUT /competitions/:id, so the
 // same malformed payload is rejected identically regardless of entry point.
 func validatePlayerRequired(name, dojo string) error {
 	if strings.TrimSpace(name) == "" {
@@ -295,7 +295,7 @@ func validatePlayerRequired(name, dojo string) error {
 // participant. Shared between the participants handler (live UI write)
 // and the import handler (manifest upload) so a malformed CSV or JSON
 // payload from either path is rejected with the same error shape. The
-// Metadata slice is also count-capped — 16 entries is generous given
+// Metadata slice is also count-capped, 16 entries is generous given
 // the current schema (Dan, Grade, optional flags) but rejects abusive
 // payloads that would inflate participants.csv into the megabytes.
 func validatePlayerLengths(name, displayName, dojo, source string, metadata []string) error {
@@ -314,7 +314,7 @@ func validatePlayerLengths(name, displayName, dojo, source string, metadata []st
 	// A non-empty registration source must be a recognised value. Validate the
 	// CANONICAL form (CanonicalRegistrationSource trims, lower-cases, and aliases
 	// the legacy "reserved" → "manual") so every endpoint accepts the same set
-	// uniformly — including legacy inputs — while still rejecting truly unknown
+	// uniformly, including legacy inputs, while still rejecting truly unknown
 	// values (the CSV loader only recognises these tokens, so an unexpected value
 	// would shift into Metadata on reload).
 	if source != "" && !helper.IsRegistrationSource(helper.CanonicalRegistrationSource(source)) {
@@ -368,7 +368,7 @@ func (e *ValidationError) Error() string {
 //
 // Defined as a named type whose underlying type is state.MatchResult so
 // the JSON shape is identical to the pre-Slice-0 endpoint (clients send
-// MatchResult fields at the top level) — no client-side change. The
+// MatchResult fields at the top level), no client-side change. The
 // named type lets us hang Validate() off it without polluting state
 // (which is a pure-data package).
 //
@@ -402,7 +402,7 @@ func (r *ScoreRequest) Validate() error {
 			}
 		}
 	}
-	// Length caps — defense-in-depth against unbounded YAML/CSV bloat.
+	// Length caps, defense-in-depth against unbounded YAML/CSV bloat.
 	// `decisionReason` was previously bounded only in DecisionRequest.Validate
 	// (200 char contract); folding it in here closes the bulk-score gap
 	// where a 1MB reason could land on disk via PUT /matches/:mid/score.
@@ -415,7 +415,7 @@ func (r *ScoreRequest) Validate() error {
 	if err := validateMaxLen("winner", r.Winner, MaxLenMatchSide); err != nil {
 		return err
 	}
-	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names —
+	// Daihyosen/tiebreaker rep-player names (mp-62vr) are competitor names,
 	// cap them like the match sides to keep the appended pool-matches.csv
 	// columns bounded.
 	if err := validateMaxLen("repPlayerA", r.RepPlayerA, MaxLenMatchSide); err != nil {
@@ -448,7 +448,7 @@ func (r *ScoreRequest) Validate() error {
 	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only
-	// check when both sides AND winner are present in the request —
+	// check when both sides AND winner are present in the request,
 	// the engine's preserve-on-empty fallback handles the side-omitted
 	// case.
 	if r.Winner != "" && r.SideA != "" && r.SideB != "" {
@@ -497,12 +497,12 @@ func (r *ScoreRequest) Validate() error {
 		if len(r.IpponsA) != len(r.IpponsB) {
 			return &ValidationError{
 				Field:   "decidedByHantei",
-				Message: "requires a tied scoreline — ippon counts must be equal",
+				Message: "requires a tied scoreline, ippon counts must be equal",
 			}
 		}
 		// Hantei is a referee judges' decision that produces a winner from a
 		// tied bout. Any other special decision (hikiwake=draw, kiken=withdrawal,
-		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible —
+		// fusenpai=no-show, daihyosen=rep-bout…) is semantically incompatible,
 		// persisting both would render contradictory suffixes like "Kiken (E) HT".
 		// Only the neutral values ("" and "fought") are allowed alongside hantei.
 		switch r.Decision {
@@ -511,7 +511,7 @@ func (r *ScoreRequest) Validate() error {
 		default:
 			return &ValidationError{
 				Field:   "decidedByHantei",
-				Message: fmt.Sprintf("incompatible with decision %q — hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
+				Message: fmt.Sprintf("incompatible with decision %q, hantei declares a winner from a tied bout; use '' or 'fought'", r.Decision),
 			}
 		}
 		if r.DecisionBy != "" {
@@ -597,7 +597,7 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 
 // maxIpponsPerSide is the kendo best-of-3 cap: each fighter can score
 // at most 2 ippons in regulation (the bout ends when one side reaches
-// 2). 2-2 is therefore an impossible scoreline — the match would have
+// 2). 2-2 is therefore an impossible scoreline, the match would have
 // ended at 2-1 before either side could score a third.
 const maxIpponsPerSide = 2
 
@@ -605,11 +605,11 @@ const maxIpponsPerSide = 2
 // single match (or sub-bout) tally. Rules:
 //
 //   - len(ipponsA) ≤ 2 and len(ipponsB) ≤ 2
-//   - NOT (len(ipponsA) == 2 && len(ipponsB) == 2)   — the 2-2 ban
+//   - NOT (len(ipponsA) == 2 && len(ipponsB) == 2)  , the 2-2 ban
 //
 // Field is the JSON-field prefix used in error messages (e.g. "" for a
 // top-level match, "subResults[i]." for a sub-bout). Kiken/fusenpai
-// scorelines are also bounded by these rules — their own n-0 check in
+// scorelines are also bounded by these rules, their own n-0 check in
 // validateDecision is strictly tighter (n ≤ 2) so this passes through.
 func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 	if len(ipponsA) > maxIpponsPerSide {
@@ -634,7 +634,7 @@ func validateIpponCounts(field string, ipponsA, ipponsB []string) error {
 }
 
 // requireWinnerForDecision enforces that Winner is set when a kiken/
-// fusenpai is recorded — the engine's eligibility side effect uses
+// fusenpai is recorded, the engine's eligibility side effect uses
 // Winner as the canonical surviving side. Without this, a bulk-score
 // or hand-crafted request could record an ineligibility against the
 // wrong player.
@@ -666,7 +666,7 @@ func (r *ScoreRequest) AsMatchResult() *state.MatchResult {
 // at the top level), so it's not listed here.
 //
 // Rejected: "kiken-voluntary", "kiken-injury", "fusenpai", "daihyosen",
-// "kachinuki-exhaustion", "fusensho" — referee/operator rulings with
+// "kachinuki-exhaustion", "fusensho", referee/operator rulings with
 // eligibility side-effects or official designation requirements. Also
 // rejected when decidedByHantei is explicitly true (judges' panel decision).
 func IsSelfRunReportableDecision(decision string, decidedByHantei *bool) bool {

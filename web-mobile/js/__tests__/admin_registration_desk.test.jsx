@@ -6,7 +6,7 @@ import {
 
 // Pure helpers behind the Registration desk (mp-25bk). These carry the
 // cross-competition identity, fuzzy search, player-tag resolution, and
-// presence logic — pinning them behaviorally so a refactor can't silently
+// presence logic: pinning them behaviorally so a refactor can't silently
 // regress the desk's arrival loop.
 
 describe('rdNorm', () => {
@@ -60,7 +60,7 @@ describe('rdTokenScore (fuzzy)', () => {
   });
   it('rejects a scattered subsequence with gaps larger than the needle', () => {
     // "yama" coincidentally subsequences "ryo nakamura wakaba" but is not a
-    // real hit — the gap cap rejects it.
+    // real hit: the gap cap rejects it.
     expect(rdTokenScore('yama', 'ryo nakamura wakaba transfer')).toBeNull();
   });
   it('rejects at the gap-cap boundary (gaps == needle length)', () => {
@@ -150,7 +150,7 @@ describe('rdZekken', () => {
   });
   it('ignores derived display names from non-zekken competitions', () => {
     // Women's etc. carry a server-derived DisplayName ("A. SATO") that is not a
-    // real zekken — it must not surface.
+    // real zekken: it must not surface.
     expect(rdZekken([{ comp: { withZekkenName: false }, player: { name: 'Aiko Sato', displayName: 'A. SATO' } }]))
       .toBe('');
   });

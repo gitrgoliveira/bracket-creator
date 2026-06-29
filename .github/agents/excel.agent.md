@@ -11,18 +11,18 @@ You are an Excel generation specialist for the bracket-creator project. Your exp
 - Binary tree structures that drive bracket layouts
 
 ## Key Files
-- `internal/helper/excel.go` — Pool match rendering with cell formulas
-- `internal/helper/excel_tree.go` — Playoff bracket tree rendering
-- `internal/helper/excel_data.go` — Data structures with Excel coordinates
-- `internal/helper/excel_styles.go` — Cell formatting and styles
-- `internal/helper/tree.go` — Binary tree construction for brackets
-- `internal/excel/client.go` — Excel file lifecycle (open/save)
-- `internal/excel/sheet_manager.go` — Sheet operations
-- `internal/excel/styles.go` — Style management
+- `internal/helper/excel.go`: Pool match rendering with cell formulas
+- `internal/helper/excel_tree.go`: Playoff bracket tree rendering
+- `internal/helper/excel_data.go`: Data structures with Excel coordinates
+- `internal/helper/excel_styles.go`: Cell formatting and styles
+- `internal/helper/tree.go`: Binary tree construction for brackets
+- `internal/excel/client.go`: Excel file lifecycle (open/save)
+- `internal/excel/sheet_manager.go`: Sheet operations
+- `internal/excel/styles.go`: Style management
 
 ## Constraints
-- DO NOT modify domain types in `internal/domain` — they are clean models without Excel coupling
-- DO NOT break formula references between sheets — always verify cross-sheet links
+- DO NOT modify domain types in `internal/domain`: they are clean models without Excel coupling
+- DO NOT break formula references between sheets: always verify cross-sheet links
 - DO NOT change cell coordinate patterns without updating all dependent formulas
 - ONLY make changes that maintain the dual-column pool layout (odd pools left, even pools right)
 

@@ -151,7 +151,7 @@ def run_competition_setup(cat):
     # teamSize follows the API contract: 0 = individual, >0 = team (engine
     # checks comp.TeamSize > 0; OpenAPI Competition.teamSize: "0 for
     # individual"). Categories without an explicit team_size are individual,
-    # so default to 0 — never 1, which would make them look like 1-person
+    # so default to 0, never 1, which would make them look like 1-person
     # team comps internally. kind is derived the same way so kind and
     # teamSize can never disagree. Each team CSV row is one team
     # (TeamName, Dojo); team_size sets the sub-bouts per encounter.
@@ -181,7 +181,7 @@ def run_competition_setup(cat):
                              json={"players": participants}, headers=HEADERS).raise_for_status()
 
     # NOTE: a mixed (Pools + Knockout) competition is a SINGLE competition. Its
-    # knockout bracket fills in automatically as each pool finishes — there is no
+    # knockout bracket fills in automatically as each pool finishes, there is no
     # separate playoffs competition to create. Cross-competition promotion (the
     # old "reserved slots" feature) has also been removed.
 
@@ -235,7 +235,7 @@ def score_all_matches(comp_id):
         bracket_matches = []
         bracket = detail.get('bracket', {})
         # A mixed competition's knockout bracket fills in IN PLACE as each pool
-        # finishes — there is no separate playoffs competition. Score any bracket
+        # finishes, there is no separate playoffs competition. Score any bracket
         # match whose BOTH sides are resolved competitors: skip "Winner of …"
         # feeders, empty bye slots, and unseeded pool-origin placeholders
         # ("Pool A-1st") whose feeder pool hasn't finished yet. Re-fetching each
@@ -254,7 +254,7 @@ def score_all_matches(comp_id):
                         bracket_matches.append(m)
         
         # Tag each match as a pool match (draws/hikiwake allowed) or a bracket
-        # match (knockout — no draw). The old code keyed this off the comp-level
+        # match (knockout, no draw). The old code keyed this off the comp-level
         # format=='pools', but 'pools' is a removed legacy value (mixed comps are
         # 'mixed'), so pool matches in mixed comps were wrongly forced into wins.
         to_score = [(m, True) for m in pool_matches] + [(m, False) for m in bracket_matches]
@@ -287,7 +287,7 @@ def score_all_matches(comp_id):
                 if raw_decision == "X":
                     raw_decision = "hikiwake"
 
-                # Knockout (bracket) matches can't end in a draw — convert to a win.
+                # Knockout (bracket) matches can't end in a draw, convert to a win.
                 if not is_pool_match and raw_decision == "hikiwake":
                     winner = sideA
                     ipponsA = ["M"]
@@ -346,19 +346,19 @@ def main():
         # Per-category isolation: a cyclic pool tie can block one comp from
         # finishing. Don't let that abort seeding of the remaining categories.
         try:
-            # 1. Setup pools (mixed competition — its knockout bracket fills in
+            # 1. Setup pools (mixed competition, its knockout bracket fills in
             #    automatically as each pool finishes; no separate playoff comp).
             comp_id = run_competition_setup(cat)
 
             # 2. Score everything: score_all_matches loops until no scoreable
             #    match remains. As each pool completes, its finishers are seeded
             #    into the knockout in place, so the subsequent loop iterations
-            #    pick up the now-playable knockout matches automatically — pools
+            #    pick up the now-playable knockout matches automatically, pools
             #    and knockout are all driven by this one call.
             score_all_matches(comp_id)
 
             # 3. Finalize. A mixed comp ends in 'playoffs' status once the
-            #    bracket final is scored; mark it completed (idempotent — a
+            #    bracket final is scored; mark it completed (idempotent, a
             #    league comp already auto-completes, so /complete is a no-op or
             #    harmless there).
             resp = requests.post(f"{BASE_URL}/api/competitions/{comp_id}/complete", headers=HEADERS)

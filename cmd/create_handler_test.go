@@ -59,7 +59,7 @@ func leagueForm(playerList string) url.Values {
 // from disk, which severs the player↔match pointer link PrintPoolMatches needs,
 // so the per-player W/L/T cells degraded to "=0" and ranking never computed.
 // This asserts the "W" column in the pool Results block holds a live counting
-// formula — NOT "=0".
+// formula, NOT "=0".
 func TestCreateHandler_LeagueWLAreCountingFormulas(t *testing.T) {
 	f := postCreate(t, leagueForm("Alice, DA\nBob, DB\nCharlie, DC\nDave, DD\nEve, DE\nFrank, DF"))
 
@@ -81,7 +81,7 @@ func TestCreateHandler_LeagueWLAreCountingFormulas(t *testing.T) {
 		formula, ferr := f.GetCellFormula("Pool Matches", cell)
 		require.NoError(t, ferr)
 		require.NotEqual(t, "0", strings.TrimPrefix(formula, "="),
-			"W cell %s collapsed to =0 — pool scoring formulas are dead (mp-x0u9 regression)", cell)
+			"W cell %s collapsed to =0, pool scoring formulas are dead (mp-x0u9 regression)", cell)
 		if strings.Contains(formula, "COUNTA") {
 			sawCountingFormula = true
 		}
@@ -95,7 +95,7 @@ func TestCreateHandler_LeagueWLAreCountingFormulas(t *testing.T) {
 // comma must survive the round trip: the web-mobile export RFC-4180-quotes such
 // fields (e.g. `"Doe, John"`), which routes the line through encoding/csv in
 // helper.CreatePlayers instead of a naive strings.Split. Without quoting the
-// name would split into name="Doe", dojo="John" — silent corruption.
+// name would split into name="Doe", dojo="John", silent corruption.
 func TestCreateHandler_CommaInPlayerName_NotCorrupted(t *testing.T) {
 	// The quoted form is exactly what the JS csvField helper emits.
 	const quotedName = `"Doe, John"`
@@ -165,12 +165,12 @@ func TestCreateHandler_PartialPoolFormat_FewerMatches(t *testing.T) {
 // blank "\r" line. The handler normalizes CRLF→LF before splitting.
 func TestCreateHandler_CRLFRoster_Normalized(t *testing.T) {
 	crlf := "Alice, DA\r\nBob, DB\r\nCharlie, DC\r\nDave, DD\r\nEve, DE\r\nFrank, DF\r\n"
-	f := postCreate(t, leagueForm(crlf)) // 200 — no phantom-duplicate 400, no parse error
+	f := postCreate(t, leagueForm(crlf)) // 200, no phantom-duplicate 400, no parse error
 
 	rows, err := f.GetRows("data")
 	require.NoError(t, err)
 	for _, row := range rows {
-		// Column C (idx 2) is Player Dojo — it must not carry a trailing CR.
+		// Column C (idx 2) is Player Dojo, it must not carry a trailing CR.
 		if len(row) > 2 && row[1] == "Frank" {
 			require.Equal(t, "DF", row[2], "dojo retained a trailing carriage return from CRLF input")
 		}

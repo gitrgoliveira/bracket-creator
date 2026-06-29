@@ -1,10 +1,10 @@
-// admin_competition_swiss.jsx — Swiss-round management section (AdminSwissRounds)
+// admin_competition_swiss.jsx: Swiss-round management section (AdminSwissRounds)
 // and its pure round predicates. Split out of admin_competition.jsx (mp-hpe3).
 // The predicates are ES-exported and re-exported by the entry for the vitest suite.
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
-// T191 (US13 — FR-050d): pure helpers for the Swiss-round admin
+// T191 (US13, FR-050d): pure helpers for the Swiss-round admin
 // section. Extracted so the conditional logic ("which round, are
 // matches complete, can we generate next?") is unit-testable without
 // mounting AdminSwissRounds. Mirrors the admin_scoring_modal.jsx
@@ -12,7 +12,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // exported for tests).
 
 // Returns the canonical match-ID prefix for a Swiss round. Matches
-// engine/swiss.go's `swissPoolName`/`swissMatchID` — keep in sync.
+// engine/swiss.go's `swissPoolName`/`swissMatchID`. Keep in sync.
 function swissRoundIDPrefix(round) {
   return `Swiss-R${round}-`;
 }
@@ -27,7 +27,7 @@ function filterSwissRoundMatches(poolMatches, round) {
 }
 
 // Returns true when every match in `matches` has status "completed".
-// Returns false for an empty list — an unbegun round is not "complete"
+// Returns false for an empty list (an unbegun round is not "complete")
 // from the admin's perspective; the Generate Next Round button stays
 // disabled until the round exists AND every match in it is done.
 function isSwissRoundComplete(matches) {
@@ -45,7 +45,7 @@ function canGenerateNextSwissRound(comp, currentRoundMatches) {
   if (total < 1) return false;
   if (current >= total) return false;
   // First round is generated on competition start; if currentRound is
-  // 0 (status=setup) we never enable Generate Next — operator should
+  // 0 (status=setup) we never enable Generate Next. Operator should
   // hit "Start competition" first. After start, current >= 1 and we
   // require the current round to be complete to advance.
   if (current < 1) return false;
@@ -54,7 +54,7 @@ function canGenerateNextSwissRound(comp, currentRoundMatches) {
 
 // T193 (FR-050e): once every configured round has been generated and
 // completed, the admin page hides the Generate button and surfaces a
-// "Competition complete — view final standings" link. `currentRound
+// "Competition complete. View final standings" link. `currentRound
 // >= swissRounds` AND every match in the final round done.
 function isSwissCompetitionComplete(comp, currentRoundMatches) {
   if (!comp || comp.format !== "swiss") return false;
@@ -71,7 +71,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // Reset the inline error whenever the round changes or new matches
-  // land via SSE — the prior "current round incomplete" message is
+  // land via SSE (the prior "current round incomplete" message is
   // not meaningful once the operator has moved on.
   useEffectA(() => { setGenError(null); }, [c.swissCurrentRound, (poolMatches || []).length]);
 
@@ -87,7 +87,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
     setGenError(null);
     try {
       await window.API.swissGenerateRound(c.id, password);
-      // SSE swiss_round_generated will trigger AdminApp's refetch —
+      // SSE swiss_round_generated will trigger AdminApp's refetch.
       // no local-state mutation needed. Surface a toast so the
       // operator sees confirmation in case the SSE is slow.
       if (!mountedRef.current) return;
@@ -97,7 +97,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
       // 409 / round_incomplete is a known operator-error condition;
       // surface it inline rather than as a generic toast.
       if (e.code === "round_incomplete") {
-        setGenError("Cannot generate — current round still has incomplete matches.");
+        setGenError("Cannot generate. Current round still has incomplete matches.");
       } else {
         setGenError(e.message || "Failed to generate next round");
         if (showToast) showToast(e.message || "Failed to generate next round", "error");
@@ -107,7 +107,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
     }
   };
 
-  // Setup state (status === "setup") — nudge the operator to hit
+  // Setup state (status === "setup"). Nudge the operator to hit
   // Start so round 1 is generated.
   if (c.status === "setup") {
     return (
@@ -127,7 +127,7 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
         </div>
       </div>
 
-      {/* Current-round match list (id + sides + status). Kept compact — */}
+      {/* Current-round match list (id + sides + status). Kept compact. */}
       {/* the full edit experience lives in the Scores section. */}
       {currentMatches.length > 0 && (
         <table className="pool__table" style={{ marginBottom: 10 }}>
@@ -136,9 +136,9 @@ function AdminSwissRounds({ c, poolMatches, password, onViewStandings, showToast
             {currentMatches.map((m, i) => (
               <tr key={m.id}>
                 <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{i + 1}</td>
-                <td>{m.sideB?.name || "—"}</td>
-                <td>{m.sideA?.name || "—"}</td>
-                <td style={{ fontFamily: "var(--font-mono)" }}>{m.court || "—"}</td>
+                <td>{m.sideB?.name || "n/a"}</td>
+                <td>{m.sideA?.name || "n/a"}</td>
+                <td style={{ fontFamily: "var(--font-mono)" }}>{m.court || "n/a"}</td>
                 <td style={{ fontSize: 12, color: m.status === "completed" ? "var(--accent)" : m.status === "running" ? "var(--accent)" : "var(--ink-3)" }}>
                   {m.status === "completed" ? "Done" : m.status === "running" ? "Now" : "Scheduled"}
                 </td>

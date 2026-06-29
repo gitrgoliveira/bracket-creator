@@ -267,7 +267,7 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 
 	const sheet = "Pool Matches"
 
-	// Stop scanning at the "Results" header — rows below it are the
+	// Stop scanning at the "Results" header, rows below it are the
 	// results-table aggregator formulas, NOT match rows, and writing
 	// into them would clobber the W/L/PW/PL formulas we want to test.
 	var resultsRow int
@@ -294,10 +294,10 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 
 		switch {
 		case strings.Contains(whiteFormula, kevinDataRef):
-			// Kevin is on the white side — left scores B/C win.
+			// Kevin is on the white side, left scores B/C win.
 			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("B%d", row), "M"))
 		case strings.Contains(redFormula, kevinDataRef):
-			// Kevin is on the red side — right scores E/F win.
+			// Kevin is on the red side, right scores E/F win.
 			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("F%d", row), "M"))
 		}
 	}
@@ -322,7 +322,7 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 		"single round-robin pool of 8: rank-1 ranking cell %s should resolve to the player who won all 7 matches",
 		rank1Cell)
 
-	// No formula in any sheet may have a leading '=' — OOXML <f> bodies
+	// No formula in any sheet may have a leading '='; OOXML <f> bodies
 	// that start with '=' are tolerated by Excel but rejected by Google
 	// Sheets and Apple Numbers (mp-x7h).
 	for _, s := range f.GetSheetList() {
@@ -341,7 +341,7 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 	}
 
 	// And the elimination bracket's Pool A-1st CONCATENATE formula must
-	// reference the rank-1 cell (regression for mp-c5c — empty-cell ref).
+	// reference the rank-1 cell (regression for mp-c5c, empty-cell ref).
 	const elimSheet = "Elimination Matches"
 	var poolARefCell string
 	for r := 1; r < 50; r++ {
@@ -369,7 +369,7 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 // the team-summary Points-Won/Points-Lost (PW/PL) bug. With teams of 3 and a
 // full round robin (3 teams, single shiaijo, single pool), the SUMPRODUCT
 // formulas in buildTeamPointsFormula / buildTeamWinnersFormula passed cell
-// ranges through SUBSTITUTE/LEN — that only iterates as an array in Excel
+// ranges through SUBSTITUTE/LEN; that only iterates as an array in Excel
 // 365 with dynamic-array semantics. Legacy Excel, Google Sheets, and Apple
 // Numbers collapse the range to the first cell, so PW and IV (and the
 // derived rank/score) were stuck at 1 instead of summing all 3 sub-bouts.
@@ -424,7 +424,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	// formula reference or the resolved value "Alice Adams".
 	alphaTeamRef := "'data'!$B$3"
 
-	// Find Team Alpha's team-match summary rows — column A or G holds the
+	// Find Team Alpha's team-match summary rows, column A or G holds the
 	// alphaTeamRef formula and the row below contains the "1" sub-bout label.
 	var summaryRows []int
 	for r := 1; r < 200; r++ {
@@ -444,16 +444,16 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	// Award Team Alpha 1 ippon ("M") in every sub-bout (3 per match × 2).
 	for _, sr := range summaryRows {
 		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", sr))
-		col := "B" // Team Alpha is white — write into leftVictories column.
+		col := "B" // Team Alpha is white, write into leftVictories column.
 		if redFormula == alphaTeamRef {
-			col = "E" // Team Alpha is red — write into rightPoints column.
+			col = "E" // Team Alpha is red, write into rightPoints column.
 		}
 		for sub := sr + 1; sub <= sr+3; sub++ {
 			require.NoError(t, f.SetCellValue(sheet, fmt.Sprintf("%s%d", col, sub), "M"))
 		}
 	}
 
-	// Find Team Alpha's IV/IL/IT/PW/PL row — column A resolves to
+	// Find Team Alpha's IV/IL/IT/PW/PL row, column A resolves to
 	// "Alice Adams" (Alpha's first-member display label, see above),
 	// the next row's column A is NOT "1", and column E has a formula
 	// (PW). The earlier Team Alpha row in the W/L/T results table has
@@ -470,7 +470,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 		}
 		eForm, _ := f.GetCellFormula(sheet, fmt.Sprintf("E%d", r))
 		if eForm == "" {
-			continue // W/L/T row — no PW formula
+			continue // W/L/T row, no PW formula
 		}
 		alphaPwRow = r
 		break
@@ -484,7 +484,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	// IV is in column B and IL in column C of the team-results
 	// IV/IL/IT/PW/PL row. Both come from buildTeamWinnersFormula via
 	// the per-row IF clauses, which is the OTHER half of the fix in
-	// this PR — assert them here too so a regression in win-counting
+	// this PR, assert them here too so a regression in win-counting
 	// doesn't sneak through unnoticed (Copilot feedback).
 	iv, err := f.CalcCellValue(sheet, fmt.Sprintf("B%d", alphaPwRow))
 	require.NoError(t, err)
@@ -1051,7 +1051,7 @@ func TestPoolBoundsForSubtree(t *testing.T) {
 func TestPoolBoundsForSubtree_DegenerateInputs(t *testing.T) {
 	t.Parallel()
 
-	// numSubtrees < numCourts: pagesPerCourt would be 0 — must not panic.
+	// numSubtrees < numCourts: pagesPerCourt would be 0, must not panic.
 	start, end := poolBoundsForSubtree(2, 4, 1, 0)
 	assert.GreaterOrEqual(t, start, 0)
 	assert.GreaterOrEqual(t, end, start)

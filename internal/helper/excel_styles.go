@@ -462,7 +462,7 @@ func buildUnlockedBorderStyleBottom(f *excelize.File) int {
 
 // mustNewStyle creates an Excel style and returns its ID.  It panics when
 // style creation fails, which only happens when the Style definition itself
-// is malformed — a programming error, not a runtime condition.
+// is malformed, a programming error, not a runtime condition.
 func mustNewStyle(f *excelize.File, style *excelize.Style) int {
 	id, err := f.NewStyle(style)
 	if err != nil {

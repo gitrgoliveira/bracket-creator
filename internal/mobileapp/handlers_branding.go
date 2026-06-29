@@ -29,7 +29,7 @@ var validBrandingContentTypes = map[string]string{
 // The BrandingManager component uses HEAD to probe logo existence on mount.
 func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 	brandingLogoHandler := func(c *gin.Context) {
-		// Prevent browsers/proxies from caching 404s — a newly uploaded logo
+		// Prevent browsers/proxies from caching 404s, a newly uploaded logo
 		// would otherwise stay "missing" until a hard refresh.
 		c.Header("Cache-Control", "no-cache")
 		t, err := store.LoadTournament()
@@ -42,7 +42,7 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 			return
 		}
 		name := t.Theme.LogoPath
-		// Only allow the two known filenames — never serve arbitrary paths.
+		// Only allow the two known filenames, never serve arbitrary paths.
 		if name != "logo.png" && name != "logo.jpg" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"})
 			return

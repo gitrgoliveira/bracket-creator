@@ -35,7 +35,7 @@ func (s *Store) LoadCompetitorStatus(compID string) (map[string]domain.Competito
 
 func (s *Store) loadCompetitorStatusLocked(compID string) (map[string]domain.CompetitorStatus, error) {
 	path := s.compPath(compID, competitorStatusFilename)
-	data, err := os.ReadFile(path) // #nosec G304 — compPath cleans the path.
+	data, err := os.ReadFile(path) // #nosec G304; compPath cleans the path.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.CompetitorStatus{}, nil
@@ -66,7 +66,7 @@ func parseCompetitorStatusBytes(data []byte) (map[string]domain.CompetitorStatus
 
 // saveCompetitorStatusLocked persists the status map. Caller MUST
 // hold the per-comp write lock. The write parameter routes the
-// actual file write — directWrite for non-tx callers, WAL-capturing
+// actual file write; directWrite for non-tx callers, WAL-capturing
 // writer for tx callers. See saveBracketLocked (T211/T212).
 func (s *Store) saveCompetitorStatusLocked(compID string, statuses map[string]domain.CompetitorStatus, write writeFn) error {
 	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
@@ -110,7 +110,7 @@ func (s *Store) SetCompetitorStatus(compID string, status domain.CompetitorStatu
 // (typically via WithTransaction).
 //
 // status.Validate() is still re-run here so the lock-free path is just
-// as safe as the public method when called from a transaction body —
+// as safe as the public method when called from a transaction body;
 // callers don't have to remember to validate before invoking. The
 // write parameter routes the save (T211/T212).
 func (s *Store) setCompetitorStatusLocked(compID string, status domain.CompetitorStatus, write writeFn) error {

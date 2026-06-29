@@ -1,11 +1,11 @@
-// viewer_watchlist.jsx — the watchlist personalisation UI, extracted from
+// viewer_watchlist.jsx: the watchlist personalisation UI, extracted from
 // viewer.jsx to keep that file's component count manageable (mp-42rg follow-up).
 //
 // Sharing model: this module keeps its OWN <script type="module"> tag in
 // index.html because viewer.js does NOT import it (unlike the other viewer_*
 // modules, which viewer.js is the sole entry for). It shares code with viewer.jsx
 // via `window.*` reads at RENDER time to break the runtime cycle with
-// viewer_home.jsx — NOT because ES imports would fail: the server rewrites
+// viewer_home.jsx: NOT because ES imports would fail: the server rewrites
 // `/dist/X.jsx` → the compiled `X.js`, so `import "./X.jsx"` resolves fine.
 //
 // This file and viewer_home.jsx form a runtime CYCLE: ViewerHome (in
@@ -33,7 +33,7 @@ function BellIcon({ muted, size = 17 }) {
 }
 window.BellIcon = BellIcon;
 
-// WatchPicker — unified typeahead over the tournament roster that yields
+// WatchPicker: unified typeahead over the tournament roster that yields
 // EITHER a player pick or a whole-dojo pick. A single search box surfaces both
 // (matching dojos first, then matching players), so "Hagane" offers
 // "Watch all of Hagane Dojo" as one entry instead of forcing the user to add
@@ -85,9 +85,9 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
       {open && total > 0 && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? pluralize(total, "match", "matches") : `${pluralize(roster.length, "participant")} · ${pluralize((dojos || []).length, "dojo")} — type to search`}
+            {q ? pluralize(total, "match", "matches") : `${pluralize(roster.length, "participant")} · ${pluralize((dojos || []).length, "dojo")}: type to search`}
           </div>
-          {/* Dojo options first — a dojo entry is dynamic (auto-includes late
+          {/* Dojo options first: a dojo entry is dynamic (auto-includes late
               registrations), so it's the higher-leverage choice for a coach. */}
           {dojoMatches.map((d) => (
             <button type="button"
@@ -124,10 +124,10 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
   );
 }
 
-// WatchHeroCard — the rich "next match" hero for the PRIMARY watched entity
+// WatchHeroCard: the rich "next match" hero for the PRIMARY watched entity
 // (mp-xhaa). Lifted from the former MyMatchPanel so the lone-competitor case
 // keeps its full treatment: AKA/SHIRO badge, queue position, opponent, court,
-// time. The subject is whichever side belongs to the primary — for a player
+// time. The subject is whichever side belongs to the primary: for a player
 // primary that's the player; for a dojo primary it's the member currently
 // competing (primaryIds covers all members).
 function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
@@ -173,7 +173,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
       <div className="my-match__row">
         <div className="my-match__chip">
           <span className="l">Court</span>
-          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || "—"}</span>
+          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || ":"}</span>
         </div>
         <div className="my-match__chip">
           <span className="l">Time</span>
@@ -218,7 +218,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   );
 }
 
-// WatchlistPanel — the unified personalisation panel (mp-xhaa). One card that
+// WatchlistPanel: the unified personalisation panel (mp-xhaa). One card that
 // absorbs the former "Find my matches" hero and the multi-player watchlist:
 //   - chip list of watched entities (players + whole dojos), each removable,
 //     each pin-able when ≥2 entities exist;
@@ -278,7 +278,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     setPrimaryKey(primaryKey === k ? "" : k);
   };
 
-  // Chip for one entry — player or dojo, with optional pin star (≥2 entries)
+  // Chip for one entry: player or dojo, with optional pin star (≥2 entries)
   // and a remove button.
   const renderChip = (entry) => {
     const k = entryKey(entry);
@@ -332,8 +332,8 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
             className={`watchlist-bell-btn${chimeMuted ? " watchlist-bell-btn--muted" : ""}`}
             onClick={onBellToggle}
             aria-pressed={!chimeMuted}
-            aria-label={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
-            title={chimeMuted ? "Alerts muted — tap to enable" : "Alerts on — tap to mute"}
+            aria-label={chimeMuted ? "Alerts muted: tap to enable" : "Alerts on: tap to mute"}
+            title={chimeMuted ? "Alerts muted: tap to enable" : "Alerts on: tap to mute"}
           >
             <BellIcon muted={chimeMuted} />
           </button>
@@ -342,7 +342,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
 
       {count === 0 ? (
         <div className="hint">
-          Track yourself, a few competitors, or a whole dojo — we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
+          Track yourself, a few competitors, or a whole dojo : we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
         </div>
       ) : (
         <div className="pmf__bar pmf__bar--standalone watchlist-chips">
@@ -368,11 +368,11 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           until the user picks a primary. */}
       {multi && !primaryEntry && (
         <div className="hint watchlist-pin-hint">
-          Tap ☆ on a chip to pin your primary — they get the big card and an on-deck chime.
+          Tap ☆ on a chip to pin your primary : they get the big card and an on-deck chime.
         </div>
       )}
 
-      {/* Primary hero — implicit when 1 entity, pinned when ≥2. */}
+      {/* Primary hero: implicit when 1 entity, pinned when ≥2. */}
       {primaryEntry && primaryNextMatch && (
         <WatchHeroCard
           nextMatch={primaryNextMatch}
@@ -387,7 +387,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
         </div>
       )}
 
-      {/* Bounded compact list of running and upcoming watched matches — shown when
+      {/* Bounded compact list of running and upcoming watched matches: shown when
           ≥2 entities are watched so a coach sees the whole squad at a glance.
           Includes running matches (buildWatchlistUpcoming returns both). */}
       {multi && upcoming.length > 0 && (

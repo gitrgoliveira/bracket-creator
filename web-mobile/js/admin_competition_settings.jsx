@@ -1,4 +1,4 @@
-// admin_competition_settings.jsx — AdminSettings section (+ the formatCompMinutes
+// admin_competition_settings.jsx: AdminSettings section (+ the formatCompMinutes
 // schedule-time helper it consumes) split out of admin_competition.jsx (mp-hpe3).
 // formatCompMinutes is ES-exported and re-exported by the admin_competition.jsx
 // entry for the vitest suite.
@@ -78,7 +78,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // Tournament ceremony/timing fields are included so the estimate refreshes
   // when the operator changes openingBlock, lunchBlock, closingBlock,
   // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
-  // settings screen and then returns here — otherwise the display would be
+  // settings screen and then returns here: otherwise the display would be
   // stale until a competition field changed (Finding 5 fix).
   }, [c.id, c.format, c.kind, c.poolMatchDuration, c.playoffMatchDuration, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
@@ -86,7 +86,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // AdminSettings unmounts when the user navigates to a different section
   // via onSection() (AdminCompetition rerenders with a different child).
   // saveNow's .then/.catch and the delete handler's finally fire on
-  // own state — gate via mountedRef. Same teardown-race shape as
+  // own state: gate via mountedRef. Same teardown-race shape as
   // admin_participants.jsx apply().
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -101,16 +101,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   // Track which settings fields the user has actively edited since the
   // last successful save. Used by:
-  //  (a) the sync effect below — preserve user's pending edits on these
+  //  (a) the sync effect below: preserve user's pending edits on these
   //      fields while still absorbing SSE updates to OTHER fields, and
-  //  (b) saveNow's payload builder — overlay user-edited values onto a
+  //  (b) saveNow's payload builder: overlay user-edited values onto a
   //      FRESH snapshot of `c` (cRef.current), so the PUT body reflects
   //      concurrent server-side changes to fields the user isn't editing
   //      rather than stale values captured when the edit was made.
   //
   // Without this set, a concurrent admin's settings change that lands in `c`
   // between the user's edit and their Save click would be dropped by the sync
-  // effect AND overwritten by saveNow — net effect: saving one field silently
+  // effect AND overwritten by saveNow: net effect: saving one field silently
   // reverts simultaneous edits to other fields. Caught by Copilot round-15.
   const editedFieldsRef = useRefA(new Set());
 
@@ -154,11 +154,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // canonical DD-MM-YYYY form on success, or an error message on
     // failure (bad shape, semantic-invalid day, year out of range).
     //
-    // Skip validation for empty date — the backend's validateDateDMY
+    // Skip validation for empty date: the backend's validateDateDMY
     // accepts "" as "Date TBA" and competitions created via the import
     // path can land here with an empty Date. Without this skip, the
     // user would be unable to save ANY unrelated setting on a date-less
-    // competition (round-robin toggle, pool size, etc.) — saveNow would
+    // competition (round-robin toggle, pool size, etc.): saveNow would
     // reject with "Invalid date" even though the user hasn't touched the date.
     let dateNorm = "";
     if (effective.date && effective.date.trim() !== "") {
@@ -173,7 +173,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // Trim before comparing AND before sending. The backend trims
     // `comp.Name` on save, so without normalizing here the JS-side
     // uniqueness check would compare "  Men's Cup  " against the
-    // canonical "Men's Cup" and miss — landing two competitions with the
+    // canonical "Men's Cup" and miss: landing two competitions with the
     // same effective name. Send the trimmed value so the value the user
     // sees in the input matches what the server stores.
     const trimmedName = (effective.name || "").trim();
@@ -196,7 +196,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
     }
 
-    // Trim numberPrefix — the input does substring(0, 3) per keystroke
+    // Trim numberPrefix: the input does substring(0, 3) per keystroke
     // but doesn't trim, so typing "  A" stores "  A" in local state and
     // (without this) lands "  A" on the server. The CREATE flow
     // (AdminCreateCompetition.create's deriveCompetitionName + trim
@@ -205,14 +205,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // generated from the prefix can't end up like "  A1" / "  A2".
     // Cross-file guard symmetry: same shape as the comp.Name trim above.
     const trimmedPrefix = (effective.numberPrefix || "").trim();
-    // Build the PUT payload from settings fields ONLY — do NOT spread the
+    // Build the PUT payload from settings fields ONLY: do NOT spread the
     // full `c` snapshot or the full `next` snapshot. Pre-fix this was
     // `{ ...c, ...next, ... }`, which carried `local.status` and
     // `local.players` (and any other field the JSX/effects don't touch)
     // into the PUT body. If the sync-to-local effect deps list was
     // incomplete for any such field, SSE-pushed changes to that field
     // would not propagate into `local`, and the next save of ANY unrelated
-    // setting would PUT the stale value back to the server — effectively
+    // setting would PUT the stale value back to the server: effectively
     // reverting the server-side change. Whitelisting the payload makes
     // AdminSettings genuinely settings-only and decouples save correctness
     // from the deps-list completeness of the sync effect.
@@ -234,15 +234,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // local state when the user clears a number input (so the render
     // layer can show "" instead of "0"). If the user clears poolSize and then
     // clicks Save, the cleared poolSize is still NaN in the edited overlay.
-    // JSON.stringify({n: NaN}) produces '{"n":null}' — Go binds
-    // JSON null to int as 0 — backend transform writes 0 to disk,
+    // JSON.stringify({n: NaN}) produces '{"n":null}'. Go binds
+    // JSON null to int as 0: backend transform writes 0 to disk,
     // clobbering the prior good value. Falling back to `latestC.<field>`
     // when the effective value isn't a usable positive integer preserves
     // the disk value until the user types a valid replacement.
     const safeInt = (v, fallback) =>
       Number.isFinite(v) && Number.isInteger(v) && v >= 1 ? v : fallback;
     // safeNonNegInt is the >=0 sibling for the per-phase duration
-    // fields. T047: 0 means "no override — fall through to the legacy
+    // fields. T047: 0 means "no override: fall through to the legacy
     // matchDuration default per backend ApplyCompetitionDefaults", so
     // we DO want 0 to round-trip. Same NaN/fractional/negative guards
     // as safeInt; the only difference is the lower bound. Same
@@ -273,7 +273,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // accepts the empty value, so a non-pool format can safely PUT "".
       poolFormat: effective.poolFormat || "",
       // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
-      // "use legacy default" — fall through to safeNonNegInt with
+      // "use legacy default": fall through to safeNonNegInt with
       // latestC's value to avoid NaN-clobbering a previously-set value.
       poolMatchDuration: safeNonNegInt(effective.poolMatchDuration, latestC.poolMatchDuration || 0),
       playoffMatchDuration: safeNonNegInt(effective.playoffMatchDuration, latestC.playoffMatchDuration || 0),
@@ -290,14 +290,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
       leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
       // teamMatchType has no editable control in this form, but the settings
-      // merge is a full replace — omitting it would clobber a kachinuki
+      // merge is a full replace: omitting it would clobber a kachinuki
       // competition's value to "" (fixed) on any save. Round-trip it like
       // `mirror` above to preserve the stored value.
       teamMatchType: effective.teamMatchType || latestC.teamMatchType || "",
     };
     // Snapshot the VALUE of each edited field we're about to persist (not just
     // the field name). On success we clear a field only if its current staged
-    // value still equals what we sent — so a field RE-EDITED during the
+    // value still equals what we sent: so a field RE-EDITED during the
     // in-flight save (its value now differs) stays in the edited set and rolls
     // into the next save. A name-only Set couldn't distinguish the original
     // edit from a concurrent re-edit and would drop the user's latest change.
@@ -325,7 +325,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       setIsDirty(stillDirty);
       // On a clean save (nothing left pending), check whether the change put
       // this competition on a court (shiaijo) at the same time as another. The
-      // save has already committed — this is a non-blocking warning. If clashes
+      // save has already committed: this is a non-blocking warning. If clashes
       // exist we surface them and STAY on the page; otherwise we return to the
       // dashboard. A clash-check failure must not strand the operator, so it
       // falls through to the normal saved-and-return path.
@@ -335,12 +335,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             if (!mountedRef.current) return;
             if (Array.isArray(clashes) && clashes.length > 0) {
               setClashWarnings(clashes);
-              showToast(`Saved — ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
+              showToast(`Saved. ${clashes.length} court clash${clashes.length > 1 ? "es" : ""} detected, review below`, "error");
             } else {
               setClashWarnings(null);
               showToast("Competition settings saved");
               // Don't navigate away if the operator started a NEW edit during
-              // the clash round-trip — that would silently discard it. Stay on
+              // the clash round-trip: that would silently discard it. Stay on
               // the page so the pending change can be saved.
               if (onBack && editedFieldsRef.current.size === 0) onBack();
             }
@@ -354,7 +354,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     }).catch((e) => {
       if (!mountedRef.current) return;
       setSaving(false);
-      // Keep edited fields in the set and stay dirty — the user can retry.
+      // Keep edited fields in the set and stay dirty: the user can retry.
       // updateCompetition already surfaced the error via showToast; mirror it
       // inline next to the Save button so the cause is visible without a
       // duplicate toast.
@@ -363,7 +363,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   };
 
   // Manual-save model: edit handlers stage the change into `local` and mark
-  // the field edited, but DO NOT persist — the operator commits all pending
+  // the field edited, but DO NOT persist: the operator commits all pending
   // edits explicitly via "Save changes". editedFieldsRef is still marked so
   // the sync effect preserves the user's in-progress edit if an SSE-driven
   // `c` update lands before they click Save (same concurrent-edit guard as
@@ -375,7 +375,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // by spreading a stale closure-captured `local`. We also write the
     // result to localRef synchronously: saveNow reads localRef.current when
     // the operator clicks Save, and the useEffect that syncs localRef from
-    // `local` is async — a rapid edit-then-click could otherwise land before
+    // `local` is async: a rapid edit-then-click could otherwise land before
     // the effect runs and the latest edit would be missing from the PUT.
     setLocal((prev) => {
       const next = { ...prev, [k]: v };
@@ -426,9 +426,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (nextCourts.length) update("courts", nextCourts);
   };
 
-  // draw-ready lock: output-affecting fields — those that reach the Excel
+  // draw-ready lock: output-affecting fields: those that reach the Excel
   // generator (pools, courts, format, kind, team size, mirror, numberPrefix,
-  // withZekkenName) — are disabled while a draw exists. Fields that do NOT
+  // withZekkenName): are disabled while a draw exists. Fields that do NOT
   // affect the generated workbook (name, date, startTime, checkInEnabled,
   // naginata) remain editable. Discard the draw from the competition header to
   // unlock everything.
@@ -458,17 +458,17 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {clashWarnings && clashWarnings.length > 0 && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="clash-banner">
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            ⚠ Court clash — this competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
+            ⚠ Court clash. This competition overlaps {clashWarnings.length === 1 ? "another" : `${clashWarnings.length} other`} on a shared shiaijo:
           </div>
           <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
             {clashWarnings.map((w, i) => (
               <li key={i}>
-                <strong>{w.otherCompName}</strong> — shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
+                <strong>{w.otherCompName}</strong>. Shiaijo {(w.sharedCourts || []).join(", ")} · {w.overlapStart}–{w.overlapEnd}
               </li>
             ))}
           </ul>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
-            The change was saved. Two competitions can't run on the same court at the same time — adjust the start time or assigned courts here or on the other competition.
+            The change was saved. Two competitions can't run on the same court at the same time. Adjust the start time or assigned courts here or on the other competition.
           </div>
           <button type="button" className="btn btn--sm" onClick={() => { setClashWarnings(null); if (onBack) onBack(); }}>Dismiss & return to dashboard</button>
         </div>
@@ -485,11 +485,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             if (days.length > 0) {
               // A controlled <select> whose value matches no <option> would
               // silently display the first option while React state keeps the
-              // real (stale or empty) value — the operator would then "save"
+              // real (stale or empty) value: the operator would then "save"
               // a value the UI never showed. Two cases need an explicit
               // matching option so the displayed value always tracks state:
               //   - empty date (legacy/imported competition with no day set):
-              //     render a disabled "— Select a day —" placeholder so the
+              //     render a disabled placeholder "(select a day)" so the
               //     select shows "unset" and forces a deliberate pick rather
               //     than persisting "" while appearing to show Day 1.
               //   - out-of-range date (e.g. the tournament duration was
@@ -505,13 +505,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                   onChange={(e) => update("date", e.target.value)}
                 >
                   {isEmpty && (
-                    <option value="" disabled>— Select a day —</option>
+                    <option value="" disabled>(select a day)</option>
                   )}
                   {outOfRange && (
                     <option key={local.date} value={local.date}>{local.date} (outside tournament days)</option>
                   )}
                   {days.map((d, i) => (
-                    <option key={d} value={d}>Day {i + 1} — {d}</option>
+                    <option key={d} value={d}>Day {i + 1}: {d}</option>
                   ))}
                 </select>
               );
@@ -547,7 +547,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       )}
       <div className="field">
         <label className="field__label">Assigned shiaijo (courts)</label>
-        {/* draw-ready lock: courts is output-affecting — discard the draw to reassign. */}
+        {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {isDrawReady && (
           <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
             Discard the draw to change pools, courts, or format.
@@ -566,8 +566,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           const numCourts = local.courts.length;
           const hardCap = Math.max(1, Math.floor(playerCount / 2));
           const suggestedCourts = Math.max(1, hardCap - 1);
-          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts — {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;
-          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts — consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
+          if (numCourts > hardCap) return <div className="field__hint" style={{ color: "var(--red)" }}>Too many courts. {hardCap} max for {pt(playerCount)} (suggested: {suggestedCourts})</div>;
+          if (numCourts === hardCap && hardCap > suggestedCourts) return <div className="field__hint" style={{ color: "#78350f" }}>No rest between fights at {numCourts} courts. Consider {ct(suggestedCourts)} for {pt(playerCount)}</div>;
           return <div className="field__hint">Suggested: up to {ct(suggestedCourts)} for {pt(playerCount)}</div>;
         })() : (
           <div className="field__hint">Concurrency = number of shiaijo assigned. Schedule prevents double-booking with other competitions.</div>
@@ -680,7 +680,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             const perCourt = (compEstimate.perCourtMinutes || []).map(m => formatCompMinutes(m) || "0m");
             const ceremony = formatCompMinutes(compEstimate.ceremonyMinutes);
             if (!total) {
-              return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet — add participants and configure duration to see a projection.</div>;
+              return <div style={{ fontSize: 12, color: "var(--ink-3, #6b7280)" }}>No estimate yet. Add participants and configure duration to see a projection.</div>;
             }
             return (
               <div style={{ fontSize: 12.5, color: "var(--ink-1, #111827)" }}>
@@ -727,7 +727,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
-      {/* Phase 3b (mp-8rc9): league tie-breaker settings — only for team leagues. */}
+      {/* Phase 3b (mp-8rc9): league tie-breaker settings. Only for team leagues. */}
       {local.format === "league" && (local.teamSize > 0 || local.kind === "team") && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
           <div className="field">
@@ -751,7 +751,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze — no 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>
+            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze. No 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>
           </div>
         </div>
       )}
@@ -779,7 +779,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                     // Use the server response (if any) so that server-side
                     // field updates are reflected immediately. Fall back to
                     // forcing only `status: "invalid"` if the response isn't
-                    // a competition object. Don't call onUpdate — that would
+                    // a competition object. Don't call onUpdate: that would
                     // trigger a full PUT with unsanitised local state.
                     const newStatus = (updated && typeof updated === "object" ? updated.status : null) ?? "invalid";
                     setLocal(prev => (updated && typeof updated === "object"

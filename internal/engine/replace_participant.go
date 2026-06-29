@@ -83,7 +83,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 				return fmt.Errorf("saving pools: %w", err)
 			}
 			// Dojo-conflict detection on affected pools after the swap.
-			// Warn but do not block — the operator decides whether to proceed.
+			// Warn but do not block, the operator decides whether to proceed.
 			for _, pool := range pools {
 				if !affectedPools[pool.PoolName] {
 					continue
@@ -165,7 +165,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 
 	// If oldName appeared nowhere in the draw AND oldName != newName, the participant
 	// was not placed in the draw. This is expected when check-in filtering excluded
-	// them — treat as a warning so the caller is not forced to roll back a successful
+	// them, treat as a warning so the caller is not forced to roll back a successful
 	// participants.csv update.
 	if !poolsChanged && !bracketFound && !matchesFound && oldName != newName {
 		warnings = append(warnings, fmt.Sprintf("participant %q not found in draw artifacts (may be excluded by check-in filtering)", oldName))

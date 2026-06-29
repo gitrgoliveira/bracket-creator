@@ -38,9 +38,9 @@
 
 This project lets any club or organisation run kendo tournaments in three ways:
 
-* **Offline** — no internet required; relies entirely on printed brackets and score sheets.
-* **Partially connected** — internet available but no display screens; some printed material still needed.
-* **Fully digital** — complete setup with multiple monitors and real-time score tracking.
+* **Offline**: no internet required; relies entirely on printed brackets and score sheets.
+* **Partially connected**: internet available but no display screens; some printed material still needed.
+* **Fully digital**: complete setup with multiple monitors and real-time score tracking.
 
 I've been using this application to organise the London Cup since ~2023. It reflects everything I've learned from running real tournaments and the feedback I've received. 
 
@@ -86,7 +86,7 @@ The images below show the full workflow: entering participants, seeding past win
 | **Column 2 is Zekken name** | Enable to use the second column of the input CSV as the participant's display name on the zekken. |
 | **Team Matches** | Number of players per team. Set to `0` for individual matches. |
 | **Number of Shiaijo (courts)** | Number of courts to use. Must be between **1 and 26** (Shiaijo are labelled A–Z). For pool tournaments, pools are split evenly across courts and each column in the Pool Matches sheet is labelled "Shiaijo A", "Shiaijo B", etc. For both tournament types, each tree sheet is labelled with the matching Shiaijo name. (CLI: `--courts`, default `2`) |
-| **Player/Team List** | Enter one participant per line in plain or CSV format (`Name, Dojo`). You can also drag-and-drop a CSV file or use the **Small / Medium / Large Sample** buttons. Duplicate entries are rejected with an error — each line must be unique. |
+| **Player/Team List** | Enter one participant per line in plain or CSV format (`Name, Dojo`). You can also drag-and-drop a CSV file or use the **Small / Medium / Large Sample** buttons. Duplicate entries are rejected with an error: each line must be unique. |
 
 > **About Dojo**: In pool tournaments, the `Dojo` field is used to ensure participants from the same dojo are not placed in the same pool.
 
@@ -100,7 +100,7 @@ In the modal:
 - Each participant is listed with their dojo and a **Seed Rank** input field.
 - Enter a **positive integer** to seed a participant (e.g., `1` = top seed, `2` = second seed).
 - Leave a field empty to place the participant in the unseeded pool.
-- Seed ranks must be **unique** — duplicate ranks will be rejected with an error.
+- Seed ranks must be **unique**: duplicate ranks will be rejected with an error.
 - Seeded participants are **strictly validated**: every seeded name must exactly match a name in the participant list (case-sensitive). If a name does not match, the bracket generation will fail with a clear error.
 
 After saving, the button label changes to **★ N Seeds Assigned** (highlighted in amber) and the seeds are submitted with the form.
@@ -205,7 +205,7 @@ bracket-creator create-playoffs -f ./test-data/players.csv -o ./playoffs.xlsx --
 **Important rules:**
 - Names must match **exactly** (case-sensitive) to a name in the main participant list.
 - A name that cannot be matched will cause the command to fail with a descriptive error.
-- Seed ranks must be unique — duplicate ranks are rejected.
+- Seed ranks must be unique: duplicate ranks are rejected.
 - Seeded participants are placed first in the bracket, following standard bracket distribution (e.g., seeds 1 and 2 placed on opposite halves). Unseeded participants fill the remaining slots.
 
 
@@ -285,24 +285,24 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 | **Participant import** | Paste a CSV (with or without zekken/display names) or upload a file directly in the browser. The participant textarea shows **line numbers** for easy error spotting. |
 | **Seeds** | Import a seeds CSV to control bracket placement, or type seed numbers per participant. |
 | **Real-time updates** | Results broadcast to all connected viewers in real time via Server-Sent Events (SSE). |
-| **Password reset** | Visit `/reset` to set a new admin password if you've forgotten it (file mode only — see *Admin authentication* below). |
+| **Password reset** | Visit `/reset` to set a new admin password if you've forgotten it (file mode only: see *Admin authentication* below). |
 | **Locked-password mode** | For internet-exposed deployments. `--lock-password` reads a bcrypt hash from `TOURNAMENT_PASSWORD_HASH` and disables `POST /api/tournament/reset` (the SPA `/reset` page still renders an operator-disabled message). |
 
 ### Admin authentication
 
 The server runs in one of two modes, selected at startup:
 
-**File mode** (default — for local / private LAN deployments):
+**File mode** (default: for local / private LAN deployments):
 
 - The admin password lives plaintext in `tournament-data/tournament.md`.
-- Forgot the password? Browse to `http://<host>/reset` from any device on the same network and set a new one. No old password required — this is the documented recovery path.
+- Forgot the password? Browse to `http://<host>/reset` from any device on the same network and set a new one. No old password required: this is the documented recovery path.
 - Set during initial **Create tournament** flow in the UI, or edit `tournament.md` directly.
 
 **Locked mode** (recommended for any deployment reachable over the internet):
 
 ```bash
 # 1. Generate a bcrypt hash for your chosen password.
-# hash-password reads one line from stdin without a prompt or echo masking —
+# hash-password reads one line from stdin without a prompt or echo masking ,
 # pipe from a secrets manager or here-doc rather than typing interactively.
 printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
 # (the hash is printed on stdout)
@@ -446,7 +446,7 @@ This project adheres to the Contributor Covenant [code of conduct](https://githu
 Copyright © 2023–2026 Ricardo Oliveira &lt;oliveira.rg [at] gmail.com&gt;
 
 This is an independent project created and maintained by Ricardo Oliveira in a
-personal capacity — in his own time and on his own equipment. It is not
+personal capacity: in his own time and on his own equipment. It is not
 affiliated with, endorsed by, or owned by any employer, and Ricardo Oliveira is
 the sole copyright holder.
 

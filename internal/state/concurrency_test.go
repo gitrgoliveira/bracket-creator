@@ -12,7 +12,7 @@ import (
 
 // TestConcurrent_SaveLoadCompetition fires N goroutines that each save then
 // load the same competition. The race detector validates no data races;
-// content assertions confirm no lost writes (last writer wins is fine —
+// content assertions confirm no lost writes (last writer wins is fine;
 // what we must NOT see is a corrupted or zero-value struct).
 func TestConcurrent_SaveLoadCompetition(t *testing.T) {
 	store, cleanup := newTestStore(t)

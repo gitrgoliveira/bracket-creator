@@ -10,7 +10,7 @@ import (
 )
 
 // RegisterScheduleHandlers wires the stateless schedule estimator
-// endpoint under r. T147a, T152a — the endpoint reads no state and
+// endpoint under r. T147a, T152a,  the endpoint reads no state and
 // holds no auth requirement so it can serve both the CLI web UI
 // (`make run` mode) and the mobile-app frontend (`make run-mobile`
 // mode) with one implementation. The web/js/time_estimator.js fetch
@@ -75,7 +75,7 @@ func scheduleEstimateHandler(c *gin.Context) {
 		return
 	}
 	// Reject hostile/garbage `courts` values up front rather than
-	// silently clamping in the engine — the operator deserves a clear
+	// silently clamping in the engine,  the operator deserves a clear
 	// 400 if their UI sends nonsense. engine.MaxCourts mirrors the
 	// CLI's A–Z (26) cap; this guard also closes the
 	// CodeQL go/uncontrolled-allocation-size finding on the engine's

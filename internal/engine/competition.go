@@ -10,7 +10,7 @@ import (
 // courtsEqual returns true when two court-label slices are
 // element-wise equal (used by StartCompetition's mid-pipeline
 // settings-drift check). nil and empty slices are treated as
-// equivalent — both mean "no courts" from the config's POV.
+// equivalent, both mean "no courts" from the config's POV.
 func courtsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -48,7 +48,7 @@ const (
 	// matches were injected. The competition stays in CompStatusPools while the
 	// remaining pools run, but the bracket changed and knockout matches whose
 	// both sides are now resolved have become SCOREABLE (scheduling is never
-	// gated — court/time can be set on a placeholder match at any time). Callers
+	// gated, court/time can be set on a placeholder match at any time). Callers
 	// should broadcast EventMatchUpdated and EventScheduleUpdated.
 	AutoCompletePoolsResolved AutoCompleteOutcome = 4
 	// AutoCompleteAwaitingLeagueTiebreak means all regular team-league matches are
@@ -80,7 +80,7 @@ const (
 //     pool's finishers into the in-place knockout bracket incrementally (no
 //     separate playoffs competition, no manual "start knockout" step), and flips
 //     the competition to CompStatusPlayoffs once the LAST pool has been seeded.
-//     Knockout matches become scoreable per-match as their feeder pools finish —
+//     Knockout matches become scoreable per-match as their feeder pools finish,
 //     there is no wait for the whole pool phase.
 //
 // The function is a no-op for any other format or status.
@@ -96,7 +96,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return AutoCompleteNoChange, err
 	}
 
-	// MIXED (Pools + Knockout): resolve incrementally — pool finishers drop into
+	// MIXED (Pools + Knockout): resolve incrementally, pool finishers drop into
 	// their knockout slots the moment each pool completes, with NO wait for the
 	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
 	// gate below (which is only meaningful for league completion).
@@ -104,7 +104,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		return e.advanceMixedPools(compID, comp)
 	}
 
-	// Optional fast-path outside the lock — avoids taking the
+	// Optional fast-path outside the lock, avoids taking the
 	// per-comp write lock for the common "still in progress" case.
 	matches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
@@ -155,7 +155,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// All regular matches (and any existing TB/DH matches) are complete.
 	//
 	// Team-league path: the operator decides whether to run supplementary
-	// tie-breaker matches — we do NOT auto-inject DH matches. Instead, block
+	// tie-breaker matches, we do NOT auto-inject DH matches. Instead, block
 	// completion while any CONSEQUENTIAL tied group still lacks an operator
 	// tie-breaker, returning AwaitingLeagueTiebreak so the UI can surface the
 	// decision.
@@ -167,7 +167,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// the other group still unresolved. DH results are excluded from the Points
 	// totals (scoring.go), so LeagueTiebreakCandidates keeps reporting a group
 	// even after its DH is scored; we therefore treat a group as "actioned"
-	// when a DH match exists for it (any DH is guaranteed complete here —
+	// when a DH match exists for it (any DH is guaranteed complete here,
 	// hasIncompleteDH bailed above) and hand the resolved/cyclic verdict to the
 	// dhCycleExists guard below. LeagueTiebreakCandidates returns [] when the
 	// operator has finalized shared ranks, so that path completes normally.
@@ -181,7 +181,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		}
 		for _, g := range candidates {
 			if !leagueGroupHasDH(g.Teams, matches) {
-				// A consequential tie with no tie-breaker yet — operator must act.
+				// A consequential tie with no tie-breaker yet, operator must act.
 				return AutoCompleteAwaitingLeagueTiebreak, nil
 			}
 		}
@@ -218,7 +218,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// For team competitions where DH matches have been played (either via
 	// operator-triggered league tie-breakers or auto-injected mixed/pools DH):
 	// verify that the DH results actually broke all ties before transitioning.
-	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A — only
+	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A, only
 	// possible in a 3+ team pool with a full round-robin DH), every team in
 	// that group still has equal DH win counts and standings remain
 	// unresolved.  Per tournament practice the pool would normally be
@@ -281,14 +281,14 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 //
 //  1. Inject tiebreaker/DH matches for any newly-tied pools (idempotent).
 //  2. Seed every COMPLETED pool's finishers into the bracket placeholders
-//     (ResolveQualifiedPools) — newly-playable knockout matches were already
+//     (ResolveQualifiedPools), newly-playable knockout matches were already
 //     scheduled at draw time, so they become live immediately.
 //  3. When the final pool has been seeded (no pool placeholders remain), flip
-//     CompStatusPools → CompStatusPlayoffs (informational — knockout matches are
+//     CompStatusPools → CompStatusPlayoffs (informational, knockout matches are
 //     already playable per-match during "pools").
 //
 // Outcomes: AutoCompleteKnockoutStarted (last pool seeded, status flipped),
-// AutoCompletePoolsResolved (some pools seeded and/or tiebreakers injected —
+// AutoCompletePoolsResolved (some pools seeded and/or tiebreakers injected,
 // bracket/schedule changed), or AutoCompleteNoChange (nothing new this score).
 func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
 	// 1. Inject tie-break matches for tied pools (idempotent; per-tied-pool).
@@ -348,10 +348,10 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 //
 // poolRanks is the operator's manual rank override map (keyed by pool
 // name → team name → rank). A tied group whose every member has a
-// manual rank override is considered resolved — the operator has
+// manual rank override is considered resolved, the operator has
 // explicitly ranked them, so the cycle no longer blocks completion.
 // leagueGroupHasDH reports whether a daihyosen tie-breaker match already exists
-// between two members of the given tied group — i.e. the operator has run a
+// between two members of the given tied group, i.e. the operator has run a
 // tie-breaker for it. Used by MaybeAutoCompletePools to decide, per consequential
 // group, whether the operator still needs to act. At that call site every DH
 // match is guaranteed complete (an incomplete DH bails earlier), so "a DH match
@@ -422,7 +422,7 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 // StartCompetition starts a competition. When called on a draw-ready
 // competition it transitions directly to running (no regeneration).
 // When called on a setup competition it generates the draw first then
-// transitions — preserving the single-click "Start" UX.
+// transitions, preserving the single-click "Start" UX.
 //
 // See runDrawPipeline for pipeline limitations (pre-existing).
 func (e *Engine) StartCompetition(id string) error {
@@ -484,7 +484,7 @@ func (e *Engine) GenerateDraw(id string) error {
 // competition is still draw-ready, GenerateDraw rejects new requests, so no
 // concurrent caller can generate fresh artifacts during the deletion window.
 // If we flipped to Setup first, a concurrent GenerateDraw could start,
-// write new artifacts, commit draw-ready — and then our deferred deletes
+// write new artifacts, commit draw-ready, and then our deferred deletes
 // would erase the freshly generated files, leaving draw-ready with no
 // artifacts.
 func (e *Engine) DiscardDraw(id string) error {
@@ -577,7 +577,7 @@ func filterCheckedIn(players []domain.Player) []domain.Player {
 // is checked in, else nil. Used to prune their seed assignments so ApplySeeds
 // doesn't fail on an absent player.
 //
-// The key is the raw, case-sensitive player Name — matching the roster identity
+// The key is the raw, case-sensitive player Name, matching the roster identity
 // the draw uses (helper.CheckDuplicateEntries and ApplySeeds' playerMap both key
 // on the exact Name, so "Alice" and "alice" are distinct participants).
 // Normalizing case here would let an excluded "alice" drop the seed of a
@@ -668,7 +668,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// Note: PoolWinners drives generatePoolPreviewBracket for mixed-format
 	// competitions (mp-9dz: the preview bracket leaf-count equals PoolWinners
 	// per pool). It is therefore snapshotted and validated in the atomic commit
-	// below, but ONLY for mixed format — for other formats it still doesn't
+	// below, but ONLY for mixed format, for other formats it still doesn't
 	// drive generation, so admin's concurrent change is preserved by leaving
 	// current.PoolWinners alone. Mirror (export-only), Name, Date, Venue are
 	// still NOT snapshotted (UI-only, never read during generation).
@@ -677,13 +677,13 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// field snapshot above; participants and seeds live in separate
 	// files and have no per-field snapshot, so use the file mtime as a
 	// fingerprint. A concurrent AdminParticipants PUT between our outer
-	// Load and the atomic commit below changes participants.csv mtime
-	// — if we don't detect it, our generated pools.csv / bracket.json
+	// Load and the atomic commit below changes participants.csv mtime,
+	// if we don't detect it, our generated pools.csv / bracket.json
 	// reflect a stale roster while participants.csv on disk has the new
 	// one. The transform below aborts the start with a validation error
 	// when either file's mtime changed; the operator retries against
 	// the fresh roster. FileMtime returns 0 if the file does not exist,
-	// which is a valid "no participants yet" state — we snapshot the
+	// which is a valid "no participants yet" state, we snapshot the
 	// same 0 and the comparison still works.
 	loadedParticipantsMtime := e.store.FileMtime(id, "participants.csv")
 	loadedSeedsMtime := e.store.FileMtime(id, "seeds.csv")
@@ -706,7 +706,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
-	// Exclude participants who have not checked in (mp-w7x) — but ONLY when the
+	// Exclude participants who have not checked in (mp-w7x), but ONLY when the
 	// competition has check-in tracking enabled (comp.CheckInEnabled). The rest
 	// of the stack masks checkedIn behind this flag (the viewer derives
 	// checkedIn as `checkInEnabled && p.checkedIn`), so a stale/imported
@@ -763,7 +763,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// mp-9dz: a mixed (Pools + Knockout) competition feeds a knockout
 		// bracket. Generate a PREVIEW bracket (pool-origin placeholder
 		// leaves) so the operator sees the elimination structure on the
-		// source competition at draw time — mirroring the Excel Tree sheet.
+		// source competition at draw time, mirroring the Excel Tree sheet.
 		// League has no knockout stage, so skip it there.
 		if comp.Format == state.CompFormatMixed {
 			if err := e.generatePoolPreviewBracket(comp); err != nil {
@@ -772,7 +772,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		}
 		comp.Status = state.CompStatusDrawReady
 	case state.CompFormatSwiss:
-		// Guard 1: SwissCurrentRound already bumped — AdvanceSwissRound ran to
+		// Guard 1: SwissCurrentRound already bumped, AdvanceSwissRound ran to
 		// completion before StartCompetition was called.
 		if comp.SwissCurrentRound != 0 {
 			return validationErrorf("competition %s Swiss round %d already generated; cannot start again", id, comp.SwissCurrentRound)
@@ -781,7 +781,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// (at least one is non-scheduled). AdvanceSwissRound may have written
 		// round-1 matches before its UpdateCompetitionChanged round-bump failed,
 		// leaving SwissCurrentRound=0 while the CSV has scored/running content.
-		// We only block when scoring has started — purely-scheduled entries are
+		// We only block when scoring has started, purely-scheduled entries are
 		// safe to overwrite on a retry (StartCompetition itself could have written
 		// them in a previous call that then failed inside UpdateCompetitionChanged,
 		// and the operator retrying should not be permanently stuck).
@@ -806,7 +806,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	default:
 		// A standalone playoffs competition (the only remaining playoffs case
 		// after the derived-playoffs path was removed in mp-turx) uses standalone
-		// seeding — there is no pool-preview topology to mirror.
+		// seeding, there is no pool-preview topology to mirror.
 		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
 			return err
 		}
@@ -814,28 +814,28 @@ func (e *Engine) runDrawPipeline(id string) error {
 	}
 
 	// Atomic commit of the modified competition. The transform
-	// re-validates Status under the per-comp lock — if a concurrent
+	// re-validates Status under the per-comp lock, if a concurrent
 	// StartCompetition won the race and already moved Status to
 	// Pools/Playoffs, we abort here with a validation error rather
 	// than clobbering their result with ours.
 	//
 	// The transform ALSO re-validates the generation-relevant fields
 	// (Format, PoolSize, PoolSizeMode, NumberPrefix, StartTime,
-	// RoundRobin, Kind, WithZekkenName, Courts — the exact set
+	// RoundRobin, Kind, WithZekkenName, Courts, the exact set
 	// listed in the validation block below). If a concurrent settings
 	// save changed any of those between our outer Load (the basis
 	// for the pools/playoffs files we just generated) and this atomic
-	// commit, the generated artifacts no longer match the new config
-	// — e.g. a Format change from "mixed" to "playoffs" would leave
+	// commit, the generated artifacts no longer match the new config,
+	// e.g. a Format change from "mixed" to "playoffs" would leave
 	// pools.csv on disk while Status committed to "playoffs". Better
 	// to abort with a 409-style conflict than to commit inconsistent
 	// state. Note: TeamSize and PoolWinners are deliberately NOT in
-	// this set — see the inline comment on the validation block for
+	// this set, see the inline comment on the validation block for
 	// the rationale.
 	//
 	// Note: our generated pools.csv / bracket.json have already been
 	// written by this point (see pipeline limitations in the function
-	// comment) — aborting here leaves them as orphaned artifacts that
+	// comment), aborting here leaves them as orphaned artifacts that
 	// the next successful start overwrites. Pre-existing partial-
 	// atomicity issue; the fix here only guarantees comp-config
 	// consistency.
@@ -858,7 +858,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		//   - Kind / WithZekkenName (participants loading)
 		//   - CheckInEnabled (decides which participants are included)
 		// Other config fields (TeamSize, Name, Date, Venue, Mirror) are NOT
-		// validated — they don't drive generation, so admin's concurrent
+		// validated, they don't drive generation, so admin's concurrent
 		// change to them doesn't invalidate the pools.csv / bracket.json we
 		// just wrote. Their values are preserved by leaving `current.X` alone
 		// in the transform (except TeamSize, see below).
@@ -897,8 +897,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// UpdateCompetitionChanged holds, so a concurrent write of
 		// either file BLOCKS until the transform commits. That closes
 		// the race between mtime-check and status-commit (previously
-		// SaveSeeds took the store-wide s.mu — a different mutex from
-		// the per-comp lock — leaving a microsecond window where a seed
+		// SaveSeeds took the store-wide s.mu, a different mutex from
+		// the per-comp lock, leaving a microsecond window where a seed
 		// save could land between our check and our commit, persisting
 		// status=Pools alongside seeds.csv content the engine never
 		// read). See seeds.go for the locking-strategy rationale.
@@ -915,10 +915,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// TeamSize handling: not in the drift validation above
 		// because it doesn't drive generation. If admin DIDN'T
 		// concurrently change it (current == loaded), apply our
-		// pipeline's value — which may be the loaded value unchanged
+		// pipeline's value, which may be the loaded value unchanged
 		// OR the auto-default 5 for team comps that started with 0.
 		// If admin DID concurrently change it (current != loaded),
-		// preserve their change — leaving current.TeamSize alone.
+		// preserve their change, leaving current.TeamSize alone.
 		// Pre-fix this line was `current.TeamSize = comp.TeamSize`
 		// unconditionally, which clobbered admin's concurrent change
 		// AND the validation list (including TeamSize) rejected the
@@ -934,7 +934,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// concurrently change the field (current == loaded), apply our
 		// pipeline's overridden value; if they did, the conflict check
 		// above already returned an error before we reach this block, so
-		// the guard is always true here — it's kept for symmetry.
+		// the guard is always true here, it's kept for symmetry.
 		if comp.Format == state.CompFormatLeague {
 			if current.PoolSize == loadedPoolSize {
 				current.PoolSize = comp.PoolSize
@@ -956,8 +956,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// (e.g. AdminParticipants persisting a UUID roster in parallel
 		// with this start). Combined with the no-roster-rewrite path
 		// NOT rewriting participants.csv, the result was a UUID file
-		// on disk paired with a HasParticipantIDs=false metadata flag
-		// — and the list-view's HasIDs hint would then misparse the
+		// on disk paired with a HasParticipantIDs=false metadata flag,
+		// and the list-view's HasIDs hint would then misparse the
 		// UUID as part of each player's Name.
 		//
 		// The participants/seeds drift check above already aborts the

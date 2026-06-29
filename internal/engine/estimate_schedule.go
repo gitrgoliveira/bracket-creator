@@ -19,7 +19,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 		return ScheduleEstimate{}, notFoundErrorf("competition %s not found", compID)
 	}
 
-	// Step 2: load tournament (nil is safe — EstimateForCounts handles it).
+	// Step 2: load tournament (nil is safe, EstimateForCounts handles it).
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return ScheduleEstimate{}, err
@@ -31,8 +31,8 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 		return ScheduleEstimate{}, err
 	}
 	if playerCount == 0 {
-		// No participants yet (or source pools not generated) — return a zero
-		// estimate rather than an error; the caller can display "—" or "unknown".
+		// No participants yet (or source pools not generated), return a zero
+		// estimate rather than an error; the caller can display a dash or "unknown".
 		return EstimateForCounts(0, 0, comp, tournament), nil
 	}
 
@@ -51,7 +51,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	poolCount, playoffCount, err := helper.EstimateMatchCounts(in)
 	if err != nil {
 		// EstimateMatchCounts errors are config-caused (unknown format, zero
-		// pool size, player count < pool size) — surface as ValidationError
+		// pool size, player count < pool size), surface as ValidationError
 		// so the HTTP handler returns 400, not 500.
 		return ScheduleEstimate{}, validationErrorf("%s", err)
 	}

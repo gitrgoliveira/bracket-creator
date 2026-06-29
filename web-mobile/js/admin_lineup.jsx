@@ -25,7 +25,7 @@ import { LineupNameInput } from './admin_scoring_shared.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
-// Term — kendo-glossary tooltip wrapper. Lazy lookup so the script
+// Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
 // are type="module" and execute asynchronously). U1 / glossary.md.
 function TermAL(props) {
@@ -91,7 +91,7 @@ function mergeRosterWithAssigned(baseRoster, lineup) {
 }
 
 // Resolve the team's stable ID. Backend uses player.id (UUID assigned
-// at first persist); pre-persist teams may not have one yet — fall back
+// at first persist); pre-persist teams may not have one yet: fall back
 // to name as a best-effort key.
 function teamIdOf(team) {
   return team?.id || team?.ID || team?.name || team?.Name || "";
@@ -121,7 +121,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   // Lineup state: { position-key -> player name (or member ID once
   // members are first-class). The backend stores player IDs but our
-  // current Player model exposes member names through Metadata — so
+  // current Player model exposes member names through Metadata: so
   // we save what the dropdown returns. The server validates either way.
   const [values, setValues] = useStateA(() => {
     const init = {};
@@ -175,21 +175,21 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     setSaving(true);
     try {
       // Strip empty positions so the server doesn't see them as
-      // explicit empty strings — domain.TeamLineup.Validate counts
+      // explicit empty strings: domain.TeamLineup.Validate counts
       // empty values as "missing", which is what we want.
       const positionsOut = {};
       Object.entries(values).forEach(([k, v]) => {
-        // Trim here too (not just onBlur) so a Save triggered without a blur —
-        // e.g. Enter — never persists leading/trailing or whitespace-only names.
+        // Trim here too (not just onBlur) so a Save triggered without a blur:
+        // e.g. Enter: never persists leading/trailing or whitespace-only names.
         const trimmed = (v || "").trim();
         if (trimmed) positionsOut[k] = trimmed;
       });
       const updated = await window.API.putTeamLineup(compId, teamId, round, positionsOut, password);
-      // F5: a queued (offline/transient) write is NOT a confirmed save — don't
+      // F5: a queued (offline/transient) write is NOT a confirmed save: don't
       // clear the revising state or show "saved"; the write is durable and will
       // retry. Keep the form editable and tell the operator it's pending.
       if (updated && updated.queued) {
-        if (typeof showToast === "function") showToast("Offline — lineup not saved yet, will retry");
+        if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
         return;
       }
       setLockedAt(updated.lockedAt || null);
@@ -204,7 +204,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const onRevise = () => {
     setError("");
-    // Local-only flip — the server will accept the next PUT only if
+    // Local-only flip: the server will accept the next PUT only if
     // the round's first match hasn't started yet (same 409 path).
     setRevising(true);
   };
@@ -221,7 +221,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             {comp?.name} · Round {round + 1}
           </div>
           <h2 style={{ margin: "4px 0 0 0", fontSize: 22, fontWeight: 700 }}>
-            {team?.name || team?.Name || "Team"} — Lineup
+            {team?.name || team?.Name || "Team"} : Lineup
           </h2>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4 }}>
             {teamSize}-person team
@@ -266,7 +266,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           ))}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              This team has no registered members — type each competitor's name directly.
+              This team has no registered members : type each competitor's name directly.
             </div>
           )}
         </div>

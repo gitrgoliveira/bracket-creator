@@ -1,7 +1,7 @@
 //go:build inspect
 
 // scratch/inspect_kachinuki.go is a manual verification script for T203
-// (Phase 11 — Kachinuki Excel Detail Sheet). It builds an *.xlsx file
+// (Phase 11, Kachinuki Excel Detail Sheet). It builds an *.xlsx file
 // containing a synthesized kachinuki team match and the new Kachinuki
 // Detail sheet, then prints the sheet's cell values for visual review.
 //
@@ -26,7 +26,7 @@ import (
 func main() {
 	matches := []helper.KachinukiMatchDetail{
 		{
-			Label:        "Pool A — Round 1",
+			Label:        "Pool A, Round 1",
 			SideATeam:    "Team Tiger",
 			SideBTeam:    "Team Dragon",
 			Winner:       "Team Tiger",
@@ -56,7 +56,7 @@ func main() {
 	if err := f.SaveAs(out); err != nil {
 		log.Fatalf("SaveAs: %v", err)
 	}
-	fmt.Printf("Wrote %s — sheets: %v\n", out, f.GetSheetList())
+	fmt.Printf("Wrote %s, sheets: %v\n", out, f.GetSheetList())
 
 	// Dump the detail sheet's cells row-by-row for visual review.
 	rows, err := f.GetRows(helper.SheetKachinukiDetail)

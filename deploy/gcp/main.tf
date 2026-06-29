@@ -1,12 +1,12 @@
 ##############################################################################
-# bracket-creator — GCP Always-Free e2-micro deployment
+# bracket-creator, GCP Always-Free e2-micro deployment
 #
 # Free-forever resources used:
 #   - 1× e2-micro (us-west1 / us-central1 / us-east1 ONLY)
 #   - 30 GB pd-standard boot disk
-#   - 1 GB/month egress free (North America) — see README for the scale ceiling
+#   - 1 GB/month egress free (North America), see README for the scale ceiling
 #
-# !! Region validation is a billing guard — an e2-micro outside the three US
+# !! Region validation is a billing guard, an e2-micro outside the three US
 #    free regions is NOT free and will generate charges. !!
 ##############################################################################
 
@@ -101,7 +101,7 @@ resource "google_compute_firewall" "allow_ssh" {
   )
 }
 
-# Optional reserved static IP — costs nothing while attached to a running
+# Optional reserved static IP, costs nothing while attached to a running
 # instance.  Use it so the DNS A record never needs updating after a
 # stop/start cycle.
 resource "google_compute_address" "static" {
@@ -163,7 +163,7 @@ locals {
             volumes:
               - ${local.data_dir}:/tournament-data
             # Defense-in-depth: the app never needs the cloud metadata service,
-            # so map its hostname to loopback. NOTE this is not a hard block —
+            # so map its hostname to loopback. NOTE this is not a hard block,
             # the metadata server is still reachable via the link-local IP
             # (169.254.169.254); a full block needs host-level firewalling.
             extra_hosts:
@@ -192,7 +192,7 @@ locals {
       # --- Caddyfile (rendered from Caddyfile.tftpl) ---
       - echo ${base64encode(local.caddyfile)} | base64 -d > ${local.app_dir}/Caddyfile
 
-      # --- app.env (chmod 600 — contains secrets) ---
+      # --- app.env (chmod 600, contains secrets) ---
       - |
         cat > ${local.app_dir}/app.env <<'EOF'
         LOCK_PASSWORD=${var.lock_password}
@@ -219,11 +219,11 @@ resource "google_compute_instance" "app" {
   machine_type = "e2-micro"
   zone         = local.effective_zone
 
-  # Debian 12 (Bookworm) — keep in sync with Dockerfile.mobile base image
+  # Debian 12 (Bookworm), keep in sync with Dockerfile.mobile base image
   boot_disk {
     initialize_params {
       image = "debian-cloud/debian-12"
-      size  = 30 # GiB — free-tier pd-standard cap
+      size  = 30 # GiB, free-tier pd-standard cap
       type  = "pd-standard"
     }
   }
@@ -257,7 +257,7 @@ resource "google_compute_instance" "app" {
     # empty hash makes the app exit immediately (it fails closed).
     precondition {
       condition     = !var.lock_password || trimspace(var.tournament_password_hash) != ""
-      error_message = "tournament_password_hash must be set when lock_password is true — the app fails closed and exits at startup with an empty hash."
+      error_message = "tournament_password_hash must be set when lock_password is true, the app fails closed and exits at startup with an empty hash."
     }
 
     ignore_changes = [

@@ -1,4 +1,4 @@
-// Package mobileapp — handlers_decision.go owns the POST
+// Package mobileapp, handlers_decision.go owns the POST
 // `/api/competitions/:cid/matches/:mid/decision` endpoint that auto-
 // fills the scoreline for kiken/fusenpai/fusensho/daihyosen decisions
 // (T090).
@@ -43,13 +43,13 @@ type DecisionRequest struct {
 //   - decision MUST be one of kiken-voluntary/kiken-injury/fusenpai/fusensho/daihyosen
 //     (legacy "kiken" is remapped to "kiken-voluntary").
 //   - decisionBy is required and MUST be "shiro" or "aka".
-//   - decisionReason ≤ 200 chars (contract).
+//   - decisionReason, 200 chars max (contract).
 func (r *DecisionRequest) Validate() error {
 	switch r.Decision {
 	case "kiken":
 		r.Decision = "kiken-voluntary"
 	case "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho", "daihyosen":
-		// ok — these are the decision types this endpoint creates.
+		// ok, these are the decision types this endpoint creates.
 	case "":
 		return &ValidationError{Field: "decision", Message: "required"}
 	default:
@@ -83,7 +83,7 @@ func (r *DecisionRequest) Validate() error {
 // `eng` exposes the tx-aware RecordDecisionTx the closure dispatches to.
 //
 // SSE broadcasts and the optional tryAutoCompletePools post-write run
-// AFTER the tx returns — the auto-complete check itself takes the lock
+// AFTER the tx returns, the auto-complete check itself takes the lock
 // internally via UpdateCompetitionChanged, so running it inside the tx
 // would deadlock (non-reentrant mutex). Holding the tx open across an
 // SSE broadcast would let a slow consumer stall every other writer for
@@ -112,7 +112,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		}
 
 		// T104/CHK029: enforce MaxEnchoPeriods cap on the encho block.
-		// Same shape as the score handler — Force bypasses, 0 cap means
+		// Same shape as the score handler, Force bypasses, 0 cap means
 		// unlimited. Done BEFORE the tx so the read is cheap and we
 		// don't take the lock when the request is going to 400 anyway.
 		if !enforceEnchoCap(c, store, id, req.Encho, req.Force) {
@@ -120,10 +120,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		}
 
 		// T156: run the entire RecordDecision flow inside one
-		// WithTransaction. The engine call chain — sides lookup, T103
+		// WithTransaction. The engine call chain, sides lookup, T103
 		// downstream-match check, T105 concurrent-kiken pre-check,
 		// pool/bracket match-write, ineligibility check-and-set, prior-
-		// loser eligibility restore on undo — all use the same StoreTx
+		// loser eligibility restore on undo, all use the same StoreTx
 		// handle, so the per-comp lock is acquired exactly once for the
 		// entire mutation.
 		var (
@@ -152,7 +152,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			var engNotFoundErr *engine.NotFoundError
 			switch {
 			case errors.As(engErr, &alreadyIneligErr):
-				// T105/CHK047: concurrent kiken — another operator already
+				// T105/CHK047: concurrent kiken, another operator already
 				// recorded ineligibility for this player on a different match.
 				// U1: reasonHuman carries the volunteer-readable gloss
 				// alongside the raw kendo-term reason.

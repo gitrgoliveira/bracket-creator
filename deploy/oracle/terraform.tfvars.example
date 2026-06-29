@@ -8,9 +8,9 @@ instance_image_ocid = "ocid1.image.oc1.iad.aaaa..." # Ubuntu 22.04 Minimal aarch
 hostname   = "tournament.example.com"
 ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 
-# Optional — restrict SSH to your IP
+# Optional, restrict SSH to your IP
 # operator_cidrs = ["203.0.113.10/32"]
 
-# Optional — locked password mode (hash must be bcrypt; see README)
+# Optional, locked password mode (hash must be bcrypt; see README)
 # lock_password            = true
 # tournament_password_hash = "$2b$12$..."

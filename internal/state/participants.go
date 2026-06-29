@@ -19,19 +19,19 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // bulk write path when the supplied (Player.Name, Player.Dojo) pair collides
 // with another participant in the same roster (excluding the participant being
 // edited, for the update path). The comparison is on the normalized
-// (name, dojo) key — the SAME name at a DIFFERENT dojo is allowed (two real
+// (name, dojo) key; the SAME name at a DIFFERENT dojo is allowed (two real
 // people at different clubs), so the message names both fields.
 var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
-// (Store.AddParticipant and Store.ReplaceParticipant — both call
+// (Store.AddParticipant and Store.ReplaceParticipant; both call
 // requireSetupLocked) when the competition has already advanced past the
 // setup phase. The status is re-checked under the per-competition lock so a
 // concurrent POST /competitions/:id/start landing between the handler's
 // outer check and the store call cannot leak a roster write into a started
 // competition.
 //
-// Store.UpdateParticipant is intentionally NOT gated by this error — check-in
+// Store.UpdateParticipant is intentionally NOT gated by this error; check-in
 // toggles must keep working while the competition is running. Future setup-
 // only write paths should call requireSetupLocked under the same lock as
 // AddParticipant/ReplaceParticipant do.
@@ -110,7 +110,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	//
 	// mp-p7n / Copilot PR #185 round-6: without the parse-mode suffix,
 	// a no-hint auto-detect call that lands a "no-IDs" parse can poison
-	// the same cache key that a later HasIDs=&true call reads — the
+	// the same cache key that a later HasIDs=&true call reads; the
 	// hinted call would return the cached shifted rows instead of
 	// stripping column 0. Splitting the cache key by parse mode means
 	// each mode's parse is cached independently. saveParticipantsNoLock
@@ -177,7 +177,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// only used when we have no comp record (e.g. a stand-alone CSV
 	// loaded outside the normal handler flow).
 	// hasIDs: there is an id column in the file at all.
-	// trustHint: strip column 0 from EVERY row unconditionally — set
+	// trustHint: strip column 0 from EVERY row unconditionally; set
 	// only when the caller (or the comp's HasParticipantIDs flag)
 	// asserts "every row has an id". Without this signal, the auto-
 	// detect path falls back to a per-record UUID-shape check below
@@ -207,7 +207,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 
 		// Determine data fields (everything after the id if present).
 		//
-		// mp-p7n: pre-fix, this branch gated on `uuidRE(record[0])` —
+		// mp-p7n: pre-fix, this branch gated on `uuidRE(record[0])`;
 		// a per-record check that only stripped the first field when
 		// it matched the canonical-UUID shape. That broke any roster
 		// whose ids weren't UUID-shaped (e.g. the `${compID}-p${N}`
@@ -221,17 +221,17 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		//
 		// Fix:
 		//   - `trustHint` (caller-supplied or comp.HasParticipantIDs=true):
-		//     strip column 0 unconditionally — every row has an id of
+		//     strip column 0 unconditionally; every row has an id of
 		//     whatever shape. Preserves non-UUID ids (a client/import
 		//     path may carry one) and keeps them joinable with other
-		//     persisted state that references the player by id —
+		//     persisted state that references the player by id;
 		//     CompetitorStatus.PlayerID, team-lineup PlayerIDs (Copilot
 		//     PR #185 round-3: an alternative that regenerated non-UUID
 		//     ids at save time would silently orphan all those references).
 		//   - Auto-detected `hasIDs` (UUID-shape sniff on the first
 		//     row): keep the per-record uuidRE check so mixed-format
 		//     legacy files (some rows with UUID ids, some without)
-		//     load both kinds correctly — TestStore_ParticipantsCSV_MixedIDs
+		//     load both kinds correctly; TestStore_ParticipantsCSV_MixedIDs
 		//     pins this contract.
 		dataStart := 0
 		if hasIDs && len(record) > 0 {
@@ -242,7 +242,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		dataFields := record[dataStart:]
 
 		// Skip records that are empty after UUID stripping (e.g. a
-		// UUID-only row) — CreatePlayersFromRecords would skip these
+		// UUID-only row); CreatePlayersFromRecords would skip these
 		// too, and the metadata slices must stay aligned.
 		allEmpty := true
 		for _, f := range dataFields {
@@ -318,7 +318,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 
 // SaveParticipants persists the roster. It loads the competition under the
 // per-comp lock to determine WithZekkenName so the on-disk CSV layout matches
-// what the next LoadParticipants(_, comp.WithZekkenName) call will read —
+// what the next LoadParticipants(_, comp.WithZekkenName) call will read;
 // passing the wrong column count corrupts the file on the next round-trip.
 func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	mu := s.getCompLock(compID)
@@ -348,7 +348,7 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 // participantPairKey is the (normalizedName, normalizedDojo) identity key used
 // to resolve a participant when no stable UUID is available. It mirrors the
 // Tier-1 dedup key (NormalizeParticipantName on both halves joined by "|"), so
-// the pair is unique across a roster by construction — name alone is NOT unique
+// the pair is unique across a roster by construction; name alone is NOT unique
 // (same name at a different dojo is allowed). Keep in sync with checkInKey in
 // handlers_participants.go and checkinPid in web-mobile/js/data.jsx.
 func participantPairKey(name, dojo string) string {
@@ -357,7 +357,7 @@ func participantPairKey(name, dojo string) string {
 
 // pidPairKey derives the (normalizedName, normalizedDojo) key from a composite
 // "name|dojo" pid sent by the client for legacy UUID-less rows. The raw pid is
-// split on the FIRST "|" and each half normalized separately — splitting before
+// split on the FIRST "|" and each half normalized separately; splitting before
 // normalizing trims whitespace around the delimiter, which normalizing the whole
 // string would not. A pid with no "|" resolves as a name with an empty dojo.
 func pidPairKey(pid string) string {
@@ -366,10 +366,10 @@ func pidPairKey(pid string) string {
 }
 
 // resolveParticipantIndex finds the index of the participant addressed by pid.
-// It matches a stable UUID first; failing that — legacy participants.csv files
+// It matches a stable UUID first; failing that; legacy participants.csv files
 // loaded without a UUID column have empty IDs (loadParticipantsNoLock mints
 // none; the first write via saveParticipantsNoLock migrates those rows to UUIDs
-// because marshalParticipantsCSV backfills empty IDs) — it falls back to
+// because marshalParticipantsCSV backfills empty IDs); it falls back to
 // matching the composite "name|dojo" key the client sends for ID-less rows. The
 // fallback is restricted to ID-less rows (UUID rows are only addressable by
 // their id) and the (name, dojo) pair is unique per roster, so resolution is
@@ -492,7 +492,7 @@ func (s *Store) UpdateParticipant(compID string, pid string, withZekkenName bool
 // ReplaceParticipant can wrap the same logic under a status-gated lock
 // without forcing the lock-only check-in callers to pay for that gate.
 func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenName bool, transform func(p *domain.Player) error) (*domain.Player, error) {
-	// Seeds are not merged here — check-in mutations don't need seed data.
+	// Seeds are not merged here; check-in mutations don't need seed data.
 	players, err := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
 		return nil, err
@@ -531,13 +531,13 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 
 	// Canonicalize to match what CreatePlayers produces on load (Title-case),
 	// so participants.csv and seeds.csv store the same form that will be read
-	// back — otherwise a rename to "alice cooper" would be read as "Alice Cooper"
+	// back; otherwise a rename to "alice cooper" would be read as "Alice Cooper"
 	// while seeds.csv still holds "alice cooper", breaking seed merging.
 	players[foundIdx].Name = helper.TitleCaseName(players[foundIdx].Name)
 
 	// Duplicate guard: reject if any OTHER participant already has the same
-	// (normalizedName, normalizedDojo) pair. This runs unconditionally — even
-	// for check-in-only transforms that don't rename — which is harmless
+	// (normalizedName, normalizedDojo) pair. This runs unconditionally; even
+	// for check-in-only transforms that don't rename; which is harmless
 	// because the participant being edited is skipped (i == foundIdx) and a
 	// no-op edit can't collide with itself. Using both fields allows same-named
 	// competitors from different clubs while rejecting diacritic/casing variants.
@@ -566,7 +566,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		case loadErr == nil:
 			// seeds loaded; will rename below.
 		case errors.Is(loadErr, os.ErrNotExist):
-			seeds = nil // no seeds file — nothing to rename
+			seeds = nil // no seeds file; nothing to rename
 		default:
 			return nil, fmt.Errorf("load seeds for rename of %q: %w", oldName, loadErr)
 		}
@@ -576,7 +576,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// participants write leaves a retryable state: seeds already carries the
 	// new name, so a retry will see changed=false (oldName no longer in seeds)
 	// and skip the rename, then successfully write participants. The reverse
-	// order (participants first) is not retryable — oldName is gone from
+	// order (participants first) is not retryable; oldName is gone from
 	// participants so the seeds rename can never be applied again.
 	if oldName != players[foundIdx].Name && seeds != nil {
 		changed := false
@@ -588,7 +588,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		}
 		if changed {
 			// Use encoding/csv so names containing commas / quotes (e.g.
-			// "Smith, John") are properly escaped — fmt.Fprintf("%d,%s\n")
+			// "Smith, John") are properly escaped; fmt.Fprintf("%d,%s\n")
 			// would emit broken CSV that ParseSeedsFile then mis-splits,
 			// silently dropping seeds. Mirrors Store.SaveSeeds.
 			var sb strings.Builder
@@ -641,7 +641,7 @@ func (s *Store) loadParticipantsLocked(compID string, withZekkenName bool) ([]do
 //
 // Pre-fix the function tried to be clever by writing the 2-column form (id,
 // Name, Dojo) when DisplayName was empty or auto-derivable. That broke zekken
-// reloads as soon as Source or Metadata were present — e.g. the manual-source
+// reloads as soon as Source or Metadata were present; e.g. the manual-source
 // default added by the single-add endpoint produced [id, Name, Dojo, "manual"]
 // for zekken comps, which CreatePlayersFromRecords(_, true) then read as
 // Name=Name, DisplayName=Dojo, Dojo="manual" (corrupted). Branch on
@@ -659,7 +659,7 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		if withZekkenName {
 			// Always include the DisplayName column so a subsequent
 			// LoadParticipants(_, true) reads [Name, DisplayName, Dojo, ...]
-			// — even when DisplayName equals SanitizeName(Name) and even when
+			// even when DisplayName equals SanitizeName(Name) and even when
 			// Source/Metadata are present.
 			dn := p.DisplayName
 			if dn == "" {
@@ -671,11 +671,11 @@ func marshalParticipantsCSV(players []domain.Player, withZekkenName bool) ([]byt
 		}
 		record = append(record, p.Metadata...)
 		// Canonicalize (trim + lower-case) at the write chokepoint so participants.csv
-		// is always normalized regardless of which handler built the Player — keeps
+		// is always normalized regardless of which handler built the Player; keeps
 		// the loader from shifting a stray-cased value into Metadata and avoids
 		// split filter buckets. Only persist a RECOGNIZED source: an unknown value
 		// (set by some internal caller bypassing the API validator) would otherwise
-		// be written as a column and reloaded as Metadata — a lossy round-trip — so
+		// be written as a column and reloaded as Metadata; a lossy round-trip; so
 		// drop it instead.
 		if src := helper.CanonicalRegistrationSource(p.Source); helper.IsRegistrationSource(src) {
 			record = append(record, src)
@@ -719,7 +719,7 @@ func (s *Store) requireSetupLocked(compID string) error {
 // (see newParticipantID and saveParticipantsNoLock's ID-fill branch) so
 // the format-sniffer in loadParticipantsNoLock keeps a single contract.
 //
-// Re-checks the competition status under the per-comp lock — a concurrent
+// Re-checks the competition status under the per-comp lock; a concurrent
 // POST /competitions/:id/start landing between the handler's outer check and
 // this lock would otherwise leak a roster mutation into a started competition.
 func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bool) (*domain.Player, error) {
@@ -793,8 +793,8 @@ func (s *Store) ReplaceParticipant(compID string, pid string, withZekkenName boo
 
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool) error {
 	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
-	// persistence path — the bulk PUT /competitions/:id roster import (the
-	// SPA's primary flow), single add/edit, and any future caller — rejects
+	// persistence path; the bulk PUT /competitions/:id roster import (the
+	// SPA's primary flow), single add/edit, and any future caller; rejects
 	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
 	// only in the handlers would leave the guard bypassable, the same reason
 	// the elevated-password gate is inline on the roster PUT path.
@@ -840,7 +840,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 // invalidateParticipantCaches drops every parse-mode variant of the
 // participant cache for compID. Called after a participants.csv write
 // (saveParticipantsNoLock) AND after a competition config write
-// (saveCompetitionChangedLocked) — the latter is load-bearing because
+// (saveCompetitionChangedLocked); the latter is load-bearing because
 // the load decision depends on Competition.HasParticipantIDs, so a flag
 // flip must force a re-parse even when participants.csv is untouched.
 //

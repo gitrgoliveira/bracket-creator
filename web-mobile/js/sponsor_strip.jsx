@@ -1,4 +1,4 @@
-// SponsorStrip — renders a horizontal row of sponsor logos. Used on the
+// SponsorStrip: renders a horizontal row of sponsor logos. Used on the
 // viewer home and on the /display TV / lobby surfaces. See mp-c38.
 //
 // Props:
@@ -8,7 +8,7 @@
 // The viewer variant wraps logos with a link in <a target="_blank"
 // rel="noopener noreferrer">. The lobby and tv variants are passive
 // (TVs have no mouse; lobby touch installs shouldn't focus-trap on a
-// sponsor logo) — they always render a bare <img>.
+// sponsor logo): they always render a bare <img>.
 //
 // Hidden when sponsors is empty or undefined.
 
@@ -25,7 +25,7 @@ function SponsorStrip({ sponsors, variant }) {
     >
       {sponsors.map((s) => {
         // Key on s.file (server-generated, unique per upload) so React
-        // doesn't reuse the wrong DOM node when a sponsor is deleted —
+        // doesn't reuse the wrong DOM node when a sponsor is deleted:
         // index keys would let sponsor N+1's image flash into sponsor
         // N's slot before the next render flush.
         //

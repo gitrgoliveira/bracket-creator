@@ -17,11 +17,11 @@ import {
 // buildRunningIpponResult helper, which consumes the full points arrays.
 //
 // Kendo win conditions covered:
-//   - 2 ippons (sansoo)             — automatic win
-//   - 1 ippon at time-up            — winner if opponent has 0
-//   - 1 ippon vs 1 with one ahead   — same shape (2-1, 3-2 not allowed)
+//   - 2 ippons (sansoo): automatic win
+//   - 1 ippon at time-up: winner if opponent has 0
+//   - 1 ippon vs 1 with one ahead: same shape (2-1, 3-2 not allowed)
 // Draws (0-0, 1-1, 2-2) go through the full editor's hikiwake toggle,
-// not this helper — scoreboard submit is disabled in those states.
+// not this helper: scoreboard submit is disabled in those states.
 //
 // Tests below pin every adversarial-input case so a future refactor
 // can't silently re-introduce the truncation.
@@ -124,7 +124,7 @@ describe('buildRunningIpponResult', () => {
     });
 
     it('side A 2-1 win: loser keeps their single ippon (loserPts=1)', () => {
-      // Pre-fix the loser's letter was dropped on the floor — only the
+      // Pre-fix the loser's letter was dropped on the floor: only the
       // winner's first letter survived. The 2-1 case is the most likely
       // place where the truncation matters: the user entered detail for
       // both sides, but only the winner's first letter persisted.
@@ -135,7 +135,7 @@ describe('buildRunningIpponResult', () => {
       expect(r.score.loserPts).toBe(1);
     });
 
-    it('side B 2-1 win: symmetric — loser letters land in ipponsA', () => {
+    it('side B 2-1 win: symmetric. Loser letters land in ipponsA', () => {
       const r = buildRunningIpponResult("b", SIDE_A, SIDE_B, ["K", "T"], ["M"]);
       expect(r.ipponsA).toEqual(["M"]);
       expect(r.ipponsB).toEqual(["K", "T"]);
@@ -176,7 +176,7 @@ describe('loadScoreboardPoints', () => {
   // `match.score.ippons` (winner-only) gated by `winner.id === sideX.id`,
   // which silently dropped the LOSER's letters on every render. Once
   // buildRunningIpponResult started writing 2-1 wins correctly (loser's
-  // single ippon preserved), the loader's truncation surfaced — a 2-1
+  // single ippon preserved), the loader's truncation surfaced: a 2-1
   // win came back as 2-0 and re-submission re-truncated it.
   //
   // Fix reads from `match.ipponsA` / `match.ipponsB` directly. Tests pin
@@ -224,7 +224,7 @@ describe('loadScoreboardPoints', () => {
       expect(r).toEqual({ aPoints: ["M", "K"], bPoints: [] });
     });
 
-    it('2-1 side A win round-trip: aPoints=["M","K"], bPoints=["D"] — the bug case', () => {
+    it('2-1 side A win round-trip: aPoints=["M","K"], bPoints=["D"]: the bug case', () => {
       // Pre-fix: loader returned aPoints=["M","K"] (from score.ippons,
       // which was the winner's letters) and bPoints=[] (winner.id !==
       // sideB.id). So a 2-1 win came back as 2-0 in the UI even though
@@ -277,7 +277,7 @@ describe('loadScoreboardPoints', () => {
     it('filters out "•" empty-slot placeholders (matches scoring modal pattern)', () => {
       // The full editor uses "•" to mark empty slots in its 2-element
       // ippon arrays. Running panel never writes "•" but data may round-trip
-      // through the full editor — filtering defensively keeps the
+      // through the full editor: filtering defensively keeps the
       // scoreboard display clean.
       const r = loadScoreboardPoints({
         ipponsA: ["M", "•"],
@@ -303,11 +303,11 @@ describe('loadScoreboardPoints', () => {
 // AdminSettings syncs server-pushed changes into local state via a
 // useEffect whose deps list every c.* field rendered in the JSX (via
 // `local.*`). A missing dep means an SSE update to that field won't
-// propagate — the user sees stale data (the UI keeps showing the
+// propagate: the user sees stale data (the UI keeps showing the
 // pre-SSE value).
 //
 // This used to ALSO matter for save correctness because saveNow spread
-// `{ ...c, ...next }` into the PUT — so a stale `local.status` would
+// `{ ...c, ...next }` into the PUT: so a stale `local.status` would
 // be PUT back over a server-side status change. That's now handled
 // independently by the saveNow whitelist below (it builds the PUT
 // body from settings fields only, never including non-settings fields
@@ -330,12 +330,12 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
   // Fields the sync useEffect must list as deps. Two reasons a field
   // lands here:
   //
-  //   (a) The JSX reads `local.<field>` — without `c.<field>` in deps,
+  //   (a) The JSX reads `local.<field>`: without `c.<field>` in deps,
   //       SSE-pushed changes don't propagate and the UI shows stale
   //       data. Example: `local.status` is read for the delete-warning
   //       prompt, so SSE-driven status changes must update local.
   //
-  //   (b) saveNow PUTs `next.<field>` (allowlist) — without `c.<field>`
+  //   (b) saveNow PUTs `next.<field>` (allowlist): without `c.<field>`
   //       in deps, a concurrent admin's PUT (broadcast via SSE) won't
   //       update local, and the next save of any other field would PUT
   //       a stale value over the server's update. Example: `mirror` is
@@ -388,7 +388,7 @@ describe('AdminSettings useEffect deps completeness (H3 regression)', () => {
       const pattern = `c.${field}`;
       expect(
         depsLine.includes(pattern),
-        `expected deps to include ${pattern} — if you added local.${field} to the JSX, add c.${field} to the useEffect deps`
+        `expected deps to include ${pattern}: if you added local.${field} to the JSX, add c.${field} to the useEffect deps`
       ).toBe(true);
     }
   });
@@ -436,7 +436,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // FR-050 / T044: round-robin shape selector.
     'poolFormat',
     // FR-052..FR-054 / T047: per-phase duration overrides. Zero means
-    // "use legacy default" — fall through to backend ApplyCompetitionDefaults.
+    // "use legacy default": fall through to backend ApplyCompetitionDefaults.
     'poolMatchDuration', 'playoffMatchDuration',
     // FR-050a / T190: Swiss rounds (number of rounds the operator
     // configured for a Swiss-format competition). Editable pre-start
@@ -457,7 +457,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // competition's value to "" on a settings save.
     'teamMatchType',
   ]);
-  // Fields that MUST NOT appear in the PUT body — pinning the
+  // Fields that MUST NOT appear in the PUT body: pinning the
   // negative invariant explicitly so a careless re-add is caught.
   const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule'];
 
@@ -473,9 +473,9 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     expect(fnMatch, 'expected `const finalNext = { ... };` in saveNow').not.toBeNull();
     const body = fnMatch[1];
 
-    // No spread allowed — saveNow used to do `{ ...c, ...next, ... }`
+    // No spread allowed: saveNow used to do `{ ...c, ...next, ... }`
     // and that's exactly the regression we want to prevent.
-    expect(/\.\.\./.test(body), 'finalNext must not use spread — list each field explicitly').toBe(false);
+    expect(/\.\.\./.test(body), 'finalNext must not use spread: list each field explicitly').toBe(false);
 
     // Extract key names (everything before `:` per line, ignoring
     // strings/comments). Simple but sufficient for an object literal.
@@ -484,13 +484,13 @@ describe('AdminSettings.saveNow payload whitelist', () => {
       const m = line.match(/^\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/);
       if (m) keys.push(m[1]);
     }
-    expect(keys.length, 'finalNext appears to have no fields — parse failed').toBeGreaterThan(0);
+    expect(keys.length, 'finalNext appears to have no fields: parse failed').toBeGreaterThan(0);
 
     for (const k of keys) {
-      expect(ALLOWED.has(k), `finalNext key "${k}" is not in the settings allowlist — either add it to ALLOWED here (if it really is a setting) or remove it from finalNext`).toBe(true);
+      expect(ALLOWED.has(k), `finalNext key "${k}" is not in the settings allowlist: either add it to ALLOWED here (if it really is a setting) or remove it from finalNext`).toBe(true);
     }
     for (const forbidden of FORBIDDEN) {
-      expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}" — that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
+      expect(keys.includes(forbidden), `finalNext must NOT include "${forbidden}": that field is server-managed via a dedicated endpoint, not settings`).toBe(false);
     }
   });
 
@@ -514,7 +514,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
       const pattern = new RegExp(`\\b${field}:\\s*safeInt\\(`);
       expect(
         pattern.test(body),
-        `finalNext.${field} must use safeInt(...) — raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
+        `finalNext.${field} must use safeInt(...): raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
       ).toBe(true);
     }
   });
@@ -547,7 +547,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
 // reverting concurrent admin changes to fields the user wasn't
 // editing. The fix has three structural invariants we pin here:
 //
-//   1. saveLater takes NO snapshot arg — it relies on refs at fire time.
+//   1. saveLater takes NO snapshot arg: it relies on refs at fire time.
 //   2. saveNow builds an `effective` object by overlaying `localRef.current`
 //      values onto `cRef.current` for each field in `editedFieldsRef`.
 //   3. update / updateNumber call `editedFieldsRef.current.add(k)`
@@ -564,12 +564,12 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
   // Non-vacuity guard (mp-hpe3): AdminSettings was split into
   // admin_competition_settings.jsx. If this path ever points at a module that
   // doesn't contain AdminSettings, the source-introspection regexes below would
-  // match nothing and could pass trivially — fail loudly instead.
+  // match nothing and could pass trivially: fail loudly instead.
   it('reads the module that actually defines AdminSettings', () => {
     expect(src).toContain('function AdminSettings');
   });
 
-  it('uses manual save — no debounced autosave timer (mp-3xn6)', () => {
+  it('uses manual save: no debounced autosave timer (mp-3xn6)', () => {
     // Competition Settings was converted from debounced autosave to explicit
     // "Save changes" (matching the Tournament Edit-details page). The old
     // `saveLater` debounce must be gone, and saveNow must be reachable from an
@@ -635,7 +635,7 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
         `${handler} must write localRef.current = next inside its setLocal updater so saveNow sees the latest staged value even when the operator clicks Save immediately after editing`
       ).toContain('localRef.current = next');
       // Copilot finding (PR #320 round 4): the post-save clash banner says the
-      // change "was saved" — it goes stale the moment new edits are staged (the
+      // change "was saved": it goes stale the moment new edits are staged (the
       // edit may even resolve the clash). Each staging handler must clear it.
       expect(
         m[2],
@@ -660,7 +660,7 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
 
   it('sync effect uses editedFieldsRef.has guard, not blanket debounceRef gate', () => {
     // Pre-fix sync effect: `if (debounceRef.current) return prev;`
-    // — dropped ALL updates during the debounce, losing SSE changes to
+    // (it dropped ALL updates during the debounce, losing SSE changes to
     // fields the user wasn't editing. Post-fix: per-field check via
     // `editedFieldsRef.current.has(k)` inside Object.keys(c).
     expect(src).toContain('editedFieldsRef.current.has(k)');
@@ -681,7 +681,7 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
 // implement the "current round complete, generate next" decision flow.
 // Exported separately so the conditional logic can be pinned without
 // mounting AdminSwissRounds (the React vitest setup stubs hooks at the
-// component level — only the helpers can be exercised here).
+// component level: only the helpers can be exercised here).
 
 describe('swissRoundIDPrefix', () => {
   // Must match engine/swiss.go swissMatchID format: "Swiss-R{N}-".
@@ -768,7 +768,7 @@ describe('isSwissRoundComplete', () => {
 
   it('false for empty list (unbegun round is not complete)', () => {
     // The Generate Next Round button must stay disabled when there
-    // are no matches yet — pre-fix, returning true for [] would
+    // are no matches yet: pre-fix, returning true for [] would
     // enable the button before round 1 even exists.
     expect(isSwissRoundComplete([])).toBe(false);
     expect(isSwissRoundComplete(null)).toBe(false);
@@ -815,7 +815,7 @@ describe('canGenerateNextSwissRound', () => {
   });
 
   it('false when current round is 0 (setup, round 1 not generated)', () => {
-    // Operator hasn't hit Start yet — must press "Start competition"
+    // Operator hasn't hit Start yet: must press "Start competition"
     // first; the Generate Next Round button is not a substitute.
     expect(canGenerateNextSwissRound(mkComp({ swissCurrentRound: 0 }), [])).toBe(false);
   });

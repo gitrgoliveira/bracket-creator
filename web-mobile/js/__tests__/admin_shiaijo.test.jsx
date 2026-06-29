@@ -3,10 +3,10 @@ import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
 import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches } from '../admin_shiaijo.jsx';
 
-// A team encounter's score must never be shown as a bare number — it always
+// A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
 // wins or points. Individual bouts show the self-explanatory ippon score.
-describe('shiaijoScoreCell — team numbers are never context-free', () => {
+describe('shiaijoScoreCell; team numbers are never context-free', () => {
   const orig = {};
   beforeEach(() => {
     orig.iv = window.teamIVScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore;
@@ -40,9 +40,9 @@ describe('shiaijoScoreCell — team numbers are never context-free', () => {
 });
 
 // The completed result is rendered on its own centred line BELOW the names
-// (.shiaijo-qrow__result), NOT in the top-right state slot — so the (often long)
+// (.shiaijo-qrow__result), NOT in the top-right state slot; so the (often long)
 // names keep the full-width matchup line. The state slot carries only "Final".
-describe('ShiaijoQueueRow — completed result placement', () => {
+describe('ShiaijoQueueRow; completed result placement', () => {
   const realReact = global.React;
   let runtime, ShiaijoQueueRow, orig = {};
 
@@ -71,7 +71,7 @@ describe('ShiaijoQueueRow — completed result placement', () => {
 
   beforeEach(async () => {
     orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore; orig.iv = window.teamIVScore;
-    window.formatIpponsScore = () => '·—MK';
+    window.formatIpponsScore = () => '·;MK';
     window.ipponsFromScore = () => [];
     window.teamIVScore = () => null;
     runtime = makeReactive();
@@ -92,8 +92,8 @@ describe('ShiaijoQueueRow — completed result placement', () => {
     const tree = runtime.currentTree();
     const result = byClass(tree, 'shiaijo-qrow__result');
     expect(result.length).toBe(1);
-    expect(text(result[0])).toContain('·—MK');
-    // The top-right state slot shows only "Final" — the score is NOT there.
+    expect(text(result[0])).toContain('·;MK');
+    // The top-right state slot shows only "Final"; the score is NOT there.
     const state = byClass(tree, 'shiaijo-qrow__state');
     expect(state.length).toBe(1);
     expect(text(state[0])).toContain('Final');
@@ -112,9 +112,9 @@ describe('ShiaijoQueueRow — completed result placement', () => {
   });
 });
 
-// mp-tidg: viewer competition tab routing — /competition/:id/:tab gives
+// mp-tidg: viewer competition tab routing; /competition/:id/:tab gives
 // browser back/forward support across tabs (Overview / Pools / Bracket / etc).
-describe('parsePath — /competition/:id/:tab', () => {
+describe('parsePath; /competition/:id/:tab', () => {
   it('parses a tab segment into viewerTab', () => {
     expect(parsePath('/competition/abc/bracket')).toEqual({
       mode: 'viewer', viewerCompId: 'abc', viewerTab: 'bracket',
@@ -134,7 +134,7 @@ describe('parsePath — /competition/:id/:tab', () => {
   });
 });
 
-describe('pathFromState — viewer competition tab round-trip', () => {
+describe('pathFromState; viewer competition tab round-trip', () => {
   it('emits bare /competition/:id for overview (default tab)', () => {
     expect(pathFromState('viewer', undefined, 'abc', {}, 'overview')).toBe('/competition/abc');
     expect(pathFromState('viewer', undefined, 'abc', {}, null)).toBe('/competition/abc');
@@ -151,11 +151,11 @@ describe('pathFromState — viewer competition tab round-trip', () => {
     });
   });
 
-  it('register takes precedence over vcid — no tab suffix', () => {
+  it('register takes precedence over vcid; no tab suffix', () => {
     expect(pathFromState('viewer', 'register', 'abc', {}, 'bracket')).toBe('/register/abc');
   });
 
-  // mp-tidg: encode/decode symmetry — pathFromState encodeURIComponent's the
+  // mp-tidg: encode/decode symmetry; pathFromState encodeURIComponent's the
   // tab and parsePath safeDecode's it, so a URL-special tab id round-trips.
   // (Real tab ids are plain ASCII, so this is a defensive contract, not a
   // behaviour change for current tabs.)
@@ -169,7 +169,7 @@ describe('pathFromState — viewer competition tab round-trip', () => {
 });
 
 // Routing for the dedicated shiaijo operator view (mp-c2yr).
-describe('parsePath — /admin/shiaijo/:court', () => {
+describe('parsePath; /admin/shiaijo/:court', () => {
   it('maps a court segment to the shiaijo admin kind', () => {
     expect(parsePath('/admin/shiaijo/A')).toEqual({
       mode: 'admin', admin: { kind: 'shiaijo', court: 'A' },
@@ -183,7 +183,7 @@ describe('parsePath — /admin/shiaijo/:court', () => {
     });
   });
 
-  it('does NOT throw on malformed percent-encoding — falls back to the raw segment', () => {
+  it('does NOT throw on malformed percent-encoding; falls back to the raw segment', () => {
     // decodeURIComponent('%E0') throws; parsePath runs in the popstate
     // handler with no try/catch, so a crash here would break back/forward
     // navigation. safeDecode swallows the error and keeps the raw value.
@@ -200,7 +200,7 @@ describe('parsePath — /admin/shiaijo/:court', () => {
   });
 });
 
-describe('pathFromState — shiaijo round-trip', () => {
+describe('pathFromState; shiaijo round-trip', () => {
   const toPath = (court) =>
     pathFromState('admin', undefined, undefined, { kind: 'shiaijo', court });
 
@@ -214,7 +214,7 @@ describe('pathFromState — shiaijo round-trip', () => {
 
   it('falls back to /admin (not /admin/shiaijo/) when court is empty', () => {
     // A blank court would otherwise emit an unroutable /admin/shiaijo/
-    // that parsePath bounces back to the dashboard — a state↔URL mismatch.
+    // that parsePath bounces back to the dashboard; a state↔URL mismatch.
     expect(toPath('')).toBe('/admin');
     expect(toPath(undefined)).toBe('/admin');
   });
@@ -298,11 +298,11 @@ describe('partitionShiaijoMatches', () => {
 });
 
 
-describe('groupQueueMatches — Upcoming queue grouping', () => {
+describe('groupQueueMatches; Upcoming queue grouping', () => {
   const pool = (poolName, id) => ({ phase: 'pool', compFormat: 'mixed', poolName, id });
   const bracket = (round, roundIndex, id) => ({ phase: 'bracket', compFormat: 'mixed', round, roundIndex, id });
 
-  it('returns null (flat) for a league competition — no grouping', () => {
+  it('returns null (flat) for a league competition; no grouping', () => {
     const matches = [
       { phase: 'pool', compFormat: 'league', poolName: 'League table', id: 'l1' },
       { phase: 'pool', compFormat: 'league', poolName: 'League table', id: 'l2' },
@@ -341,7 +341,7 @@ describe('groupQueueMatches — Upcoming queue grouping', () => {
 });
 
 
-describe('isTeamMatch — gates the "Enter lineup" affordance', () => {
+describe('isTeamMatch; gates the "Enter lineup" affordance', () => {
   it('true for team encounters (by compKind or teamSize)', () => {
     expect(isTeamMatch({ compKind: 'team' })).toBe(true);
     expect(isTeamMatch({ teamSize: 5 })).toBe(true);

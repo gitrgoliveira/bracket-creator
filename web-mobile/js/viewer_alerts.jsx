@@ -1,17 +1,17 @@
-// viewer_alerts.jsx — alert/notification-trigger hooks + banners extracted
+// viewer_alerts.jsx: alert/notification-trigger hooks + banners extracted
 // from viewer.jsx (mp-pxxc step 3). Pure file split: no behaviour change.
 //
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module — do NOT give it its own <script type="module">
+// index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
 // Cycle note: viewer.jsx imports from this file and re-exports every symbol
 // here (plus window.* assignments) so the public surface of viewer.jsx is
 // unchanged. subscribePermissionChanges (private to AnnBellBtn) lives in
-// viewer_notifications.jsx and imports dispatchNotif from here — not a cycle:
+// viewer_notifications.jsx and imports dispatchNotif from here: not a cycle:
 // viewer_notifications.jsx loads after viewer_alerts.jsx, so the import resolves.
 
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
@@ -19,7 +19,7 @@ import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 const { useState, useRef: useRefV, useEffect } = React;
 
 // ---------------------------------------------------------------------------
-// mp-4fd: On-deck match alert — predicate, hook, banner, chime
+// mp-4fd: On-deck match alert: predicate, hook, banner, chime
 // ---------------------------------------------------------------------------
 
 // LocalStorage key for the chime mute preference (viewer-level).
@@ -27,7 +27,7 @@ const LS_CHIME_MUTED = "viewer.matchAlert.chimeMuted";
 
 // Hook: chime-muted preference backed by localStorage.
 // useChimeMuted syncs across multiple ViewerHome mounts via
-// a custom DOM event dispatched on toggle — the native `storage` event only
+// a custom DOM event dispatched on toggle: the native `storage` event only
 // fires across tabs, not within the same page.
 const CHIME_SYNC_EVENT = "chimeMutedSync";
 // Mirrors CHIME_SYNC_EVENT for the notifications-enabled flag so all AnnBellBtn
@@ -75,12 +75,12 @@ export async function notifEnable() {
         dispatchNotif(false);
         return r === "denied" ? "denied" : "off";
       }
-      // Only reachable after an async await — check cancel flag set by a
+      // Only reachable after an async await: check cancel flag set by a
       // concurrent notifDisable() call that arrived while the dialog was open.
       if (notifCancelled) { dispatchNotif(false); return "off"; }
     }
     try { window.localStorage.setItem(LS_NOTIFICATIONS_ENABLED, "true"); } catch (_e) { /* quota */ }
-    // Read back the actual persisted value — setItem may have thrown while the key
+    // Read back the actual persisted value: setItem may have thrown while the key
     // was already "true" (locked or quota-exceeded on a pre-existing opt-in).
     // Dispatching the real stored state keeps bells in sync with what
     // fireNotification() will see, mirroring the same pattern in notifDisable().
@@ -144,7 +144,7 @@ export function useChimeMuted() {
   // Preact 10 (hooks.umd.js in vendor/) executes functional updaters
   // synchronously within the useState setter call, so `next` is always
   // defined before the LS write and dispatch below. If upgrading Preact beyond
-  // v10, verify this invariant still holds — the effect-based alternative is
+  // v10, verify this invariant still holds: the effect-based alternative is
   // a useEffect on `muted` for LS/dispatch, but it adds a render cycle delay.
   const _applyMuted = (v) => {
     if (typeof window === "undefined") return;
@@ -224,7 +224,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
 
     // Build the signature for this state.  Always a string so the
     // strict-equality fast-path (sig === lastSigRef.current) works when
-    // off-deck too — null !== "" would bypass the dedup on every render.
+    // off-deck too: null !== "" would bypass the dedup on every render.
     const sig = onDeck && m
       ? m.id + ":" + (m.status === "running" ? "running" : "upnext")
       : "";
@@ -255,7 +255,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
       if (originalTitleRef.current === null) {
         originalTitleRef.current = document.title;
       }
-      const titlePrefix = m.status === "running" ? "🔴 NOW — " : "(1) Your match is next — ";
+      const titlePrefix = m.status === "running" ? "🔴 NOW: " : "(1) Your match is next: ";
       document.title = titlePrefix + (originalTitleRef.current || "Tournament");
     }
 
@@ -283,14 +283,14 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
           playTone(880, t0, 0.25);
           playTone(1100, t0 + 0.3, 0.35);
         }
-      } catch (_e) { /* autoplay restrictions or unavailable AudioContext — silent fail */ }
+      } catch (_e) { /* autoplay restrictions or unavailable AudioContext: silent fail */ }
     }
 
     // 3. Backgrounded browser Notification (reuses existing opt-in).
     if (typeof window !== "undefined" && typeof window.fireNotification === "function" && m) {
       const sideA = matchSideName(m.sideA, m.sideAName);
       const sideB = matchSideName(m.sideB, m.sideBName);
-      const courtStr = m.court ? ` — Shiaijo ${m.court}` : "";
+      const courtStr = m.court ? `: Shiaijo ${m.court}` : "";
       const body = (sideA && sideB) ? `${sideA} vs ${sideB}${courtStr}` : courtStr.slice(3) || "";
       const notifTitle = m.status === "running" ? "Your match is on now" : "Your match is next";
       window.fireNotification(notifTitle, body, { tag: "match-" + m.id });
@@ -302,7 +302,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
 }
 
 // mp-xhaa: secondary (non-primary) watched matches get a QUIET, rate-limited
-// banner — no chime, no title flash, no notification. This is the anti-storm
+// banner: no chime, no title flash, no notification. This is the anti-storm
 // rule (critique P2): a coach watching a 50-player dojo must not be pinged for
 // every student. The decision is a pure function so the rate-limiting is
 // unit-testable without timers.
@@ -312,7 +312,7 @@ export function useFollowedMatchAlert(myNextMatch, { chimeMuted, onAlert } = {})
 //   now:        epoch ms (Date.now())
 //   cooldownMs: minimum gap between secondary banners
 //
-// Returns { fire, match, seen, lastAt } — whether to surface a banner, which
+// Returns { fire, match, seen, lastAt }: whether to surface a banner, which
 // match, and the next state. A "signature" (id + running/upnext) dedups SSE
 // re-renders; `seen` is pruned to matches still on-deck so a match that leaves
 // and returns can alert again.

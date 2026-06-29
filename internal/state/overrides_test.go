@@ -116,7 +116,7 @@ func TestLoadOverridesLocked_NilFieldInit(t *testing.T) {
 	compID := "nil-init-comp"
 	compDir := filepath.Join(dir, "competitions", compID)
 	require.NoError(t, os.MkdirAll(compDir, 0700))
-	// Write an empty JSON object — Unmarshal leaves both map fields nil.
+	// Write an empty JSON object; Unmarshal leaves both map fields nil.
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "overrides.json"), []byte("{}"), 0600))
 
 	o, err := store.LoadOverrides(compID)

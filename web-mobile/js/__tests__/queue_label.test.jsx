@@ -7,13 +7,13 @@ import { queueLabel, queueLabelCompact } from '../display.jsx';
 // TWMatch pill (viewer.jsx) cannot drift apart again.
 //
 // Contract:
-//   - queueLabel(m)        — full-form label used in scheduled-list rows
+//   - queueLabel(m): full-form label used in scheduled-list rows
 //     - status !== "scheduled" → "" (gate applied first, matches queueLabelCompact)
 //     - qp === 1 → "Next up"  (qp coerced with Number(), handles string values)
 //     - qp >  1 → "(qp - 1) before yours"
 //     - status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm" fallback
 //     - any other combination → ""
-//   - queueLabelCompact(m) — pill form used in dense rows
+//   - queueLabelCompact(m): pill form used in dense rows
 //     - status !== "scheduled" → null (so callers can hide the pill)
 //     - qp === 1 → "Next up"
 //     - qp >  1 → "#N"

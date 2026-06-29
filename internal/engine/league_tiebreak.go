@@ -40,14 +40,14 @@ func effectiveTopN(comp *state.Competition) int {
 //     least one of the tied positions determines a top-N place.
 //  2. The group is NOT fully covered by the two-joint-3rd-places exemption:
 //     when LeagueTwoThirdPlaces is true and ALL positions in the group are at
-//     position >= 3, there is no need to distinguish 3rd from 4th — both teams
+//     position >= 3, there is no need to distinguish 3rd from 4th, both teams
 //     share 3rd. The group is therefore non-consequential.
 //
 // Rule precision for the two-thirds exemption:
 //   - The exemption fires only when EVERY position in the group is >= 3
 //     (i.e. MinPosition >= 3). If MinPosition < 3 the group straddles 2nd/3rd
 //     or higher, and a tie-breaker IS needed to decide who finishes 2nd.
-//   - The exemption is applied regardless of topN — even if topN==4, a
+//   - The exemption is applied regardless of topN, even if topN==4, a
 //     group sitting entirely at positions [3,4] is just "two joint 3rds" and
 //     no tie-breaker is required when LeagueTwoThirdPlaces is true.
 func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
@@ -61,7 +61,7 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 
 	// Two-joint-3rd-places exemption: when enabled, a group that sits entirely
 	// at positions >= 3 (i.e. only 3rd-place-or-below slots) does not need a
-	// decider — all members share 3rd place. The minimum position of the group
+	// decider, all members share 3rd place. The minimum position of the group
 	// must be at least 3 for this exemption to apply.
 	if comp.LeagueTwoThirdPlaces && g.MinPosition >= 3 {
 		return false
@@ -161,7 +161,7 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // matches for a specific set of tied teams in a team-league competition. It is
 // the operator-triggered path, called by the POST /league-tiebreak handler after
 // it has validated the selection against LeagueTiebreakCandidates (this function
-// does NOT re-validate consequentiality — the handler is the gate).
+// does NOT re-validate consequentiality, the handler is the gate).
 //
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.

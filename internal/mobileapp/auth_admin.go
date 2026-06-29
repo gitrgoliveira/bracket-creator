@@ -11,7 +11,7 @@ import (
 // ElevatedVerifier gates the destructive-operation middleware
 // (RequireElevatedPassword) for spec 004 / mp-e21. It is intentionally
 // NARROWER than PasswordVerifier: there is no bootstrap branch, no reset
-// semantics, and no stored-password redaction policy — those belong to the
+// semantics, and no stored-password redaction policy, those belong to the
 // primary credential. The elevated password is a SECOND factor layered on
 // top of the main-password AuthMiddleware, so by the time these methods run
 // the request has already proven it holds the main password.
@@ -28,7 +28,7 @@ import (
 type ElevatedVerifier interface {
 	// GateActive reports whether the middleware should enforce at all.
 	//   file mode:   true only when an admin password has been set.
-	//   locked mode: always true (fail-closed — a locked deployment that
+	//   locked mode: always true (fail-closed, a locked deployment that
 	//                forgot the env var must NOT silently allow destructive
 	//                ops with the main password alone).
 	GateActive() bool
@@ -74,7 +74,7 @@ func (v *fileElevatedVerifier) adminPassword() (string, error) {
 	return t.AdminPassword, nil
 }
 
-// GateActive: in file mode the gate is opt-in — it activates only once the
+// GateActive: in file mode the gate is opt-in, it activates only once the
 // operator has set an admin password. A load error is treated as
 // "active" so a transient store failure fails closed (the subsequent
 // Verify will surface the error and the middleware 500s) rather than
@@ -89,7 +89,7 @@ func (v *fileElevatedVerifier) GateActive() bool {
 
 // Configured mirrors GateActive in file mode: the same on-disk field both
 // activates the gate and is the credential. A load error reports false so
-// the middleware's Configured() branch doesn't 503 on a transient error —
+// the middleware's Configured() branch doesn't 503 on a transient error,
 // the error is surfaced by Verify instead.
 func (v *fileElevatedVerifier) Configured() bool {
 	pw, err := v.adminPassword()
@@ -128,7 +128,7 @@ type bcryptElevatedVerifier struct {
 // NewBcryptElevatedVerifier validates `hash` as a bcrypt-encoded password
 // hash and returns a configured locked-mode verifier. An empty hash is
 // rejected with a distinct error so the caller can fall back to the
-// unconfigured verifier (which 503s on use) rather than failing startup —
+// unconfigured verifier (which 503s on use) rather than failing startup,
 // a locked deployment that never performs destructive ops shouldn't be
 // forced to set this env var just to boot.
 func NewBcryptElevatedVerifier(hash string) (ElevatedVerifier, error) {
@@ -150,7 +150,7 @@ func (v *bcryptElevatedVerifier) Verify(presented string) (bool, error) {
 		return false, nil
 	}
 	// Pre-check length so an oversized header can't trip a 500 (and thus a
-	// differential-error oracle) — identical rationale to
+	// differential-error oracle), identical rationale to
 	// bcryptPasswordVerifier.Verify, bcryptMaxInputBytes defined there.
 	if len(presented) > bcryptMaxInputBytes {
 		return false, nil

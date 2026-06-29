@@ -93,7 +93,7 @@ describe('keyboard shortcut routing', () => {
     const upper = k.toUpperCase();
     if ("MKDTH".includes(upper) && k.length === 1) {
       const isDrawClear = isDrawToggled;
-      // ev.shiftKey determines side — matches admin.jsx production logic
+      // ev.shiftKey determines side: matches admin.jsx production logic
       const side = ev.shiftKey ? "a" : "b";
       return `action/pt/${side}${isDrawClear ? "/cleardraw" : ""}`;
     }

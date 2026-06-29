@@ -45,7 +45,7 @@ describe('mergeCompetitionsIntoTournament', () => {
   });
 
   it('passes an empty array to the mutator when competitions is undefined', () => {
-    // Guards the `|| []` fallback — necessary so handlers that fire on
+    // Guards the `|| []` fallback: necessary so handlers that fire on
     // a fresh tournament (no competitions yet) don't crash on .map of
     // undefined.
     const t = { id: 't1', name: 'Cup' };
@@ -72,7 +72,7 @@ describe('mergeCompetitionsIntoTournament', () => {
     // closure-captured snapshot. This test simulates the pattern by
     // calling the helper twice with different `currentT` values,
     // showing that each call sees only what it was given (no hidden
-    // closure-captured state in the helper itself — that's exactly
+    // closure-captured state in the helper itself; that's exactly
     // what we want).
     const _t1 = { id: 't1', competitions: [{ id: 'c1', name: 'Original' }] };
     const t2 = {
@@ -91,7 +91,7 @@ describe('mergeCompetitionsIntoTournament', () => {
       { id: 'c2', name: 'Added by SSE' },
     ]);
     // Critically: t2's SSE-added c2 is preserved. Pre-fix, AdminApp's
-    // handlers used closure-captured `t = t1`, which had only c1 —
+    // handlers used closure-captured `t = t1`, which had only c1;
     // the post-await onUpdate({...t1, competitions: [{c1: renamed}]})
     // would have dropped c2 from the local state, requiring another
     // SSE round-trip to recover.
@@ -103,7 +103,7 @@ describe('mergeCompetitionsIntoTournament', () => {
 // (addCompetition) used `refreshCompsBestEffort` which
 // just logged + toasted on refresh failure. The caller then navigated
 // to `view.kind="competition", id: created.id`, but local
-// `t.competitions` still didn't contain `created` — so AdminApp's
+// `t.competitions` still didn't contain `created`; so AdminApp's
 // `t.competitions.find(cc => cc.id === view.id)` returned undefined,
 // rendering "Competition not found" until the next SSE/manual refresh
 // landed.
@@ -111,11 +111,11 @@ describe('mergeCompetitionsIntoTournament', () => {
 // Fix: a `refreshCompsAfterCreate(created, ...)` helper that ALSO
 // merges the created record into local state when refresh fails.
 // The mutator pattern is:
-//   comps => comps.some(c => c.id === created.id) ? comps : [...comps, created]
+//   comps => comps.some(c => c.id === created.id) ? comps: [...comps, created]
 // It's idempotent (no duplicates if `created` is already in `comps`,
 // e.g. via an SSE update that landed during the in-flight create).
 //
-// Pinning the mutator's behaviour here as a pure test — the full
+// Pinning the mutator's behaviour here as a pure test; the full
 // addCompetition handler needs DOM rendering to test
 // (vitest setup mocks React with stubs; see follow-up #4/#7).
 describe('refreshCompsAfterCreate merge mutator', () => {
@@ -134,7 +134,7 @@ describe('refreshCompsAfterCreate merge mutator', () => {
     ]);
   });
 
-  it('is idempotent — no duplicate when local state already has the record', () => {
+  it('is idempotent: no duplicate when local state already has the record', () => {
     // SSE could have landed during the in-flight create, populating
     // `created.id` into `t.competitions` before refresh failed. The
     // merge must not duplicate.
@@ -152,7 +152,7 @@ describe('refreshCompsAfterCreate merge mutator', () => {
   });
 
   it('appends to an empty competitions array', () => {
-    // First competition in a fresh tournament — the most common
+    // First competition in a fresh tournament: the most common
     // create-then-navigate case.
     const t = { id: 't1', competitions: [] };
     const created = { id: 'c1', name: 'First' };
@@ -183,7 +183,7 @@ describe('refreshCompsAfterCreate merge mutator', () => {
 // get clobbered by the post-await onUpdate pushing the stale closure-
 // captured `t`.
 //
-// Pinning the merge behaviour as a pure test — the handler itself is a
+// Pinning the merge behaviour as a pure test; the handler itself is a
 // closure inside AdminApp and can't be rendered in this vitest setup
 // (mocked React hooks). The test simulates the bug by passing a
 // "latest" tournament (mirroring what tRef.current would hold post-SSE)
@@ -192,7 +192,7 @@ describe('refreshCompsAfterCreate merge mutator', () => {
 describe('mergeTournamentPatch', () => {
   // NB: test fixtures below use the literal strings "X", "Y", "Z" for
   // password values. Avoid anything that looks like a credential (e.g.
-  // "session-secret", "new-pw") — generic-password secret scanners
+  // "session-secret", "new-pw"): generic-password secret scanners
   // (GitGuardian etc.) match on keyword-adjacent string values regardless
   // of context, and a flagged test fixture noise-fails CI.
   it('overlays patch fields onto the latest tournament', () => {
@@ -221,7 +221,7 @@ describe('mergeTournamentPatch', () => {
   });
 
   it('preserves the latest tournament competitions when patch omits them', () => {
-    // The CORE bug shape — pre-fix, updateTournament used the closure-
+    // The CORE bug shape: pre-fix, updateTournament used the closure-
     // captured `t` to build `next = { ...t, ...patch }`, so a SSE update
     // that mutated `tRef.current.competitions` during the in-flight PUT
     // was clobbered when `onUpdate(next)` fired post-await. The helper
@@ -238,7 +238,7 @@ describe('mergeTournamentPatch', () => {
     const patch = { name: 'New tournament name' };
     const result = mergeTournamentPatch(latestT, patch, 'X');
     expect(result.name).toBe('New tournament name');
-    // The SSE-driven competitions list is preserved — pre-fix this would
+    // The SSE-driven competitions list is preserved; pre-fix this would
     // have been the closure-captured pre-PUT snapshot (whatever t was at
     // handler-definition time), reverting status changes on every save.
     expect(result.competitions).toEqual([
@@ -318,7 +318,7 @@ describe('normalizeCreatedRecord', () => {
   });
 
   it('preserves an explicit empty players array', () => {
-    // The "cleared roster" shape — distinct from null/undefined.
+    // The "cleared roster" shape: distinct from null/undefined.
     const created = { id: 'c1', name: 'New', players: [] };
     const result = normalizeCreatedRecord(created);
     expect(result.players).toEqual([]);

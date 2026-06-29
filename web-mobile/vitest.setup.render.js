@@ -33,7 +33,7 @@ await import('./js/viewer_utils.jsx');
 // the real component, mirroring the browser's index.html load order.
 await import('./js/ui.jsx');
 
-// Fail tests that produce unexpected console.warn or console.error — matches
+// Fail tests that produce unexpected console.warn or console.error, matches
 // the invariant enforced by the unit suite (vitest.setup.js).
 // Tests that intentionally trigger warnings (e.g. the GUARD test) must spy on
 // console.error themselves with a local mock, which replaces this spy for that

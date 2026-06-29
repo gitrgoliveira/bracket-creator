@@ -1,5 +1,5 @@
 // Pure utility functions extracted from admin_schedule.jsx (mp-d7tl).
-// No React, no window dependencies — safe to import anywhere including tests.
+// No React, no window dependencies: safe to import anywhere including tests.
 
 export function formatMinutes(m) {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
@@ -33,11 +33,11 @@ export function timeEdited(oldScheduledAt, newVal) {
 //   - NaN / undefined / null            (cleared input → stored as NaN)
 //   - Infinity / -Infinity              (impossible via UI but defensive)
 //   - non-integers like 2.5             (Copilot found: addMinutes would
-//                                        produce "00:2.5" — invalid HH:MM —
+//                                        produce "00:2.5": invalid HH:MM.
 //                                        and durationEstimate "0h 32.5m")
 //   - values < 1                        (zero or negative makes no sense)
 //
-// Falls back to 3 minutes — the same default the matchDuration state
+// Falls back to 3 minutes: the same default the matchDuration state
 // uses, so the UX is "if your typed value is invalid, we schedule as if
 // you'd left the field at 3 (the placeholder default)."
 export function clampMatchDuration(raw, fallback = 3) {
@@ -51,7 +51,7 @@ export function allMatchesCompleted(matches) {
 }
 
 // T041 (US1, FR-002, SC-002): per-tablet localStorage key. The URL
-// ?court= param remains canonical — localStorage is a fallback that lets
+// ?court= param remains canonical: localStorage is a fallback that lets
 // a bookmarked operator tablet land on the same shiaijo after they
 // navigate away and return via a bare URL.
 export const COURT_STORAGE_KEY = "bc_operator_courts";

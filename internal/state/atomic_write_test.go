@@ -36,7 +36,7 @@ func TestAtomicWriteFile_HappyPath(t *testing.T) {
 
 	require.NoError(t, atomicWriteFile(target, data, 0600))
 
-	got, err := os.ReadFile(target) // #nosec G304 — test path.
+	got, err := os.ReadFile(target) // #nosec G304, test path.
 	require.NoError(t, err)
 	assert.Equal(t, data, got, "file content should equal what was written")
 
@@ -55,7 +55,7 @@ func TestAtomicWriteFile_OverwritesExisting(t *testing.T) {
 	require.NoError(t, os.WriteFile(target, []byte("OLD\n"), 0600))
 	require.NoError(t, atomicWriteFile(target, []byte("NEW\n"), 0600))
 
-	got, err := os.ReadFile(target) // #nosec G304 — test path.
+	got, err := os.ReadFile(target) // #nosec G304, test path.
 	require.NoError(t, err)
 	assert.Equal(t, []byte("NEW\n"), got, "file should be replaced with the new content")
 
@@ -106,7 +106,7 @@ func TestAtomicWriteFile_PreservesExistingOnFailure(t *testing.T) {
 	require.Error(t, err, "writing under a non-directory should error")
 
 	// Pre-existing real.json should be untouched.
-	got, err := os.ReadFile(target) // #nosec G304 — test path.
+	got, err := os.ReadFile(target) // #nosec G304, test path.
 	require.NoError(t, err)
 	assert.Equal(t, []byte("KEEP_ME"), got, "pre-existing target must be intact on unrelated failure")
 }
@@ -151,7 +151,7 @@ func TestAtomicWriteFile_CleansTmpOnError(t *testing.T) {
 func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 	// Two concurrent atomicWriteFile calls to the SAME target with
 	// independent suffixes should both succeed (one wins via rename,
-	// the other rewrites on top — the order is racy but neither write
+	// the other rewrites on top, the order is racy but neither write
 	// should error and the final content must equal one of the two
 	// inputs). Catches the failure mode where a fixed ".tmp" suffix
 	// would have one call clobber the other's in-flight temp.
@@ -175,7 +175,7 @@ func TestAtomicWriteFile_UniqueSuffixAvoidsCollision(t *testing.T) {
 		assert.NoErrorf(t, err, "concurrent atomicWriteFile call %d should succeed", i)
 	}
 
-	got, err := os.ReadFile(target) // #nosec G304 — test path.
+	got, err := os.ReadFile(target) // #nosec G304, test path.
 	require.NoError(t, err)
 	assert.True(t, string(got) == "CONTENT_A" || string(got) == "CONTENT_B",
 		"final content must be one of the two inputs, got %q", string(got))
@@ -195,7 +195,7 @@ func TestSyncDir_NonExistentPath(t *testing.T) {
 
 // TestAtomicWriteFile_RenameTargetIsDir covers the os.Rename error path:
 // if the final target path already exists as a directory, Rename fails on
-// POSIX (EISDIR). The temp file must be cleaned up — no orphan should remain.
+// POSIX (EISDIR). The temp file must be cleaned up, no orphan should remain.
 func TestAtomicWriteFile_RenameTargetIsDir(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Rename semantics differ on Windows")

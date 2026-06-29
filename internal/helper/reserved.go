@@ -5,7 +5,7 @@ import "regexp"
 // reservedPoolFinalistRE matches the pool-finalist placeholder labels the
 // engine writes into bracket slots: "<PoolName>-<ordinal>", e.g. "Pool A-1st".
 // Pool names are generated as "Pool <label>" where label is A–Z for the first
-// 26 pools, then AA, BB, … (same letter doubled) for pools beyond 26 — so a
+// 26 pools, then AA, BB, ... (same letter doubled) for pools beyond 26, so a
 // real participant named like a placeholder is extremely unlikely, but scoring
 // now gates on this regex, so we block it at the write boundary to prevent
 // silent mis-classification.
@@ -25,8 +25,8 @@ func IsReservedParticipantName(name string) bool {
 
 // IsPoolFinalistPlaceholder reports whether s is a pool-origin finalist
 // placeholder ("Pool A-1st", "Pool B-2nd", etc.) as emitted by
-// helper.GenerateFinals.  Unlike IsReservedParticipantName, this does NOT
-// match next-round feeder labels ("Winner of r1-m3") — callers that need
+// helper.GenerateFinals. Unlike IsReservedParticipantName, this does NOT
+// match next-round feeder labels ("Winner of r1-m3"), callers that need
 // to distinguish the two patterns (e.g. bracketHasPoolPlaceholders) should
 // use this instead.
 func IsPoolFinalistPlaceholder(s string) bool {

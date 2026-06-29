@@ -22,7 +22,7 @@ const scheduleClockLayout = "15:04"
 // tournaments scheduled around midday, and because the only consumer
 // that actually cares (the slot-skip loop) needs a definite window.
 // When the tournament struct gains a typed TimeBlock the resolution
-// changes — and the test suite documents this assumption explicitly
+// changes, and the test suite documents this assumption explicitly
 // so a future refactor is forced to update the convention together
 // with the type.
 const defaultLunchStartClock = "12:00"
@@ -43,7 +43,7 @@ const defaultPerMatchClockMinutes = 3
 // transitions (FR-058).
 //
 // The kachinuki branch uses comp.TeamSize as the worst-case bout
-// count for slot planning — a kachinuki match may finish earlier in
+// count for slot planning, a kachinuki match may finish earlier in
 // practice if one side gets exhausted, but the operator must reserve
 // the upper-bound block so the auto-scheduler does not double-book
 // the court. Documented trade-off; T150.
@@ -83,7 +83,7 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 
 // parseDurationMinutes converts a Go-style duration string ("30m",
 // "1h", "1h30m") to whole minutes. Empty string returns 0 (no block
-// configured). Unparseable strings return 0 — we treat invalid
+// configured). Unparseable strings return 0, we treat invalid
 // tournament configs as "no block" rather than failing the whole
 // match-generation pipeline; the operator notices the missing skip
 // in the rendered schedule. T151.
@@ -105,7 +105,7 @@ func parseDurationMinutes(s string) int {
 
 // parseClockHHMM parses the "HH:MM" wire format used by
 // Competition.StartTime into a time.Time anchored to the zero date.
-// The date doesn't matter for the loop — we only consume the time-of-
+// The date doesn't matter for the loop, we only consume the time-of-
 // day on output via t.Format(scheduleClockLayout). Falls back to
 // 09:00 when the input is empty or malformed; this matches the test
 // fixture defaults and keeps slot assignment from collapsing.
@@ -123,7 +123,7 @@ func parseClockHHMM(s string) time.Time {
 }
 
 // skipCeremonyBlocks pushes t past any ceremony window it falls
-// inside. Currently models LunchBlock as the only mid-day block —
+// inside. Currently models LunchBlock as the only mid-day block,
 // OpeningBlock is applied as a pre-loop offset to the per-court
 // start (see assignPoolMatchSlots / assignBracketMatchSlots) and
 // ClosingBlock is treated as an end-of-day reservation that the
@@ -134,7 +134,7 @@ func parseClockHHMM(s string) time.Time {
 // is the time at which LunchBlock begins; lunchDurationMin is its
 // length. When lunchDurationMin <= 0 the function is a no-op.
 //
-// The push is "to the END of the block" — never partial. If t lands
+// The push is "to the END of the block", never partial. If t lands
 // at 12:15 with a 13:00 lunch end, ScheduledAt becomes 13:00. The
 // subsequent match on that court therefore can start at 13:00 + this
 // match's elapsed minutes, which is correct: the operator does not
@@ -165,14 +165,14 @@ func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time
 // the same slice for ergonomic chaining, and the maximum per-court end-cursor
 // (i.e. the clock time when the last match on the busiest court
 // finishes). The end-cursor lets a post-draw consumer derive a real schedule
-// duration — the mp-zoh per-comp endpoint (future) and
+// duration, the mp-zoh per-comp endpoint (future) and
 // TestEstimateForCountsVsSlotAssigner_Balanced (today). Note EstimateForCounts
 // itself is pre-draw and does NOT call this assigner; it computes its own
 // per-court cursors. Callers that only want the mutated slice may discard the
 // second return value.
 //
 // The end-cursor is the per-court start anchor (comp.StartTime + OpeningBlock)
-// when there are no matches — matching where the first match on each court
+// when there are no matches, matching where the first match on each court
 // would have started, and consistent with EstimateForCounts(0,…). So a
 // post-draw consumer computing cursor.Sub(dayStart) gets the opening offset (or
 // 0 with no OpeningBlock), never a bogus year-from-zero value. A zero time.Time
@@ -237,7 +237,7 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // after every assignment. T150, T151.
 //
 // Auto-resolved bye matches (Status == Completed at generation time)
-// still receive a ScheduledAt for UI consistency — the operator-
+// still receive a ScheduledAt for UI consistency, the operator-
 // facing schedule lists them even though no play happens. The court
 // cursor is NOT advanced for byes (they consume no court time).
 //
@@ -285,7 +285,7 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 			m.ScheduledAt = cursor.Format(scheduleClockLayout)
 
 			// Don't advance the court cursor for auto-resolved byes.
-			// They occupy no real time on the court — the next round
+			// They occupy no real time on the court, the next round
 			// would otherwise inherit a phantom delay.
 			if m.Status != state.MatchStatusCompleted {
 				cursor = cursor.Add(time.Duration(perMatchMin) * time.Minute)

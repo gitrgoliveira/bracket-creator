@@ -1,4 +1,4 @@
-// Spec 004 / mp-e21 — elevated (destructive-ops) password: client header
+// Spec 004 / mp-e21: elevated (destructive-ops) password: client header
 // plumbing + the promptAdminPassword UI helper.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';

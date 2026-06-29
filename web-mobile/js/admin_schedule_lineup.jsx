@@ -5,12 +5,12 @@ import { LineupNameInput } from './admin_scoring_shared.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
-// pickCopySource — pure helper that selects the most recent saved lineup
+// pickCopySource: pure helper that selects the most recent saved lineup
 // among this team's *earlier* matches ("Copy from previous match").
 // Exported for unit testing.
 // Candidate filter: this team's matches, not the current match, with a saved
 // lineup, scheduled at or before the current match's time (when it has one).
-// Sort order: scheduledAt DESC (nulls last — unscheduled matches treated as
+// Sort order: scheduledAt DESC (nulls last: unscheduled matches treated as
 // least-recent), then court ASC, then queue-position (index in allMatches)
 // ASC, then matchId DESC.
 export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups) {
@@ -21,7 +21,7 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
   // teamId may be a single key or an array of keys ([id, name]). A match
   // side may be keyed by the team NAME (api_serializers name-as-id fallback)
   // while the team's real id is a UUID, so we match a side against ANY of
-  // the provided keys by either its id OR its name — comparing only one key
+  // the provided keys by either its id OR its name: comparing only one key
   // space would silently find zero candidates (the original copy-from-
   // previous bug).
   const keys = (Array.isArray(teamId) ? teamId : [teamId]).filter(Boolean);
@@ -34,7 +34,7 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
   // "Previous match": only consider siblings scheduled at or before the
   // current match. When the current match has no time, don't restrict (any
   // saved sibling is a valid source). An unscheduled sibling (no time) is
-  // always allowed — it sorts last anyway.
+  // always allowed: it sorts last anyway.
   const current = allMatches.find(m => m.id === currentMatchId);
   const currentTime = current && current.scheduledAt ? current.scheduledAt : "";
   const candidates = allMatches.filter(m => {
@@ -61,13 +61,13 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
     if (aIdx !== bIdx) return aIdx - bIdx;
     // matchId DESC: a defensive final tiebreak. In practice distinct match
     // objects always have distinct indices above, so this is effectively
-    // unreachable — kept only so the comparator is total.
+    // unreachable: kept only so the comparator is total.
     return (b.id || "").localeCompare(a.id || "");
   });
   return candidates[0];
 }
 
-// MatchLineupSideEditor — inline lineup editor for one team side within
+// MatchLineupSideEditor: inline lineup editor for one team side within
 // the per-match lineup panel. Handles load/save/copy-from-previous for a
 // single (compId, teamId, matchId) triple.
 // Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
@@ -92,7 +92,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // A match "involves" this team when either side resolves to it by id OR by
   // name. Match sides may be keyed by team NAME (api_serializers name-as-id
   // fallback) while teamId is the participant UUID, so we compare against
-  // both keys — the same id-vs-name pitfall the roster resolver hits.
+  // both keys: the same id-vs-name pitfall the roster resolver hits.
   const teamKeys = [team?.id, team?.ID, team?.name, team?.Name].filter(Boolean);
   const sideMatchesTeam = (side) => {
     if (side == null) return false;
@@ -143,7 +143,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           setLockedAt(matchLineup.lockedAt || null);
           setIsMatchOverride(true);
         } else {
-          // No per-match entry — reflect the round default (fetch-and-show,
+          // No per-match entry: reflect the round default (fetch-and-show,
           // but do NOT set isMatchOverride so the label says "inheriting").
           const round = window.resolveRoundIndex(match);
           try {
@@ -156,7 +156,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               });
               setValues(next);
             }
-          } catch (_e) { /* no round lineup — leave blank */ }
+          } catch (_e) { /* no round lineup: leave blank */ }
           setIsMatchOverride(false);
         }
       } catch (e) {
@@ -169,7 +169,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   }, [compId, teamId, matchId]);
 
   // Locked when this side's lineup carries a lockedAt OR the match itself is
-  // already running/finished — the backend locks the whole match once it starts
+  // already running/finished: the backend locks the whole match once it starts
   // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
   // read as locked rather than show an editable form that 409s on save.
   const matchStarted = match?.status === "running" || match?.status === "completed";
@@ -188,7 +188,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // field) or show success; keep the operator's entered values and report
       // pending. The write is durable and will retry.
       if (updated && updated.queued) {
-        if (typeof showToast === "function") showToast("Offline — match lineup not saved yet, will retry");
+        if (typeof showToast === "function") showToast("Offline: match lineup not saved yet, will retry");
         return;
       }
       // Reflect exactly what was persisted. This is also what applies the
@@ -208,7 +208,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // both persist through doSave.
       const msg = e?.message || "Failed to save lineup";
       if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
-        setError("This match is in progress — lineup is locked and cannot be changed.");
+        setError("This match is in progress: lineup is locked and cannot be changed.");
       } else {
         setError(msg);
       }
@@ -220,12 +220,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const save = () => {
     // Strip empty positions before PUT. The handler replaces the whole
     // positions map (TeamLineup{Positions: req.Positions}), and the domain
-    // validator treats an absent key the same as an explicit "" — both
+    // validator treats an absent key the same as an explicit "": both
     // "missing". Sending explicit empties only bloats the persisted YAML.
     const positionsOut = {};
     positions.forEach(p => {
       // Trim here too (not only at the picker's onSelect) so a Save can never
-      // persist leading/trailing or whitespace-only names — matches AdminLineup.
+      // persist leading/trailing or whitespace-only names: matches AdminLineup.
       const v = (values[p.key] || "").trim();
       if (v) positionsOut[p.key] = v;
     });
@@ -279,7 +279,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         setShowLineupReasonPrompt(true);
       } else {
         // doSave applies the copied values from the persisted server response on
-        // success, so we deliberately do NOT setValues eagerly here — a failed
+        // success, so we deliberately do NOT setValues eagerly here: a failed
         // save must not leave unpersisted copied values on screen. Pass the
         // distinct copy toast to preserve the pre-split confirmation.
         await doSave(next, "", "Lineup copied from previous match");
@@ -331,7 +331,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         ))}
         {roster.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-            This team has no registered members — type each competitor's name directly.
+            This team has no registered members : type each competitor's name directly.
           </div>
         )}
       </div>
@@ -376,7 +376,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   );
 }
 
-// MatchLineupPanel — modal overlay for per-match lineup editing. Renders
+// MatchLineupPanel: modal overlay for per-match lineup editing. Renders
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
 export function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal", allowDuringMatch = false }) {
@@ -390,7 +390,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
 
   // Resolve team objects from the competition's player list. comp.players
   // (loaded via /api/viewer/competitions) already carries each team's
-  // metadata (member roster) — no extra participants fetch is needed.
+  // metadata (member roster): no extra participants fetch is needed.
   //
   // The match's sideA/sideB are normalized to { id, name }, where `id`
   // falls back to the team NAME when the backend has no UUID for that slot
@@ -475,7 +475,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   );
 
   // Inline (mp-c2yr): render in-flow inside the operator console's main
-  // column — no fixed overlay, no backdrop. The shiaijo page owns the
+  // column: no fixed overlay, no backdrop. The shiaijo page owns the
   // surrounding card; here we just provide padding + scroll.
   if (variant === "inline") {
     return <div className="scoring-panel lineup-panel--inline" aria-label="Lineup for this match">{inner}</div>;

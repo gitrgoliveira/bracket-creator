@@ -11,7 +11,7 @@ import (
 )
 
 // resetPasswordRequest is the body shape for POST /api/tournament/reset.
-// A single field — the new password — replaces whatever is currently
+// A single field,  the new password,  replaces whatever is currently
 // stored in tournament.md. The endpoint is intentionally minimal: there
 // is no "old password" check because the whole point is to recover from
 // not knowing it.
@@ -26,7 +26,7 @@ type resetPasswordRequest struct {
 	// (EventPasswordReset) can be ignored in the originating tab.
 	// Without it, the tab that just submitted /reset would receive
 	// its own broadcast and immediately clear the localStorage
-	// credential ResetPasswordForm just wrote — kicking the operator
+	// credential ResetPasswordForm just wrote,  kicking the operator
 	// who reset straight back to the AuthModal. The server treats
 	// the value as opaque: echo on the broadcast, never persist.
 	OriginatorID string `json:"originatorId,omitempty"`
@@ -40,7 +40,7 @@ type passwordResetEventData struct {
 	OriginatorID string `json:"originatorId,omitempty"`
 }
 
-// MaxLenOriginatorID caps the originatorId at 128 bytes — a UUID is
+// MaxLenOriginatorID caps the originatorId at 128 bytes,  a UUID is
 // 36 bytes, a fallback random string is ~20; 128 leaves headroom for
 // future variants without letting an attacker pump arbitrary bytes
 // through the SSE channel.
@@ -72,7 +72,7 @@ var errResetPasswordRequired = errors.New("password is required")
 // Known limitations:
 //   - The host comparison is exact-string on host:port. An operator at
 //     `http://localhost:8089` and a colleague reaching the same machine
-//     via `http://127.0.0.1:8089` are treated as different origins —
+//     via `http://127.0.0.1:8089` are treated as different origins,
 //     which is also the browser's behavior.
 //   - Behind a TLS-terminating reverse proxy, c.Request.TLS is nil even
 //     when the browser sees HTTPS; the scheme check would reject the
@@ -83,7 +83,7 @@ var errResetPasswordRequired = errors.New("password is required")
 //     for direct same-host operator access.
 //   - DNS rebinding: a malicious page can rebind its domain to the
 //     tournament server's IP so that both Origin.Host and c.Request.Host
-//     equal the attacker's domain — passing the Origin == Host check even
+//     equal the attacker's domain,  passing the Origin == Host check even
 //     though the request reaches this server. This endpoint is intended
 //     for trusted networks (local / private LAN); for any
 //     internet-exposed deployment use --lock-password instead, which
@@ -128,7 +128,7 @@ func isSameOriginReset(c *gin.Context) bool {
 // RegisterResetHandlers wires POST /api/tournament/reset. The route is
 // public (no admin auth header required) because it IS the unlock path
 // for a forgotten password. In locked mode the verifier reports
-// ResetEnabled()==false and the handler 404s — matching the
+// ResetEnabled()==false and the handler 404s,  matching the
 // path-doesn't-exist response so a scanner can't differentiate a locked
 // deployment from one that's been compiled without this feature.
 func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier PasswordVerifier, hub *Hub) {
@@ -141,7 +141,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			return
 		}
 
-		// Cross-origin POST defense — see isSameOriginReset. Done before
+		// Cross-origin POST defense,  see isSameOriginReset. Done before
 		// body parsing so a malicious site can't even probe how the
 		// endpoint reacts to a payload.
 		if !isSameOriginReset(c) {
@@ -151,7 +151,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 
 		// Cap the request body before parsing. Applied here (not as group
 		// middleware) so that locked-mode deployments return 404 before any
-		// body is read — a group-level cap would return 413 for large bodies
+		// body is read,  a group-level cap would return 413 for large bodies
 		// even in locked mode, leaking that the route exists. Size rationale
 		// is in ResetMaxBodyBytes in middleware.go.
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, ResetMaxBodyBytes)
@@ -163,7 +163,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 		}
 
 		// Password is NOT trimmed (matches the PUT/POST tournament
-		// handlers — passwords may legitimately contain whitespace and
+		// handlers,  passwords may legitimately contain whitespace and
 		// the auth check is exact-string match).
 		if req.Password == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errResetPasswordRequired.Error()})
@@ -180,7 +180,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 
 		// Load the current tournament under the same atomic primitive
 		// the PUT handler uses so a concurrent PUT/POST can't race the
-		// reset. We refuse to bootstrap from reset — the operator must
+		// reset. We refuse to bootstrap from reset,  the operator must
 		// use POST /api/tournament for that, since bootstrap also needs
 		// name/date/venue/courts. A pure password-set against a
 		// non-existent record would persist Name=="" which would fail
@@ -229,7 +229,7 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			//   - EventPasswordReset: admin sessions clear localStorage
 			//     and re-show AuthModal. Without this, other admins'
 			//     cached password stays in localStorage until their next
-			//     write fails with 401 — surprising UX.
+			//     write fails with 401,  surprising UX.
 			//     The OriginatorId echoed here lets the submitting tab
 			//     identify and ignore its own broadcast so the operator
 			//     who just reset isn't immediately logged out.

@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 // pure helpers directly but never MOUNTS the page, so a window.* dep that's
 // captured at module-eval (the `const X = window.X` block) or read at render
 // time would slip through. This harness mounts with REAL React 18 + jsdom and
-// FAILS on any console.warn/error, so a missing global throws here — the
+// FAILS on any console.warn/error, so a missing global throws here. The
 // load-order class of breakage the default stub can't catch.
 //
 // All window.* deps captured at admin_registration_desk.jsx module load

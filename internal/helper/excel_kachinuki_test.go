@@ -55,7 +55,7 @@ func TestKachinukiDetailSheetExists(t *testing.T) {
 }
 
 // TestKachinukiDetailSheetSkippedWhenEmpty confirms the renderer is a no-op
-// when there are zero kachinuki matches — the detail sheet must not be
+// when there are zero kachinuki matches, the detail sheet must not be
 // created (T201 acceptance).
 func TestKachinukiDetailSheetSkippedWhenEmpty(t *testing.T) {
 	f := excelize.NewFile()
@@ -155,7 +155,7 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equalf(t, intToString(b.boutNum), boutVal, "row %d: bout number", row)
 
-		// Side A name + position (column B) — both must appear together.
+		// Side A name + position (column B), both must appear together.
 		sideACell, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(row))
 		require.NoError(t, err)
 		assert.Containsf(t, sideACell, b.sideAName, "row %d: Side A name", row)
@@ -185,7 +185,7 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 		winner, err := f.GetCellValue(SheetKachinukiDetail, "G"+intToString(row))
 		require.NoError(t, err)
 		if b.isHikiwake {
-			// Hikiwake rows render an empty or em-dash winner cell — both
+			// Hikiwake rows render an empty or em-dash winner cell, both
 			// acceptable; the decision column carries the result.
 			assert.Containsf(t, []string{"", "-"}, winner, "row %d: hikiwake winner should be empty", row)
 		} else {
@@ -199,7 +199,7 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 	}
 
 	// Sanity check: the row immediately after the last bout is the summary,
-	// not another bout row — the bout column should NOT contain a bout number
+	// not another bout row, the bout column should NOT contain a bout number
 	// (it should hold a "Summary" or "Total" label instead).
 	postBouts, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(summaryRow))
 	require.NoError(t, err)
@@ -218,7 +218,7 @@ func TestKachinukiDetailSummaryRow(t *testing.T) {
 	// 6 bouts + 3 leading rows (title, subtitle, header) → summary at row 10.
 	summaryRow := 10
 
-	// A label like "Total" / "Summary" — exact text not pinned, just that
+	// A label like "Total" / "Summary", exact text not pinned, just that
 	// some label is present.
 	label, err := f.GetCellValue(SheetKachinukiDetail, "A"+intToString(summaryRow))
 	require.NoError(t, err)
@@ -290,7 +290,7 @@ func TestKachinukiDetailMultipleMatches(t *testing.T) {
 // TestKachinukiMainSheetStillSummary is T198: when the workbook is built
 // with kachinuki team matches the existing Pool Matches and Elimination
 // Matches sheets are still present and structured as 8-column-per-court
-// — adding the detail sheet does not regress the main-sheet layout
+// adding the detail sheet does not regress the main-sheet layout
 // invariant (NFR-023).
 //
 // We exercise this by calling the existing CLI helper code path (which
@@ -302,7 +302,7 @@ func TestKachinukiMainSheetStillSummary(t *testing.T) {
 	defer func() { _ = f.Close() }()
 
 	// Build the standard set of sheets the way NewFileFromScratch does it
-	// — every Phase 11 invocation must coexist with these.
+	// every Phase 11 invocation must coexist with these.
 	for _, name := range []string{SheetTimeEstimator, SheetPoolDraw, SheetPoolMatches, SheetEliminationMatches, SheetNamesToPrint, SheetTree} {
 		_, err := f.NewSheet(name)
 		require.NoError(t, err)
@@ -326,7 +326,7 @@ func TestKachinukiMainSheetStillSummary(t *testing.T) {
 	}
 
 	// Pool Matches and Elimination Matches must remain on the 8-column-per-court
-	// layout — i.e. nothing in the detail-sheet wiring path should rewrite the
+	// layout, i.e. nothing in the detail-sheet wiring path should rewrite the
 	// CourtsColumnsPerCourt invariant.
 	assert.Equal(t, 8, CourtsColumnsPerCourt, "CourtsColumnsPerCourt invariant must remain 8")
 }

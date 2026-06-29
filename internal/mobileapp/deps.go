@@ -1,13 +1,13 @@
-// Package mobileapp — see deps.go for the consumer-boundary interfaces
+// Package mobileapp; see deps.go for the consumer-boundary interfaces
 // that handlers depend on. The intent (per Slice 0 / NFR-002) is that
 // handler code reaches the store, engine, and SSE hub through these
 // minimal interfaces rather than the concrete `*state.Store`,
-// `*engine.Engine`, and `*Hub` types — which makes handler-level tests
+// `*engine.Engine`, and `*Hub` types; which makes handler-level tests
 // cheap (no temp dirs, no real engine wiring) and confines the
 // concrete-type blast radius to the constructor.
 //
 // The interface methods are deliberately the SMALLEST set each handler
-// family needs — adding a method here is a deliberate "I want this
+// family needs; adding a method here is a deliberate "I want this
 // callable from an unrelated handler" signal, not a default. As more
 // handlers migrate to interface-based DI in later slices, methods get
 // added narrowly. Concrete types in `internal/state` and
@@ -34,7 +34,7 @@ type TournamentLoader interface {
 // CompetitionStore is the consumer-boundary view of state.Store used by
 // handler families that need to read/write competition-level data
 // (config.md, pools, brackets, schedule). Methods are added here only as
-// real handler call sites need them — see server.go for the constructor
+// real handler call sites need them; see server.go for the constructor
 // that wires `*state.Store` through this interface.
 //
 // Consumers (current): handlers_match.go (the score endpoint, after T017
@@ -67,7 +67,7 @@ type ScoringEngine interface {
 	// RecordMatchResultWithIneligibility is the variant used by the
 	// score handler when the request may have recorded a kiken or
 	// fusenpai decision. The returned CompetitorStatus is non-nil only
-	// when a new ineligibility was persisted — the handler uses that to
+	// when a new ineligibility was persisted; the handler uses that to
 	// drive the competitor-status-updated SSE broadcast (T085/T092).
 	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
 	// RecordMatchResultWithIneligibilityTx is the tx-aware twin used by
@@ -145,7 +145,7 @@ type EligibilityEngine interface {
 // The handler also needs the competition's TeamSize to drive
 // TeamLineup.Validate, so it composes this interface with
 // CompetitionStore at the registration site rather than promoting
-// LoadCompetition into this minimal store interface — same pattern
+// LoadCompetition into this minimal store interface; same pattern
 // the other handler families use.
 type TeamLineupStore interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
@@ -175,13 +175,13 @@ type Broadcaster interface {
 // CompetitionTransactor is the consumer-boundary view of
 // state.Store.WithTransaction used by handler families that need to
 // commit multiple file mutations under one per-comp lock acquire
-// (T155/T156). Kept as a single-method interface deliberately —
+// (T155/T156). Kept as a single-method interface deliberately;
 // handlers that ALSO need read access compose this with the
 // CompetitionStore / TeamLineupStore / etc. interfaces at the
 // registration site, same pattern the other handler families use.
 //
 // Consumers (current): handlers_lineup.go (the PUT, T156);
-// handlers_match.go (score, mp-95mg — wraps WithCourtExclusivityLock +
+// handlers_match.go (score, mp-95mg, wraps WithCourtExclusivityLock +
 // WithTransaction); handlers_decision.go (decision, T156).
 type CompetitionTransactor interface {
 	// WithTransaction runs fn under the per-competition write lock for

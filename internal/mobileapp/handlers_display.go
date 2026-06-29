@@ -12,10 +12,10 @@ import (
 )
 
 // RegisterDisplayHandlers wires the public, no-auth court-scoped surfaces:
-//   - GET /api/viewer/court/:court/current — a one-shot polled view of the
+//   - GET /api/viewer/court/:court/current, a one-shot polled view of the
 //     currently-running match on a court, for non-browser streaming
 //     integrations (vMix, OBS plugins, scoreboards).
-//   - GET /api/viewer/court/:court/matches — the operator console's court feed:
+//   - GET /api/viewer/court/:court/matches, the operator console's court feed:
 //     every competition with a real match physically placed on the court, each
 //     with its full {config, poolMatches, bracket} payload.
 //
@@ -31,7 +31,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
 		// no-store + CORS headers so the polled-surface guarantee survives
-		// router refactors, normalises the :court param, and writes the 503/404.
+		// router refactors, normalises the: court param, and writes the 503/404.
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
@@ -41,8 +41,8 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		// this court wins. Two running matches on the same court would
 		// already be a tournament-data error (one court runs one match
 		// at a time per R8) and we surface whichever appears first. Within a
-		// competition we check pool matches then the bracket — the same order
-		// state.RunningMatchOnCourt uses — so a running KNOCKOUT bout is just
+		// competition we check pool matches then the bracket, the same order
+		// state.RunningMatchOnCourt uses, so a running KNOCKOUT bout is just
 		// as "current" as a pool bout (mp-9h1f follow-up: the prior code
 		// scanned only poolMatches, so a running elimination match read as idle).
 		ids, _ := store.ListCompetitions()
@@ -69,7 +69,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 
 			// Bracket/knockout: a running elimination bout persists its running
 			// score as the formatted ScoreA/ScoreB string (engine.formatScore),
-			// not the ippon arrays a pool MatchResult carries — parseScore turns
+			// not the ippon arrays a pool MatchResult carries. parseScore turns
 			// it back into the {ippons, hansoku} shape the contract returns.
 			// Elimination matches have no representative-bout fighters.
 			bracket, _ := store.LoadBracket(compID)
@@ -96,21 +96,21 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 		c.JSON(http.StatusOK, gin.H{"court": court, "status": "idle"})
 	})
 
-	// GET /api/viewer/court/:court/matches — the court-scoped match feed for
+	// GET /api/viewer/court/:court/matches, the court-scoped match feed for
 	// the operator console. Returns {court, competitions:[…]} where each entry
 	// is the SAME public per-competition payload the aggregate GET /competitions
 	// returns ({config, poolMatches, bracket}), but ONLY for competitions that
-	// have at least one real (both-sides-resolved) match — pool or non-preview
-	// bracket — physically placed on this court right now.
+	// have at least one real (both-sides-resolved) match; pool or non-preview
+	// bracket, physically placed on this court right now.
 	//
 	// The operator console is court-first AND cross-competition by design: the
 	// running bout stays put across comps (AC7), the switch nudge watches other
 	// comps on the court (AC6), and Submit+Next advances within the submitted
-	// comp — all need every competition on the court, not just the selected one.
+	// comp; all need every competition on the court, not just the selected one.
 	// Keying on actual match placement (not comp.courts config) keeps the page
 	// correct after an operator MOVES a match to another shiaijo. The per-comp
 	// match data is full (not court-filtered) so client-side derivations like
-	// "Match N of M" pool counts stay correct; the right-sizing is by
+	// "Match N of M" pool counts stay correct. The right-sizing is by
 	// competition COUNT (only comps on this court, not the whole tournament).
 	r.GET("/court/:court/matches", func(c *gin.Context) {
 		court, ok := resolveCourt(c, store)
@@ -151,7 +151,7 @@ var (
 // helper: this Go side additionally TrimSpace-normalizes each name before the
 // empty/placeholder checks. That only widens the empty-side guard (a
 // whitespace-only side reads as absent) and never changes which real names
-// pass, so the two predicates agree on every real match — they are not
+// pass, so the two predicates agree on every real match; they are not
 // byte-for-byte identical implementations.
 func courtMatchSidesReal(a, b string) bool {
 	a = strings.TrimSpace(a)
@@ -170,7 +170,7 @@ func courtMatchSidesReal(a, b string) bool {
 
 // resolveCourt is the shared preamble for the court-scoped display surfaces. It
 // pins the no-store + CORS headers (streaming clients poll on a 1-2s cadence and
-// must never be cached), normalises the :court param, validates it against the
+// must never be cached), normalises the: court param, validates it against the
 // active tournament, and writes the error response on failure. Returns
 // (court, true) on success; ("", false) after writing a 503 (no tournament) or
 // 404 (unknown court), in which case the handler must return immediately.
@@ -182,7 +182,7 @@ func resolveCourt(c *gin.Context, store *state.Store) (string, bool) {
 
 	tour, err := store.LoadTournament()
 	if err != nil || tour == nil {
-		// 503 distinguishes "tournament not loaded yet" from a genuine 4xx —
+		// 503 distinguishes "tournament not loaded yet" from a genuine 4xx,
 		// clients can retry without reporting it as an error to the operator.
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "no_active_tournament"})
 		return "", false
@@ -200,7 +200,7 @@ func resolveCourt(c *gin.Context, store *state.Store) (string, bool) {
 // matchesPresentOnCourt reports whether the given (already-loaded) pool matches
 // or non-preview bracket contain at least one real match (both sides resolved,
 // see courtMatchSidesReal) physically placed on the court. A preview bracket
-// (mixed-comp placeholder structure) is skipped — it is read-only and never
+// (mixed-comp placeholder structure) is skipped, it is read-only and never
 // played, mirroring the aggregate viewer's preview strip. Pure (no store reads)
 // so buildViewerCompetitionPayload can gate the court feed off the same
 // poolMatches/bracket it already loaded, without a second read.
@@ -312,7 +312,7 @@ func parseScore(s string) ([]string, int) {
 }
 
 // buildSide turns a participant name (which is what MatchResult.SideA/SideB
-// carries — see state/models.go) into the per-side payload defined by the
+// carries, see state/models.go) into the per-side payload defined by the
 // court-current contract. When the participants list cannot resolve the name
 // we fall back to a name-only side so the overlay can still render
 // "Player vs Player" rather than blanking out.
@@ -344,7 +344,7 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 // phaseFromMatchID derives a human-readable phase label from a match ID.
 // Pool match IDs are formatted "PoolName-Idx" by engine/pools.go; we strip
 // the suffix and return the pool name verbatim. Bracket matches will land
-// in a later slice — for now we return the raw ID as a fallback so the
+// in a later slice, for now we return the raw ID as a fallback so the
 // field is never empty for a current match (the contract documents the field
 // is always present on current payloads).
 func phaseFromMatchID(id string) string {

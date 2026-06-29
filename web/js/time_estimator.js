@@ -29,19 +29,19 @@ export function formatTime(totalMinutes) {
 // object with the computed quantities otherwise.
 //
 // Inputs:
-//   totalPlayers         — number
-//   isPools              — bool (true = "Pools and Playoffs", false = "Playoffs")
-//   courts               — int >= 1
-//   teamSize             — int >= 1
-//   poolMatchMins        — minutes per pool match (per bout)
-//   elimMatchMins        — minutes per elimination match (per bout)
-//   rotationSecs         — rotation padding seconds applied per match
-//   breakMins            — break minutes added per phase
-//   playersPerPool       — int (only used when isPools)
-//   winnersPerPool       — int (only used when isPools)
-//   isMaxMode            — bool (max-players-per-pool vs min)
-//   isRoundRobin         — bool (only used when isPools)
-//   startTimeMinutes     — start time as minutes-from-midnight (number)
+//   totalPlayers        , number
+//   isPools             , bool (true = "Pools and Playoffs", false = "Playoffs")
+//   courts              , int >= 1
+//   teamSize            , int >= 1
+//   poolMatchMins       , minutes per pool match (per bout)
+//   elimMatchMins       , minutes per elimination match (per bout)
+//   rotationSecs        , rotation padding seconds applied per match
+//   breakMins           , break minutes added per phase
+//   playersPerPool      , int (only used when isPools)
+//   winnersPerPool      , int (only used when isPools)
+//   isMaxMode           , bool (max-players-per-pool vs min)
+//   isRoundRobin        , bool (only used when isPools)
+//   startTimeMinutes    , start time as minutes-from-midnight (number)
 export function estimateSchedule(opts) {
     const totalPlayers = Math.max(parseInt(opts.totalPlayers, 10) || 0, 0);
     if (totalPlayers < 2) {

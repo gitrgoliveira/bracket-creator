@@ -1,10 +1,10 @@
-// viewer_notifications.jsx — notification-settings + announcement UI extracted
+// viewer_notifications.jsx: notification-settings + announcement UI extracted
 // from viewer.jsx (mp-pxxc step 8). Pure file split: no behaviour change.
 //
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module — do NOT give it its own <script type="module">
+// index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
@@ -31,7 +31,7 @@ export function subscribePermissionChanges() {
   if (_permSubscribed || _permGaveUp) return;
   try {
     const pq = navigator.permissions?.query?.({ name: "notifications" });
-    // query() is absent on some WebViews / old iOS — optional-chain returns undefined.
+    // query() is absent on some WebViews / old iOS: optional-chain returns undefined.
     // Set _permGaveUp (not _permSubscribed) so future mounts skip retrying on a
     // browser that permanently lacks the API.
     if (!pq) { _permGaveUp = true; return; }
@@ -42,7 +42,7 @@ export function subscribePermissionChanges() {
       _permSubscribed = true;
       const handleChange = () => {
         if (s.state === "denied" || s.state === "prompt") { dispatchNotif(false); return; }
-        // "granted" — re-read LS so the dispatched state matches what fireNotification sees.
+        // "granted": re-read LS so the dispatched state matches what fireNotification sees.
         let optIn = false;
         try { optIn = window.localStorage.getItem(LS_NOTIFICATIONS_ENABLED) === "true"; } catch (_e) { /* storage unavailable */ }
         dispatchNotif(optIn);
@@ -54,7 +54,7 @@ export function subscribePermissionChanges() {
       }
     }).catch(() => { _permGaveUp = true; });
   } catch (_e) {
-    // pq.then() threw synchronously (non-conforming non-Promise pq) — give up
+    // pq.then() threw synchronously (non-conforming non-Promise pq): give up
     // consistently with the !pq branch and the .catch() path above.
     _permGaveUp = true;
   }
@@ -67,7 +67,7 @@ export function notificationSupported() {
 }
 
 // Shared formatter so the synchronous initializer and the useEffect tick
-// produce identical strings — keeps the first paint stable.
+// produce identical strings: keeps the first paint stable.
 function formatAnnouncementTimeLeft(expiresAtIso) {
   const diff = new Date(expiresAtIso).getTime() - Date.now();
   if (diff <= 0) return "";
@@ -78,7 +78,7 @@ function formatAnnouncementTimeLeft(expiresAtIso) {
   return minutes > 0 ? `${minutes}:${paddedSeconds} left` : `${seconds}s left`;
 }
 
-// AnnBellBtn — per-announcement bell icon that opts the viewer into browser notifications.
+// AnnBellBtn: per-announcement bell icon that opts the viewer into browser notifications.
 export function AnnBellBtn() {
   // viewer_watchlist.js is loaded before viewer.js in index.html; BellIcon
   // is always set by the time this component renders.
@@ -129,7 +129,7 @@ export function AnnBellBtn() {
       onClick={toggle}
       disabled={state === "denied"}
       aria-pressed={state === "on"}
-      aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on — tap to disable" : "Get notified of announcements"}
+      aria-label={state === "denied" ? "Notifications blocked in your browser" : state === "on" ? "Notifications on: tap to disable" : "Get notified of announcements"}
       title={state === "denied" ? "Notifications blocked in browser settings" : state === "on" ? "Notifications on" : "Notify me of announcements"}
     >
       <BellIcon muted={state !== "on"} size={13} />
@@ -137,7 +137,7 @@ export function AnnBellBtn() {
   );
 }
 
-// AnnouncementCard — renders a single announcement card with its own
+// AnnouncementCard: renders a single announcement card with its own
 // independent per-card countdown and auto-dismiss timer.
 // Exported for unit testing; consumed only by AnnouncementBanner below.
 export function AnnouncementCard({ ann, onDismiss }) {
@@ -187,7 +187,7 @@ export function AnnouncementCard({ ann, onDismiss }) {
   );
 }
 
-// AnnouncementBanner — fixed-position overlay that stacks ALL active
+// AnnouncementBanner: fixed-position overlay that stacks ALL active
 // announcements as independent cards. Does NOT rotate; each card owns
 // its own countdown and auto-dismiss timer. Public props unchanged so
 // app.jsx needs no edit.

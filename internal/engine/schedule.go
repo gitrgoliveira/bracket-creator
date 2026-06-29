@@ -21,13 +21,13 @@ const MaxCourts = 26
 // PerCourtMinutes has length == in.NumCourts (>=1 after clamping) and
 // each entry is the estimated elapsed minutes that one court runs match
 // play (excluding ceremonies). TotalDurationMinutes is the slowest court
-// plus CeremonyMinutes — i.e. the earliest the operator can expect the
+// plus CeremonyMinutes, i.e. the earliest the operator can expect the
 // final medal ceremony to begin.
 //
 // NOTE the "excluding ceremonies" wording above describes the EstimateSchedule
 // producer (raw scalars, no break model). The other producer, EstimateForCounts,
 // fills PerCourtMinutes from a per-court clock cursor that INCLUDES the
-// OpeningBlock offset and any LunchBlock dead-time — see its doc comment.
+// OpeningBlock offset and any LunchBlock dead-time, see its doc comment.
 //
 // data-model §5/§6.
 type ScheduleEstimate struct {
@@ -69,7 +69,7 @@ type EstimateInput struct {
 //
 // This is the single source of truth shared by EstimateSchedule and
 // perMatchElapsedMinutes (scheduler_slots.go). Both callers delegate
-// here — satisfying the FR-059 "MUST agree" constraint without manual
+// here, satisfying the FR-059 "MUST agree" constraint without manual
 // synchronisation.
 func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
 	if bouts > 0 {
@@ -92,7 +92,7 @@ func perMatchElapsed(clockMin, multiplier float64, bouts int) float64 {
 // FR-055, FR-057, FR-058, FR-059, data-model §5.
 //
 // Breaks (OpeningBlock, LunchBlock, ClosingBlock) are NOT modelled
-// here because EstimateInput carries only raw scalars — the stateless
+// here because EstimateInput carries only raw scalars, the stateless
 // handler has no competition/tournament context. Use EstimateForCounts
 // when per-comp, break-aware estimation is needed.
 func EstimateSchedule(in EstimateInput) ScheduleEstimate {
@@ -141,54 +141,54 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // (no generated matches yet) given the expected number of pool matches and
 // playoff matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
 // skipCeremonyBlocks) so per-match and in-day break (OpeningBlock/LunchBlock)
-// math match the post-draw path — but the aggregate intentionally diverges in
+// math match the post-draw path, but the aggregate intentionally diverges in
 // two documented ways (the buffer and phase-sequencing notes below), so it is
-// NOT a byte-for-byte equal. (ClosingBlock is handled differently — surfaced as
+// NOT a byte-for-byte equal. (ClosingBlock is handled differently, surfaced as
 // CeremonyMinutes here, ignored by the assigners; see below.)
 //
 // Unit reconciliation: the slot model advances clock times (time.Time), while
 // ScheduleEstimate.TotalDurationMinutes is a duration in minutes. This function
-// defines TotalDurationMinutes = round(maxCourtCursor − dayStart), where dayStart
+// defines TotalDurationMinutes = round(maxCourtCursor - dayStart), where dayStart
 // is comp.StartTime (the same anchor the slot assigners use). Each court's cursor
 // is initialised to dayStart+OpeningBlock, so the returned duration INCLUDES the
 // opening-block offset. PerCourtMinutes entries are each court's individual
-// elapsed duration — and, NOTE, unlike the ScheduleEstimate struct docstring
+// elapsed duration, and, NOTE, unlike the ScheduleEstimate struct docstring
 // ("match play (excluding ceremonies)", which describes the EstimateSchedule
 // producer), these entries INCLUDE the OpeningBlock offset and any LunchBlock
 // dead-time. They are NOT match-time-only. (Only the slowest-court buffer is
 // applied to match time alone; see below.)
 //
 // Buffer divergence (intentional): EstimateForCounts applies
-// tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate
-// — the slowest court will likely run over the mean. The buffer is applied to
+// tournament.SlowestCourtBufferPct because it is a predictive, pre-draw estimate,
+// the slowest court will likely run over the mean. The buffer is applied to
 // MATCH time only (matchMin), not to the fixed OpeningBlock offset or LunchBlock
-// dead-time, which have no runtime variance to pad — matching EstimateSchedule's
+// dead-time, which have no runtime variance to pad, matching EstimateSchedule's
 // semantics. The post-draw slot assigners (assignPoolMatchSlots /
 // assignBracketMatchSlots) do NOT apply the buffer at all because a real,
 // assigned schedule needs no extra padding. So do NOT assert RAW cross-regime
-// equality — but the buffered relationship (EstimateForCounts ≈ slot duration ×
+// equality, but the buffered relationship (EstimateForCounts ≈ slot duration ×
 // (1 + buffer/100)) IS valid, and is exactly what
 // TestEstimateForCountsVsSlotAssigner_Balanced checks.
 //
 // CeremonyMinutes is populated from tournament.ClosingBlock. The OpeningBlock is
 // applied as a pre-loop per-court start offset (cursor initialised to
 // dayStart+OpeningBlock); the LunchBlock is applied per match via the shared
-// skipCeremonyBlocks helper. ClosingBlock is not entered by the cursor — it is
+// skipCeremonyBlocks helper. ClosingBlock is not entered by the cursor, it is
 // surfaced only as CeremonyMinutes.
 //
 // Phase sequencing (intentional, and a SECOND divergence from the post-draw
 // path): each court runs its pool matches and THEN its playoff matches on the
-// same advancing cursor — pools-then-playoffs, which is the realistic order
+// same advancing cursor, pools-then-playoffs, which is the realistic order
 // (playoff seeding needs pool results). The post-draw slot assigners
 // (assignPoolMatchSlots / assignBracketMatchSlots) are invoked as two separate
 // calls that EACH re-anchor to dayStart+OpeningBlock, so they OVERLAP the two
 // phases in clock time. A post-draw estimate must therefore SEQUENCE the two
-// phases rather than max() them — but it must add the OpeningBlock offset ONCE,
+// phases rather than max() them, but it must add the OpeningBlock offset ONCE,
 // not once per phase. Summing the raw cursor durations would double-count
 // OpeningBlock (each cursor = dayStart + OpeningBlock + match-time); instead sum
 // the per-phase match durations and add OpeningBlock a single time. See mp-zoh.
 //
-// Negative counts are clamped to 0 — the helper is exported and likely fed
+// Negative counts are clamped to 0, the helper is exported and likely fed
 // derived/user inputs (mp-zoh), and a negative count would otherwise make
 // matchMin negative and yield a nonsensical (even negative) duration.
 //
@@ -208,17 +208,17 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	courts := comp.Courts
 	numCourts := len(courts)
 	if numCourts == 0 {
-		// Empty courts list defaults to a single court — consistent with the
+		// Empty courts list defaults to a single court, consistent with the
 		// assigners (pools.go / bracket.go) and EstimateSchedule's NumCourts
 		// clamp. Returning zero here would under-estimate a competition that
 		// relies on that 1-court default.
 		numCourts = 1
 	}
 	if numCourts > MaxCourts {
-		// Clamp to the A–Z (26) cap — the same defensive bound EstimateSchedule
+		// Clamp to the A–Z (26) cap, the same defensive bound EstimateSchedule
 		// applies. A malformed/hostile Competition with an oversized Courts
 		// slice would otherwise drive large per-court allocations
-		// (courtCursor/matchMin/perCourtList) — CodeQL go/uncontrolled-allocation-size.
+		// (courtCursor/matchMin/perCourtList), CodeQL go/uncontrolled-allocation-size.
 		numCourts = MaxCourts
 	}
 
@@ -235,7 +235,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	tournament = &tournCopy
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
-	// Team-size default — same guard as competition.go (StartCompetition) and
+	// Team-size default, same guard as competition.go (StartCompetition) and
 	// swiss.go: a team competition with an omitted TeamSize uses the FIK
 	// 5-person default. Without this, perMatchElapsedMinutes would see
 	// TeamSize==0 and fall through to the individual-match formula,
@@ -258,7 +258,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// Distribute pool matches evenly across courts, then advance each
 	// court's cursor by poolPerMatch per match (with lunch skipping).
 	// We use integer division; the remainder matches are spread across
-	// the first courts — an intentional even-distribution heuristic for this
+	// the first courts, an intentional even-distribution heuristic for this
 	// pre-draw estimate. (The post-draw assigner does NO distribution of its
 	// own: it schedules matches that already carry a Court assignment.)
 	courtCursor := make([]time.Time, numCourts)
@@ -266,7 +266,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 		courtCursor[i] = dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 	// Pure match minutes per court, tracked separately from the cursor so the
-	// slowest-court buffer can be applied to match time ONLY — never to the
+	// slowest-court buffer can be applied to match time ONLY, never to the
 	// fixed OpeningBlock offset or LunchBlock dead-time (those have no runtime
 	// variance to pad). Mirrors EstimateSchedule, which buffers match time alone.
 	matchMin := make([]float64, numCourts)

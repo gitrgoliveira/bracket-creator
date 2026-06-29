@@ -5,17 +5,17 @@ import "fmt"
 // EstimateMatchCountsInput carries the scalar fields from a competition
 // configuration that are needed to derive pre-draw pool and playoff match
 // counts. Only scalar types are used (no *state.Competition) because the
-// state package imports helper — adding the reverse import would create a
+// state package imports helper, adding the reverse import would create a
 // cycle. Callers in the engine layer should populate this struct from the
 // relevant Competition fields.
 //
 // Required field matrix by Format:
 //
-//	"playoffs"   — PlayerCount only (no pool fields needed).
-//	"mixed"      — PlayerCount, PoolSize (>0), PoolSizeMode, PoolWinners,
+//	"playoffs", PlayerCount only (no pool fields needed).
+//	"mixed", PlayerCount, PoolSize (>0), PoolSizeMode, PoolWinners,
 //	               RoundRobin, PoolFormat.
-//	"league"     — PlayerCount only (single pool, always full round-robin).
-//	"swiss"      — PlayerCount, SwissRounds.
+//	"league", PlayerCount only (single pool, always full round-robin).
+//	"swiss", PlayerCount, SwissRounds.
 type EstimateMatchCountsInput struct {
 	// Format is state.Competition.Format: "playoffs", "mixed", "league",
 	// "swiss". Empty string is treated as "playoffs" for backward
@@ -26,7 +26,7 @@ type EstimateMatchCountsInput struct {
 	// this competition.
 	PlayerCount int
 
-	// Pool-phase fields — relevant for "mixed" and "league" formats.
+	// Pool-phase fields, relevant for "mixed" and "league" formats.
 	PoolSize     int    // state.Competition.PoolSize
 	PoolSizeMode string // state.Competition.PoolSizeMode: "max" or "min" (any other value including "" treated as "min")
 	PoolWinners  int    // state.Competition.PoolWinners (default 2 when 0)
@@ -46,7 +46,7 @@ type EstimateMatchCountsInput struct {
 //     driven by PoolSizeMode == "max").
 //   - Pool matches: poolMatchesPerPool for each individual pool size.
 //   - Bracket matches: bracketMatchCount(numFinalists), which returns the
-//     court-time-consuming match count (excludes auto-resolved byes) — equal to
+//     court-time-consuming match count (excludes auto-resolved byes), equal to
 //     numFinalists-1 now that byes are distributed to the top seeds (mp-sess).
 //
 // Pool count and per-pool sizes are derived by calling the real CreatePools
@@ -58,7 +58,7 @@ type EstimateMatchCountsInput struct {
 // Returned counts reflect court-time-consuming matches only. Auto-resolved
 // bracket byes (player-vs-bye leaf matches marked Completed at generation time)
 // are excluded because assignBracketMatchSlots does not advance the court
-// cursor for them (scheduler_slots.go:286-291). Pool-side byes are not
+// cursor for them (scheduler_slots.go: 286-291). Pool-side byes are not
 // applicable (pools have no bye mechanism). Negative PlayerCount or
 // zero-round Swiss are clamped to zero matches rather than erroring,
 // because the estimator may be called speculatively before validation is
@@ -66,7 +66,7 @@ type EstimateMatchCountsInput struct {
 //
 // Returns an error for:
 //   - Unknown Format strings (only when PlayerCount > 0; the zero-player
-//     early return takes precedence and returns nil — callers should not
+//     early return takes precedence and returns nil, callers should not
 //     rely on a format error for zero-player inputs).
 //   - PoolSize == 0 for the mixed format (would divide by zero).
 func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCount int, err error) {
@@ -92,7 +92,7 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 		// SwissRounds * ceil(playerCount/2) matches per round.
 		// The bye-recipient match (when playerCount is odd) is included
 		// because buildSwissMatches persists it in pool-matches.csv alongside
-		// the real pairings — the slot assigner allocates a slot for it.
+		// the real pairings, the slot assigner allocates a slot for it.
 		if in.SwissRounds <= 0 {
 			return 0, 0, nil
 		}
@@ -108,7 +108,7 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 // readability.
 //
 // Finding 4 fix: when playerCount < poolSize in min mode, numPools is 0 and
-// an error is returned — mirroring CreatePools' error at tournament.go:222.
+// an error is returned, mirroring CreatePools' error at tournament.go:222.
 // In max mode numPools is always ≥1 when playerCount ≥1, so the error only
 // fires for min mode.
 //
@@ -137,14 +137,14 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCou
 		numPools = in.PlayerCount / in.PoolSize
 	}
 	if numPools == 0 {
-		// Fewer players than pool size in min mode — mirrors CreatePools'
+		// Fewer players than pool size in min mode, mirrors CreatePools'
 		// error at tournament.go:222.
 		return 0, 0, fmt.Errorf("EstimateMatchCounts: player count (%d) is less than pool size (%d) in min mode", in.PlayerCount, in.PoolSize)
 	}
 
 	// --- Per-pool sizes via the REAL CreatePools (drift-proof) ---
 	// Synthetic players: each has a unique name and a unique dojo so that
-	// discoverPool never triggers the dojo-conflict skip — ensuring that pool
+	// discoverPool never triggers the dojo-conflict skip, ensuring that pool
 	// sizes are driven solely by targetSizes / forcePoolSize, exactly as the
 	// real draw does for a freshly imported roster.
 	synth := make([]Player, in.PlayerCount)
@@ -227,7 +227,7 @@ func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
 }
 
 // bracketMatchCount returns the number of bracket matches that CONSUME COURT
-// TIME for `players` competitors — i.e., matches whose Status is NOT Completed
+// TIME for `players` competitors, i.e., matches whose Status is NOT Completed
 // at draw-generation time. The court cursor in assignBracketMatchSlots is NOT
 // advanced for auto-resolved (Completed) matches, so they must NOT be counted
 // for duration estimation.

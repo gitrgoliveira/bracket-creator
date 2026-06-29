@@ -36,7 +36,7 @@ type ClashWarning struct {
 // max(estimated duration, MinClashFootprintMinutes).
 //
 // Returns an empty (non-nil) slice when there are no clashes. A competition
-// that cannot be placed on a timeline — no date or an unparseable start time —
+// that cannot be placed on a timeline, no date or an unparseable start time,
 // is skipped rather than reported. Clashes are sorted by the other
 // competition's name for a stable UI/test order.
 func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, error) {
@@ -59,7 +59,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 
 	// Resolve courts the same way the draw paths do: an empty competition
 	// court list inherits the tournament's courts (or ["A"]). Without this a
-	// legacy competition saved before court materialization — nil Courts —
+	// legacy competition saved before court materialization, nil Courts,
 	// would silently never clash even though at draw time it occupies a real
 	// court. A LoadTournament failure leaves tourn nil; resolveClashCourts
 	// then falls back to ["A"], matching resolveCompetitionCourts.
@@ -77,7 +77,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 		other, err := e.store.LoadCompetition(id)
 		if err != nil || other == nil {
 			// Skip an unreadable competition rather than failing the whole
-			// check — a single bad file shouldn't hide every other clash.
+			// check, a single bad file shouldn't hide every other clash.
 			continue
 		}
 		if !sameDate(target.Date, other.Date) {
@@ -109,7 +109,7 @@ func (e *Engine) DetectClashesForCompetition(compID string) ([]ClashWarning, err
 }
 
 // clashFootprintMinutes is the time a competition occupies for clash detection:
-// max(estimated total duration, MinClashFootprintMinutes). It never errors — an
+// max(estimated total duration, MinClashFootprintMinutes). It never errors, an
 // estimate failure (config issue / missing roster) falls back to the floor so a
 // single un-estimatable competition can't break the whole clash check.
 func (e *Engine) clashFootprintMinutes(compID string) int {
@@ -139,7 +139,7 @@ func parseHHMM(s string) (int, bool) {
 // fmtHHMM renders minutes-since-midnight as "HH:MM". It does NOT wrap at 24h:
 // a footprint that pushes the overlap end past midnight renders as "24:15"
 // rather than a misleading "00:15", so an operator reading the warning sees
-// the next-day rollover. The value is display-only — no caller parses it back.
+// the next-day rollover. The value is display-only, no caller parses it back.
 func fmtHHMM(mins int) string {
 	if mins < 0 {
 		mins = 0

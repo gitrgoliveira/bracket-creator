@@ -1,10 +1,10 @@
-// viewer_match.jsx — match-display components extracted from viewer.jsx
+// viewer_match.jsx: match-display components extracted from viewer.jsx
 // (mp-pxxc step 4). Pure file split: no behaviour change.
 //
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module — do NOT give it its own <script type="module">
+// index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
@@ -18,7 +18,7 @@ import { TermV, poolLabel } from './viewer_utils.jsx';
 const { useState, useRef: useRefV, useCallback } = React;
 
 // ---------------------------------------------------------------------------
-// mymatchQueueLabel — FR-025 label for the "Your next match" Queue chip.
+// mymatchQueueLabel: FR-025 label for the "Your next match" Queue chip.
 //
 // Contract:
 //   - status==="scheduled" + queuePosition===1 → "Next up"
@@ -31,9 +31,9 @@ const { useState, useRef: useRefV, useCallback } = React;
 // Wording mirrors the VSchedItem helper below and display.jsx::queueLabel
 // so all three viewer surfaces agree. Running matches return null because
 // WatchHeroCard already signals the running state via the .my-match--running
-// CSS ring and label change ("Your match") — the Queue chip must not add a
+// CSS ring and label change ("Your match"): the Queue chip must not add a
 // redundant label. We intentionally do NOT
-// fall back to "Scheduled HH:MM" the way display.jsx does — the
+// fall back to "Scheduled HH:MM" the way display.jsx does: the
 // MyMatchPanel already has a dedicated Time chip.
 // Exported for unit-testing.
 export function mymatchQueueLabel(m) {
@@ -46,7 +46,7 @@ export function mymatchQueueLabel(m) {
   return `${qp - 1} before yours`;
 }
 
-// subBoutLabel — center label for a team sub-bout row. The daihyosen
+// subBoutLabel: center label for a team sub-bout row. The daihyosen
 // (representative bout) is stored with the sentinel position -1 (see
 // admin_scoring_modal.jsx buildPatch); render it as "Daihyosen" (matching
 // admin_pools.jsx wording) rather than the literal "Match -1" the
@@ -62,7 +62,7 @@ export function subBoutLabel(sub, index) {
 // display.js loads before viewer.js (see index.html), so
 // window.queueLabelCompact is normally available on first render; this
 // serves as defense-in-depth if that ever changes. (The "N before yours"
-// wording lives in mymatchQueueLabel — followed-player context only.)
+// wording lives in mymatchQueueLabel: followed-player context only.)
 // Exported so viewer_schedule.jsx's TWMatch shares this single definition.
 export function localQueueLabelCompact(m) {
   if (!m || m.status !== "scheduled") return null;
@@ -114,8 +114,8 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
         </div>
       </div>
 
-      {/* Individual matches show the two player names colour-coded — Shiro
-          dark (left), Aka red (right) — matching the team scoreboard's
+      {/* Individual matches show the two player names colour-coded: Shiro
+          dark (left), Aka red (right): matching the team scoreboard's
           summary-row name colours, instead of SHIRO/AKA text badges
           (mp-13y). Team matches carry the names in the summary row. */}
       {!isTeam && (
@@ -130,7 +130,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true }) {
         </div>
       )}
 
-      {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx) — same
+      {/* mp-13y: the ONE shared FIK scoreboard (match_scoreboard.jsx): same
           component the TV display uses. Team → team-name + IV/PW summary row +
           per-bout rows (numbered when not yet started) + Daihyosen (tie only);
           individual → ippon-letter slots. */}
@@ -174,7 +174,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   // running/completed and we don't want the fallback "Scheduled hh:mm".
   const qp = Number(m.queuePosition);
   // Use the NEUTRAL court-queue label ("Next up" / "#N") here, not the
-  // "N before yours" wording — VSchedItem renders on the general schedule and
+  // "N before yours" wording: VSchedItem renders on the general schedule and
   // home lists where no player is selected, so "yours" is meaningless. The
   // "…before yours" phrasing is reserved for the followed-player next-match
   // banner (mymatchQueueLabel), which has a real "you" context.
@@ -184,7 +184,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
-        <span className="vsched-item__time">{m.scheduledAt || "—"}</span>
+        <span className="vsched-item__time">{m.scheduledAt || ":"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
@@ -212,7 +212,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : m.status === "completed" ? (
-          <span className="vsched-item__vs">—</span>
+          <span className="vsched-item__vs">:</span>
         ) : (
           <span className="vsched-item__vs">vs</span>
         )}
@@ -283,7 +283,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         try {
           const res = await window.API.recordScore(scoringMatch.compId || defaultCompId, scoringMatch.id, patch, "", scoringMatch);
           // A queued (offline/transient) write is NOT a confirmed save: keep the
-          // editor open and return the signal so its pending-write banner shows —
+          // editor open and return the signal so its pending-write banner shows:
           // closing here would be a false success on the public self-run surface.
           if (res && res.queued) return res;
           setScoringMatch(null);
@@ -292,8 +292,8 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         } catch (err) {
           // A non-queued failure (direct 4xx validation/conflict, or an unexpected
           // exception). ScoreEditorModal doesn't render generic submit errors and the
-          // public viewer has no toast, so surface it explicitly — log + alert (the
-          // established fallback here, mirroring app.jsx) — rather than silently
+          // public viewer has no toast, so surface it explicitly: log + alert (the
+          // established fallback here, mirroring app.jsx): rather than silently
           // leaving the modal open. The modal stays open so the operator can retry.
           console.error("Self-run score submit failed:", err);
           window.alert(err && err.message ? err.message : "Couldn't save the result. Please try again.");

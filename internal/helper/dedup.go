@@ -8,7 +8,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-// Fuzzy duplicate detection constants — document the threshold choices so
+// Fuzzy duplicate detection constants, document the threshold choices so
 // reviewers can reason about them without digging into the algorithm.
 const (
 	// NearDupLevenshteinMax is the maximum edit distance that the secondary
@@ -52,7 +52,7 @@ func NormalizeParticipantName(s string) string {
 	stripped.Grow(len(nfd))
 	for _, r := range nfd {
 		if r >= 0x0300 && r <= 0x036F {
-			// Latin combining diacritical mark — drop it.
+			// Latin combining diacritical mark, drop it.
 			continue
 		}
 		stripped.WriteRune(r)
@@ -118,7 +118,7 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 		} else {
 			// Label: "name / dojo", or just "name" for empty-dojo entries
 			// (common for teams) so the message has no dangling " / ".
-			// Trim for display to match the normalization semantics — a
+			// Trim for display to match the normalization semantics, a
 			// whitespace-only dojo keys as empty, so it must render as empty too.
 			label := strings.TrimSpace(e[0])
 			if d := strings.TrimSpace(e[1]); d != "" {
@@ -215,13 +215,13 @@ func isSingleTrailingTokenDiff(na, nb string) bool {
 // Each entry is {name, dojo} already as raw (non-normalized) strings; the
 // function normalises internally.  Returns non-blocking warnings.
 //
-// Signal 1: token-subset — tokens of A ⊆ tokens of B (or vice-versa).
+// Signal 1: token-subset, tokens of A ⊆ tokens of B (or vice-versa).
 // Identical normalized strings are skipped first (na == nb → Tier-1), so the
 // surviving cases are a genuine proper subset ("Ana Maria Rossi" / "Ana Rossi",
 // a middle-name-drop) OR equal token sets reached by reordering ("Rossi Ana" /
-// "Ana Rossi") — both are intentionally flagged as likely the same person.
+// "Ana Rossi"), both are intentionally flagged as likely the same person.
 //
-// Signal 2: Levenshtein typo gate — lev ≤ NearDupLevenshteinMax AND
+// Signal 2: Levenshtein typo gate, lev ≤ NearDupLevenshteinMax AND
 // ratio ≥ NearDupRatioMin, suppressed when the two strings differ only in
 // a single trailing single-character token (squad suffix).
 func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
@@ -239,7 +239,7 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 	}
 
 	// Non-nil so callers that serialize this to JSON always emit `[]` rather
-	// than `null` — keeps the roster-PUT response shape consistent.
+	// than `null`, keeps the roster-PUT response shape consistent.
 	warnings := []NearDupWarning{}
 	// Track pairs we've already warned about to avoid duplicates.
 	type pair struct{ i, j int }
@@ -252,7 +252,7 @@ func FindNearDupWarnings(entries [][2]string) []NearDupWarning {
 			}
 			na, nb := all[i].norm, all[j].norm
 			if na == nb {
-				// Perfect match — handled by Tier-1, skip here.
+				// Perfect match, handled by Tier-1, skip here.
 				continue
 			}
 

@@ -394,7 +394,7 @@ func TestStandardSeeding_Integration(t *testing.T) {
 func TestStandardSeedingFull(t *testing.T) {
 	// buildBracketFromLeaves pairs leaf 2k with 2k+1 in round 1. A bye is an
 	// empty leaf. For a correctly seeded draw, every bye must pair with a real
-	// player (giving a top seed a bye) — never two byes in the same match.
+	// player (giving a top seed a bye); never two byes in the same match.
 	tests := []struct {
 		name        string
 		playerCount int
@@ -445,7 +445,7 @@ func TestStandardSeedingFull(t *testing.T) {
 			// No round-1 match has two byes (the core fix).
 			for k := 0; k+1 < len(result); k += 2 {
 				if result[k].Name == "" && result[k+1].Name == "" {
-					t.Errorf("empty-vs-empty match at leaves %d,%d — byes not distributed", k, k+1)
+					t.Errorf("empty-vs-empty match at leaves %d,%d, byes not distributed", k, k+1)
 				}
 			}
 
@@ -1608,7 +1608,7 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 	// Regression test: LC2026 6+ mixed category had 5 players from Tora Dojo
 	// London and 1 seeded player. The seeded player shifted unseeded filling
 	// by one slot, causing the 5th Tora player to find no conflict-free pool
-	// and fall back to forceSameDojo — placing two Tora players in the same pool.
+	// and fall back to forceSameDojo, placing two Tora players in the same pool.
 	players := []Player{
 		{Name: "Walter McCahon", Dojo: "Tora Dojo London"},
 		{Name: "Ricardo Oliveira", Dojo: "Tora Dojo London"},
@@ -1641,7 +1641,7 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 		}
 		for dojo, count := range dojoCount {
 			assert.Equal(t, 1, count,
-				"dojo %q has %d players in %s — expected at most 1", dojo, count, pool.PoolName)
+				"dojo %q has %d players in %s, expected at most 1", dojo, count, pool.PoolName)
 		}
 	}
 }

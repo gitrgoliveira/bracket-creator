@@ -6,10 +6,10 @@ A natural-language brief intended as the prompt for `/speckit.specify` (https://
 
 The bracket-creator mobile app is the live-event tool for running kendo tournaments. Source-of-truth requirements live in `running_a_kendo_tournament.md`. Four gap analyses identified ~30 capability, UX, and architectural gaps between that spec and the current implementation:
 
-- `gaps_tournament_spec.md` — 16 user-facing feature gaps
-- `gaps_implementation_plan.md` — a staged plan covering 6 of those gaps
-- `gaps_webui.md` — 14 UI issues (10 already fixed, 4 open)
-- `gaps_ARCHITECTURE.md` — 11 codebase quality recommendations
+- `gaps_tournament_spec.md`; 16 user-facing feature gaps
+- `gaps_implementation_plan.md`; a staged plan covering 6 of those gaps
+- `gaps_webui.md`; 14 UI issues (10 already fixed, 4 open)
+- `gaps_ARCHITECTURE.md`; 11 codebase quality recommendations
 
 This brief asks SpecKit to plan the work needed to close all those gaps so the app can fully support a multi-court, multi-competition kendo tournament from setup through closing.
 
@@ -33,7 +33,7 @@ This brief asks SpecKit to plan the work needed to close all those gaps so the a
 ## Glossary
 
 - **Shiaijo / Court**: A single match area, labelled A–Z; up to 26 per tournament.
-- **Shiro / Aka**: White (left) / Red (right) — the two sides of a kendo match. Fixed convention across all views.
+- **Shiro / Aka**: White (left) / Red (right); the two sides of a kendo match. Fixed convention across all views.
 - **Ippon**: A point scored by Men (M), Kote (K), Do (D), Tsuki (T), or by Hansoku (H) penalty award.
 - **Hantei**: Judges' decision awarding a point after time expires; recorded as "H" in our scoring model.
 - **Hikiwake**: Draw (tied match). Marked with the "X" toggle.
@@ -44,7 +44,7 @@ This brief asks SpecKit to plan the work needed to close all those gaps so the a
 - **Daihyosen**: Representative ippon-shobu bout used to resolve a tied team knockout match when individual victories (IV) and points won (PW) are equal.
 - **Kachinuki**: Winner-stays-on team format; the winning fighter remains to face the next opponent.
 - **Senpo / Jiho / Chuken / Fukusho / Taisho**: Standard 5-person team positions (1st through 5th/captain).
-- **IV / PW**: Individual Victories / Points Won — team match totals.
+- **IV / PW**: Individual Victories / Points Won; team match totals.
 - **Pool**: Round-robin group (full or partial). Winners advance to playoffs in mixed format.
 - **Playoff / Bracket**: Single-elimination tree.
 - **Zekken**: Cloth name-tag worn during match; the `withZekkenName` competition option uses this as the display name.
@@ -95,7 +95,7 @@ Tournaments need passive read-only displays for several audiences. These share a
 - Fullscreen, dark theme, large fonts readable from 5+ metres.
 - Current match: player/team names, Shiro (left) / Aka (right), live ippons, competition name, phase (pool name or round label).
 - Next 2 upcoming matches in a visible queue below.
-- Live indicator and auto-update via existing SSE stream — no polling.
+- Live indicator and auto-update via existing SSE stream; no polling.
 - Auto-promote first scheduled match if no live match exists.
 - Edge cases: "No matches scheduled", "All matches completed", multiple live matches on one court, SSE reconnect indicator.
 
@@ -191,7 +191,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 - New team match type distinct from the standard fixed-bout team match.
 - Dynamic bout progression: winner of bout N faces the next opponent; on hikiwake, both retire and the next pair enters.
-- Variable bout count — the match ends when one team is eliminated.
+- Variable bout count; the match ends when one team is eliminated.
 - Scoring: team result determined by eliminations, not IV/PW.
 - Team scoring modal must support dynamic bout addition (no fixed grid).
 
@@ -211,7 +211,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 #### 6a. Partial round-robin pools (Gap 8)
 
 - Competition-level setting: `full` (default) or `partial` (adjacent-neighbour pairings: 1v2, 2v3, …).
-- Reduces match count for large pools (8+). Same pool ranking criteria apply — no engine changes for ranking.
+- Reduces match count for large pools (8+). Same pool ranking criteria apply; no engine changes for ranking.
 
 #### 6b. League format (Gap 12)
 
@@ -240,7 +240,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 #### 7b. Schedule estimation improvements (Gap 16)
 
-- **Clock-to-elapsed ratio**: replace the fixed 30-second padding with a configurable multiplier (spec recommends 1.5–2x clock time — e.g., 4.5–6 min for a 3-min match, not 3.5 min).
+- **Clock-to-elapsed ratio**: replace the fixed 30-second padding with a configurable multiplier (spec recommends 1.5–2x clock time; e.g., 4.5–6 min for a 3-min match, not 3.5 min).
 - **Ceremony and break blocks**: configurable opening (15–30 min), closing (20–30 min), and lunch slots.
 - **Slowest-court buffer**: add 10–15% to the optimistic parallel-court division (`sequential time ÷ courts`).
 - **Team match duration**: scale by bout count plus inter-bout transitions, rather than treating a team match as a single individual match.
@@ -248,7 +248,7 @@ Today `MatchResult.Decision` is a draw flag only. A fought 2–0, a kiken 2–0,
 
 ---
 
-### 8. UX Polish — Open webui issues
+### 8. UX Polish; Open webui issues
 
 The four open issues in `gaps_webui.md` map onto the features above:
 
@@ -281,8 +281,8 @@ These reshape the codebase so the features above land safely. They do not delive
 
 ## Non-Functional Requirements
 
-- **Live-event constraint**: All UI changes must remain functional and performant on tablets used at the table side. The score editor's chained navigation (Prev/Next, ←/→, Finish + Start Next) must stay scoped to the current shiaijo — operators run matches per-court, so hopping courts mid-flow breaks the workflow.
-- **Real-time updates**: All viewer and display surfaces must update via SSE — no polling.
+- **Live-event constraint**: All UI changes must remain functional and performant on tablets used at the table side. The score editor's chained navigation (Prev/Next, ←/→, Finish + Start Next) must stay scoped to the current shiaijo; operators run matches per-court, so hopping courts mid-flow breaks the workflow.
+- **Real-time updates**: All viewer and display surfaces must update via SSE; no polling.
 - **Embedded-binary delivery**: The mobile app frontend is embedded into the Go binary at build time (`//go:embed web-mobile/*`). The build pipeline must continue to rebuild the esbuild bundle on every `go build` (`make run-mobile` already does this).
 - **Excel output stability**: Changes to scheduling or formats must not break the existing Excel bracket export. Validate with `make examples`.
 - **Project constitution**: Comply with `.specify/memory/constitution.md` (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, live-tournament safety).
@@ -292,28 +292,28 @@ These reshape the codebase so the features above land safely. They do not delive
 
 - Each feature area should be independently shippable.
 - Every change validated by `make go/test` and inspection of generated example files from `make examples`.
-- For UI changes, validate in a running browser via `make run-mobile` — not by reading diffs.
+- For UI changes, validate in a running browser via `make run-mobile`; not by reading diffs.
 - For schedule and format changes, validate that the Excel Time Estimator output remains coherent.
 
 ## Sequencing & Dependencies
 
 - **Foundation first**: §9.11 (extend match model + eligibility) must land before §4 (Match Resolution).
 - **Independent / quick wins**:
-  - §1 (Role-Based Access — high impact)
-  - §7a (Per-phase durations — small, isolated)
-  - §3c (Queue position — small, isolated)
+  - §1 (Role-Based Access; high impact)
+  - §7a (Per-phase durations; small, isolated)
+  - §3c (Queue position; small, isolated)
   - §6a (Partial round-robin)
   - §6b (League labeling)
   - Encho-only metadata from §4a
 - **Display family** (§2): Build §2a first; §2b and §2c share components and routing with §2a. §2c benefits from §9.5 (router).
 - **Participant family**: §3b (Watchlist) extends §3a (My-match).
 - **Team family** (§5): §5a (Lineup) is foundational. §5b (Kachinuki) is the largest single-feature build. §5c (Sticky summary) and §5d (Daihyosen) are small additions.
-- **Formats** (§6c Swiss): Defer unless concrete demand — it's a large new engine.
+- **Formats** (§6c Swiss): Defer unless concrete demand; it's a large new engine.
 - **Refactors** (§9): Mostly independent. §9.1 (helper/ split) and §9.11 (match model) are the largest. §9.6 (api.jsx split) and §9.8 (error boundary) can ship anytime.
 
 ## Notes for SpecKit
 
 - This brief consolidates four source documents (`gaps_tournament_spec.md`, `gaps_ARCHITECTURE.md`, `gaps_implementation_plan.md`, `gaps_webui.md`). Where they overlap (e.g., Plan Stage 4 vs. tournament-spec Gap 2, or webui Issue 13 vs. Gap 13), this brief follows the more comprehensive tournament-spec gap and absorbs implementation details into the plan/tasks phase.
 - Already-fixed webui issues (1–10) are omitted to avoid re-speccing completed work.
-- Architecture recommendations are included as non-functional constraints rather than user-facing features. They do not map cleanly to user stories or acceptance scenarios — that is expected and acceptable.
+- Architecture recommendations are included as non-functional constraints rather than user-facing features. They do not map cleanly to user stories or acceptance scenarios; that is expected and acceptable.
 - The scope is intentionally broad (the user chose "all gaps including refactors"). SpecKit may want to subdivide into multiple feature branches during `/speckit.plan`; sequencing guidance above identifies natural seams.

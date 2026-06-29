@@ -130,7 +130,7 @@ func TestRecordMatchResultTx_BracketFallback(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "rmrt-bracket"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// No pool matches — force the bracket fallback.
+	// No pool matches, force the bracket fallback.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -315,7 +315,7 @@ func TestMaybeLockTeamLineupsForRoundTx_NonTeamComp(t *testing.T) {
 		eng.maybeLockTeamLineupsForRoundTx(tx, compID, result)
 		return nil
 	})
-	// No lineups to check — just confirm no panic and no error.
+	// No lineups to check, just confirm no panic and no error.
 }
 
 // TestCheckConcurrentIneligibilityTx_AlreadyIneligible confirms that the
@@ -635,7 +635,7 @@ func TestRecordIneligibilityFromDecisionTx_AlreadyIneligible(t *testing.T) {
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "B"},
 	}))
-	// Alice is already ineligible from "Pool A-0" — kiken on "Pool A-1" must fail.
+	// Alice is already ineligible from "Pool A-0", kiken on "Pool A-1" must fail.
 	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
 		PlayerID:   aliceID,
 		Eligible:   false,
@@ -689,7 +689,7 @@ func TestRecordMatchResultWithIneligibilityTx_K3Rollback(t *testing.T) {
 		Reason: "kiken at Pool A-0", RecordedAt: time.Now().UTC(),
 	}))
 
-	// Kiken on "Pool A-1" — Alice is SideA and loser (decisionBy=aka → winner=SideB=Bob).
+	// Kiken on "Pool A-1", Alice is SideA and loser (decisionBy=aka → winner=SideB=Bob).
 	result := &state.MatchResult{
 		SideA:      "Alice",
 		SideB:      "Bob",

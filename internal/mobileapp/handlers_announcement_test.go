@@ -113,7 +113,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equalf(t, http.StatusRequestEntityTooLarge, w.Code, "expected 413 for body over %d bytes", AnnouncementMaxBodyBytes)
 
-	// 9. POST first announcement — happy path
+	// 9. POST first announcement, happy path
 	body, _ = json.Marshal(payload)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -128,7 +128,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.False(t, first.SentAt.IsZero())
 	assert.True(t, first.ExpiresAt.After(first.SentAt))
 
-	// 10. POST second announcement — both should coexist
+	// 10. POST second announcement, both should coexist
 	body, _ = json.Marshal(announcementRequest{Message: "Court 3 paused", DurationMinutes: 5})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
@@ -142,7 +142,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.NotEmpty(t, second.ID)
 	assert.NotEqual(t, first.ID, second.ID)
 
-	// 11. GET /api/tournament/announcements — should list both
+	// 11. GET /api/tournament/announcements, should list both
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/tournament/announcements", nil)
 	router.ServeHTTP(w, req)
@@ -153,7 +153,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Equal(t, first.ID, list[0].ID)
 	assert.Equal(t, second.ID, list[1].ID)
 
-	// 12. GET /api/tournament/announcement — legacy endpoint returns most recent
+	// 12. GET /api/tournament/announcement, legacy endpoint returns most recent
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/tournament/announcement", nil)
 	router.ServeHTTP(w, req)
@@ -162,7 +162,7 @@ func TestAnnouncementHandlers(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &single))
 	assert.Equal(t, second.ID, single.ID)
 
-	// 13. DELETE /api/announcements/:id — dismiss first
+	// 13. DELETE /api/announcements/:id, dismiss first
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/announcements/"+first.ID, nil)
 	req.Header.Set("X-Tournament-Password", "secret-password")
@@ -176,14 +176,14 @@ func TestAnnouncementHandlers(t *testing.T) {
 	assert.Len(t, list, 1)
 	assert.Equal(t, second.ID, list[0].ID)
 
-	// 14. DELETE /api/announcements/:id — not found
+	// 14. DELETE /api/announcements/:id, not found
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/announcements/doesnotexist", nil)
 	req.Header.Set("X-Tournament-Password", "secret-password")
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
-	// 15. DELETE /api/announcements — clear all
+	// 15. DELETE /api/announcements, clear all
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("DELETE", "/api/announcements", nil)
 	req.Header.Set("X-Tournament-Password", "secret-password")

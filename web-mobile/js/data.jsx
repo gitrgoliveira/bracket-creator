@@ -1,12 +1,12 @@
 // Sample tournament data + small pure utilities used across the app.
 //
 // Per T009 (NFR-006), HTTP and API-payload serializers were moved out:
-//   - api_client.jsx       — fetch / SSE
-//   - api_serializers.jsx  — server payload normalizers (Go ↔ JS shape)
+//   - api_client.jsx       : fetch / SSE
+//   - api_serializers.jsx  : server payload normalizers (Go ↔ JS shape)
 //
 // What remains here:
 //   - SAMPLE_TOURNAMENTS + the sample-data generators (build* / make* /
-//     simulate* helpers) — used by the standalone UI demo and tests.
+//     simulate* helpers): used by the standalone UI demo and tests.
 //   - parseParticipantLines: the pasted-CSV → player-object parser used
 //     by AdminParticipants. UI input parsing, not API.
 //   - mergeMatchPatch: a pure state-merge helper consumed by patch.jsx.
@@ -15,12 +15,12 @@
 //     more navigation cost than the inlining saves.
 //
 // Tournament: a multi-day event held at a venue.
-//   - has its own list of `courts` (Shiaijo) — these are the physical concurrency unit.
+//   - has its own list of `courts` (Shiaijo): these are the physical concurrency unit.
 //     Different competitions can share courts; concurrency depends on the courts assigned to each.
 //   - holds many Competitions.
 //
 // Competition: one event within a tournament (e.g., "Men's Individual", "Women's Teams").
-//   - kind: "individual" | "team"  (only two kinds — gender/age tags are metadata)
+//   - kind: "individual" | "team"  (only two kinds: gender/age tags are metadata)
 //   - format: "playoffs" (knockout only) | "mixed" (pools + knockout) | "league" | "swiss"
 //     Note: the sample generator (applyFormat) only simulates "mixed" fully;
 //     "league" and "swiss" fall back to bracket-only display in demo data.
@@ -144,8 +144,8 @@ function diffMinutes(t1, t2) {
 }
 
 // ---------- Pools ----------
-// poolMode: "max" => poolSize is a maximum (never more than N per pool — flex pool count to fit)
-//           "min" => poolSize is a minimum (try to keep at least N per pool — fewer, larger pools)
+// poolMode: "max" => poolSize is a maximum (never more than N per pool: flex pool count to fit)
+//           "min" => poolSize is a minimum (try to keep at least N per pool: fewer, larger pools)
 function buildPools(players, opts = {}) {
   const { poolMode = "max", poolSize = 4, winnersPerPool = 2, courts = ["A"] } = opts;
   if (!players || players.length < 2) return null;
@@ -237,7 +237,7 @@ function applyFormat(c) {
     if (c.status === "pools") {
       simulatePools(c.pools, 0.6);
       // ALSO build empty bracket scaffold so the playoffs tab is visible/in-progress alongside pools
-      // (some federations seed playoffs early; others wait — we show it as TBD).
+      // (some federations seed playoffs early; others wait: we show it as TBD).
       const placeholder = c.pools.map((_, i) => ({ id: `tbd-${i}`, name: `TBD`, dojo: "", seed: null }));
       c.bracket = buildBracket(placeholder.slice(0, Math.min(placeholder.length, 8)), c.courts);
     } else if (c.status === "playoffs") {
@@ -303,7 +303,7 @@ const SAMPLE_TOURNAMENTS = [
       buildCompetition({ id: "wk-yi", name: "Youth Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
       buildCompetition({ id: "wk-bi", name: "Beginners Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
     ];
-    return buildTournament({ id: "wakaba-cup", name: "Wakaba Cup — Beginners", date: "2026-06-04", venue: "Sanshukai Dojo", courts, status: "setup", competitions: comps });
+    return buildTournament({ id: "wakaba-cup", name: "Wakaba Cup: Beginners", date: "2026-06-04", venue: "Sanshukai Dojo", courts, status: "setup", competitions: comps });
   })(),
   (() => {
     const courts = ["A", "B", "C"];
@@ -355,7 +355,7 @@ function parseParticipantLines(lines, withZekken) {
     let displayName = "", dojo = "", danGrade = "", source = "";
     let checkedIn = false;
 
-    // Detect trailing checked_in column — mirrors Go's column-based check (len > 2).
+    // Detect trailing checked_in column: mirrors Go's column-based check (len > 2).
     // Requires at least 3 parts so a bare "Name, Dojo" row is never affected.
     if (parts.length > 2 && parts[parts.length - 1]?.toLowerCase() === "checked_in") {
       checkedIn = true;
@@ -383,7 +383,7 @@ function parseParticipantLines(lines, withZekken) {
   });
 }
 
-// Pure utility — used by ScoreEditorModal for isDirty checks; exported so tests
+// Pure utility: used by ScoreEditorModal for isDirty checks; exported so tests
 // can import the real implementation rather than re-implementing it.
 function arraysEqual(a, b) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -394,8 +394,8 @@ function arraysEqual(a, b) {
 // legacy UUID-less rosters (a participants.csv never re-saved through the app)
 // have no id, so we fall back to the composite "name|dojo" key the server
 // resolves on (pidPairKey / resolveParticipantIndex in
-// internal/state/participants.go). The dojo is included because (name, dojo) —
-// not name alone — is the uniqueness invariant: the same name at a different
+// internal/state/participants.go). The dojo is included because (name, dojo): 
+// not name alone: is the uniqueness invariant: the same name at a different
 // dojo is two distinct people. Keep in sync with the Go resolver.
 function checkinPid(p) {
   return p.id ?? `${p.name}|${p.dojo ?? ""}`;

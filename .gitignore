@@ -31,6 +31,7 @@ completions/
 manpages
 bin/
 site/
+.venv-docs/
 square_prep/*
 # !square_prep/lc2026/*
 # Universal and Go added by speckit

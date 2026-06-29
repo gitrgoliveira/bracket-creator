@@ -27,7 +27,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/serve docs/open docs/build run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/test go/build go/lint go/sec go/vuln go/security js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -173,17 +173,43 @@ docker/run: docker/build ## Run the application in Docker
 pre-commit: go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
-docs/serve: ## Locally serve the documentation
-	@echo "Starting documentation server..."
-	mkdocs serve
+# Documentation (MkDocs Material): pinned toolchain.
+# `make docs/*` builds and serves through a local venv created from the pinned
+# docs/requirements.txt, so local output matches the deployed GitHub Pages site
+# regardless of any system-wide mkdocs. A drifting system mkdocs is what makes
+# Material features (grid-card layout, code-copy, ...) silently degrade locally.
+PYTHON     ?= python3
+DOCS_PORT  ?= 8000
+DOCS_VENV  := .venv-docs
+DOCS_BIN   := $(DOCS_VENV)/bin
+DOCS_REQS  := docs/requirements.txt
+DOCS_STAMP := $(DOCS_VENV)/.installed
 
-docs/open: docs/serve & ## Open documentation in browser
-	@echo "Opening documentation in browser..."
-	$(OPEN_CMD) http://localhost:8000
+# Create (or refresh) the venv whenever the pinned requirements change.
+$(DOCS_STAMP): $(DOCS_REQS)
+	@echo "Installing pinned docs toolchain into $(DOCS_VENV)..."
+	@test -x $(DOCS_BIN)/python || $(PYTHON) -m venv $(DOCS_VENV)
+	@$(DOCS_BIN)/python -m pip install --quiet --upgrade pip
+	@$(DOCS_BIN)/python -m pip install --quiet -r $(DOCS_REQS)
+	@touch $@
 
-docs/build: ## Build static documentation site (output: site/)
+docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain into .venv-docs
+
+docs/serve: $(DOCS_STAMP) ## Locally serve the documentation (pinned toolchain)
+	@echo "Serving docs at http://localhost:$(DOCS_PORT) (Ctrl-C to stop)..."
+	$(DOCS_BIN)/mkdocs serve --dev-addr localhost:$(DOCS_PORT)
+
+docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
+	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
+	$(DOCS_BIN)/mkdocs serve --dev-addr localhost:$(DOCS_PORT) --open
+
+docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
-	mkdocs build --strict
+	$(DOCS_BIN)/mkdocs build --strict
+
+docs/clean: ## Remove the docs venv and the built site
+	@echo "Removing $(DOCS_VENV) and site/..."
+	rm -rf $(DOCS_VENV) site
 
 run: go/build ## Run the application locally
 	@echo "Running $(BIN_NAME)..."

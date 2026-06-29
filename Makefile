@@ -19,10 +19,8 @@ BUILD_DATE ?= $(shell date -u +"%Y-%m-%d %H:%M:%S %z")
 # OS detection
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-	OPEN_CMD := open
 	SED_CMD := sed -i ''
 else
-	OPEN_CMD := xdg-open
 	SED_CMD := sed -i
 endif
 
@@ -186,10 +184,12 @@ DOCS_REQS  := docs/requirements.txt
 DOCS_STAMP := $(DOCS_VENV)/.installed
 
 # Create (or refresh) the venv whenever the pinned requirements change.
+# NOTE: pip install only adds/upgrades; it does not remove packages dropped
+# from requirements.txt. After removing one, run `make docs/clean` then a docs
+# target to rebuild a venv that matches the pinned set exactly.
 $(DOCS_STAMP): $(DOCS_REQS)
 	@echo "Installing pinned docs toolchain into $(DOCS_VENV)..."
 	@test -x $(DOCS_BIN)/python || $(PYTHON) -m venv $(DOCS_VENV)
-	@$(DOCS_BIN)/python -m pip install --quiet --upgrade pip
 	@$(DOCS_BIN)/python -m pip install --quiet -r $(DOCS_REQS)
 	@touch $@
 

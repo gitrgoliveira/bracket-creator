@@ -9,6 +9,8 @@ You will need:
 
 ## Choosing a deployment
 
+Each option below links to its full guide on **GitHub**, where the Compose and Terraform files live alongside the instructions.
+
 | Option | Platform | Scale | Use when |
 |---|---|---|---|
 | [Docker baseline](https://github.com/gitrgoliveira/bracket-creator/tree/main/deploy/docker) | Any Linux host with Docker | Depends on the host | You already have a server or VM and want the provider-agnostic Compose + Caddy stack. |
@@ -23,4 +25,4 @@ Any deployment reachable over the internet should run in **locked-password mode*
 
 ## What still needs printing
 
-A fully digital setup still leaves one job on paper: organisers print player tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. See the [three ways to run a tournament](../index.md) for how this mode compares to the offline and partially connected setups.
+A fully digital setup still leaves one job on paper: organisers print player tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. See the [three ways to run a tournament](../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.

@@ -34,8 +34,7 @@
 	/* Derived surfaces (OKLCH). */
 	--bc-line:       oklch(0.925 0.006 260);
 	--bc-line-soft:  oklch(0.955 0.004 260);
-	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash for cards/code headers */
-	--bc-wash-2:     oklch(0.945 0.018 255);
+	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash for card chips */
 
 	/* Motion. */
 	--bc-ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
@@ -68,12 +67,10 @@ html, body { overflow-x: clip; }
 
 	--bc-card-bg:    var(--bc-white);
 	--bc-code-bg:    oklch(0.975 0.008 255);
-	--bc-code-head:  var(--bc-navy);
 	--bc-table-head: var(--bc-navy);
 	--bc-table-head-fg: var(--bc-white);
 	--bc-table-alt:  var(--bc-wash);
 	--bc-tick:       var(--bc-navy);
-	--bc-muted:      oklch(0.52 0.02 262);
 }
 
 /* ===== Dark (slate) scheme ===== */
@@ -89,16 +86,13 @@ html, body { overflow-x: clip; }
 
 	--bc-card-bg:    oklch(0.27 0.02 262);
 	--bc-code-bg:    oklch(0.23 0.02 262);
-	--bc-code-head:  oklch(0.34 0.04 258);
 	--bc-table-head: oklch(0.32 0.04 258);
 	--bc-table-head-fg: var(--bc-ice);
 	--bc-table-alt:  oklch(0.30 0.018 262);
 	--bc-tick:       var(--bc-sky);
-	--bc-muted:      oklch(0.72 0.02 262);
 	--bc-line:       oklch(0.40 0.02 262);
 	--bc-line-soft:  oklch(0.34 0.02 262);
 	--bc-wash:       oklch(0.30 0.02 262);
-	--bc-wash-2:     oklch(0.33 0.025 258);
 }
 
 /* ===== Typography: sporting display headings ===== */
@@ -152,16 +146,24 @@ html, body { overflow-x: clip; }
 .md-typeset a:has(img) { text-decoration: none; }
 
 /* ===== Buttons: sporting fills + outlines ===== */
-.md-typeset .md-button {
+/* Shared shape, weight, and hover lift across the prose and hero contexts.
+ * Scoped to both (not bare .md-button) so it never bleeds into Material's
+ * own page chrome (nav, search). */
+.md-typeset .md-button,
+.bc-hero .md-button {
 	border-radius: var(--bc-radius-sm);
-	border-width: 2px;
 	font-weight: 700;
+}
+.md-typeset .md-button:hover,
+.bc-hero .md-button:hover { transform: translateY(-2px); }
+
+.md-typeset .md-button {
+	border-width: 2px;
 	padding: 0.5em 1.25em;
 	transition: transform var(--bc-dur) var(--bc-ease-out),
 	            background-color var(--bc-dur) var(--bc-ease-out),
 	            box-shadow var(--bc-dur) var(--bc-ease-out);
 }
-.md-typeset .md-button:hover { transform: translateY(-2px); }
 .md-typeset .md-button:active { transform: translateY(0); }
 .md-typeset .md-button--primary {
 	background: var(--bc-navy);
@@ -233,15 +235,12 @@ html, body { overflow-x: clip; }
 	gap: 0.8rem;
 }
 .bc-hero .md-button {
-	border-radius: var(--bc-radius-sm);
 	border: 2px solid var(--bc-sky);
 	color: var(--bc-white);
-	font-weight: 700;
 	padding: 0.6em 1.4em;
 	transition: transform var(--bc-dur) var(--bc-ease-out),
 	            background-color var(--bc-dur) var(--bc-ease-out);
 }
-.bc-hero .md-button:hover { transform: translateY(-2px); }
 .bc-hero .md-button--primary {
 	background: var(--bc-white);
 	border-color: var(--bc-white);
@@ -253,7 +252,9 @@ html, body { overflow-x: clip; }
 /* Home only: the hero carries the page <h1>, so suppress Material's
  * auto-injected page-title h1 in the content body (it renders the nav title
  * "Home" when the markdown has no top-level heading). Scoped via :has(.bc-hero)
- * so only the home page is affected; every other page keeps its real h1. */
+ * so only the home page is affected; every other page keeps its real h1.
+ * :has() needs Firefox 121+ (Dec 2023); on older Firefox the rule no-ops and a
+ * spurious "Home" h1 shows under the hero, cosmetic only, not a broken page. */
 body:has(.bc-hero) .md-content__inner > h1 { display: none; }
 
 /* ===== Badge strip on the home page ===== */
@@ -400,6 +401,14 @@ body:has(.bc-hero) .md-content__inner > h1 { display: none; }
 	.bc-hero__actions .md-button { flex: 1 1 auto; text-align: center; }
 	.md-typeset h1 { font-size: 1.85rem; }
 	.md-typeset h2 { font-size: 1.35rem; }
+}
+
+/* On phones the primary persona wants the three modes fast, so tighten the
+ * hero's vertical rhythm and shrink the crest to lift content toward the fold. */
+@media screen and (max-width: 480px) {
+	.bc-hero__inner { padding-top: 2rem; padding-bottom: 2rem; }
+	.bc-hero__mark { width: 48px; margin-bottom: 0.8rem; }
+	.bc-hero__lede { margin-bottom: 1.4rem; }
 }
 
 /* ===== Reduced motion ===== */

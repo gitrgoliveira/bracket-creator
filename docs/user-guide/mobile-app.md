@@ -85,7 +85,7 @@ Tap a competition to drill into its schedule, pool standings, and bracket. Aka (
 
 ### Scoreboards and court displays
 
-For a TV or projector, open a court-scoped display (no password). The single-court view is the shiai-jo **scoreboard**, the live score for the current bout, read by the **referees** (confirming it matches their calls), the **two competitors**, the **scoring operator** (a check against what they entered), and spectators at that court. The all-courts view is the **outside / lobby screen** from the tournament guide, the progress board for everyone waiting to fight.
+Each shiai-jo runs **one digital scoreboard** on a TV or projector: a court-scoped display (no password) showing the live score for the current bout. It is read by the **referees** (confirming it matches their calls), the **two competitors**, the **scoring operator** (a check against what they entered), and spectators at that court. A separate all-courts view is the **outside / lobby screen** from the tournament guide, the progress board for everyone waiting to fight.
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.

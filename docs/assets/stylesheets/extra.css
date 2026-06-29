@@ -103,12 +103,16 @@ html, body { overflow-x: clip; }
 	letter-spacing: -0.018em;
 	line-height: 1.12;
 	overflow-wrap: anywhere;
+	text-wrap: balance;
 }
 
 .md-typeset h1 {
 	font-size: 2.1rem;
 	min-width: 0;
 }
+
+/* Fewer orphans in running prose (graceful no-op where unsupported). */
+.md-typeset p { text-wrap: pretty; }
 
 /* "Court-line" tick before every h2: a short bold navy bar, the spatial
  * motif from the bracket courts. Section heads collapse cleanly on mobile. */
@@ -221,6 +225,7 @@ html, body { overflow-x: clip; }
 	color: var(--bc-white);
 	overflow-wrap: anywhere;
 	min-width: 0;
+	text-wrap: balance;
 }
 .bc-hero__lede {
 	font-size: clamp(1.02rem, 1.6vw, 1.2rem);
@@ -228,6 +233,7 @@ html, body { overflow-x: clip; }
 	max-width: 40ch;
 	margin: 1.1rem 0 1.9rem;
 	color: var(--bc-lede);
+	text-wrap: pretty;
 }
 .bc-hero__actions {
 	display: flex;

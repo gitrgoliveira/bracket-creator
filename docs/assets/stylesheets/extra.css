@@ -1,7 +1,4 @@
-/* Hallmark · macrostructure: Marquee Hero · tone: bold-sporting · anchor hue: navy 257
- * Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
- *
- * bracket-creator docs theme: a bold, sporting design language layered onto
+/* bracket-creator docs theme: a bold, sporting design language layered onto
  * MkDocs Material. The brand navy (#1d3557, see DESIGN.md) is the single
  * interactive colour; Aka red (#c1121f) appears only as a hairline accent.
  * Material owns the page chrome (header, tabs, sidebar, TOC, search); this
@@ -255,13 +252,9 @@ html, body { overflow-x: clip; }
 .bc-hero .md-button--primary:hover { background: var(--bc-ice); border-color: var(--bc-ice); }
 .bc-hero .md-button:not(.md-button--primary):hover { background: var(--bc-sky-soft); }
 
-/* Home only: the hero carries the page <h1>, so suppress Material's
- * auto-injected page-title h1 in the content body (it renders the nav title
- * "Home" when the markdown has no top-level heading). Scoped via :has(.bc-hero)
- * so only the home page is affected; every other page keeps its real h1.
- * :has() needs Firefox 121+ (Dec 2023); on older Firefox the rule no-ops and a
- * spurious "Home" h1 shows under the hero, cosmetic only, not a broken page. */
-body:has(.bc-hero) .md-content__inner > h1 { display: none; }
+/* The home page's duplicate "Home" <h1> is suppressed in the template
+ * (overrides/home.html overrides the content block to skip Material's
+ * auto-injected page title), so no CSS hiding is needed here. */
 
 /* ===== Badge strip on the home page ===== */
 /* Scoped under .md-typeset so it outranks Material's paragraph margin without

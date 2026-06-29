@@ -197,15 +197,15 @@ docs/deps: $(DOCS_STAMP) ## Install the pinned docs toolchain into .venv-docs
 
 docs/serve: $(DOCS_STAMP) ## Locally serve the documentation (pinned toolchain)
 	@echo "Serving docs at http://localhost:$(DOCS_PORT) (Ctrl-C to stop)..."
-	$(DOCS_BIN)/mkdocs serve --dev-addr localhost:$(DOCS_PORT)
+	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT)
 
 docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
 	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
-	$(DOCS_BIN)/mkdocs serve --dev-addr localhost:$(DOCS_PORT) --open
+	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
 docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
-	$(DOCS_BIN)/mkdocs build --strict
+	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

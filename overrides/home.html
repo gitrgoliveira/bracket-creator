@@ -28,3 +28,22 @@
     </div>
   </section>
 {% endblock %}
+
+{#-
+  The hero already carries the page <h1> (.bc-hero__title). Material's
+  content.html injects an <h1>{{ page.title }}</h1> ("Home") whenever the
+  rendered markdown has no <h1> of its own, which would place a second,
+  duplicate top-level heading in the content body. Override the content block
+  to mirror Material's partials/content.html exactly, minus that title
+  injection, so the spurious heading never reaches the DOM (more robust than
+  hiding it with CSS, and correct for screen readers in every browser).
+  Material is pinned in docs/requirements.txt, so this partial list is stable.
+-#}
+{% block content %}
+  {% include "partials/tags.html" %}
+  {% include "partials/actions.html" %}
+  {{ page.content }}
+  {% include "partials/source-file.html" %}
+  {% include "partials/feedback.html" %}
+  {% include "partials/comments.html" %}
+{% endblock %}

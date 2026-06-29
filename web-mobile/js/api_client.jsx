@@ -31,12 +31,7 @@
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
-import { openBridge } from './court_bridge.jsx';
-
-// Module-level bridge singleton. Opened once so all recordScore calls in
-// this tab share one BroadcastChannel handle. The bridge auto-degrades to
-// a no-op when BroadcastChannel is unavailable (graceful degrade).
-const _bridge = openBridge();
+import { bridge as _bridge } from './court_bridge.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -1061,16 +1056,23 @@ const API = {
         // court-local BroadcastChannel so the display tab can update without
         // a server round-trip during offline periods.
         //
-        // The payload shape mirrors the SSE match_updated data envelope:
-        //   { result: { id: matchID, ...backendFields } }
-        // applyPatch (patch.jsx) reads result.id to locate the match.
-        // We strip rev/revSession from the broadcast so the display tab's
-        // applyPatch does not propagate internal write-ordering metadata.
-        // court is sourced from the match object passed by the score editor.
+        // The envelope mirrors the SSE match_updated shape including sideAId and
+        // sideBId so the display tab's normalizeMatch can resolve participants by
+        // UUID rather than falling back to name-key lookup (which can mis-resolve
+        // same-name participants). winnerId is already in rest when present.
+        // rev/revSession are stripped so internal write-ordering metadata is not
+        // propagated to the display tab.
         const _broadcastPatch = (fields) => {
             const { rev: _r, revSession: _rs, ...rest } = fields || {};
             const court = (match && match.court) || '';
-            _bridge.publish('patch', court, compID, { result: { id: matchID, ...rest } });
+            _bridge.publish('patch', court, compID, {
+                result: {
+                    id: matchID,
+                    ...(match && match.sideA && match.sideA.id ? { sideAId: match.sideA.id } : {}),
+                    ...(match && match.sideB && match.sideB.id ? { sideBId: match.sideB.id } : {}),
+                    ...rest,
+                },
+            });
         };
 
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
@@ -1143,10 +1145,13 @@ const API = {
                 _matchRevCounters.delete(_revKey(compID, matchID));
             }
             // A stale running write is signalled by HTTP 200 {stale:true}
-            // (the server's rev-guard no-ops it). Returned as-is; the
+            // (the server's rev-guard no-ops it). Do not broadcast it: pushing
+            // a superseded running score to the display would overwrite the
+            // authoritative newer state already there. Return as-is; the
             // fire-and-forget autosave caller ignores the value.
-            // mp-9ukk: broadcast the confirmed server response so the display
-            // tab gets authoritative data even when the SSE link is slow/down.
+            // mp-9ukk: broadcast only confirmed, non-stale responses so the
+            // display tab gets authoritative data when the SSE link is slow/down.
+            if (data && data.stale) return data;
             _broadcastPatch(payload);
             return data;
         }

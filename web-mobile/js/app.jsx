@@ -4,7 +4,7 @@
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
-import { openBridge, setSnapshotProvider, getLastBroadcastAt, applyPatchToTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
+import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -390,6 +390,10 @@ function App() {
   // Derived from sseConnected + the bridge's last-broadcast recency in a tick.
   // The boolean sseConnected is kept for LobbyDisplay (unchanged scope).
   const [linkState, setLinkState] = useS('connected');
+  // Ref kept in sync with sseConnected so the 5 s display-mode ticker can
+  // read the current value without closing over a stale copy from the effect
+  // that has [mode] as its only dep. See the sync effect below.
+  const sseConnectedRef = useR(sseConnected);
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -591,8 +595,12 @@ function App() {
     })();
     const court = rawCourt.toLowerCase() === 'all' ? 'ALL' : rawCourt.toUpperCase();
 
-    const bridge = openBridge();
+    // Scope the inbound recency clock to this display court so a patch for
+    // a different court does not falsely advance the local dot to 'local'.
+    setDisplayCourt(court);
 
+    // Use the module-level singleton (shared with api_client's publisher in
+    // the same tab) so only one BroadcastChannel is opened per tab.
     // Post snapshot-req so any open operator tab can reply with court data.
     bridge.publish('snapshot-req', court, '', null);
 
@@ -602,8 +610,7 @@ function App() {
         return;
       }
       if (msg.type === 'snapshot' && msg.payload) {
-        // Bootstrap: if tournament is not yet loaded (undefined/null) OR
-        // if this snapshot carries more up-to-date data, merge it.
+        // Bootstrap or fill gap from the operator tab's court snapshot.
         // We build a minimal tournament wrapper: the display only reads
         // tournament.name/courts for the header and tournament.competitions
         // for match rendering.
@@ -614,8 +621,10 @@ function App() {
             // No server data yet: bootstrap entirely from the snapshot.
             return { name: '', courts: [], competitions: incomingComps };
           }
-          // Server data is already loaded: merge the snapshot's competitions
-          // for the court into the existing tournament to fill any gap.
+          // Server data is already loaded: merge the operator snapshot into
+          // the existing tournament. Existing competitions ARE replaced by the
+          // operator snapshot (the operator tab is the court authority during
+          // an outage). The reconnect full-refetch restores server truth.
           const existing = prev.competitions || [];
           const merged = existing.slice();
           for (const comp of incomingComps) {
@@ -624,7 +633,11 @@ function App() {
             const idx = merged.findIndex(c =>
               c.id === id || (c.config && (c.config.id === id || c.config.Id === id))
             );
-            if (idx === -1) merged.push(comp);
+            if (idx === -1) {
+              merged.push(comp);
+            } else {
+              merged[idx] = comp;
+            }
           }
           return { ...prev, competitions: merged };
         });
@@ -633,9 +646,13 @@ function App() {
 
     // Tick: re-derive linkState every 5 s so the dot transitions promptly
     // when the broadcast recency crosses the freshnessMs threshold.
+    // The ticker reads sseConnectedRef.current (a ref kept in sync by a
+    // dedicated effect) so the interval closure is never stale. sseConnected
+    // is intentionally left OUT of this effect's deps so re-opening the bridge
+    // does not drop in-flight snapshot replies.
     const ticker = setInterval(() => {
       setLinkState(deriveLinkState({
-        sseConnected,
+        sseConnected: sseConnectedRef.current,
         lastBroadcastAt: getLastBroadcastAt(),
         now: Date.now(),
         freshnessMs,
@@ -644,14 +661,15 @@ function App() {
 
     return () => {
       unsub();
-      bridge.close();
+      // Do NOT close the shared bridge here: it is shared with api_client's
+      // publisher in the same tab. Only unsubscribe the display listener.
+      setDisplayCourt(null);
       clearInterval(ticker);
     };
     // mode is in deps so the effect re-runs if the user navigates away from
     // display mode (unlikely but possible via popstate). sseConnected is NOT
     // in deps deliberately: re-opening the bridge on every SSE flip would
-    // drop all in-flight snapshot replies. The ticker reads sseConnected via
-    // setLinkState which always captures fresh state.
+    // drop all in-flight snapshot replies.
   }, [mode]);
 
   // mp-9ukk Phase 2: linkState re-derivation on every sseConnected change.
@@ -666,6 +684,10 @@ function App() {
       freshnessMs,
     }));
   }, [sseConnected, mode]);
+
+  // Keep sseConnectedRef in sync with sseConnected so the display-mode 5 s
+  // ticker can read the current value without the interval closure going stale.
+  useE(() => { sseConnectedRef.current = sseConnected; }, [sseConnected]);
 
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //

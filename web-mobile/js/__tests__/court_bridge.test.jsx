@@ -5,6 +5,7 @@ import {
     freshnessMs,
     getLastBroadcastAt,
     setSnapshotProvider,
+    setDisplayCourt,
     openBridge,
     _tabId,
 } from '../court_bridge.jsx';
@@ -387,5 +388,108 @@ describe('openBridge', () => {
         });
         // Bridge is closed: no delivery expected.
         expect(received).toHaveLength(0);
+    });
+});
+
+// -------------------------------------------------------------------------
+// 4. setDisplayCourt: court-scoped inbound recency clock (FIX 2)
+//
+// When a display court is set, only inbound patches/snapshots for that
+// court advance _lastBroadcastAt. When null, all inbound messages advance it.
+// -------------------------------------------------------------------------
+describe('setDisplayCourt inbound recency scoping', () => {
+    let origBC;
+
+    beforeEach(() => {
+        origBC = global.BroadcastChannel;
+        global.BroadcastChannel = MockBroadcastChannel;
+        MockBroadcastChannel.reset();
+        setSnapshotProvider(null);
+        // Reset display court to null before each test.
+        setDisplayCourt(null);
+    });
+
+    afterEach(() => {
+        global.BroadcastChannel = origBC;
+        MockBroadcastChannel.reset();
+        setDisplayCourt(null);
+    });
+
+    it('does not advance _lastBroadcastAt when a patch arrives for a different court', () => {
+        setDisplayCourt('A');
+        openBridge(); // open a bridge so the channel.onmessage handler is active
+
+        const before = getLastBroadcastAt();
+
+        // Inject a patch for court B (not the display court).
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'patch', origin: 'other-tab-id',
+            court: 'B', compId: 'comp-1', payload: { result: { id: 'm1' } },
+        });
+
+        expect(getLastBroadcastAt()).toBe(before);
+    });
+
+    it('advances _lastBroadcastAt when a patch arrives for the display court', () => {
+        setDisplayCourt('A');
+        openBridge();
+
+        const t0 = Date.now();
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'patch', origin: 'other-tab-id',
+            court: 'A', compId: 'comp-1', payload: { result: { id: 'm1' } },
+        });
+
+        const after = getLastBroadcastAt();
+        expect(typeof after).toBe('number');
+        expect(after).toBeGreaterThanOrEqual(t0);
+    });
+
+    it('advances _lastBroadcastAt for any court when setDisplayCourt(null) is called', () => {
+        setDisplayCourt(null);
+        openBridge();
+
+        const t0 = Date.now();
+
+        // Court B patch should advance the clock when no display court is set.
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'patch', origin: 'other-tab-id',
+            court: 'B', compId: 'comp-2', payload: { result: { id: 'm2' } },
+        });
+
+        const after = getLastBroadcastAt();
+        expect(typeof after).toBe('number');
+        expect(after).toBeGreaterThanOrEqual(t0);
+    });
+
+    it('does not advance _lastBroadcastAt for snapshot of a different court', () => {
+        setDisplayCourt('A');
+        openBridge();
+
+        const before = getLastBroadcastAt();
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot', origin: 'other-tab-id',
+            court: 'C', compId: '', payload: [],
+        });
+
+        expect(getLastBroadcastAt()).toBe(before);
+    });
+
+    it('advances _lastBroadcastAt for snapshot matching the display court', () => {
+        setDisplayCourt('A');
+        openBridge();
+
+        const t0 = Date.now();
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot', origin: 'other-tab-id',
+            court: 'A', compId: '', payload: [],
+        });
+
+        const after = getLastBroadcastAt();
+        expect(typeof after).toBe('number');
+        expect(after).toBeGreaterThanOrEqual(t0);
     });
 });

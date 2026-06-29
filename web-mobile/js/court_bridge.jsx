@@ -121,6 +121,21 @@ export function applyPatchToTree(tournament, msg) {
 // -----------------------------------------------------------------------
 let _lastBroadcastAt = null;
 
+// -----------------------------------------------------------------------
+// Court-scope filter for inbound recency tracking (FIX 2).
+//
+// When a display court is set, only patches/snapshots for that court
+// advance the recency clock. This prevents a court-B patch from making
+// the court-A display dot falsely show 'local'.
+// When null (operator tabs, no specific display court), all inbound
+// messages advance the clock.
+// -----------------------------------------------------------------------
+let _displayCourt = null;
+
+export function setDisplayCourt(c) {
+    _displayCourt = c || null;
+}
+
 // getLastBroadcastAt: read the module-level recency timestamp.
 // Called by app.jsx in its linkState-derivation tick.
 export function getLastBroadcastAt() {
@@ -169,8 +184,11 @@ export function openBridge() {
         // Self-echo suppression.
         if (msg.origin === _tabId) return;
 
-        // Update recency tracker on any inbound patch or snapshot data.
-        if (msg.type === 'patch' || msg.type === 'snapshot') {
+        // Update recency tracker on inbound patch or snapshot data.
+        // When a display court is set, only messages for that court advance
+        // the clock; when null (operator tabs) all inbound messages advance it.
+        if ((msg.type === 'patch' || msg.type === 'snapshot') &&
+            (!_displayCourt || msg.court === _displayCourt)) {
             _lastBroadcastAt = Date.now();
         }
 
@@ -238,3 +256,12 @@ export function openBridge() {
 
     return bridge;
 }
+
+// -----------------------------------------------------------------------
+// Singleton bridge: one shared BroadcastChannel handle per tab.
+// Both api_client.jsx (publisher) and app.jsx (display subscriber) import
+// this same reference so only one BroadcastChannel is opened per tab.
+// The no-op-degrade path inside openBridge() runs exactly once at module
+// load time.
+// -----------------------------------------------------------------------
+export const bridge = openBridge();

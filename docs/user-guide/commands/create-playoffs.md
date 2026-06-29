@@ -18,7 +18,7 @@ bracket-creator create-playoffs [flags]
 | `--seeds` | (none) | (none) | CSV file with seed rankings |
 | `--determined` | `-d` | `false` | Do not shuffle input order |
 | `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
-| `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …) |
+| `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (for example, `K` produces K1, K2, …) |
 | `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
 
 ## Examples

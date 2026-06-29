@@ -61,7 +61,7 @@ flowchart TB
     hub ==>|SSE id + data frames| sse
 ```
 
-- **REST**: score/decision/lineup writes, config, participants. Auth via the
+- **REST**: score/decision/lineup writes, config, participants. Auth through the
   `X-Tournament-Password` header (two modes, §5).
 - **SSE**: one stream per client carrying `match_updated`, `competition_started/completed`,
   `competitor_status_updated`, `draw_generated`, `schedule_updated`, plus the resilience control
@@ -103,7 +103,7 @@ sequenceDiagram
 
 ## 4. Client resilience on flaky Wi-Fi
 
-The client treats the link as unreliable by default; the flows below show how.
+The client treats the link as unreliable by default; the following flows show how.
 
 ```mermaid
 flowchart TD
@@ -131,7 +131,7 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 
 | Concern | Mechanism |
 |---|---|
-| Half-open / stalled sockets | 12s write timeouts, 35s SSE silence watchdog (armed at connect, not just `onopen`) |
+| Half-open / stalled sockets | 12s write timeouts, 35s SSE silence watchdog (armed at connect, not only `onopen`) |
 | Reconnect storms | exponential backoff + jitter (vs. a fixed delay) |
 | Lost writes | durable outbox persisted to `localStorage` (6h TTL), retried; survives tab refresh |
 | Missed events | `Last-Event-ID` replay + `checkSeqGap` on every event → scoped refetch; `resync_required` |
@@ -163,14 +163,14 @@ flowchart TD
 | `ReadHeaderTimeout` | 10s | slowloris-header defense |
 | `ReadTimeout` | 30s | slow-body defense (still allows multi-MB CSV import) |
 | `IdleTimeout` | 120s | bounds fd commitment per idle keep-alive |
-| `WriteTimeout` | **0** | SSE is infinite; cancellation via request context |
+| `WriteTimeout` | **0** | SSE is infinite; cancellation through the request context |
 | `MaxHeaderBytes` | 1 MB | header-bomb defense |
 | Body cap (admin JSON) | 1 MB | `MaxBodyBytes` middleware → 413 |
 | Body cap (`/tournament/import`) | 64 MB | matches multipart CSV import |
-| Graceful shutdown | 30s | `Hub.Close` via `RegisterOnShutdown` |
+| Graceful shutdown | 30s | `Hub.Close` through `RegisterOnShutdown` |
 
 ## 7. Scale limit = egress
 
 Because every live update is fanned out to **every** connected viewer, **network egress is the
-practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity--scaling)
-for per-tier audience guidance (e.g. GCP free tier vs Oracle for 1000+ viewers).
+practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
+for per-tier audience guidance (for example, GCP free tier compared with Oracle for 1000+ viewers).

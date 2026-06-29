@@ -58,6 +58,7 @@ read the diff. See CONTRIBUTING and CLAUDE.md.
 - [ ] New/updated unit tests cover the change
 - [ ] Manual browser verification (for `web-mobile/` or `web/` changes): describe what you exercised
 - [ ] Screenshots added above (REQUIRED for any UI-affecting change)
+- [ ] Docs updated under `docs/` for any new or changed user-facing feature, flag, command, or behavior (`make docs/build` passes)
 - [ ] No new console errors or warnings
 
 <!-- Bead reference: -->

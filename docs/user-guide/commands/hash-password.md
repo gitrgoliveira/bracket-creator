@@ -17,7 +17,7 @@ Bcrypt has a hard 72-byte limit on the input. Passwords longer than that are rej
 
 ## Output
 
-Single line on stdout: the bcrypt hash (e.g. `$2a$10$tq9jkGYsf1ttx0ZM.UUrxezVBcO4aZaS.dVRY73xC5lwEvTJLcMc6`). Cost is `bcrypt.DefaultCost` (10), fine for admin-facing endpoints (~50-100 ms per verify) and not worth tuning until a real load problem appears.
+Single line on stdout: the bcrypt hash (for example, `$2a$10$tq9jkGYsf1ttx0ZM.UUrxezVBcO4aZaS.dVRY73xC5lwEvTJLcMc6`). Cost is `bcrypt.DefaultCost` (10), fine for admin-facing endpoints (~50-100 ms per verify) and not worth tuning until a real load problem appears.
 
 ## Examples
 
@@ -34,4 +34,4 @@ TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-See the [mobile-app command reference](mobile-app.md#locked-mode---lock-password) for how the hash is consumed at startup.
+See the [mobile-app command reference](mobile-app.md#locked-mode-lock-password) for how the hash is consumed at startup.

@@ -25,6 +25,14 @@ PORT=8082 make run-mobile   # Use alternate port (also works direct: PORT=8082 .
 TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder (also works without make: TOURNAMENT_DATA_DIR=/path ./bin/bracket-creator mobile-app)
 make examples          # Generate example Excel files from mock data
 
+make docs/build        # Build + strict-validate the MkDocs site (the PR-template gate)
+make docs/serve        # Serve docs locally with live reload
+make docs/deps         # Create .venv-docs from docs/requirements.txt
+make docs/clean        # Remove .venv-docs and the built site/
+# All docs/* targets run through .venv-docs (pinned mkdocs + Material from
+# docs/requirements.txt). The system-PATH mkdocs drifts (older, no Material),
+# so never call mkdocs directly for verification; use make docs/build.
+
 # Run a single test
 go test -run TestName ./internal/helper/...
 go test -run TestName ./cmd/...
@@ -51,6 +59,30 @@ go test -cover ./internal/helper/...
 - **`internal/state/`**: File-backed state store for the mobile app. Tournament and competition config lives in `tournament-data/tournament.md` and `tournament-data/competitions/<id>/config.md` (YAML front-matter). Participants are in `participants.csv` alongside each config.
 - **`internal/engine/`**: Thin adapter that drives `internal/helper` pool/bracket generation from a `state.Competition`. Called by the `POST /api/competitions/:id/start` handler.
 - **`web-mobile/`**: Preact/JSX frontend for the mobile app, served embedded in the binary. Entry point: `web-mobile/index.html`. JS modules in `web-mobile/js/` are grouped by prefix: `admin_*.jsx` (the operator console: setup, participants, pools, scoring, scheduling, lineups, etc.), `viewer_*.jsx` and `display_*.jsx` (public attendee/spectator surfaces), and shared infrastructure (`app.jsx`, `api_client.jsx`, `api_serializers.jsx`, `bracket.jsx`, `data.jsx`, `patch.jsx`, `router.jsx`, `ui.jsx`, `glossary.jsx`). Run `ls web-mobile/js/` for the current set rather than relying on an enumerated list here. Note `admin_participants.jsx` holds the `LinedTextarea` gutter participant paste box and the check-in filter list. CSS in `web-mobile/css/styles.css`. Pre-compiled to `web-mobile/dist/` by esbuild (run automatically as part of `make go/build`).
+
+### Layering and on-disk state
+
+Layered with no upward or circular dependencies: presentation (`cmd/`, `mobileapp/`, `web/`, `web-mobile/`) → business logic (`engine/`, `helper/`, `service/`) → persistence (`state/`, `excel/`) → domain models (`domain/`, the dependency leaf with zero internal deps). `mobileapp` → `engine` (via `deps.go` interfaces) and `state` (direct reads for viewer endpoints); `engine` → `helper` + `excel` + `state`.
+
+Live-tournament state is file-backed under `tournament-data/` (owned by `internal/state/`):
+
+```
+tournament-data/
+├── tournament.md                  YAML front-matter: name, date, venue, courts, password
+├── .wal/                          Pending multi-file transactions (replayed on startup)
+├── branding/  sponsors/           Uploaded logo + sponsor images for display surfaces
+└── competitions/<id>/
+    ├── config.md                  YAML front-matter: format, pool size, courts
+    ├── participants.csv           One participant per line (UUID-prefixed)
+    ├── seeds.csv                  Seed rank to player mapping
+    ├── pools.csv                  Pool assignments after start
+    ├── pool-matches.csv           Pool phase match results
+    ├── bracket.json               Elimination bracket structure + results
+    ├── schedule.csv               Court/time assignments
+    ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
+    ├── lineups.yaml               Team lineups, keyed by round
+    └── overrides.json             Manual ranking overrides
+```
 
 ### Key Algorithms
 
@@ -128,6 +160,17 @@ if p := panicRef.Load(); p != nil {
 
 See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
 
+### Architectural observations (areas to watch)
+
+In-progress migrations and tech debt to keep in mind (re-derive package sizes with `gocloc` when you need numbers):
+
+- **`mobileapp/` is the largest package** after the decision/eligibility/lineup/daihyosen/Swiss/display/league/registration/announcement/branding/sponsors/print handler families plus supporting infra (rate limiting, broadcast coalescer, viewer single-flight). Grouping into subpackages may be warranted.
+- **`engine/` has grown rapidly**: scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, PDF export. Sub-splitting may be warranted.
+- **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, utilities. The `helper/{bracket,csv,seeding}/` subpackages are an in-progress extraction; `helper/` proper has not shrunk yet.
+- **`excel/` has minimal direct test coverage** (roughly 0.3x source) despite Excel being the primary CLI deliverable; most Excel coverage lives in `helper/*_test.go`.
+- **`domain/` adoption is partial**: much business logic still uses `helper.Player` directly rather than domain types; the migration is incomplete.
+- **No top-level interfaces** for `state.Store` or `engine.Engine`: interface adoption is incremental via `mobileapp/deps.go`; engine-to-state and helper-to-engine calls still use concrete types.
+
 ## Testing Conventions
 
 - **Table-driven tests** with `t.Run()` subtests throughout (see `seed_test.go`, `tree_test.go`)
@@ -165,6 +208,8 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect. The files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
 - Chained match navigation in the admin score editor (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the current match's shiaijo. Operators run matches per-court, so hopping courts mid-flow breaks the workflow. See `AdminScoreEditor` in `web-mobile/js/admin_schedule.jsx`: filter to `(m.court || "") === (openMatch.court || "")` so empty/undefined courts share one "unassigned" bucket.
+- Docs under `docs/` are PUBLIC-facing: no beads (`mp-xxxx`)/`bd`, no internal-tooling or `CLAUDE.md` references, and NO em-dashes. The PR template gates `make docs/build`; run it before pushing docs changes.
+- `mkdocs build --strict` fails on broken cross-file links (WARNING) but only logs missing same-page anchors as INFO (build still passes), so verify anchors by hand. Anchors use pymdownx slugs: lowercase, punctuation dropped, `--`/parens collapsed to single hyphens (e.g. `### Locked mode (--lock-password)` becomes `#locked-mode-lock-password`). Note TWO files named `mobile-app.md` exist (`docs/user-guide/mobile-app.md` guide vs `docs/user-guide/commands/mobile-app.md` reference); a relative link from `commands/` resolves to the sibling, so confirm the target file before trusting a flagged anchor.
 
 ## PR Workflow
 

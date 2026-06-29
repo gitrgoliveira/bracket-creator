@@ -1,5 +1,7 @@
 # Web UI
 
+This is the **organiser's** tool for the days before the event: turn a roster into a print-ready bracket, no command line required. On the day, the [live tournament app](mobile-app.md) takes over for scorers, competitors, and spectators.
+
 The web UI lets you generate brackets without using the command line. Start it with:
 
 ```bash
@@ -30,6 +32,6 @@ After confirming, the assigned seeds are shown inline next to each participant n
 
 ![Seeds assigned](../screenshots/webui-seeds-assigned.png)
 
-## Downloading the bracket
+## Download the bracket
 
 Click **Generate** to produce the Excel file. The browser downloads the `.xlsx` directly (no server-side storage, no account needed).

@@ -17,6 +17,10 @@ extra_javascript:
   - assets/javascripts/mermaid-init.js
 
 markdown_extensions:
+  # attr_list + md_in_html power the home-page grid cards (the `markdown`
+  # attribute on a <div class="grid cards"> block, styled in extra.css).
+  - attr_list
+  - md_in_html
   - admonition
   - pymdownx.details
   - pymdownx.highlight:
@@ -42,8 +46,13 @@ theme:
     - navigation.instant
     - navigation.tabs
     - navigation.tabs.sticky
+    # One-tap copy on every code block: the docs are CLI-heavy (install +
+    # command pages), so copy-paste of shell commands is the primary action.
+    - content.code.copy
   favicon: assets/images/favicon.ico
-  logo: assets/images/logo.png
+  # Brand crest (kendo men + shinai + sword), white silhouette on transparent so
+  # it reads on the navy header in both schemes. Derived from logo/bracket-creator.v2.jpeg.
+  logo: assets/images/logo-crest-light.png
   font:
     # Atkinson Hyperlegible (Braille Institute) maximizes glyph separation
     # (l/I/1, O/0/Q); chosen for legibility in bright/noisy halls per
@@ -72,11 +81,13 @@ nav:
       - Input format: user-guide/input-format.md
       - Web UI: user-guide/web-ui.md
       - Mobile / live tournament app: user-guide/mobile-app.md
+      - Host the live app: user-guide/hosting.md
       - Commands:
           - create-pools: user-guide/commands/create-pools.md
           - create-playoffs: user-guide/commands/create-playoffs.md
           - serve: user-guide/commands/serve.md
           - mobile-app: user-guide/commands/mobile-app.md
+          - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
   - Developer guide:

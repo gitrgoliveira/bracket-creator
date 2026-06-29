@@ -53,7 +53,7 @@ const LOBBY_ROWS = [
 // upcoming matches fill slots 1 – (LOBBY_ROWS.length - 1).
 //
 // Returns an array of exactly LOBBY_ROWS.length elements; missing
-// slots are null (rendered as an empty ":" cell).
+// slots are null (rendered as an empty "-" cell).
 function buildCourtSlots(competitions, court) {
     const totalSlots = LOBBY_ROWS.length;
     const running = findRunningOnCourt(competitions, court);
@@ -105,7 +105,7 @@ function LobbyMatchCell({ slot, rowKind }) {
                     opacity: 0.12,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 18,
-                }}>:</div>
+                }}>-</div>
             </td>
         );
     }
@@ -208,7 +208,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
 
     // Trim queue rows: always show Now (slot 0) and Next (slot 1) as anchors;
     // only include deeper rows (#3–#6) when at least one visible court has a
-    // non-null slot at that index. This avoids a table half-filled with ":"
+    // non-null slot at that index. This avoids a table half-filled with "-"
     // placeholders when the queue is short.
     const visibleRows = LOBBY_ROWS.filter(row =>
         row.slot < 2 || courtSlots.some(slots => slots[row.slot] != null)

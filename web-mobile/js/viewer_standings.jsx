@@ -561,7 +561,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
                         </>
                       ) : (
-                        Array.from({ length: isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">:</td>)
+                        Array.from({ length: isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">-</td>)
                       )}
                     </tr>
                   );

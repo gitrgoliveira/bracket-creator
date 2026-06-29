@@ -212,7 +212,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         {scoreStr ? (
           <span className={`vsched-item__score${isRunning ? " vsched-item__score--live" : ""}`}>{scoreStr}</span>
         ) : m.status === "completed" ? (
-          <span className="vsched-item__vs">:</span>
+          <span className="vsched-item__vs">-</span>
         ) : (
           <span className="vsched-item__vs">vs</span>
         )}

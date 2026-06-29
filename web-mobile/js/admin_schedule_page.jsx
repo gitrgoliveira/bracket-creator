@@ -68,7 +68,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
             onClick={(e) => { e.stopPropagation(); if (onTimeChange) { setTimeVal(m.scheduledAt || ""); setEditingTime(true); } }}
             title="Click to set time"
           >
-            {m.scheduledAt || <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>:</span>}
+            {m.scheduledAt || <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>-</span>}
             {onTimeChange && <span style={{ fontSize: 9, color: "var(--ink-4)", marginLeft: 2 }}>✎</span>}
           </button>
         )}

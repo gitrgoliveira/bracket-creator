@@ -134,10 +134,10 @@ function StreamingOverlay({ court, position, competitions }) {
         ? (pickFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl) || subSideName(currentSub.sideA) || boutPosLabel)
         : (dhPending ? boutPosLabel : '');
 
-    // Bout score for the current sub: ippon letters, ":" (not "0") for an
+    // Bout score for the current sub: ippon letters, "-" (not "0") for an
     // empty side so a kendo score never reads "M – 0".
-    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || ':') : ':';
-    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || ':') : ':';
+    const boutIpponsB = currentSub ? ((currentSub.ipponsB || []).filter(x => x && x !== "•").join('') || '-') : '-';
+    const boutIpponsA = currentSub ? ((currentSub.ipponsA || []).filter(x => x && x !== "•").join('') || '-') : '-';
 
     // Team names (outer flanks of QR in team mode).
     const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken) : '';

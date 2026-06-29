@@ -202,6 +202,26 @@ The dashboard lists all competitions. Each card shows the competition type, numb
 
 ![Admin dashboard: tournament header, totals, shiai-jo operator views, and competition cards tagged Pending, Draw ready, and Pools.](../screenshots/mobile-dashboard.png)
 
+### Tournament details and the public info page
+
+Edit the tournament details from **Admin** to set the public-facing information attendees see: the venue address and a map link, opening and closing times, a link to the rules, an awards note, free-form info notes, and contact people. Setting the **public URL** here also enables the [QR codes on tags](#export-print) and shareable links. These fields populate a public **info page** in the viewer, so spectators have one place for the practical details of the day.
+
+### Branding and sponsors
+
+The same details screen lets you brand the tournament: upload a **logo** and set the **primary and accent colours**, and the public viewer and displays adopt them. You can also add an ordered list of **sponsor logos** that appear on the public tournament page. All of these are optional; with nothing set, the app uses its default kendo theme.
+
+### Announcements
+
+From the admin console you can **broadcast a short announcement** to every connected viewer (for example, "Lunch break until 13:00" or "Shiai-jo C is moving to the far hall"). Choose how long it stays up, **5, 10, 15, or 30 minutes**, and it clears itself automatically. The message appears as an overlay on the public viewer and the displays; viewers who allow browser notifications can also receive it in the background.
+
+### Registration desk
+
+The **Registration desk** (opened from the dashboard) is a cross-competition check-in surface for the welcome table. Instead of checking people in one competition at a time, it lists every competitor across the whole tournament so a helper can mark them present as they arrive. It complements the per-competition [check-in workflow](#optional-check-in-workflow) below.
+
+### Shiai-jo court console
+
+Each court has a dedicated operator console at `/admin/shiaijo/<court>` (linked from the dashboard's **Shiaijo operator views**). It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court, and nudges the operator to switch to whichever competition next needs the court.
+
 ### Setting up a competition
 
 Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status; Swiss-format competitions run live under the `pools` status.
@@ -269,6 +289,25 @@ For large individual tournaments using the **Swiss** format:
 2. **Match Completion**: Scorers record match outcomes. A Swiss round must have all matches completed before the operator can generate the next round.
 3. **Cumulative Standings**: Standings are calculated in real time based on wins, points scored, head-to-head records, and stable alphabetical sorting. This cumulative standings view is public (no authentication required) so spectators can track who is leading the field at any point.
 4. **Advancement**: Click **Generate next round** to compute pairings for the subsequent round. This increments `swissCurrentRound` and broadcasts `swiss_round_generated` SSE events to refresh all screens.
+
+### Team lineups
+
+In team competitions you set each team's **fighting order** across the positions Senpo, Jiho, Chuken, Fukusho, and Taisho (or fewer for smaller team sizes). A lineup is set **per team match**, and you can reuse the previous round's order with **Copy from previous match**. The editor enforces the FIK rules for an incomplete team: Senpo and Taisho must always be filled; a single vacancy must be Jiho, two vacancies must be Jiho and Fukusho, and three or more empty positions disqualify the team. Lineups appear on the viewer, the court display, and the streaming overlay.
+
+### Recording match decisions
+
+Not every bout is decided on points. The score editor records the kendo outcomes described in the [rules guide](https://github.com/gitrgoliveira/bracket-creator/blob/main/running_a_kendo_tournament.md#withdrawal-mid-tournament-kiken):
+
+- **Kiken** (withdrawal): **voluntary** (FIK Art. 31) is permanent, the competitor takes no further matches; **injury** (FIK Art. 30) can be **reinstated** later by the operator if the competitor recovers.
+- **Fusenpai** (a no-show default loss) and **fusensho** (a per-bout default win in team matches).
+- **Daihyosen** (a representative bout) to settle a tied team encounter in the knockout.
+- **Hikiwake** (a draw) in pools.
+
+A kiken or fusenpai marks the loser ineligible for further matches, and the app blocks starting an ineligible competitor until they are reinstated, so a withdrawal cannot silently re-enter the draw.
+
+### Awards and winners
+
+When a competition finishes, the public viewer shows its **podium**, following the kendo convention of **1st, 2nd, and two equal 3rd places** (there is no bronze-medal match). For a mixed competition still in its pool phase, it shows a provisional cross-pool ranking until the knockout decides the final places. Operators also get an **all-competition winners** view that gathers every result in one place, and each competition can carry optional **fighting-spirit (敢闘賞) awards**, free-text individual honours that also appear to viewers.
 
 ### Export & print
 

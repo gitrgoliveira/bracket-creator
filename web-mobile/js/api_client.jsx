@@ -31,6 +31,12 @@
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
+import { openBridge } from './court_bridge.jsx';
+
+// Module-level bridge singleton. Opened once so all recordScore calls in
+// this tab share one BroadcastChannel handle. The bridge auto-degrades to
+// a no-op when BroadcastChannel is unavailable (graceful degrade).
+const _bridge = openBridge();
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -1051,6 +1057,22 @@ const API = {
             _recomputeSyncStatus();
         }
 
+        // mp-9ukk Phase 2: broadcast helper. Publishes a match patch on the
+        // court-local BroadcastChannel so the display tab can update without
+        // a server round-trip during offline periods.
+        //
+        // The payload shape mirrors the SSE match_updated data envelope:
+        //   { result: { id: matchID, ...backendFields } }
+        // applyPatch (patch.jsx) reads result.id to locate the match.
+        // We strip rev/revSession from the broadcast so the display tab's
+        // applyPatch does not propagate internal write-ordering metadata.
+        // court is sourced from the match object passed by the score editor.
+        const _broadcastPatch = (fields) => {
+            const { rev: _r, revSession: _rs, ...rest } = fields || {};
+            const court = (match && match.court) || '';
+            _bridge.publish('patch', court, compID, { result: { id: matchID, ...rest } });
+        };
+
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
         let res;
         try {
@@ -1073,6 +1095,9 @@ const API = {
                 // failures so they are not silently lost on a wifi gap.
                 if (isRunning) {
                     enqueueRunningWrite(compID, matchID, payload, password);
+                    // mp-9ukk: broadcast even on enqueue so the display tab gets
+                    // the optimistic overlay while the server is unreachable.
+                    _broadcastPatch(payload);
                     // Return a DISCRIMINATED { queued: true } result. The write was
                     // NOT confirmed by the server: only enqueued for async delivery
                     // via _flushQueue (last-write-wins). Fire-and-forget callers
@@ -1090,6 +1115,8 @@ const API = {
                     _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
                     payload, password, compID, matchID
                 );
+                // mp-9ukk: broadcast the terminal write for offline display update.
+                _broadcastPatch(payload);
                 return { queued: true };
             }
         } finally {
@@ -1118,6 +1145,9 @@ const API = {
             // A stale running write is signalled by HTTP 200 {stale:true}
             // (the server's rev-guard no-ops it). Returned as-is; the
             // fire-and-forget autosave caller ignores the value.
+            // mp-9ukk: broadcast the confirmed server response so the display
+            // tab gets authoritative data even when the SSE link is slow/down.
+            _broadcastPatch(payload);
             return data;
         }
         // A running write that failed with a RETRYABLE server error (5xx / 429)
@@ -1128,6 +1158,8 @@ const API = {
         // latest state.
         if (isRunning && (res.status >= 500 || res.status === 429)) {
             enqueueRunningWrite(compID, matchID, payload, password);
+            // mp-9ukk: broadcast the queued state for offline display update.
+            _broadcastPatch(payload);
             // Discriminated { queued: true }: not server-confirmed; see the
             // network-error branch above for the full caller contract.
             return { queued: true };
@@ -1139,6 +1171,8 @@ const API = {
                 _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
                 payload, password, compID, matchID
             );
+            // mp-9ukk: broadcast the queued terminal state for offline display.
+            _broadcastPatch(payload);
             return { queued: true };
         }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor

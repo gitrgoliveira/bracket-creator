@@ -36,10 +36,12 @@ import {
 // position → "bottom". Both "true" and "1" toggle overlay mode so the
 // OBS muscle-memory ?overlay=1 form works alongside ?overlay=true.
 //
-// `connected` is forwarded so the per-court / lobby surfaces can show
-// the SSE reconnect indicator. app.jsx owns the EventSource lifecycle
-// and feeds the boolean down through the AppRouter props.
-function DisplayRoute({ tournament, competitions, connected = true }) {
+// `connected` (boolean) is forwarded to LobbyDisplay for the SSE reconnect
+// indicator. `linkState` (3-state: 'connected'|'local'|'stale') is forwarded
+// to TvDisplay (mp-9ukk Phase 2): the per-court board shows a small coloured
+// dot that distinguishes server-fresh vs operator-broadcast vs no feed, without
+// hiding the layout on outage. app.jsx owns both values and feeds them down.
+function DisplayRoute({ tournament, competitions, connected = true, linkState = 'connected' }) {
     const useQuery = window.AppRouter?.useQuery;
     const query = useQuery ? useQuery() : (() => {
         if (typeof window === 'undefined') return {};
@@ -68,7 +70,7 @@ function DisplayRoute({ tournament, competitions, connected = true }) {
     if (court === 'ALL') {
         return <LobbyDisplay tournament={tournament} competitions={competitions} connected={connected} />;
     }
-    return <TvDisplay court={court} tournament={tournament} competitions={competitions} connected={connected} />;
+    return <TvDisplay court={court} tournament={tournament} competitions={competitions} linkState={linkState} />;
 }
 
 export {

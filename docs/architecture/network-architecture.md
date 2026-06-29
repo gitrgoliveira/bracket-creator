@@ -172,5 +172,5 @@ flowchart TD
 ## 7. Scale limit = egress
 
 Because every live update is fanned out to **every** connected viewer, **network egress is the
-practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity--scaling)
+practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
 for per-tier audience guidance (e.g. GCP free tier vs Oracle for 1000+ viewers).

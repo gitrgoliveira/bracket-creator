@@ -10,16 +10,16 @@ bracket-creator create-playoffs [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--file` | `-f` | — | CSV file with participants **(required)** |
-| `--output` | `-o` | — | Output `.xlsx` path **(required)** |
+| `--file` | `-f` | (none) | CSV file with participants **(required)** |
+| `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
 | `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
-| `--seeds` | — | — | CSV file with seed rankings |
+| `--seeds` | (none) | (none) | CSV file with seed rankings |
 | `--determined` | `-d` | `false` | Do not shuffle input order |
-| `--single-tree` | — | `false` | Produce one tree sheet instead of one per court |
+| `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
 | `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (e.g. `K` produces K1, K2, …) |
-| `--title-prefix` | — | `""` | Prefix added to sheet titles |
+| `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
 
 ## Examples
 
@@ -47,7 +47,7 @@ bracket-creator create-playoffs \
 
 ## Seeding
 
-Works the same as `create-pools` — top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../input-format.md#seeds-file) for the seeds CSV layout.
+Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../input-format.md#seeds-file) for the seeds CSV layout.
 
 ## Output sheets
 

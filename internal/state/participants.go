@@ -104,6 +104,18 @@ func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadPa
 }
 
 func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
+	// Engi competitions ALWAYS use the 4-column zekken layout (member 2 stored in
+	// the DisplayName column); force it on regardless of the caller's flag so an
+	// engi-pair roster reads back its second member name. Non-engi parsing is
+	// unaffected (Engi defaults false). The comp record is read again below for
+	// the HasParticipantIDs check; this early read is cheap (cached) and keeps
+	// the effective layout decision in one spot. A read error is non-fatal here:
+	// fall back to the caller's flag rather than failing the whole load.
+	if !withZekkenName {
+		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.Engi {
+			withZekkenName = true
+		}
+	}
 	// Use a virtual filename for cache to distinguish between with/without
 	// seeds AND between the three possible parse modes
 	// (HasIDs=&true / HasIDs=&false / nil → auto-detect).
@@ -331,9 +343,17 @@ func (s *Store) SaveParticipants(compID string, players []domain.Player) error {
 	return s.saveParticipantsNoLock(compID, players, withZekken)
 }
 
-// withZekkenNameLocked returns the WithZekkenName flag for compID. Caller MUST
-// hold the per-comp lock. Returns false when the competition record is missing
-// (matches the default zero value SaveParticipants would otherwise observe).
+// withZekkenNameLocked returns the effective zekken-column flag for compID.
+// Caller MUST hold the per-comp lock. Returns false when the competition record
+// is missing (matches the default zero value SaveParticipants would otherwise
+// observe).
+//
+// Engi competitions ALWAYS use the 4-column zekken layout: an engi competitor is
+// a PAIR stored as a single participant with member 1 in Player.Name, member 2
+// in Player.DisplayName, and the shared dojo in Player.Dojo. So the effective
+// flag is (WithZekkenName OR Engi). This keeps non-engi parsing byte-identical
+// (Engi defaults false) while letting an engi roster round-trip its second
+// member name through the existing DisplayName column.
 func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
@@ -342,7 +362,7 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	if comp == nil {
 		return false, nil
 	}
-	return comp.WithZekkenName, nil
+	return comp.WithZekkenName || comp.Engi, nil
 }
 
 // participantPairKey is the (normalizedName, normalizedDojo) identity key used

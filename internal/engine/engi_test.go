@@ -1,0 +1,352 @@
+package engine
+
+import (
+	"testing"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// --- Validation -------------------------------------------------------------
+
+func TestEngiValidTotal(t *testing.T) {
+	cases := []struct {
+		a, b int
+		ok   bool
+	}{
+		// Accepted: odd total in {1,3,5}, no draw.
+		{1, 0, true},
+		{0, 1, true},
+		{3, 0, true},
+		{2, 1, true},
+		{1, 2, true},
+		{5, 0, true},
+		{4, 1, true},
+		{3, 2, true},
+		// Rejected: zero total.
+		{0, 0, false},
+		// Rejected: even totals (would allow a draw).
+		{2, 0, false},
+		{1, 1, false},
+		{4, 2, false},
+		{2, 2, false},
+		// Rejected: totals over 5.
+		{7, 0, false},
+		{6, 1, false},
+		{4, 3, false},
+		// Rejected: negative.
+		{-1, 2, false},
+	}
+	for _, c := range cases {
+		assert.Equalf(t, c.ok, engiValidTotal(c.a, c.b), "engiValidTotal(%d,%d)", c.a, c.b)
+	}
+}
+
+func TestEngiWinnerSide(t *testing.T) {
+	assert.Equal(t, "A", engiWinnerSide(3, 2))
+	assert.Equal(t, "B", engiWinnerSide(2, 3))
+	assert.Equal(t, "A", engiWinnerSide(5, 0))
+	assert.Equal(t, "B", engiWinnerSide(0, 1))
+}
+
+func TestEngiStandingPoints_WinsThenFlags(t *testing.T) {
+	// More wins always beats fewer wins regardless of flags.
+	assert.Greater(t, engiStandingPoints(2, 0), engiStandingPoints(1, 5))
+	// Equal wins: more flags wins.
+	assert.Greater(t, engiStandingPoints(1, 5), engiStandingPoints(1, 3))
+}
+
+// --- Helpers ---------------------------------------------------------------
+
+func createEngiCompetition(t *testing.T, store *state.Store, id, format string, poolSize int) {
+	t.Helper()
+	comp := &state.Competition{
+		ID:           id,
+		Name:         "Engi Test",
+		Kind:         "individual",
+		Format:       format,
+		PoolSize:     poolSize,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+		Engi:         true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// --- Pool match recording --------------------------------------------------
+
+func TestRecordEngiMatchResult_PoolFlagMajority(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-pool"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	first := matches[0]
+
+	res, err := eng.RecordEngiMatchResult(compID, first.ID, 3, 2)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, first.SideA, res.Winner, "3-2 → SideA wins")
+	assert.Equal(t, 3, res.FlagsA)
+	assert.Equal(t, 2, res.FlagsB)
+	assert.Equal(t, state.MatchStatusCompleted, res.Status)
+
+	// Persisted to disk.
+	matches, err = store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if m.ID == first.ID {
+			assert.Equal(t, 3, m.FlagsA)
+			assert.Equal(t, 2, m.FlagsB)
+			assert.Equal(t, first.SideA, m.Winner)
+		}
+	}
+}
+
+func TestRecordEngiMatchResult_InvalidRejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-invalid"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	first := matches[0]
+
+	for _, bad := range [][2]int{{0, 0}, {2, 0}, {1, 1}, {4, 2}, {7, 0}} {
+		_, err := eng.RecordEngiMatchResult(compID, first.ID, bad[0], bad[1])
+		assert.Errorf(t, err, "expected %d-%d to be rejected", bad[0], bad[1])
+	}
+}
+
+// --- Bracket match recording -----------------------------------------------
+
+func TestRecordEngiMatchResult_BracketAdvances(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-bracket"
+
+	comp := &state.Competition{
+		ID: compID, Name: "Engi Knockout", Kind: "individual",
+		Format: state.CompFormatPlayoffs, PoolSize: 3, PoolWinners: 2,
+		Courts: []string{"A"}, StartTime: "09:00", Status: "setup", Engi: true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2)
+
+	// SF0: 3-2 → SideA advances.
+	res, err := eng.RecordEngiMatchResult(compID, sf[0].ID, 3, 2)
+	require.NoError(t, err)
+	assert.Equal(t, sf[0].SideA, res.Winner)
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	// Final's SideA should now be SF0's winner.
+	final := bracket.Rounds[len(bracket.Rounds)-1][0]
+	assert.Equal(t, sf[0].SideA, final.SideA, "flag-decided winner propagated to final")
+	// Flag counts persisted in bracket.json.
+	assert.Equal(t, 3, bracket.Rounds[sfIdx][0].FlagsA)
+	assert.Equal(t, 2, bracket.Rounds[sfIdx][0].FlagsB)
+}
+
+// --- Standings -------------------------------------------------------------
+
+// TestComputeEngiStandings_PoolWinsThenFlags builds a 3-player round-robin and
+// scores it so the ranking is decided first by wins, then by accumulated flags.
+func TestComputeEngiStandings_PoolWinsThenFlags(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-standings"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 3, "3-player round-robin → 3 matches")
+
+	// Score every match. We give Alice both her wins, Bob beats Charlie.
+	// Standings: Alice 2 wins, Bob 1 win, Charlie 0 wins.
+	for _, m := range matches {
+		var fa, fb int
+		// Alice always wins her matches; otherwise the alphabetically-first side wins.
+		switch {
+		case m.SideA == "Alice":
+			fa, fb = 3, 2
+		case m.SideB == "Alice":
+			fa, fb = 2, 3
+		case m.SideA == "Bob":
+			fa, fb = 5, 0
+		default:
+			fa, fb = 0, 5
+		}
+		_, err := eng.RecordEngiMatchResult(compID, m.ID, fa, fb)
+		require.NoError(t, err)
+	}
+
+	standings, err := eng.computeStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, 1)
+	var rows []state.PlayerStanding
+	for _, v := range standings {
+		rows = v
+	}
+	require.Len(t, rows, 3)
+
+	assert.Equal(t, "Alice", rows[0].Player.Name, "2 wins → 1st")
+	assert.Equal(t, 2, rows[0].Wins)
+	assert.Equal(t, "Bob", rows[1].Player.Name, "1 win → 2nd")
+	assert.Equal(t, 1, rows[1].Wins)
+	assert.Equal(t, "Charlie", rows[2].Player.Name, "0 wins → 3rd")
+	assert.Equal(t, 0, rows[2].Wins)
+
+	// Flag accrual: winner AND loser both accumulate own-side flags. Alice won
+	// 3-2 and 2-3-as-SideB → accrued flags from both her bouts.
+	assert.Greater(t, rows[0].Flags, 0, "winner accrues own-side flags")
+	assert.Greater(t, rows[2].Flags, 0, "loser also accrues own-side flags")
+}
+
+// TestComputeEngiStandings_FlagTiebreak verifies that when wins tie, the higher
+// accumulated flag count ranks first.
+func TestComputeEngiStandings_FlagTiebreak(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-flagtie"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	// Use 2 pools is not desired; one league pool of 4.
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	// Make Alice and Bob each win 2 (tie on wins), but Alice wins by larger
+	// margins (more own-side flags) so she ranks above Bob.
+	for _, m := range matches {
+		var fa, fb int
+		win := func(side string) (int, int) {
+			// big margin for Alice, small for Bob
+			if side == "Alice" {
+				return 5, 0
+			}
+			if side == "Bob" {
+				return 3, 2
+			}
+			return 3, 0
+		}
+		switch {
+		case m.SideA == "Alice":
+			fa, fb = win("Alice")
+		case m.SideB == "Alice":
+			fb, fa = win("Alice")
+		case m.SideA == "Bob":
+			fa, fb = win("Bob")
+		case m.SideB == "Bob":
+			fb, fa = win("Bob")
+		default:
+			fa, fb = 3, 0
+		}
+		_, err := eng.RecordEngiMatchResult(compID, m.ID, fa, fb)
+		require.NoError(t, err)
+	}
+
+	standings, err := eng.computeStandings(compID)
+	require.NoError(t, err)
+	var rows []state.PlayerStanding
+	for _, v := range standings {
+		rows = v
+	}
+	require.Len(t, rows, 4)
+	// Find Alice and Bob.
+	var aliceRank, bobRank, aliceFlags, bobFlags int
+	for _, r := range rows {
+		if r.Player.Name == "Alice" {
+			aliceRank, aliceFlags = r.Rank, r.Flags
+		}
+		if r.Player.Name == "Bob" {
+			bobRank, bobFlags = r.Rank, r.Flags
+		}
+	}
+	assert.Greater(t, aliceFlags, bobFlags, "Alice has more own-side flags")
+	assert.Less(t, aliceRank, bobRank, "more flags ranks above on a wins tie")
+}
+
+// --- Regression: kendo path unchanged --------------------------------------
+
+// TestEngiDispatch_DoesNotAffectKendo proves the engi seam is branched-around:
+// a non-engi (kendo) competition's standings are computed via the kendo path
+// and are identical whether or not engi support is compiled in.
+func TestEngiDispatch_DoesNotAffectKendo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kendo-regression"
+
+	createTestCompetition(t, store, compID, state.CompFormatLeague, 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &state.MatchResult{
+			Winner:  m.SideA,
+			IpponsA: []string{"M", "K"},
+			Status:  state.MatchStatusCompleted,
+		}))
+	}
+
+	standings, err := eng.computeStandings(compID)
+	require.NoError(t, err)
+	var rows []state.PlayerStanding
+	for _, v := range standings {
+		rows = v
+	}
+	require.NotEmpty(t, rows)
+	// Kendo standings populate IpponsGiven; engi never touches that field. The
+	// winning side accrued ippons, proving the kendo path ran (not the engi one).
+	total := 0
+	for _, r := range rows {
+		total += r.IpponsGiven
+		assert.Zero(t, r.Flags, "kendo standings must not populate the engi Flags field")
+	}
+	assert.Greater(t, total, 0, "kendo standings still record ippons")
+}
+
+// TestEngi_PairParticipantRoundTrip verifies an engi-pair participant row
+// (member 1, member 2, dojo) round-trips through the store with member 2 stored
+// in the DisplayName column.
+func TestEngi_PairParticipantRoundTrip(t *testing.T) {
+	_, store, _ := setupTestEngine(t)
+	compID := "engi-pair"
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+
+	pair := domain.Player{Name: "Yamada Taro", DisplayName: "Suzuki Hanako", Dojo: "Tokyo Dojo"}
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{pair}))
+
+	// Load with the caller passing false; the engi flag must still force the
+	// 4-column zekken layout so member 2 reads back from DisplayName.
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Yamada Taro", loaded[0].Name, "member 1 → Name")
+	assert.Equal(t, "Suzuki Hanako", loaded[0].DisplayName, "member 2 → DisplayName")
+	assert.Equal(t, "Tokyo Dojo", loaded[0].Dojo, "shared dojo")
+}

@@ -413,6 +413,9 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  // Engi-Kyogi (kata demonstration): flag-count scoring. Standings show
+  // Victories (W) and total Flags columns only.
+  const isEngi = !!(competition && competition.engi);
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format
@@ -495,7 +498,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
             {/* Standings table: rows in draw position order, rank looked up by player key (id or name||dojo) */}
             <table className="pool__table">
               <thead>
-                {isTeam ? (
+                {isEngi ? (
+                  <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
+                ) : isTeam ? (
                   <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
                 ) : (
                   <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
@@ -551,17 +556,26 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       </td>
                       {s ? (
                         <>
-                          <td className="num">{s.wins}</td>
-                          <td className="num">{s.losses}</td>
-                          <td className="num">{s.draws}</td>
-                          {isTeam && <td className="num">{s.individualWins || 0}</td>}
-                          {isTeam && <td className="num">{s.individualLosses || 0}</td>}
-                          {isTeam && <td className="num">{s.individualDraws || 0}</td>}
-                          <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                          <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                          {isEngi ? (
+                            <>
+                              <td className="num">{s.wins}</td>
+                              <td className="num">{s.flags || 0}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="num">{s.wins}</td>
+                              <td className="num">{s.losses}</td>
+                              <td className="num">{s.draws}</td>
+                              {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                              {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                              {isTeam && <td className="num">{s.individualDraws || 0}</td>}
+                              <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                              <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                            </>
+                          )}
                         </>
                       ) : (
-                        Array.from({ length: isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">-</td>)
+                        Array.from({ length: isEngi ? 2 : isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">-</td>)
                       )}
                     </tr>
                   );

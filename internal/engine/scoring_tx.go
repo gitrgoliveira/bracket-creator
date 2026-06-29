@@ -126,6 +126,16 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 			}
 		}
 
+		// Bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, outside
+		// Rounds; resolve it here (twin of recordBracketMatchResult). No
+		// propagation out of bronze.
+		if !found && bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			if err := applyBronzeMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
+				return err
+			}
+			found = true
+		}
+
 		if !found {
 			return notFoundErrorf("bracket match %s not found", matchID)
 		}
@@ -236,6 +246,16 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 // T156.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchID
+
+	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
+	// engi slice through the SAME tx so the write stays inside the caller's
+	// single per-comp lock acquire. Engi has no eligibility concept, so the
+	// status return is nil.
+	if comp, loadErr := tx.LoadCompetition(compID); loadErr == nil && comp != nil && comp.Engi {
+		_, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB)
+		return nil, recErr
+	}
+
 	applyHansokuIppons(result)
 	deriveDaihyosenWinner(result)
 
@@ -253,6 +273,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		poolRescoredName string   // pool this match belongs to (empty = not a pool match)
 		oldTopN          []string // qualifying finisher names BEFORE the write
 		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
+		compIsEngi       bool     // captured so the post-write standings block needn't reload the comp
 	)
 	if prior != nil {
 		// Fail closed at the gate too: if the competition record can't be read
@@ -264,6 +285,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if compErr != nil {
 			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
 		}
+		compIsEngi = comp != nil && comp.Engi
 		if comp != nil && comp.Format == state.CompFormatMixed {
 			// Only actual pool matches ("Pool X-…") can change pool finishers.
 			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i"), whose ID
@@ -275,7 +297,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				// Fail closed: if we can't establish the pre-write finishers we
 				// can't prove the re-score is safe, so abort before writing
 				// anything (nothing is staged yet, so returning aborts cleanly).
-				preStandings, sErr := e.computeStandingsFrom(tx, compID)
+				var preStandings map[string][]state.PlayerStanding
+				var sErr error
+				if compIsEngi {
+					preStandings, sErr = e.computeEngiStandings(tx, compID)
+				} else {
+					preStandings, sErr = e.computeStandingsFrom(tx, compID)
+				}
 				if sErr != nil {
 					return nil, fmt.Errorf("mp-e2k1: pre-write standings for %s pool %q: %w", compID, pn, sErr)
 				}
@@ -327,7 +355,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// Fail closed on any verification-read failure past this point: the
 		// forward write is already staged, so we restore prior before returning
 		// the error, never silently commit a re-score we couldn't prove safe.
-		postStandings, sErr := e.computeStandingsFrom(tx, compID)
+		var postStandings map[string][]state.PlayerStanding
+		var sErr error
+		if compIsEngi {
+			postStandings, sErr = e.computeEngiStandings(tx, compID)
+		} else {
+			postStandings, sErr = e.computeStandingsFrom(tx, compID)
+		}
 		if sErr != nil {
 			e.rollbackMatchResultTx(tx, compID, matchID, prior)
 			return nil, fmt.Errorf("mp-e2k1: post-write standings for %s pool %q: %w", compID, poolRescoredName, sErr)

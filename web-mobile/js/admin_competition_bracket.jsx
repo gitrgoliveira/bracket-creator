@@ -188,8 +188,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // Recenter on the running match whenever it changes (initial bracket
   // load, or one match finishing and the next starting). Empty deps would
   // miss the case where `bracket` is still null on first mount and only
-  // populates via the detail fetch / SSE.
-  const runningMatchId = (bracket?.rounds || []).flatMap(r => r || []).find(m => m && m.status === "running")?.id || null;
+  // populates via the detail fetch / SSE. Also check thirdPlaceMatch.
+  const runningMatchId = (() => {
+    const inRounds = (bracket?.rounds || []).flatMap(r => r || []).find(m => m && m.status === "running");
+    if (inRounds) return inRounds.id;
+    const bronze = bracket?.thirdPlaceMatch;
+    if (bronze && bronze.status === "running") return bronze.id;
+    return null;
+  })();
   useEffectA(() => {
     if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
   }, [runningMatchId]);
@@ -234,6 +240,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         if (m && m.id === selected.matchId) return m;
       }
     }
+    // Also check the bronze/3rd-place match (naginata competitions).
+    const bronze = bracket?.thirdPlaceMatch;
+    if (bronze && bronze.id === selected.matchId) return bronze;
     return null;
   };
   // All bracket scoring now flows through the shared inline ScoreEditorModal →
@@ -296,6 +305,37 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
             />
+            {bracket.thirdPlaceMatch && (() => {
+              const bm = bracket.thirdPlaceMatch;
+              const isReady = hasBothSides(bm);
+              const isHighlighted = selected?.matchId === bm.id;
+              return (
+                <div style={{ marginTop: 16 }}>
+                  <div className="bracket-bronze-label" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--ink-3)", marginBottom: 6, paddingLeft: 4 }}>
+                    3rd Place Match
+                  </div>
+                  <div
+                    className={`bracket-match-card${isHighlighted ? " bracket-match-card--selected" : ""}${!isReady ? " bracket-match-card--pending" : ""}`}
+                    style={{ cursor: isReady ? "pointer" : "default", maxWidth: 280 }}
+                    onClick={() => { if (isReady) select(bm, -1, 0); }}
+                    data-testid="bracket-bronze-match"
+                  >
+                    <div className="bracket-match-card__side">
+                      <span className="bracket-match-card__name">{bm.sideA ? (typeof bm.sideA === "object" ? bm.sideA.name : bm.sideA) : "TBD"}</span>
+                    </div>
+                    <div className="bracket-match-card__vs">vs</div>
+                    <div className="bracket-match-card__side">
+                      <span className="bracket-match-card__name">{bm.sideB ? (typeof bm.sideB === "object" ? bm.sideB.name : bm.sideB) : "TBD"}</span>
+                    </div>
+                    {bm.winner && (
+                      <div className="bracket-match-card__result" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+                        Winner: {typeof bm.winner === "object" ? bm.winner.name : bm.winner}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

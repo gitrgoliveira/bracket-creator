@@ -390,6 +390,19 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 21 {
 			m.RepPlayerB = rec[21]
 		}
+		// Engi flag columns (appended after RepPlayerB), the referee flag counts
+		// per side for an engi (kata demonstration) bout. Absent in files written
+		// before engi support → stay 0. A non-numeric value is treated as 0.
+		if len(rec) > 22 {
+			if v, err := strconv.Atoi(rec[22]); err == nil {
+				m.FlagsA = v
+			}
+		}
+		if len(rec) > 23 {
+			if v, err := strconv.Atoi(rec[23]); err == nil {
+				m.FlagsB = v
+			}
+		}
 
 		results = append(results, m)
 	}
@@ -426,7 +439,7 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 	// the previous os.Create + streaming pattern lacked.
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB"}); err != nil {
+	if err := writer.Write([]string{"PoolName", "MatchIdx", "SideA", "SideB", "Winner", "IpponsA", "IpponsB", "HansokuA", "HansokuB", "Decision", "Status", "Court", "SubResults", "ScheduledAt", "ResultSource", "Round", "SideAID", "SideBID", "WinnerID", "CorrectionReason", "RepPlayerA", "RepPlayerB", "FlagsA", "FlagsB"}); err != nil {
 		return err
 	}
 
@@ -467,6 +480,8 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 			r.CorrectionReason,
 			r.RepPlayerA,
 			r.RepPlayerB,
+			strconv.Itoa(r.FlagsA),
+			strconv.Itoa(r.FlagsB),
 		}); err != nil {
 			return err
 		}

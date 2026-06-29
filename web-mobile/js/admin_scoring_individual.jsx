@@ -31,6 +31,7 @@ import {
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
 
 import { TeamScoreEditorModal } from './admin_scoring_team.jsx';
+import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
   const m = match;
@@ -42,7 +43,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // correctly stay on the individual editor.
   const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
   const teamSize = m.teamSize || 5;
-  if (isTeam) return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
   const seedBPts = m.ipponsB?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? m.score.ippons || [] : []);
@@ -96,6 +96,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Naginata competitions add an extra "S" (Sune) ippon button.
   // Fetched from the competition config alongside maxEnchoPeriods.
   const [isNaginata, setIsNaginata] = useStateA(false);
+  // Engi competitions use flag-count scoring; dispatched to EngiScoreEditorModal.
+  const [isEngi, setIsEngi] = useStateA(false);
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
   // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
@@ -141,6 +143,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (!cancelled) {
         setMaxEnchoPeriods(d?.config?.maxEnchoPeriods || 0);
         setIsNaginata(!!d?.config?.naginata);
+        setIsEngi(!!d?.config?.engi);
       }
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -494,6 +497,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []); // listener registered once; reads fresh state via kbRef
+
+  // Engi competition: delegate to the flag-count editor. This check runs after
+  // all hooks so React's rules-of-hooks are satisfied. isEngi starts false and
+  // flips to true once the async competition-config fetch lands. On the first
+  // render (isEngi still false) this renders the individual editor briefly; the
+  // fetch is fast (same detail endpoint used for isNaginata) so the flash is
+  // imperceptible. The team check is skipped for engi (engi is never a team).
+  if (isEngi) {
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} canClose={canClose} />;
+  }
+  // Team routing: forward to TeamScoreEditorModal.
+  if (isTeam) {
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} variant={variant} canClose={canClose} />;
+  }
 
   // a11y: label the dialog with the match/court context so screen readers
   // announce who is fighting and on which shiaijo when the modal opens.

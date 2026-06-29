@@ -180,6 +180,9 @@ function normalizeMatch(m, playerMap) {
             ippons: aWin ? norm.ipponsA : norm.ipponsB,
         };
     }
+    // Carry engi flag counts through (additive, no kendo code reads these).
+    if (m.flagsA != null) norm.flagsA = m.flagsA;
+    if (m.flagsB != null) norm.flagsB = m.flagsB;
     return norm;
 }
 
@@ -292,13 +295,14 @@ function normalizeCompetitionDetail(data) {
         }));
     }
 
-    // Normalize standings player field
+    // Normalize standings player field (carry flags for engi standings)
     if (result.standings) {
         const standings = {};
         for (const key of Object.keys(result.standings)) {
             standings[key] = result.standings[key].map(s => ({
                 ...s,
                 player: normalizePlayer(s.player),
+                flags: s.flags || 0,
             }));
         }
         result.standings = standings;
@@ -313,6 +317,10 @@ function normalizeCompetitionDetail(data) {
         result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
             round.map(m => normalizeMatch(m, playerMap))
         )};
+    }
+    // Normalize bronze/3rd-place match when present (naginata competitions)
+    if (result.bracket && result.bracket.thirdPlaceMatch) {
+        result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap) };
     }
     return result;
 }

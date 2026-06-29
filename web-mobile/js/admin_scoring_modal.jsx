@@ -9,6 +9,7 @@
 //   admin_scoring_individual.jsx: ScoreEditorModal (individual editor)
 
 import { ScoreEditorModal } from './admin_scoring_individual.jsx';
+import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
 
 import {
   teamResultLabel,
@@ -49,8 +50,10 @@ import {
 } from './admin_scoring_shared.jsx';
 
 window.ScoreEditorModal = ScoreEditorModal;
+window.EngiScoreEditorModal = EngiScoreEditorModal;
 
 export {
+  EngiScoreEditorModal,
   useDebouncedRunningWrite,
   SyncStatusPill,
   AUTOSAVE_DEBOUNCE_MS,

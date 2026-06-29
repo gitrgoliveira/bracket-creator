@@ -3140,6 +3140,14 @@ button.pool-match-row {
   order: 3;
 }
 
+/* 4th place: flat fill, no gradient, no medal icon. Naginata / bronze-match comps only. */
+.podium-step--4 {
+  background: var(--surface);
+  border-color: var(--line);
+  min-height: 90px;
+  order: 4;
+}
+
 .podium-step .place {
   font-size: 28px;
   font-weight: 700;
@@ -4172,6 +4180,147 @@ button.pool-match-row {
   flex-direction: column;
   gap: 12px;
 }
+
+/* === Engi-Kyogi flag-count score editor === */
+.score-editor--engi .engi-sides {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.engi-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.engi-side--winner {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.engi-side__badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.engi-side__badge--shiro {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.engi-side__badge--aka {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.engi-side__names {
+  text-align: center;
+}
+
+/* Pair names must never be clipped: they consist of two member names. */
+.engi-side__name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.engi-side__dojo {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.engi-pips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.engi-pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: transparent;
+  display: inline-block;
+}
+
+.engi-pip--filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.engi-counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.engi-counter__btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 0;
+  border-radius: var(--r);
+}
+
+.engi-counter__value {
+  font-size: 22px;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.engi-divider {
+  align-self: center;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.engi-total {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.engi-total--valid {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.engi-total--invalid {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* === End engi editor === */
 
 .score-editor__bar {
   display: flex;

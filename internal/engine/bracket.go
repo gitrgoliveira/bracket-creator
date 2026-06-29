@@ -254,6 +254,21 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// = Hidden or both-sides-empty in the web bracket).
 	assignBracketMatchNumbers(bracket)
 
+	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
+	// round exists (len(Rounds) >= 2; a 2-player bracket has a single round and
+	// no semifinal, so no bronze). Modelled as a sibling field rather than a row
+	// in Rounds to preserve the power-of-two advancement geometry (see
+	// state.Bracket.ThirdPlaceMatch). Sides start empty and are filled from the
+	// two semifinal losers by propagateBracketWinner. DisplayRound -1 is a
+	// sentinel telling renderers to label this "3rd Place".
+	if comp.Naginata && len(bracket.Rounds) >= 2 {
+		bracket.ThirdPlaceMatch = &state.BracketMatch{
+			ID:           "m-bronze",
+			Status:       state.MatchStatusScheduled,
+			DisplayRound: -1,
+		}
+	}
+
 	return bracket, nil
 }
 

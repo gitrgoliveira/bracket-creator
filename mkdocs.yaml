@@ -87,6 +87,7 @@ nav:
           - create-playoffs: user-guide/commands/create-playoffs.md
           - serve: user-guide/commands/serve.md
           - mobile-app: user-guide/commands/mobile-app.md
+          - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md
           - version: user-guide/commands/version.md
   - Developer guide:

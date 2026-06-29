@@ -14,20 +14,20 @@ export function stopActivePoll(timers = defaultTimers) {
 
 // startDownloadPoll starts a polling loop for the given token. Calling it
 // again with a fresh token cancels the previous loop (interval + timeout)
-// before starting the new one — so duplicate submits never produce two
+// before starting the new one, so duplicate submits never produce two
 // concurrent intervals.
 //
 // Required deps:
 //   fetchStatus(token) -> Promise<{ready: boolean}>
 //
 // Optional deps (default to platform globals):
-//   onReady()                   — called once when fetchStatus reports ready
-//   onError()                   — called once after maxConsecutiveErrors
-//   onTimeout()                 — called once when timeoutMs elapses without ready
+//   onReady()                  , called once when fetchStatus reports ready
+//   onError()                  , called once after maxConsecutiveErrors
+//   onTimeout()                , called once when timeoutMs elapses without ready
 //   intervalMs (default 100)
 //   timeoutMs (default 60000)
 //   maxConsecutiveErrors (default 5)
-//   timers                       — { setInterval, clearInterval, setTimeout, clearTimeout }
+//   timers                      , { setInterval, clearInterval, setTimeout, clearTimeout }
 //                                  (override for tests; defaults to globalThis)
 export function startDownloadPoll(token, deps = {}) {
     const fetchStatus = deps.fetchStatus;
@@ -67,7 +67,7 @@ export function startDownloadPoll(token, deps = {}) {
     }, intervalMs);
 
     const timeout = timers.setTimeout(function () {
-        // Only fire the timeout path if the interval is still active —
+        // Only fire the timeout path if the interval is still active,
         // otherwise we already completed (success or error path).
         if (activePoll !== null && activePoll.interval === interval) {
             stopActivePoll(timers);

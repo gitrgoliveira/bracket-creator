@@ -1,4 +1,4 @@
-# deploy/docker — provider-agnostic baseline
+# deploy/docker: provider-agnostic baseline
 
 This directory is the **reusable core** for every bracket-creator cloud deploy.
 The provider-specific Terraform modules (GCP, Oracle) render this compose +
@@ -28,7 +28,7 @@ Linux machine with Docker installed.
 git clone https://github.com/gitrgoliveira/bracket-creator
 cd bracket-creator/deploy/docker
 
-# 2. Edit Caddyfile — replace "tournament.example.com" with your real domain
+# 2. Edit Caddyfile: replace "tournament.example.com" with your real domain
 nano Caddyfile
 
 # 3. Create the data directory with the correct owner
@@ -45,7 +45,7 @@ $EDITOR app.env   # fill in LOCK_PASSWORD / TOURNAMENT_PASSWORD_HASH
 # 5. Start the stack
 docker compose up -d
 
-# 6. Verify — Caddy will obtain a Let's Encrypt cert automatically (may take
+# 6. Verify: Caddy will obtain a Let's Encrypt cert automatically (may take
 #    a few seconds on first boot).
 curl -s https://tournament.example.com/health
 ```
@@ -60,13 +60,13 @@ sudo chown -R 65534:65534 ./tournament-data
 ```
 
 If you skip this step, the app cannot write to the data directory (a permission
-error) and exits on first write. The app logs a clear diagnostic in this case —
+error) and exits on first write. The app logs a clear diagnostic in this case ,
 check `docker compose logs app` if the container exits immediately.
 
 ## SSE and Caddy buffering
 
 Caddy **streams** responses by default.  The live-score event stream (`/api/
-events` SSE endpoint) requires streaming — do **not** add `flush_interval -1`
+events` SSE endpoint) requires streaming: do **not** add `flush_interval -1`
 or any response-buffering directive to the Caddyfile.  The included Caddyfile
 is correct as-is.
 
@@ -76,7 +76,7 @@ Set `LOCK_PASSWORD=true` and `TOURNAMENT_PASSWORD_HASH=<bcrypt>` in `app.env`
 for public deployments.  Generate the hash:
 
 ```bash
-# The hash MUST be bcrypt — the server validates it with bcrypt and refuses
+# The hash MUST be bcrypt: the server validates it with bcrypt and refuses
 # to start in locked mode otherwise (SHA-512 / MD5 crypt hashes are rejected).
 htpasswd -bnBC 12 "" 'MySecretPassword' | tr -d ':\n'
 ```
@@ -90,7 +90,7 @@ docker compose down -v
 ```
 
 Data in `./tournament-data` is a host bind-mount and is **not** removed by
-`docker compose down` — back it up first if you want to keep tournament state.
+`docker compose down`: back it up first if you want to keep tournament state.
 
 ## Updating the image
 

@@ -38,7 +38,7 @@ For competitions with pool matches, all pool rounds across every shiaijo must co
 
 ## Tournament Timings
 
-The FIK standard match duration is **5 minutes** with **3-minute encho** (FIK Article 6). However, tournaments routinely modify this — for example, the EKC uses 4-minute pools and 5-minute knockout for seniors, with unlimited encho in senior knockout (EKC Rules Section 6.1.5.2, 6.2.5.2). Match duration may differ between phases within a competition — for example, 2 minutes in pools and 3 minutes in playoffs. If the tournament organiser provides these timings, the match schedule can be estimated automatically.
+The FIK standard match duration is **5 minutes** with **3-minute encho** (FIK Article 6). However, tournaments routinely modify this, for example, the EKC uses 4-minute pools and 5-minute knockout for seniors, with unlimited encho in senior knockout (EKC Rules Section 6.1.5.2, 6.2.5.2). Match duration may differ between phases within a competition, for example, 2 minutes in pools and 3 minutes in playoffs. If the tournament organiser provides these timings, the match schedule can be estimated automatically.
 
 ### Schedule Estimation
 
@@ -48,7 +48,7 @@ To estimate total tournament duration:
 
 1. **Pool phase**: (total pool matches across all pools) x (time per match including transitions) + break time.
 2. **Elimination phase**: (number of elimination matches) x (time per match including transitions) + break time. For team elimination, each match contains multiple bouts.
-3. **Parallel courts**: divide the sequential total by the number of courts to get wall-clock time. In practice, courts rarely finish simultaneously — add 10–15% buffer for the slowest court.
+3. **Parallel courts**: divide the sequential total by the number of courts to get wall-clock time. In practice, courts rarely finish simultaneously, add 10–15% buffer for the slowest court.
 4. **Ceremonies and breaks**: add time for the opening ceremony (15–30 minutes), lunch break if applicable, and closing ceremony with awards (20–30 minutes).
 
 The tournament start time (e.g. 9:00 AM) plus the estimated duration gives the projected finish time.
@@ -77,7 +77,7 @@ For team competitions, the **fighting order** (lineup) must be submitted to the 
 
 ## Equipment Inspection (Kensa)
 
-Before competition begins, all competitors must pass equipment inspection at a designated station — usually during or immediately after check-in.
+Before competition begins, all competitors must pass equipment inspection at a designated station, usually during or immediately after check-in.
 
 ### Shinai Specifications (FIK Regulations)
 
@@ -97,7 +97,7 @@ Competitors using **nito** (two-sword style) have different specifications: the 
 - **Dimensional compliance**: length, weight, sakigawa diameter measured with official gauges.
 - **Fittings**: tsuru (string), nakayui (leather binding), and all knots checked for tightness. Sakigawa condition verified.
 - **Bogu**: men-himo, do-himo, and chichikawa inspected for damage. Gi and hakama checked for tears or holes.
-- **Nafuda**: name tags must be affixed to the centre of the tare — dark blue background with white lettering.
+- **Nafuda**: name tags must be affixed to the centre of the tare, dark blue background with white lettering.
 
 Competitors typically present both their primary and backup shinai for sign-off. Equipment that fails inspection must be corrected or replaced before the competitor can participate.
 
@@ -105,22 +105,22 @@ Competitors typically present both their primary and backup shinai for sign-off.
 
 ### Opening Ceremony (Kaikaishiki)
 
-1. **Seiretsu** — all competitors and officials line up in formation.
-2. **Seiza** — everyone kneels.
-3. **Mokuso** — brief silent meditation, ended with "Mokuso yame."
-4. **Shomen ni rei** — bow toward the shomen (place of honour).
-5. **Sensei ni rei** — bow to assembled instructors and honoured guests.
-6. **Otagai ni rei** — mutual bow among all participants.
-7. **Speeches** — welcome address by the tournament director or hosting organisation.
-8. **Kata demonstration** (optional) — some tournaments include a Nippon Kendo Kata demonstration by senior instructors.
-9. **Administrative announcements** — final reminders, team order submission deadlines.
+1. **Seiretsu**, all competitors and officials line up in formation.
+2. **Seiza**, everyone kneels.
+3. **Mokuso**, brief silent meditation, ended with "Mokuso yame."
+4. **Shomen ni rei**, bow toward the shomen (place of honour).
+5. **Sensei ni rei**, bow to assembled instructors and honoured guests.
+6. **Otagai ni rei**, mutual bow among all participants.
+7. **Speeches**, welcome address by the tournament director or hosting organisation.
+8. **Kata demonstration** (optional), some tournaments include a Nippon Kendo Kata demonstration by senior instructors.
+9. **Administrative announcements**, final reminders, team order submission deadlines.
 
 ### Closing Ceremony (Heikaishiki)
 
-1. **Seiretsu** — line up again.
-2. **Results and awards** — presentation of trophies and certificates to winners.
-3. **Closing speech** — brief remarks from the tournament director.
-4. **Mokuso, Shomen ni rei, Sensei ni rei, Otagai ni rei** — same bow sequence as the opening.
+1. **Seiretsu**, line up again.
+2. **Results and awards**, presentation of trophies and certificates to winners.
+3. **Closing speech**, brief remarks from the tournament director.
+4. **Mokuso, Shomen ni rei, Sensei ni rei, Otagai ni rei**, same bow sequence as the opening.
 5. **Dismissal**.
 
 ## Information Needs by Audience
@@ -130,7 +130,7 @@ Competitors typically present both their primary and backup shinai for sign-off.
 
 ### Coaches
 - Need to know when their players or teams are scheduled to fight so they can prepare them.
-- Want to review results of completed matches — both their own participants and others.
+- Want to review results of completed matches, both their own participants and others.
 
 ### Audience
 - Want an at-a-glance overview of all shiaijo: who is currently fighting, where, and the live score.
@@ -147,7 +147,7 @@ Competitors typically present both their primary and backup shinai for sign-off.
 | Head | Men | Top or sides of the head protector |
 | Wrist | Kote | Right wrist (or left wrist when in jodan or nito stance) |
 | Torso | Do | Left or right side of the body protector |
-| Throat | Tsuki | Throat guard (tsuki-dare) — thrust only |
+| Throat | Tsuki | Throat guard (tsuki-dare), thrust only |
 
 ### Referee System
 
@@ -155,9 +155,9 @@ Three referees (shinpan) officiate each match. Each holds a red and a white flag
 
 ### Penalties (Hansoku)
 
-Fouls include stepping out of bounds, dropping the shinai, making illegal contact, or other prohibited acts (FIK Article 17). **Two hansoku result in one ippon awarded to the opponent** (FIK Article 20). Hansoku are **cumulative for the duration of the concerned shiai**, including encho — they do not reset between regulation time and overtime.
+Fouls include stepping out of bounds, dropping the shinai, making illegal contact, or other prohibited acts (FIK Article 17). **Two hansoku result in one ippon awarded to the opponent** (FIK Article 20). Hansoku are **cumulative for the duration of the concerned shiai**, including encho, they do not reset between regulation time and overtime.
 
-Per the FIK *Regulations of Kendo Shiai and Shinpan* (Shinpan Management, p.15, Table 1 — "Recording Matters and Indications"), a hansoku is recorded as a **red upward triangle (▲)** against the offending competitor. **When the second hansoku is committed, the ▲ is deleted** and one ippon is placed on the opponent's side — so the outstanding count is always 0 or 1 and a competitor never displays two triangles. In **sosai** (simultaneous mutual hansoku that cancel out for penalty purposes), the ▲ marks are **left in place**. The running number of hansoku is tracked separately.
+Per the FIK *Regulations of Kendo Shiai and Shinpan* (Shinpan Management, p.15, Table 1, "Recording Matters and Indications"), a hansoku is recorded as a **red upward triangle (▲)** against the offending competitor. **When the second hansoku is committed, the ▲ is deleted** and one ippon is placed on the opponent's side, so the outstanding count is always 0 or 1 and a competitor never displays two triangles. In **sosai** (simultaneous mutual hansoku that cancel out for penalty purposes), the ▲ marks are **left in place**. The running number of hansoku is tracked separately.
 
 ## Match Formats
 
@@ -174,7 +174,7 @@ The first competitor to score one point wins. Used for:
 
 ### Encho (Overtime)
 
-When a knockout match ends in a draw, an **encho** (E) period is played under ippon-shobu rules — the first to score wins. Encho duration is typically 3 minutes but varies by tournament. Some tournaments allow multiple encho periods before moving to hantei.
+When a knockout match ends in a draw, an **encho** (E) period is played under ippon-shobu rules, the first to score wins. Encho duration is typically 3 minutes but varies by tournament. Some tournaments allow multiple encho periods before moving to hantei.
 
 ### Chusen (Drawing Lots)
 
@@ -182,35 +182,35 @@ FIK Article 7-3 also lists **chusen** (drawing lots) as a possible resolution me
 
 ### Hantei (Judges' Decision)
 
-If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei** — upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei — one side must be chosen.
+If a match remains tied after encho (or after multiple encho periods, depending on tournament rules), the three referees make a **hantei**, upon the shushin's call, all three simultaneously raise a flag for the competitor they judge performed better (FIK Article 29-6). The competitor chosen by at least two of the three referees wins. FIK Article 7-5 specifies two criteria in order of precedence: first, **skill** (whether a competitor made datotsu nearly equal to yuko-datotsu), then **attitude** (superiority in posture and movement). There is no draw in hantei, one side must be chosen.
 
-The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters — it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
+The scoreboard marks the hantei winner with **Ht** on their side. **Ht** is **not** an ippon and is not one of the M/K/D/T/H scoring letters, it records that the referees' decision **settled the match**, determining the winner outright. Do not confuse **Ht** (hantei, which decides the match) with **H** (the hansoku ippon described under [Penalties](#penalties-hansoku)).
 
 ## Match Procedure
 
 Each match follows a fixed sequence of etiquette and referee commands. Understanding this flow is essential for court managers and table operators.
 
-1. **Approach** — competitors walk onto the court and stop three large steps from the starting line (kaishi-sen).
-2. **Standing bow (Ritsurei)** — holding the shinai at the side (sageto), both competitors exchange a standing bow.
-3. **Advance to starting line** — three steps forward to the kaishi-sen marks.
-4. **Draw and Sonkyo** — draw the shinai into kamae (guard position) while lowering into sonkyo (a crouching position with shinai tips nearly touching).
-5. **Hajime** — the chief referee calls "Hajime!" to start the match. The timer begins.
+1. **Approach**, competitors walk onto the court and stop three large steps from the starting line (kaishi-sen).
+2. **Standing bow (Ritsurei)**, holding the shinai at the side (sageto), both competitors exchange a standing bow.
+3. **Advance to starting line**, three steps forward to the kaishi-sen marks.
+4. **Draw and Sonkyo**, draw the shinai into kamae (guard position) while lowering into sonkyo (a crouching position with shinai tips nearly touching).
+5. **Hajime**, the chief referee calls "Hajime!" to start the match. The timer begins.
 6. **During the match**:
-   - **Yame** — the chief referee calls "Yame!" to stop play. The timer stops. Competitors return to the starting lines.
-   - **Wakare** — called during close-quarters engagement (tsubazeriai) to separate competitors. The timer does **not** stop.
-   - **Gogi** — the chief referee may call "Yame" then "Gogi" to convene a conference among the three referees.
-7. **Point awarded** — when at least two referees agree on a valid strike, the chief referee announces the target: "Men ari!", "Kote ari!", "Do ari!", or "Tsuki ari!". Competitors return to starting lines.
-8. **Match end** — when a competitor scores 2 points, the chief referee announces "Shobu ari!" (victory decided). If time expires, the referee announces "Jikan" and the side with more ippon wins, or the match is a draw (in pools) or proceeds to encho (in knockout).
-9. **Closing Sonkyo** — competitors return to the starting line, assume sonkyo, sheathe the shinai, and stand.
-10. **Retreat and bow** — step backward, exchange a standing bow, and exit without turning their back to the opponent.
+   - **Yame**, the chief referee calls "Yame!" to stop play. The timer stops. Competitors return to the starting lines.
+   - **Wakare**, called during close-quarters engagement (tsubazeriai) to separate competitors. The timer does **not** stop.
+   - **Gogi**, the chief referee may call "Yame" then "Gogi" to convene a conference among the three referees.
+7. **Point awarded**, when at least two referees agree on a valid strike, the chief referee announces the target: "Men ari!", "Kote ari!", "Do ari!", or "Tsuki ari!". Competitors return to starting lines.
+8. **Match end**, when a competitor scores 2 points, the chief referee announces "Shobu ari!" (victory decided). If time expires, the referee announces "Jikan" and the side with more ippon wins, or the match is a draw (in pools) or proceeds to encho (in knockout).
+9. **Closing Sonkyo**, competitors return to the starting line, assume sonkyo, sheathe the shinai, and stand.
+10. **Retreat and bow**, step backward, exchange a standing bow, and exit without turning their back to the opponent.
 
-**For the table operator**: the timer starts and stops on "Hajime"/"Yame" calls only — not on "Wakare". The operator records each scored point using the ippon letter abbreviations (M, K, D, T, H).
+**For the table operator**: the timer starts and stops on "Hajime"/"Yame" calls only, not on "Wakare". The operator records each scored point using the ippon letter abbreviations (M, K, D, T, H).
 
 ## Withdrawal Mid-Tournament (Kiken)
 
 FIK Articles 30–33 distinguish between **voluntary withdrawal** (kiken) and **inability to continue due to injury**. The scoring is the same but the consequences differ.
 
-### Voluntary Withdrawal (Kiken — FIK Article 31)
+### Voluntary Withdrawal (Kiken, FIK Article 31)
 
 - The withdrawing competitor loses. The opponent is awarded **2–0** (a full win by default, per Article 32).
 - If withdrawal occurs during encho, the opponent receives **1 point** instead.
@@ -235,11 +235,11 @@ Withdrawal rules for team members differ from pre-tournament absences (fusensho)
 
 For non-standard team sizes (3, 7, 10+), the tournament rules will specify which positions may be left vacant. The general principle is that the first and last positions cannot be forfeited.
 
-Team order and players can change between each team match
+Team order and players can change between each team match.
 
 ### Recording
 
-On the scoreboard, a kiken is recorded the same way as fusensho — the opponent receives the default score (2–0 for regulation, 1–0 for encho). The court manager notes the withdrawal for the tournament manager.
+On the scoreboard, a kiken is recorded the same way as fusensho, the opponent receives the default score (2–0 for regulation, 1–0 for encho). The court manager notes the withdrawal for the tournament manager.
 
 ## Competitor Colours (Aka and Shiro)
 
@@ -259,25 +259,25 @@ On scoreboards, score sheets, and in the app, **white (shiro) is always displaye
 
 ## Scoreboard Structure
 
-The scoreboard is what table operators and court managers work from — either on screen (the app or Excel spreadsheet) or on paper. It must capture everything needed to determine match results and feed into pool rankings.
+The scoreboard is what table operators and court managers work from, either on screen (the app or Excel spreadsheet) or on paper. It must capture everything needed to determine match results and feed into pool rankings.
 
 ### Individual Match Scoreboard
 
-Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hansoku point — the ippon awarded by the opponent's second hansoku). A hantei (judges' decision) win is **not** an ippon at all; it is marked **Ht** on the winner's side to record that the referees **decided the match** (see below).
+Each match has a 7-column row (plus an 8th spacer column between courts). The operator enters one ippon letter per scoring strike: **M** (men), **K** (kote), **D** (do), **T** (tsuki), or **H** (hansoku point, the ippon awarded by the opponent's second hansoku). A hantei (judges' decision) win is **not** an ippon at all; it is marked **Ht** on the winner's side to record that the referees **decided the match** (see below).
 
 | White | ▲ | out | in | vs | in | out | ▲ | Red |
 |---|---|---|---|---|---|---|---|---|
 | Tanaka | – | M | K | | | D | – | Suzuki |
 
-Each competitor's marks read **outward-to-inward** — from their own name toward the centre `vs` column — and the two sides mirror across that centre.
+Each competitor's marks read **outward-to-inward**, from their own name toward the centre `vs` column, and the two sides mirror across that centre.
 
-- **Two scoring slots per side** — in sanbon-shobu, filling both means an outright win (2 ippon). The match winner is determined by who has more total ippon. If one side has 1 ippon and the other has 0 at time-up, the side with 1 wins.
-- **Ippon fill order — outside to inside (fixed rule)** — each side's ippons **start at the slot nearest that competitor's name (the outer edge) and fill inward toward the centre `vs`**. White's first ippon lands in its leftmost (name-side) slot and fills rightward; Red's first ippon lands in its rightmost (name-side) slot and fills leftward. Both scores therefore grow from each name toward the middle, mirrored across `vs`. This ordering is fixed and not configurable — it must never fill centre-outward on either side. (In the example above Tanaka has M then K reading inward from the left; Suzuki has D in his outer, name-side slot.)
-- **Hansoku triangle position** — the outstanding-hansoku **▲** is placed **immediately beside the competitor's name, on the inner side of the name** (between the name and that side's ippon slots). It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward.
-- **vs** — centre column, normally blank. **X** marks a hikiwake (draw).
-- **Fouls** — hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Shinpan Management p.15, Table 1; position as above). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1 — a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
-- **Draw** — an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
-- **Hantei** — if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon) — it records the match outcome, not a scored point.
+- **Two scoring slots per side**, in sanbon-shobu, filling both means an outright win (2 ippon). The match winner is determined by who has more total ippon. If one side has 1 ippon and the other has 0 at time-up, the side with 1 wins.
+- **Ippon fill order, outside to inside (fixed rule)**, each side's ippons **start at the slot nearest that competitor's name (the outer edge) and fill inward toward the centre `vs`**. White's first ippon lands in its leftmost (name-side) slot and fills rightward; Red's first ippon lands in its rightmost (name-side) slot and fills leftward. Both scores therefore grow from each name toward the middle, mirrored across `vs`. This ordering is fixed and not configurable, it must never fill centre-outward on either side. (In the example above Tanaka has M then K reading inward from the left; Suzuki has D in his outer, name-side slot.)
+- **Hansoku triangle position**, the outstanding-hansoku **▲** is placed **immediately beside the competitor's name, on the inner side of the name** (between the name and that side's ippon slots). It is never mixed into the ippon slots; it hugs the name so the slots stay free to fill outward-to-inward.
+- **vs**, centre column, normally blank. **X** marks a hikiwake (draw).
+- **Fouls**, hansoku are tracked per side. A single outstanding hansoku displays as the **red upward triangle (▲)** next to the offending competitor's name (FIK Shinpan Management p.15, Table 1; position as above). On the second hansoku the **▲ is deleted** and 1 ippon is awarded to the opponent (recorded as **H** in one of the opponent's slots, filling outside-to-inside like any ippon), so the outstanding count is always 0 or 1, a competitor never shows two triangles. In sosai (simultaneous mutual hansoku) the ▲ marks are left in place.
+- **Draw**, an **X** in the "vs" column, or both sides finishing with equal total ippon, marks a hikiwake. Draws only occur in pool matches.
+- **Hantei**, if a knockout match is decided by judges' decision, an **Ht** mark is placed on the winner's side to show the referees **decided the match**. **Ht** is not an ippon (distinct from **H**, the hansoku ippon), it records the match outcome, not a scored point.
 
 ### Team Match Scoreboard
 
@@ -290,29 +290,29 @@ A team match block has one row per individual bout plus a **summary row**. Each 
 | Bout 2 | 2 | | | | | | 2 |
 | ... | ... | | | | | | ... |
 
-- **Summary row** — shows the aggregated **IV** (Individual Victories) and **PW** (Points Won) for each team. These are computed automatically from the bout rows below.
-- **Bout rows** — the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**. Each bout row follows the same individual-scoreboard conventions: ippons fill **outside-to-inside** (from each name toward the centre) and the outstanding-hansoku **▲** sits **next to the name on its inner side** (see [Individual Match Scoreboard](#individual-match-scoreboard)).
+- **Summary row**, shows the aggregated **IV** (Individual Victories) and **PW** (Points Won) for each team. These are computed automatically from the bout rows below.
+- **Bout rows**, the bout number appears in both name columns. The four inner cells are ippon scoring slots (two per side), and the centre column marks draws with **X**. Each bout row follows the same individual-scoreboard conventions: ippons fill **outside-to-inside** (from each name toward the centre) and the outstanding-hansoku **▲** sits **next to the name on its inner side** (see [Individual Match Scoreboard](#individual-match-scoreboard)).
 - If both IV and PW are equal: in pools it is a **draw**; in knockout, a **daihyosen** (representative match) is recorded as an additional bout row below the regular bouts.
 
 ### Pool Results Table
 
 After all pool matches are played, a results table summarises each competitor's standing. This is what the court manager uses to determine who advances.
 
-**Individual pools** — ranking mirrors the individual pool criteria (W > L > T > PW > PL):
+**Individual pools**, ranking mirrors the individual pool criteria (W > L > T > PW > PL):
 
 | Player | W | L | T | PW | PL | Rank |
 |--------|---|---|---|----|----|------|
 | (name) | wins | losses | ties (hikiwake) | points won | points lost | auto-calculated |
 
-**Team pools** use two tables stacked — ranking uses all columns hierarchically (W > L > T > IV > IL > IT > PW > PL):
+**Team pools** use two tables stacked, ranking uses all columns hierarchically (W > L > T > IV > IL > IT > PW > PL):
 
-*Table 1 — Team-level results:*
+*Table 1, Team-level results:*
 
 | Team | W | L | T | Rank |
 |------|---|---|---|------|
 | (name) | team wins | team losses | team draws | auto-calculated |
 
-*Table 2 — Individual aggregate stats:*
+*Table 2, Individual aggregate stats:*
 
 | Team | IV | IL | IT | PW | PL |
 |------|----|----|----|----|-----|
@@ -320,26 +320,26 @@ After all pool matches are played, a results table summarises each competitor's 
 
 ### Elimination Match Scoreboard
 
-Each individual elimination match is a self-contained block. There are no draws — if tied at time-up, encho is played, and if still tied, hantei decides.
+Each individual elimination match is a self-contained block. There are no draws, if tied at time-up, encho is played, and if still tied, hantei decides.
 
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
-| **Header** | Round N — Match M |||||||
+| **Header** | Round N, Match M |||||||
 | **Colours** | Red | | | vs | | | White |
 | **Scoring** | Pool A-1st | | | | | | Pool B-1st |
 | **1st** | | | | | | 1. | *(winner name)* |
 | **2nd** | | | | | | 2. | *(runner-up name)* |
 
-- **Header row** — merged across all columns, shows round and match number.
-- **Colour labels** — a Red/White header row identifies which side is which.
+- **Header row**, merged across all columns, shows round and match number.
+- **Colour labels**, a Red/White header row identifies which side is which.
 - **Source labels** indicate where each competitor comes from: "Pool A-1st", "Pool B-2nd", or "M 15" (winner of match 15) for later rounds.
-- **Result rows** (1st/2nd) — the operator writes the winner and runner-up names here. The winner cell feeds into subsequent rounds via formulas.
+- **Result rows** (1st/2nd), the operator writes the winner and runner-up names here. The winner cell feeds into subsequent rounds via formulas.
 
 For **team elimination matches**, the block expands with sub-bout rows and a summary section. The team winner is decided by IV first, then PW, then daihyosen if still tied:
 
 | Row | Name (left) | | | vs | | | Name (right) |
 |---|---|---|---|---|---|---|---|
-| **Header** | Round N — Match M |||||||
+| **Header** | Round N, Match M |||||||
 | **Colours** | Red | | | vs | | | White |
 | **Summary** | Pool A-1st | IV | PW | | PW | IV | Pool B-1st |
 | Bout 1 | 1 | | | | | | 1 |
@@ -386,7 +386,7 @@ Each fighter has 3 bouts. The six matches are played in this order:
 | 5 | 1 | 3 |
 | 6 | 2 | 4 |
 
-This ordering ensures that no fighter has consecutive bouts — each competitor rests for at least one bout between their matches.
+This ordering ensures that no fighter has consecutive bouts, each competitor rests for at least one bout between their matches.
 
 ### Larger pools
 
@@ -421,9 +421,9 @@ If a team is missing a player for a position, the opposing fighter at that posit
 
 The result of each individual bout contributes to the team result. A team wins the encounter when it has:
 
-1. **Most individual victories** — the team with more individual bout wins takes the match.
-2. **If victories are equal, most total points scored** — sum of ippon across all bouts.
-3. **If still equal**: in pools it is a **draw**; in knockout, a **daihyosen** (representative match) is fought — one member from each team is chosen to fight ippon-shobu with no time limit.
+1. **Most individual victories**, the team with more individual bout wins takes the match.
+2. **If victories are equal, most total points scored**, sum of ippon across all bouts.
+3. **If still equal**: in pools it is a **draw**; in knockout, a **daihyosen** (representative match) is fought, one member from each team is chosen to fight ippon-shobu with no time limit.
 
 ### How a Team Pool Is Decided
 
@@ -450,7 +450,7 @@ Pools are built using a greedy algorithm with **dojo-conflict avoidance**: each 
 
 ### Seeded Pool Placement
 
-Seeded players are distributed across pools so that no pool contains two top seeds. When multiple courts are in use, seeds are further spread across courts — the top seed in each court's bracket lands on opposite ends, ensuring they can only meet in the court's final round.
+Seeded players are distributed across pools so that no pool contains two top seeds. When multiple courts are in use, seeds are further spread across courts, the top seed in each court's bracket lands on opposite ends, ensuring they can only meet in the court's final round.
 
 ### In Elimination Brackets
 
@@ -460,25 +460,25 @@ Seeds are placed using standard bracket ordering: seed #1 and #2 are placed in o
 
 ### Initial Allocation
 
-Pools are distributed across courts in **contiguous blocks** — for example, 8 pools across 3 courts might assign pools A–C to court 1, D–F to court 2, and G–H to court 3. The first court(s) may get one extra pool if the numbers don't divide evenly.
+Pools are distributed across courts in **contiguous blocks**, for example, 8 pools across 3 courts might assign pools A–C to court 1, D–F to court 2, and G–H to court 3. The first court(s) may get one extra pool if the numbers don't divide evenly.
 
 Each court's elimination bracket is built from the pools assigned to it. When a competition uses multiple courts, each court runs its own mini-bracket from pool winners, and the results feed into a cross-court final bracket.
 
 ### Rebalancing
 
-In practice, courts rarely finish at the same time — one court may have faster matches or fewer draws. The tournament manager can move upcoming matches from a slower court to a faster one to keep the overall schedule on track. This is an operational decision, not automatic — the manager judges when rebalancing is worthwhile versus the disruption of moving competitors and referees.
+In practice, courts rarely finish at the same time, one court may have faster matches or fewer draws. The tournament manager can move upcoming matches from a slower court to a faster one to keep the overall schedule on track. This is an operational decision, not automatic, the manager judges when rebalancing is worthwhile versus the disruption of moving competitors and referees.
 
 ## Byes
 
-When the number of competitors is not a power of 2 (e.g. 13 players in a 16-bracket), some first-round positions are left empty. These are **byes** — the competitor paired against an empty slot advances automatically without fighting.
+When the number of competitors is not a power of 2 (e.g. 13 players in a 16-bracket), some first-round positions are left empty. These are **byes**, the competitor paired against an empty slot advances automatically without fighting.
 
 - Byes are placed so that **seeded players receive them first**, giving top seeds the advantage of skipping the first round.
 - In pools-to-playoffs formats, the bracket is sized to the next power of 2 above the number of qualifiers. First-place pool finishers are positioned to receive byes ahead of second-place finishers.
-- A match where both sides are empty (double bye) is simply marked as completed with no winner — this can happen in sparsely populated brackets.
+- A match where both sides are empty (double bye) is simply marked as completed with no winner, this can happen in sparsely populated brackets.
 
 ## Awards
 
-Kendo tournaments typically award **four places**: 1st, 2nd, and two 3rd places. In most FIK and national championship events there is **no bronze medal match** — both semi-final losers receive 3rd place equally. Some regional or local tournaments do hold a 3rd-place match, but this is less common.
+Kendo tournaments typically award **four places**: 1st, 2nd, and two 3rd places. In most FIK and national championship events there is **no bronze medal match**, both semi-final losers receive 3rd place equally. Some regional or local tournaments do hold a 3rd-place match, but this is less common.
 
 Awards are presented during the closing ceremony. Common forms include trophies, medals, certificates, and sometimes shinai or other kendo equipment as prizes.
 
@@ -486,7 +486,7 @@ Awards are presented during the closing ceremony. Common forms include trophies,
 
 Most national federations require **first-aid personnel on site** for the duration of the tournament. A designated first-aid station should be clearly marked and accessible from all courts.
 
-When a referee stops a match for injury (calling "Yame" and signalling to the medical team), the timer stops. The injured competitor is assessed on or near the court. If they can continue, the match resumes. If they cannot, the match is decided as a kiken (withdrawal) — the opponent receives the default score.
+When a referee stops a match for injury (calling "Yame" and signalling to the medical team), the timer stops. The injured competitor is assessed on or near the court. If they can continue, the match resumes. If they cannot, the match is decided as a kiken (withdrawal), the opponent receives the default score.
 
 An injury that causes bleeding must be treated before the competitor can return to the court. Competitors with open wounds that cannot be adequately covered are not permitted to continue.
 
@@ -498,13 +498,13 @@ Each shiaijo requires **3 active referees** (shinpan) at all times: 1 Shushin (c
 
 ### Rotation
 
-- After a set of matches (typically every 3 individual matches, or after each team match), referees rotate positions — each moves one position to their right.
+- After a set of matches (typically every 3 individual matches, or after each team match), referees rotate positions, each moves one position to their right.
 - The Shushin role changes after every few matches so all referees cycle through.
 - A replacement referee enters from the side of the court nearest to the one being replaced, without crossing the court.
 
 ### Management
 
-The **Shinpan-cho** (chief referee coordinator) allocates referee groups to courts, balancing skill levels. For a tournament with 8 courts, this means at least 32 referees. The Shinpan-cho also manages rest breaks — tournament days can run 10+ hours, so explicit rest rotations are essential to maintain decision quality.
+The **Shinpan-cho** (chief referee coordinator) allocates referee groups to courts, balancing skill levels. For a tournament with 8 courts, this means at least 32 referees. The Shinpan-cho also manages rest breaks, tournament days can run 10+ hours, so explicit rest rotations are essential to maintain decision quality.
 
 ## Competition Formats
 
@@ -512,20 +512,20 @@ The **Shinpan-cho** (chief referee coordinator) allocates referee groups to cour
 
 The most common format for larger competitions. Competitors are divided into pools of 3–5 players (sometimes with 8 players each) and play round-robin within their pool. After all pool matches complete, the top-ranked from each pool advance to a single-elimination knockout bracket. Pool matches typically use shorter match times (e.g. 3–4 minutes) while knockout matches use longer times (e.g. 4–5 minutes).
 
-In tournaments with large pools, a **partial round-robin** may be used instead of a full one — each competitor or team only fights their adjacent neighbours in the pool list (e.g. position 1 vs 2, 2 vs 3, 3 vs 4, etc.) rather than every possible pairing. This significantly reduces the number of matches while still producing enough data for ranking. The same pool ranking criteria apply.
+In tournaments with large pools, a **partial round-robin** may be used instead of a full one, each competitor or team only fights their adjacent neighbours in the pool list (e.g. position 1 vs 2, 2 vs 3, 3 vs 4, etc.) rather than every possible pairing. This significantly reduces the number of matches while still producing enough data for ranking. The same pool ranking criteria apply.
 
 ### Playoffs Only (Direct Elimination)
 
-A single-elimination bracket from the start, with no pool stage. Often used when time is limited or the number of entries is small. Seeding may be applied to separate strong competitors in the draw. Every match has a decisive result — draws go to encho/hantei.
+A single-elimination bracket from the start, with no pool stage. Often used when time is limited or the number of entries is small. Seeding may be applied to separate strong competitors in the draw. Every match has a decisive result, draws go to encho/hantei.
 
 ### Kachinuki (Winner-Stays-On)
 
-A team format where the winning fighter stays on to face the next opponent from the other team (FIK Article 8-2). Team fighting order is fixed and cannot change. The team that defeats the last member of the opposing team wins. In common tournament practice, if a bout ends in hikiwake, **both fighters retire** and the next pair enters — though this convention is not explicitly stated in the FIK regulations and should be confirmed in the specific tournament rules. This format rewards endurance and consistency, as a single strong fighter can defeat multiple opponents in succession.
+A team format where the winning fighter stays on to face the next opponent from the other team (FIK Article 8-2). Team fighting order is fixed and cannot change. The team that defeats the last member of the opposing team wins. In common tournament practice, if a bout ends in hikiwake, **both fighters retire** and the next pair enters, though this convention is not explicitly stated in the FIK regulations and should be confirmed in the specific tournament rules. This format rewards endurance and consistency, as a single strong fighter can defeat multiple opponents in succession.
 Teams can have 10 or more players.
 
 ### League (Full Round-Robin)
 
-All competitors play every other competitor (or all teams play every other team). There is no knockout stage — final standings are determined entirely from cumulative results using the same ranking criteria as pools (wins, losses, hikiwake, points scored/conceded for individuals; W/L/T/IV/IL/IT/PW/PL for teams). This format gives every participant the maximum number of matches and produces the most statistically fair ranking, but requires significantly more time and courts. Typically used for smaller fields or regional leagues that run across multiple sessions.
+All competitors play every other competitor (or all teams play every other team). There is no knockout stage, final standings are determined entirely from cumulative results using the same ranking criteria as pools (wins, losses, hikiwake, points scored/conceded for individuals; W/L/T/IV/IL/IT/PW/PL for teams). This format gives every participant the maximum number of matches and produces the most statistically fair ranking, but requires significantly more time and courts. Typically used for smaller fields or regional leagues that run across multiple sessions.
 
 ### Swiss System
 
@@ -537,6 +537,6 @@ Tournaments with a live video stream need to overlay player names and the curren
 
 ## References
 
-- [FIK Regulations of Kendo Shiai and Shinpan (Revised July 2023)](http://www.kendo-fik.org/wp-content/uploads/2025/04/Regulations-of-Kendo-Shiai-and-Shinpan-EN_Jul2023.pdf) — the core rulebook governing kendo matches and refereeing worldwide.
-- [33rd European Kendo Championships 2025 — Rules & Regulations](https://www.ekf-eu.com/documents/33EKC%202025%20RULES%20Final.pdf) — the most recent EKC competition rules, including shinai specifications, team formats, pool/knockout procedures, and tournament-specific variations from the FIK standard.
-- [FIK Revision of Regulations (July 2025)](https://www.kendo-fik.org/news/8489) — revision of the FIK Handbook for Kendo Shiai and Shinpan Management, incorporating the COVID-era provisional rules permanently.
+- [FIK Regulations of Kendo Shiai and Shinpan (Revised July 2023)](http://www.kendo-fik.org/wp-content/uploads/2025/04/Regulations-of-Kendo-Shiai-and-Shinpan-EN_Jul2023.pdf), the core rulebook governing kendo matches and refereeing worldwide.
+- [33rd European Kendo Championships 2025, Rules & Regulations](https://www.ekf-eu.com/documents/33EKC%202025%20RULES%20Final.pdf), the most recent EKC competition rules, including shinai specifications, team formats, pool/knockout procedures, and tournament-specific variations from the FIK standard.
+- [FIK Revision of Regulations (July 2025)](https://www.kendo-fik.org/news/8489), revision of the FIK Handbook for Kendo Shiai and Shinpan Management, incorporating the COVID-era provisional rules permanently.

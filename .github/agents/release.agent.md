@@ -58,7 +58,7 @@ Commits are categorized by conventional commit prefixes:
 
 ## Constraints
 - DO NOT create a tag or push without explicit user confirmation of the version number
-- DO NOT skip `make go/test` — tests must pass before tagging
+- DO NOT skip `make go/test`: tests must pass before tagging
 - DO NOT use `--force` on git push or tag operations
 - DO NOT modify `.goreleaser.yaml` or workflow files unless explicitly asked
 - ONLY use semver format: `vMAJOR.MINOR.PATCH` (e.g., `v1.5.0`)
@@ -127,7 +127,7 @@ If MCP GitHub tools are unavailable:
 - **Major** (`v2.0.0`): Breaking changes to CLI flags, file format, or API
 
 ## Key Files
-- `.goreleaser.yaml` — Build matrix and changelog config
-- `.github/workflows/release.yaml` — CI trigger on tag push
-- `.github/workflows/docker-release.yaml` — Docker image push on release
-- `Makefile` — `make release VERSION=x.y.z`, `make goreleaser/test`
+- `.goreleaser.yaml`: Build matrix and changelog config
+- `.github/workflows/release.yaml`: CI trigger on tag push
+- `.github/workflows/docker-release.yaml`: Docker image push on release
+- `Makefile`: `make release VERSION=x.y.z`, `make goreleaser/test`

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>AKA vs SHIRO · Red / White Distinction System — Bracket Creator</title>
+<title>AKA vs SHIRO · Red / White Distinction System, Bracket Creator</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
@@ -18,11 +18,11 @@
    SHIRO = a true-white block held by a dark cool frame + 45°
            "menjō" hatch, so white never dissolves into the page.
    Reinforced by fixed position (SHIRO left, AKA right) and a
-   romaji label — colour is never the only signal.  (No kanji.)
+   romaji label, colour is never the only signal.  (No kanji.)
    ============================================================ */
 
 :root {
-  /* —— App tokens (carried over from styles.css) —— */
+  /*,, App tokens (carried over from styles.css),, */
   --ink:    #1a1d24;
   --ink-1:  #111827;
   --ink-2:  #3a414e;
@@ -31,7 +31,7 @@
   --bg:     #f7f8fa;
   --surface:#ffffff;
 
-  /* —— THE TWO SIDES —— the heart of the system —— */
+  /*,, THE TWO SIDES,, the heart of the system,, */
   /* AKA (red) */
   --aka:        #cc1122;   /* the red */
   --aka-deep:   #8d0d17;   /* spine / pressed / borders */
@@ -47,7 +47,7 @@
   --shiro-soft: #c2ccde;   /* secondary cool hairline */
   --shiro-wash: #f4f7fc;   /* faint cool surface tint */
 
-  /* —— Scoreboard backdrop (tatami night) —— */
+  /*,, Scoreboard backdrop (tatami night),, */
   --tatami:   #14181f;
   --tatami-2: #1d2530;
 
@@ -80,7 +80,7 @@ body::before {
    1 · THE TWO PRIMITIVES
    ============================================================ */
 
-/* —— SIDE CHIP — the universal "which side" pill —— */
+/*,, SIDE CHIP, the universal "which side" pill,, */
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
   font: 800 11px/1 var(--sans);
@@ -104,7 +104,7 @@ body::before {
   border: 1.5px solid var(--shiro-edge);
 }
 
-/* —— MICRO SQUARE — for the tightest rows (schedule, bracket) —— */
+/*,, MICRO SQUARE, for the tightest rows (schedule, bracket),, */
 .sq{ width:24px;height:24px;border-radius:6px;display:grid;place-items:center;
   font:800 13px/1 var(--sans); flex:none; }
 .sq--aka{ background:var(--aka); color:#fff; }
@@ -112,7 +112,7 @@ body::before {
   border:1.5px solid var(--shiro-edge);
   background-image: repeating-linear-gradient(-45deg,transparent 0 4px,rgba(42,51,70,.12) 4px 5px); }
 
-/* —— SIDE PANEL — the universal competitor block —— */
+/*,, SIDE PANEL, the universal competitor block,, */
 .panel {
   position: relative;
   border-radius: var(--r);
@@ -120,7 +120,7 @@ body::before {
   overflow: hidden;
   isolation: isolate;
 }
-/* the SPINE — a thick edge bar that screams the colour */
+/* the SPINE, a thick edge bar that screams the colour */
 .panel::before {
   content: ""; position: absolute; top: 0; bottom: 0; width: 7px; z-index: 2;
 }
@@ -187,7 +187,7 @@ body::before {
 @media (max-width: 720px){ .grid2 { grid-template-columns: 1fr; } }
 
 /* ============================================================
-   3 · LIVE SCOREBOARD  (display.jsx — TV / audience)
+   3 · LIVE SCOREBOARD  (display.jsx, TV / audience)
    ============================================================ */
 .board {
   position: relative; border-radius: var(--r-lg); overflow: hidden;
@@ -213,13 +213,13 @@ body::before {
 .bside { position: relative; padding: 40px 34px 44px; min-height: 240px;
   display:flex; flex-direction:column; justify-content:space-between; }
 
-/* SHIRO half — left. Cool frame + hatch so "white" reads as deliberate. */
+/* SHIRO half, left. Cool frame + hatch so "white" reads as deliberate. */
 .bside--shiro { background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.02)); }
 .bside--shiro::after { content:""; position:absolute; inset:0; pointer-events:none;
   background: repeating-linear-gradient(-45deg, transparent 0 9px, rgba(255,255,255,.05) 9px 10px); }
 .bside--shiro .bside__bar { background:#fff; }
 
-/* AKA half — right. Saturated red flood + glow. */
+/* AKA half, right. Saturated red flood + glow. */
 .bside--aka { background: linear-gradient(180deg, rgba(204,17,34,.34), rgba(204,17,34,.14)), var(--tatami); }
 .bside--aka::after { content:""; position:absolute; inset:0; pointer-events:none;
   background: radial-gradient(80% 60% at 80% 0%, rgba(255,59,59,.25), transparent 60%); }
@@ -251,7 +251,7 @@ body::before {
 .board__vs { font: 400 22px/1 var(--impact); letter-spacing:.06em; color: rgba(255,255,255,.4); writing-mode: vertical-rl; padding: 12px 0; }
 
 /* ============================================================
-   4 · ADMIN SCORE EDITOR — tap mode
+   4 · ADMIN SCORE EDITOR, tap mode
    ============================================================ */
 .tap { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .tapbtn { position:relative; border-radius: var(--r); overflow:hidden;
@@ -259,7 +259,7 @@ body::before {
   cursor:pointer; text-align:left; transition: .15s ease; }
 .tapbtn:hover { transform: translateY(-2px); }
 
-/* always-on coloured identity header — the obvious cue, present
+/* always-on coloured identity header, the obvious cue, present
    before any winner is chosen so the two sides never look alike */
 .tapbtn__id { display:flex; align-items:center; gap:9px;
   padding:12px 15px; font:400 19px/1 var(--impact); letter-spacing:.08em; }
@@ -319,7 +319,7 @@ body::before {
    ============================================================ */
 .pool { display:grid; grid-template-columns:1fr auto 1fr; align-items:stretch; gap:10px;
   padding:10px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
-/* each side is a tinted cell — the colour now fills the row, not a dot */
+/* each side is a tinted cell, the colour now fills the row, not a dot */
 .pool__side{ display:flex; align-items:center; gap:9px; padding:9px 12px; border-radius:9px; }
 .pool__side--shiro{ justify-content:flex-end; text-align:right;
   background:#fff; border:1px solid var(--shiro-soft);
@@ -378,8 +378,8 @@ body::before {
     <span class="a">AKA</span><span class="vs">VS</span><span class="s">SHIRO</span>
   </h1>
   <p class="masthead__lede">
-    One unmistakable language for telling <strong style="color:var(--aka)">AKA — the red side</strong>
-    from <strong>SHIRO — the white side</strong>, on every screen, card and row.
+    One unmistakable language for telling <strong style="color:var(--aka)">AKA, the red side</strong>
+    from <strong>SHIRO, the white side</strong>, on every screen, card and row.
     Differentiated by <em>treatment</em>, not just colour, so it survives glare,
     projectors, colour-blindness and tiny phone rows alike.
   </p>
@@ -390,11 +390,11 @@ body::before {
   <!-- ===================== LEGEND ===================== -->
   <section class="section reveal" style="animation-delay:.05s">
     <div class="section__head">
-      <span class="section__num">00 — THE KEY</span>
+      <span class="section__num">00, THE KEY</span>
       <h2 class="section__title">Two sides, two treatments</h2>
       <p class="section__desc">
         Position is fixed across the whole app: <b>SHIRO is always on the LEFT,
-        AKA is always on the RIGHT.</b> Colour alone is never the only signal — each
+        AKA is always on the RIGHT.</b> Colour alone is never the only signal, each
         side also carries its label, its position, and a distinct surface treatment.
       </p>
     </div>
@@ -413,7 +413,7 @@ body::before {
         <div>
           <div class="legend__h">AKA · Red</div>
           <div class="legend__p">Solid saturated red flood with a brighter live glow.
-            The dominant, eye-first colour — reserved exclusively for the red side.</div>
+            The dominant, eye-first colour, reserved exclusively for the red side.</div>
           <div class="legend__rule">📍 <b>Right</b> side · solid red · live glow</div>
         </div>
       </div>
@@ -423,7 +423,7 @@ body::before {
   <!-- ===================== 1. LIVE SCOREBOARD ===================== -->
   <section class="section reveal" style="animation-delay:.1s">
     <div class="section__head">
-      <span class="section__num">01 — display.jsx</span>
+      <span class="section__num">01, display.jsx</span>
       <h2 class="section__title">Live scoreboard (TV / audience)</h2>
       <p class="section__desc">The whole half of the screen is colour-coded. White half is
         framed + hatched; red half floods with a glow. Readable from the back of a sports hall.</p>
@@ -466,13 +466,13 @@ body::before {
   <!-- ===================== 2. SCORE EDITOR ===================== -->
   <section class="section reveal" style="animation-delay:.12s">
     <div class="section__head">
-      <span class="section__num">02 — admin_competition.jsx</span>
+      <span class="section__num">02, admin_competition.jsx</span>
       <h2 class="section__title">Admin score editor</h2>
       <p class="section__desc">Tap-to-win + ippon dots. The selected winner floods with its
-        own colour so the operator can confirm at a glance — even one-handed, mid-court.</p>
+        own colour so the operator can confirm at a glance, even one-handed, mid-court.</p>
     </div>
     <div class="demo">
-      <div class="demo__label">Tap mode — Shiro selected as winner</div>
+      <div class="demo__label">Tap mode, Shiro selected as winner</div>
       <div class="tap">
         <button class="tapbtn tapbtn--shiro is-on">
           <span class="tapbtn__win">★ WINNER</span>
@@ -505,14 +505,14 @@ body::before {
   <!-- ===================== 3+4. BRACKET + POOL ===================== -->
   <section class="section reveal" style="animation-delay:.14s">
     <div class="section__head">
-      <span class="section__num">03 / 04 — bracket.jsx · viewer.jsx</span>
+      <span class="section__num">03 / 04, bracket.jsx · viewer.jsx</span>
       <h2 class="section__title">Bracket card &amp; pool match row</h2>
       <p class="section__desc">Compact contexts use the coloured spine: solid red bar vs hatched
         white bar on the inner edge, plus the square badge.</p>
     </div>
     <div class="grid2">
       <div class="demo">
-        <div class="demo__label">Bracket match — Aka advances</div>
+        <div class="demo__label">Bracket match, Aka advances</div>
         <div class="bracket">
           <div class="bx">
             <div class="bx__row bx__row--shiro">
@@ -529,7 +529,7 @@ body::before {
         </div>
       </div>
       <div class="demo">
-        <div class="demo__label">Pool match row — Shiro left, Aka right</div>
+        <div class="demo__label">Pool match row, Shiro left, Aka right</div>
         <div class="pool">
           <div class="pool__side pool__side--shiro">
             <span class="pool__nm">Tanaka H.</span>
@@ -552,10 +552,10 @@ body::before {
   <!-- ===================== 5. SCHEDULE LIST ===================== -->
   <section class="section reveal" style="animation-delay:.16s">
     <div class="section__head">
-      <span class="section__num">05 — admin_schedule.jsx</span>
+      <span class="section__num">05, admin_schedule.jsx</span>
       <h2 class="section__title">Schedule list (tight rows)</h2>
       <p class="section__desc">At the smallest size the square badge still resolves red vs white
-        instantly — S framed, A filled. Order is fixed: white then red.</p>
+        instantly, S framed, A filled. Order is fixed: white then red.</p>
     </div>
     <div class="demo">
       <div class="sched">
@@ -593,7 +593,7 @@ body::before {
   <!-- ===================== 6. MATCH DETAIL PANELS ===================== -->
   <section class="section reveal" style="animation-delay:.18s">
     <div class="section__head">
-      <span class="section__num">06 — viewer.jsx</span>
+      <span class="section__num">06, viewer.jsx</span>
       <h2 class="section__title">Match detail panels</h2>
       <p class="section__desc">Full competitor blocks share the spine + chip system: wash-tinted
         surface, coloured edge, side chip. Same DNA as every other surface.</p>

@@ -7,7 +7,7 @@ before:
     - go generate ./...
     - mkdir -p web-mobile/dist
     # Mirror Makefile's esbuild-jsx target so release builds bundle every
-    # web-mobile/js/*.jsx entry — not just the four legacy names. The
+    # web-mobile/js/*.jsx entry, not just the four legacy names. The
     # previous explicit list went stale as sources moved from .js to .jsx
     # and per-screen modules (glossary.jsx, reset.jsx, admin_*.jsx) were
     # added; release artifacts would 404 on /dist/reset.js (and others)

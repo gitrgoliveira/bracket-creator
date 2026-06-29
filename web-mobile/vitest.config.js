@@ -7,20 +7,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Two vitest projects run under `vitest run` / `npm test`:
 //
-//  unit   — pure-logic suite with the fake React global stub (~1572 tests).
+//  unit  , pure-logic suite with the fake React global stub (~1572 tests).
 //           Fast: components are never mounted; logic helpers are called directly.
-//  render — render-smoke suite with REAL React 18 + jsdom. Components are
+//  render, render-smoke suite with REAL React 18 + jsdom. Components are
 //           mounted via @testing-library/react so a missing window.* reference
 //           throws a ReferenceError that the unit suite cannot see.
 //
 // JSX transformation: @vitejs/plugin-react handles `.jsx` files with the
 // classic React.createElement runtime so the global `React` (stub or real,
 // depending on the project) is what the compiled output calls. We intentionally
-// do NOT also set an `esbuild` block here — vitest 4 uses oxc for transforms
+// do NOT also set an `esbuild` block here, vitest 4 uses oxc for transforms
 // and warns "Both esbuild and oxc options were set. oxc options will be used
 // and esbuild options will be ignored." if both are present.
 
-// Use a factory so each project gets its own plugin instance — sharing a
+// Use a factory so each project gets its own plugin instance, sharing a
 // single instance across projects can cause cross-project state leakage in
 // plugins that cache state per build (e.g. configResolved caches).
 const makePlugins = () => [react({ include: /\.(js|jsx)$/, jsxRuntime: 'classic' })];
@@ -59,7 +59,7 @@ export default defineConfig({
           name: 'render',
           environment: 'jsdom',
           globals: true,
-          // Real React 18 — deliberately does NOT include vitest.setup.js
+          // Real React 18, deliberately does NOT include vitest.setup.js
           // (the fake-React stub). Function bodies execute; missing window.*
           // references throw ReferenceErrors.
           setupFiles: ['./vitest.setup.render.js'],

@@ -5,7 +5,7 @@ High-signal instructions for AI agents working in this repository.
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
-**`.specify/memory/constitution.md`** — defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
+**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
 
 ## Core Technical Context
 - **Domain Logic:** Primarily in `internal/helper/`. A new `internal/domain/` package is being introduced to decouple logic from Excel formatting; use it for new pure-domain models but check `helper` for existing Excel-linked logic.
@@ -43,7 +43,7 @@ Before implementing features or making architectural decisions, read the project
 - **Team Matches:** `team-matches=0` is the default for individual tournaments.
 - **Shiaijo (Courts):** `--courts` defaults to 2. It controls both pool distribution and tree labeling.
 - **Dojo Conflicts:** The `Dojo` field in CSVs is used *only* for pool randomization to avoid early teammate matches; it's not used in playoffs-only mode.
-- **Workbook construction:** All sheets/styles are emitted by `internal/excel/template.go` and `internal/helper/excel_styles.go`. To change global appearance, edit these — there is no template binary.
+- **Workbook construction:** All sheets/styles are emitted by `internal/excel/template.go` and `internal/helper/excel_styles.go`. To change global appearance, edit these: there is no template binary.
 - **Duplicates:** Participant CSVs are checked for duplicate names; both CLI and Web UI return an error before generating output.
 
 ## Useful Commands
@@ -52,7 +52,7 @@ Before implementing features or making architectural decisions, read the project
 - **Single test:** `go test -v -run <TestName> ./internal/helper/...`
 - **Generate examples:** `make examples`
 - **Mobile app (local):** `make run-mobile` (default data dir `./tournament-data`, port 8080)
-- **Mobile app (custom port/dir):** `PORT=8082 TOURNAMENT_DATA_DIR=/path make run-mobile` — env vars (`PORT`, `BIND_ADDRESS`, `TOURNAMENT_DATA_DIR`) are also honored when invoking the binary directly without `make`. Explicit flags (`--port`, `--bind`, `--folder`) win over the env vars.
+- **Mobile app (custom port/dir):** `PORT=8082 TOURNAMENT_DATA_DIR=/path make run-mobile`: env vars (`PORT`, `BIND_ADDRESS`, `TOURNAMENT_DATA_DIR`) are also honored when invoking the binary directly without `make`. Explicit flags (`--port`, `--bind`, `--folder`) win over the env vars.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
 ## Beads Issue Tracker
@@ -70,9 +70,9 @@ bd close <id>         # Complete work if the PR is merged
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Use `bd` for ALL task tracking: do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `bd remember` for persistent knowledge: do NOT use MEMORY.md files
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 

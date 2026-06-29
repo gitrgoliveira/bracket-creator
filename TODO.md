@@ -20,7 +20,7 @@
 ******
 * Participants that do not check-in, are not part of the draw, when the competition starts (Start competition button).
 
-* [DONE — mp-j39] you can't seed the reserved slots. We'll enter those manually. Remove the "reserved slots" feature.
+* [DONE: mp-j39] you can't seed the reserved slots. We'll enter those manually. Remove the "reserved slots" feature.
 
 
 

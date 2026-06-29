@@ -35,7 +35,7 @@ square_prep/*
 # !square_prep/lc2026/*
 # Universal and Go added by speckit
 vendor/
-# Go embed placeholders — these files ensure web-mobile/dist and
+# Go embed placeholders, these files ensure web-mobile/dist and
 # web-mobile/vendor exist on clean checkouts so the embed directive compiles.
 !web-mobile/dist/
 web-mobile/dist/*
@@ -96,7 +96,7 @@ bracket-creator-*
 bracket-creator-*/*
 mp-*/
 
-# Session/process state (Claude Code) — never commit
+# Session/process state (Claude Code), never commit
 .claude/scheduled_tasks.lock
 .claude/*.lock
 .impeccable/
@@ -105,7 +105,7 @@ mp-*/
 **/.terraform/
 **/.terraform.lock.hcl
 
-# Terraform state and variable files — may contain secrets (e.g. password
+# Terraform state and variable files, may contain secrets (e.g. password
 # hashes) in plaintext; never commit them.
 **/*.tfstate
 **/*.tfstate.*

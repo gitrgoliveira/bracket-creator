@@ -1,4 +1,4 @@
-# 005 — Per-match team lineups
+# 005 : Per-match team lineups
 
 **Bead:** mp-825
 **Status:** Backend slice (Phases 0–4). UI (Phase 5) and viewer overlay (Phase 6) tracked as follow-ups.
@@ -15,23 +15,23 @@ Consequences for a pool of N teams (each team plays N−1 encounters in one "rou
 - A team has a single round-0 lineup.
 - When that team's **first** pool match goes live, `LockTeamLineupsForRound(comp, 0)`
   freezes it.
-- The lineup is then frozen for pool matches 2..N — the operator **cannot** field a
+- The lineup is then frozen for pool matches 2..N : the operator **cannot** field a
   different order/roster for later encounters.
 
 This contradicts FIK practice: a team may change its order and players between each
 team encounter.
 
-> Note: bracket/elimination is already correct — a team appears in exactly one match
+> Note: bracket/elimination is already correct : a team appears in exactly one match
 > per `Rounds[N]`, so `(teamID, round)` is already 1:1 with the match there. The defect
 > is **pool-specific**.
 
-## Approach — additive `MatchID` key (not a full re-key)
+## Approach : additive `MatchID` key (not a full re-key)
 
 Add an optional `MatchID string` to `TeamLineup`.
 
 - Store key resolves to a **match-scoped** key when `MatchID != ""`, else the existing
   **round-scoped** key. The two namespaces never collide (match keys are prefixed).
-- Bracket and legacy round-only data load unchanged — **no on-disk migration**. A
+- Bracket and legacy round-only data load unchanged : **no on-disk migration**. A
   round-only lineup remains valid and is the fallback when no per-match entry exists.
 - Per-match entries lock independently: locking pool match 1 does **not** freeze the
   (still-unstarted) lineup for pool match 2.
@@ -52,13 +52,13 @@ Add an optional `MatchID string` to `TeamLineup`.
 4. **FIK 5-person rule.** `Validate(teamSize)` is unchanged and runs per set, regardless
    of keying.
 5. **Engine advancement.** `MaybeAdvanceKachinuki` does **not** read lineups (it works
-   off a roster snapshot) — untouched. The only lineup consumer in the engine is the
+   off a roster snapshot) : untouched. The only lineup consumer in the engine is the
    XLSX exporter (`kachinuki_export.go`), which now prefers a match-scoped lineup when
    present.
 
 ## API
 
-`GET/PUT/DELETE /api/competitions/:id/teams/:tid/lineups/:round` — unchanged (round-scoped).
+`GET/PUT/DELETE /api/competitions/:id/teams/:tid/lineups/:round` : unchanged (round-scoped).
 
 New, match-scoped (added alongside, both live one release):
 `GET/PUT/DELETE /api/competitions/:id/teams/:tid/match-lineups/:matchId`
@@ -68,5 +68,5 @@ round-scoped endpoint).
 
 ## Out of scope (follow-up beads)
 
-- **Phase 5** — Score-editor UI: per-side lineup edit panel + "Copy from previous match".
-- **Phase 6** — Viewer/TV overlay rendering of the per-match lineup.
+- **Phase 5** : Score-editor UI: per-side lineup edit panel + "Copy from previous match".
+- **Phase 6** : Viewer/TV overlay rendering of the per-match lineup.

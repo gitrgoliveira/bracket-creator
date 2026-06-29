@@ -19,7 +19,7 @@ export default defineConfig({
     name: 'render',
     environment: 'jsdom',
     globals: true,
-    // Uses real React — deliberately does NOT include vitest.setup.js
+    // Uses real React, deliberately does NOT include vitest.setup.js
     // (the fake-React stub). Components are actually mounted; function
     // bodies execute; missing window.* references throw ReferenceErrors.
     setupFiles: ['./vitest.setup.render.js'],

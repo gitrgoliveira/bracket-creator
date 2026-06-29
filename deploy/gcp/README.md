@@ -1,4 +1,4 @@
-# deploy/gcp — GCP Always-Free e2-micro
+# deploy/gcp: GCP Always-Free e2-micro
 
 Deploys the bracket-creator mobile-app on a **GCP Always-Free e2-micro**
 (1 GB RAM, x86-64) using Terraform.  Auto-HTTPS via Caddy.
@@ -34,7 +34,7 @@ terraform apply
 After `apply` completes, the output `instance_public_ip` is shown.  Update
 your DNS A record to that IP, then wait for propagation (typically < 5 min).
 Caddy will issue the Let's Encrypt certificate automatically on first HTTPS
-request — allow ~30 seconds for the ACME challenge to complete.
+request: allow ~30 seconds for the ACME challenge to complete.
 
 ## terraform.tfvars example
 
@@ -46,16 +46,16 @@ hostname = "tournament.example.com"
 
 ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 
-# Optional — tighten SSH to your IP only
+# Optional: tighten SSH to your IP only
 # operator_cidrs = ["203.0.113.10/32"]
 
-# Optional — reserve a stable IP (free while attached to a running instance)
+# Optional: reserve a stable IP (free while attached to a running instance)
 # reserve_static_ip = true
 
-# Optional — PDF export (heavier image, ~500 MB, more RAM pressure)
+# Optional: PDF export (heavier image, ~500 MB, more RAM pressure)
 # image_ref = "ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest"
 
-# Optional — locked password mode
+# Optional: locked password mode
 # lock_password            = true
 # tournament_password_hash = "$2b$12$..."
 ```
@@ -71,7 +71,7 @@ ssh_pubkey = "ssh-ed25519 AAAA... you@laptop"
 **Ephemeral IP caveat:** if `reserve_static_ip = false` (default), the
 instance's external IP changes every time you stop and start it.  You must
 update the DNS A record after each stop.  Set `reserve_static_ip = true` to
-avoid this — the IP is free while the instance is running.
+avoid this: the IP is free while the instance is running.
 
 ## Watching the egress meter ($1 budget alert)
 
@@ -95,7 +95,7 @@ terraform destroy
 ```
 
 This removes the VM, disk, firewall, VPC, and (if created) the static IP.
-The static IP costs ~$0.01/hr when unattached — `terraform destroy` removes
+The static IP costs ~$0.01/hr when unattached: `terraform destroy` removes
 it.  A forgotten static IP is the most common surprise-charge vector.
 
 ## Backups
@@ -116,7 +116,7 @@ gcloud compute disks snapshot <disk-name> \
 ## Security notes
 
 - **Never commit `terraform.tfstate` or `terraform.tfvars`.** Both can contain
-  secrets in plaintext — in particular `tournament_password_hash`. They are
+  secrets in plaintext: in particular `tournament_password_hash`. They are
   already covered by `.gitignore`; keep them out of version control.
 - For shared or team use, configure a **remote backend** (a GCS bucket) so state
   is encrypted at rest and never stored on a laptop.
@@ -127,10 +127,10 @@ gcloud compute disks snapshot <disk-name> \
 
 | Variable | Default | Description |
 |---|---|---|
-| `project` | — | GCP project ID |
+| `project` |: | GCP project ID |
 | `region` | `us-central1` | Must be us-west1/us-central1/us-east1 |
 | `zone` | `""` (auto) | Zone within the region |
-| `hostname` | — | FQDN for the app |
+| `hostname` |: | FQDN for the app |
 | `image_ref` | lean mobile image | Docker image tag |
 | `lock_password` | `false` | Enable bcrypt locked mode |
 | `tournament_password_hash` | `""` | Bcrypt hash (sensitive) |
@@ -138,7 +138,7 @@ gcloud compute disks snapshot <disk-name> \
 | `api_rate_limit` | `500` | Global API requests/sec limit (conservative default; raise for larger events) |
 | `api_rate_limit_burst` | `1000` | Global API rate-limit burst |
 | `ssh_user` | `ubuntu` | SSH username |
-| `ssh_pubkey` | — | SSH public key |
+| `ssh_pubkey` |: | SSH public key |
 | `operator_cidrs` | `[]` | CIDRs allowed SSH (empty = all) |
 | `reserve_static_ip` | `false` | Reserve a stable static IP |
 
@@ -146,6 +146,6 @@ gcloud compute disks snapshot <disk-name> \
 
 | Output | Description |
 |---|---|
-| `instance_public_ip` | Public IP — use for DNS A record |
+| `instance_public_ip` | Public IP: use for DNS A record |
 | `app_url` | `https://<hostname>` |
 | `ssh_command` | Ready-to-run SSH command |

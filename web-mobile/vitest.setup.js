@@ -3,7 +3,7 @@ import { vi, beforeEach, afterEach } from 'vitest';
 // Fail tests that produce unexpected console.warn or console.error.
 // Tests that intentionally trigger warnings mock console themselves
 // (vi.spyOn(console, 'warn').mockImplementation(...)), which replaces
-// the spy installed here — so the afterEach check only fires for
+// the spy installed here, so the afterEach check only fires for
 // genuinely unexpected output.
 let warnSpy, errorSpy;
 
@@ -42,7 +42,7 @@ global.React = {
   Component: _ReactComponent,
 };
 
-// ReactDOM stub — prevents the top-level ReactDOM.createRoot() call in
+// ReactDOM stub, prevents the top-level ReactDOM.createRoot() call in
 // app.jsx from throwing when the module is imported in tests.
 global.ReactDOM = {
   createRoot: () => ({ render: vi.fn() }),
@@ -57,7 +57,7 @@ global.prompt = vi.fn(() => 'mocked');
 // `window.MAX_COURTS`, `window.MIN_YEAR`, etc. globals are populated for
 // tests that import sibling files (admin_pools.jsx, admin_competition.jsx,
 // admin_setup.jsx) that read these constants via `window.X`. In the
-// browser, index.html loads admin_helpers.js before its consumers — these
+// browser, index.html loads admin_helpers.js before its consumers, these
 // tests don't go through that load order, so without this setup the
 // consumer modules see `undefined` and predicates like `next > MAX_RANK`
 // silently pass invalid input.

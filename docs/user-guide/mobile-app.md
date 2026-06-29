@@ -62,6 +62,7 @@ A tournament has several audiences and roles, and each maps to a different surfa
 | **Spectators** | who is fighting where, with live scores | Public viewer: the all-shiai-jo schedule and live standings |
 | **Referees and the two competitors** | the agreed live score for the bout in front of them | The court **scoreboard** on a TV: `/display?court=A` |
 | **Lobby / outside screen** | progress across every court at a glance | A TV on `/display?court=all` (all courts) |
+| **Stream / broadcast viewers** | player names and the live score over the video | The **overlay** `/display?court=A&overlay=true`, keyed into OBS / vMix as a browser source |
 | **Table operator** | record results for their court | Admin: the court's shiai-jo operator view and the score editor |
 | **Court manager** | call competitors, watch the queue | Admin: the shiai-jo view (current match plus the upcoming queue) |
 | **Tournament manager** | oversee all courts; set times, move matches | Admin: the [dashboard](#dashboard) and the [Tournament schedule](#tournament-schedule) |
@@ -89,7 +90,7 @@ Each shiai-jo runs **one digital scoreboard** on a TV or projector: a court-scop
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
-- Add `&overlay=true` for a transparent variant suitable for chroma-keying into a stream.
+- Add `&overlay=true` for a transparent variant you key into a live stream as a browser source (OBS, vMix, or similar), so online viewers see player names and the live score over the video.
 
 ![Single-court scoreboard for Shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../screenshots/display-scoreboard.png)
 

@@ -25,6 +25,14 @@ PORT=8082 make run-mobile   # Use alternate port (also works direct: PORT=8082 .
 TOURNAMENT_DATA_DIR=/path make run-mobile  # Custom data folder (also works without make: TOURNAMENT_DATA_DIR=/path ./bin/bracket-creator mobile-app)
 make examples          # Generate example Excel files from mock data
 
+make docs/build        # Build + strict-validate the MkDocs site (the PR-template gate)
+make docs/serve        # Serve docs locally with live reload
+make docs/deps         # Create .venv-docs from docs/requirements.txt
+make docs/clean        # Remove .venv-docs and the built site/
+# All docs/* targets run through .venv-docs (pinned mkdocs + Material from
+# docs/requirements.txt). The system-PATH mkdocs drifts (older, no Material),
+# so never call mkdocs directly for verification; use make docs/build.
+
 # Run a single test
 go test -run TestName ./internal/helper/...
 go test -run TestName ./cmd/...
@@ -165,6 +173,8 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - Mobile app frontend changes (`web-mobile/`) require rebuilding the binary to take effect. The files are embedded at `go build` time via `//go:embed web-mobile/*` in `main.go`. Run `make run-mobile` which rebuilds automatically, or run `make go/build` then restart.
 - Duplicate participant names in the CSV are rejected up front by `helper.CheckDuplicateEntries`; the web handler surfaces these to the user
 - Chained match navigation in the admin score editor (Prev/Next buttons, Finish + Start Next, ←/→ keys) must stay on the current match's shiaijo. Operators run matches per-court, so hopping courts mid-flow breaks the workflow. See `AdminScoreEditor` in `web-mobile/js/admin_schedule.jsx`: filter to `(m.court || "") === (openMatch.court || "")` so empty/undefined courts share one "unassigned" bucket.
+- Docs under `docs/` are PUBLIC-facing: no beads (`mp-xxxx`)/`bd`, no internal-tooling or `CLAUDE.md` references, and NO em-dashes. The PR template gates `make docs/build`; run it before pushing docs changes.
+- `mkdocs build --strict` fails on broken cross-file links (WARNING) but only logs missing same-page anchors as INFO (build still passes), so verify anchors by hand. Anchors use pymdownx slugs: lowercase, punctuation dropped, `--`/parens collapsed to single hyphens (e.g. `### Locked mode (--lock-password)` becomes `#locked-mode-lock-password`). Note TWO files named `mobile-app.md` exist (`docs/user-guide/mobile-app.md` guide vs `docs/user-guide/commands/mobile-app.md` reference); a relative link from `commands/` resolves to the sibling, so confirm the target file before trusting a flagged anchor.
 
 ## PR Workflow
 

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+<!--
+  Custom 404. Material's default 404 renders only "404 - Not found" with no way
+  forward; broken inbound links (common for docs) land readers on a dead end.
+  This adds an apology, the most likely destinations, and a nudge to search.
+-->
+
+{% block content %}
+  <h1>Page not found</h1>
+  <p>
+    Sorry; that page doesn’t exist. It may have moved or been renamed.
+    Use the search box at the top of the page, or jump to one of these:
+  </p>
+  <ul>
+    <li><a href="{{ base_url }}/">Home</a></li>
+    <li><a href="{{ base_url }}/user-guide/getting-started/">Installation &amp; getting started</a></li>
+    <li><a href="{{ base_url }}/user-guide/mobile-app/">Live tournament app</a></li>
+    <li><a href="{{ config.repo_url }}">Project on GitHub</a></li>
+  </ul>
+{% endblock %}

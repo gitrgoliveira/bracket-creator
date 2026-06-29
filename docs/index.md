@@ -50,8 +50,8 @@ Open `tournament.xlsx` in Excel or LibreOffice and print.
 
 ## What you need on tournament day
 
-- **A3 printer** — for team/player name sheets
-- **A4 printer** — for the bracket trees
+- **A3 printer**: for team/player name sheets
+- **A4 printer**: for the bracket trees
 - Scoreboards, whiteboard markers, scissors, tasuki
 
 ### Keeping courts in sync
@@ -60,11 +60,11 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 
 ## Before the tournament
 
-1. **Collect participants** — one name per line in a CSV file ([input format](user-guide/input-format.md))
-2. **Generate the bracket** — run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
+1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/input-format.md))
+2. **Generate the bracket**: run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
-4. **Print** — the Excel file is laid out to print cleanly on A4/A3
+4. **Print**: the Excel file is laid out to print cleanly on A4/A3
 
 ## On the day
 
-Use the **live tournament app** to manage pools and scores in real time across all devices on your network — no Excel required on the day. See the [mobile app guide](user-guide/mobile-app.md).
+Use the **live tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [mobile app guide](user-guide/mobile-app.md).

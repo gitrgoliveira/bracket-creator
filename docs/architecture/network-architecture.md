@@ -33,8 +33,8 @@ flowchart LR
 | Port | Where | Purpose |
 |---|---|---|
 | 443 | Caddy (public) | HTTPS for REST + SSE |
-| 80 | Caddy (public) | ACME challenge + redirect to 443 |
-| 8080 | app (internal) | plain HTTP; **never published directly** — Caddy proxies it |
+| 80 | Caddy (public) | ACME challenge; redirect to 443 |
+| 8080 | app (internal) | plain HTTP; **never published directly** (Caddy proxies it) |
 | 22 | host (optional) | SSH (restrict to your IP) |
 
 > **Proxy must stream, not buffer.** SSE is a long-lived response; the Caddyfiles deliberately
@@ -61,9 +61,9 @@ flowchart TB
     hub ==>|SSE id + data frames| sse
 ```
 
-- **REST** — score/decision/lineup writes, config, participants. Auth via the
+- **REST**: score/decision/lineup writes, config, participants. Auth via the
   `X-Tournament-Password` header (two modes, §5).
-- **SSE** — one stream per client carrying `match_updated`, `competition_started/completed`,
+- **SSE**: one stream per client carrying `match_updated`, `competition_started/completed`,
   `competitor_status_updated`, `draw_generated`, `schedule_updated`, plus the resilience control
   events `resync_required` and `heartbeat`. Every real event is stamped with a monotonic `seq`
   written as the SSE `id:` line, so the browser's `Last-Event-ID` advances automatically.
@@ -81,7 +81,7 @@ sequenceDiagram
     C->>H: proxied (unbuffered)
     H-->>B: id: N · data: event   (live, as matches change)
     Note over H: each event stamped seq=N,<br/>retained in a 100-event ring
-    B--xH: Wi-Fi blip — connection drops
+    B--xH: Wi-Fi blip, connection drops
     B->>C: auto-reconnect, Last-Event-ID: N
     C->>H: proxied
     alt gap satisfiable from ring
@@ -92,29 +92,29 @@ sequenceDiagram
     H-->>B: heartbeat every 15s (observable frame)
 ```
 
-- **Replay ring** — `DefaultHistorySize` (100) recent events; `Last-Event-ID` replays the gap.
-- **`resync_required`** — emitted when a gap-free replay is impossible (ring eviction, or a
-  server restart that reset `seq`); the client resets its `lastSeq` and full-refetches. Emitted
+- **Replay ring**: `DefaultHistorySize` (100) recent events. `Last-Event-ID` replays the gap.
+- **`resync_required`**: emitted when a gap-free replay is impossible (ring eviction or a
+  server restart that reset `seq`). The client resets its `lastSeq` and full-refetches. Emitted
   **without** an `id:` line when head seq is 0 so it can't force `Last-Event-ID` to "0".
-- **Observable heartbeat** — a real `{"type":"heartbeat"}` frame (no `id:`) every 15s, so the
+- **Observable heartbeat**: a real `{"type":"heartbeat"}` frame (no `id:`) every 15s, so the
   client can tell "quiet" from "dead".
 - **Per-client buffered channel**; a stalled client that can't drain is dropped (non-blocking
   send). Subscriber cap `SSE_MAX_CLIENTS` (default 5000).
 
 ## 4. Client resilience on flaky Wi-Fi
 
-The client treats the link as unreliable by default — the flows below show how.
+The client treats the link as unreliable by default; the flows below show how.
 
 ```mermaid
 flowchart TD
     submit["Operator submits a score / decision / lineup"] --> try{"fetch (12s AbortController timeout)"}
-    try -->|2xx| done["Confirmed — UI advances"]
+    try -->|2xx| done["Confirmed, UI advances"]
     try -->|transient or offline| q["Enqueue in outbox<br/>(localStorage, 6h TTL)"]
-    q --> banner["Editor shows 'Not saved yet — will retry'"]
+    q --> banner["Editor shows 'Not saved yet (will retry)'"]
     q --> flush["Background flush<br/>(exp. backoff + jitter)"]
     flush -->|2xx| cleared["Banner clears (saved)"]
-    flush -->|non-retryable 4xx| failed["Permanent fail →<br/>subscribeTerminalWriteFailed →<br/>red 'Not saved — re-enter' banner"]
-    online["browser 'online' event / tab visible again"] --> flush
+    flush -->|non-retryable 4xx| failed["Permanent fail:<br/>subscribeTerminalWriteFailed:<br/>red 'Not saved (re-enter)' banner"]
+    online["browser 'online' event, tab visible again"] --> flush
 ```
 
 ```mermaid
@@ -131,8 +131,8 @@ Key client mechanisms (all in `web-mobile/js/api_client.jsx` + consumers):
 
 | Concern | Mechanism |
 |---|---|
-| Half-open / stalled sockets | 12s write timeouts; 35s SSE silence watchdog (armed at connect, not just `onopen`) |
-| Reconnect storms | exponential backoff + jitter (vs a fixed delay) |
+| Half-open / stalled sockets | 12s write timeouts, 35s SSE silence watchdog (armed at connect, not just `onopen`) |
+| Reconnect storms | exponential backoff + jitter (vs. a fixed delay) |
 | Lost writes | durable outbox persisted to `localStorage` (6h TTL), retried; survives tab refresh |
 | Missed events | `Last-Event-ID` replay + `checkSeqGap` on every event → scoped refetch; `resync_required` |
 | Tab resume | `visibilitychange` → force reconnect + refetch |
@@ -151,9 +151,9 @@ flowchart TD
     note["locked mode also 404s POST /api/tournament/reset"]
 ```
 
-- **File mode** (default) — plaintext compare against `tournament.md`; `POST /api/tournament/reset`
+- **File mode** (default): plaintext compare against `tournament.md`. `POST /api/tournament/reset`
   is available (for a forgotten admin password).
-- **Locked mode** (`--lock-password` / `LOCK_PASSWORD=true` + `TOURNAMENT_PASSWORD_HASH`) — bcrypt
+- **Locked mode** (`--lock-password` / `LOCK_PASSWORD=true` + `TOURNAMENT_PASSWORD_HASH`): bcrypt
   compare; reset endpoint returns 404. `GET /api/auth-config` reports the mode to the SPA.
 
 ## 6. Server-side network hardening (`cmd/mobile_app.go`)

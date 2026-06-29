@@ -1,5 +1,84 @@
-:root {
+/* bracket-creator docs theme overrides.
+ *
+ * Color is scoped PER SCHEME. Material derives link/interactive colors from
+ * these tokens; an unscoped `:root` override (the previous approach) forced
+ * one value into both light and dark, which made dark-mode links #333 on a
+ * navy background (1.03:1, invisible). Each scheme now gets its own values.
+ *
+ * Accent = the web-mobile app's brand navy (--accent #1d3557, see DESIGN.md) so
+ * the docs and the product share one interactive color. The slate scheme uses a
+ * lightened navy of the same hue; links stay legible on the dark surface. */
+
+/* Light scheme */
+[data-md-color-scheme="default"] {
 	--md-primary-fg-color: #333333;
-	--md-primary-fg-color--light: #333333;
-	--md-primary-fg-color--dark: #333333;
+	--md-primary-fg-color--light: #4a4a4a;
+	--md-primary-fg-color--dark: #1f1f1f;
+
+	/* Brand navy: hover/focus/active states + in-prose links. 12.3:1 on white. */
+	--md-accent-fg-color: #1d3557;
+	--md-typeset-a-color: #1d3557;
+
+	/* Paper is a near-white tinted a whisper toward the brand navy (hue ~225),
+	 * rather than pure #fff, so the reading surface reads as the product's own
+	 * rather than a default white. Body text still clears ~16:1. */
+	--md-default-bg-color: #fbfcfe;
+}
+
+/* Dark (slate) scheme */
+[data-md-color-scheme="slate"] {
+	--md-primary-fg-color: #333333;
+	--md-primary-fg-color--light: #5a5a5a;
+	--md-primary-fg-color--dark: #1f1f1f;
+
+	/* Lightened navy (same hue) so links/accent clear 4.5:1 on the slate bg.
+	 * #93b3e0 on the default slate surface measures ~6.1:1. */
+	--md-accent-fg-color: #93b3e0;
+	--md-typeset-a-color: #93b3e0;
+}
+
+/* In-prose links are underlined by default. On a high-link-density docs site
+ * the navy hue alone is only ~1.3:1 against body text; the underline (not
+ * the color) is what marks a link. Structural/anchor links opt out. */
+.md-typeset a {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	text-decoration-thickness: 1px;
+}
+
+.md-typeset a:hover {
+	text-decoration-thickness: 2px;
+}
+
+/* Permalink anchors (¶) and buttons are not prose links; no underline. */
+.md-typeset a.headerlink,
+.md-typeset .md-button {
+	text-decoration: none;
+}
+
+/* Image-only links (e.g. shields.io badges). Kept in a SEPARATE rule: a
+ * comma-list is non-forgiving, so grouping `:has(img)` with the selectors
+ * above would invalidate the whole list (and re-underline headerlinks/buttons)
+ * in browsers without :has() support. */
+.md-typeset a:has(img) {
+	text-decoration: none;
+}
+
+/* Mobile table polish. Inline code in table cells (commands, env vars, flags
+ * like `create-pools` / `TOURNAMENT_DATA_DIR`) must not break mid-token; on a
+ * phone they were fragmenting into "create-\npools". Keep each token whole... */
+.md-typeset table:not([class]) td code,
+.md-typeset table:not([class]) th code {
+	white-space: nowrap;
+}
+
+/* ...and let the table wrapper scroll horizontally when a row gets wider than
+ * the viewport. The wrapper must be a block constrained to the content column
+ * (max-width: 100%) for overflow-x to scroll the inner table; otherwise it
+ * sizes to content and spills past the column. Material wraps every table in
+ * .md-typeset__table. */
+.md-typeset__table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
 }

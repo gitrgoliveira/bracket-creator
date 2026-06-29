@@ -1,6 +1,6 @@
 # Input Format
 
-Participants are provided as a plain CSV file — one participant per line, no header row.
+Participants are provided as a plain CSV file (one participant per line, no header row).
 
 ## Basic format
 
@@ -25,11 +25,11 @@ Eddard Stark, STARK, Team Epsilon
 
 ## Team matches
 
-For team tournaments (`--team-matches N`), each row still represents an individual fighter — the application groups them into teams of N. The dojo column is used to keep team-mates out of the same pool.
+For team tournaments (`--team-matches N`), each row still represents an individual fighter. The application groups them into teams of N. The dojo column is used to keep team-mates out of the same pool.
 
 ## Constraints
 
-- Names must be **unique** — duplicate entries are rejected before any bracket is generated.
+- Names must be **unique**: duplicate entries are rejected before any bracket is generated.
 - Names in a [seeds file](commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
 
 ## Seeds file

@@ -34,6 +34,23 @@ TOURNAMENT_DATA_DIR=/path/to/data make run-mobile
 
 Open [http://localhost:8080](http://localhost:8080) in your browser (or share the LAN address with scorers).
 
+## Run your first tournament
+
+New to the app? This is the fastest path from a running server to live results on screen. Each step links to the detail further down; you don't need the rest of this page to get going.
+
+1. **Start the server** and open it ([above](#starting-the-server)). On an empty data folder the app's **Create tournament** flow sets the name, date, venue, number of shiai-jo, and the admin password.
+2. **Create a competition** from the dashboard: choose individual or team, and a format (playoffs, mixed, league, or Swiss).
+3. **Add competitors.** In the competition's setup, paste a newline-separated roster into the participant panel and click **Apply changes** ([participant setup](#the-participant-setup-view)).
+4. **Generate the draw**, check the preview, then **Start competition** ([draw preview](#the-draw-preview-status-draw-ready-workflow)). Matches now appear to scorers and to the public viewer.
+5. **Enter a score** from the **Scores** tab ([pools](#pools)).
+
+!!! tip "The moment it clicks"
+    Open `http://localhost:8080` on a second screen (a scoreboard TV, a phone) with no password. As a scorer records a result, the pool standings and bracket update there **live, with no refresh**. That shared real-time picture is the whole point of running the app on the day.
+
+![A result entered by a scorer appears on the public viewer instantly, no refresh.](../screenshots/live-update.gif)
+
+Everything below is reference: [authentication and security](#admin-authentication), the full setup and check-in options, the Swiss flow, scheduling, and the on-disk [data format](#data-format). Reach for it when you need it, not before.
+
 ## Public viewer
 
 The default view requires no password. It shows:
@@ -41,6 +58,22 @@ The default view requires no password. It shows:
 - The full match schedule across all shiai-jo, filterable by player or team.
 - Pool standings updated in real time as scores are entered.
 - The elimination bracket as it fills in.
+
+![Public viewer landing on a phone: tournament header, a watchlist, the full schedule, and a card per competition tagged with its status.](../screenshots/viewer-home.png)
+
+Tap a competition to drill into its schedule, pool standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
+
+![A competition's public page: upcoming matches and recent results with waza-level scores.](../screenshots/viewer-competition.png)
+
+### Scoreboards and court displays
+
+For a TV or projector at each shiai-jo, open a court-scoped display (no password):
+
+- `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
+- `/display?court=all` shows every court at once, for a lobby or overview screen.
+- Add `&overlay=true` for a transparent variant suitable for chroma-keying into a stream.
+
+![Single-court scoreboard for Shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../screenshots/display-scoreboard.png)
 
 ## Admin console
 
@@ -134,11 +167,17 @@ network boundary, run behind TLS and/or `--lock-password`.
 
 The dashboard lists all competitions. Each card shows the competition type, number of participants, format, and current status. Click a card to manage that competition.
 
+![Admin dashboard: tournament header, totals, shiai-jo operator views, and competition cards tagged Pending, Draw ready, and Pools.](../screenshots/mobile-dashboard.png)
+
 ### Setting up a competition
 
 Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status; Swiss-format competitions run live under the `pools` status.
 
+![A competition's overview during setup: a Next steps checklist guides you from create, to add participants, to seeds and settings, to generating the draw.](../screenshots/mobile-participants.png)
+
 #### The Participant Setup View
+
+![Participant setup: the Seeding panel (drag-to-rank, shuffle, import seeds) on the left and the line-numbered paste box on the right.](../screenshots/mobile-participant-setup.png)
 
 The participant setup view places two panels side by side:
 
@@ -171,6 +210,8 @@ You can enable check-in for any competition in its **Settings** tab. When check-
 
 To prevent mistakes and allow manual inspection of the draw before matches are locked and started, the application uses a multi-step **Draw-Preview** workflow:
 
+![Generating the draw: clicking Generate draw transitions the competition to draw-ready and shows the pool placements for review before starting.](../screenshots/draw-generation.gif)
+
 1. Under the setup tab, after importing and checking in all players, click **Generate draw**.
 2. The competition transitions to the **`draw-ready`** status.
 3. An interactive draw preview appears, showing the generated pools, bracket structure, or Swiss Round 1 pairings. 
@@ -181,6 +222,8 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 ### Pools
 
 Once the competition has started, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores** tab or the dedicated score editor to record match results.
+
+![Pools view: per-pool standings (W/L/D/PW/PL) with each pool's matches below, scored ones showing the waza result and unscored ones offering a Score button.](../screenshots/mobile-pool-standings.png)
 
 ### Bracket
 

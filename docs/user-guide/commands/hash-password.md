@@ -34,4 +34,4 @@ TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-See the [mobile-app command reference](mobile-app.md#locked-mode---lock-password) for how the hash is consumed at startup.
+See the [mobile-app command reference](mobile-app.md#locked-mode-lock-password) for how the hash is consumed at startup.

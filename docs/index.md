@@ -1,6 +1,8 @@
-# bracket-creator
+---
+template: home.html
+---
 
-<p align="center">
+<p class="bc-badges" markdown>
   <a href="https://github.com/gitrgoliveira/bracket-creator/releases">
     <img alt="GitHub release" src="https://img.shields.io/github/v/release/gitrgoliveira/bracket-creator?include_prereleases">
   </a>
@@ -18,35 +20,96 @@
   </a>
 </p>
 
-**bracket-creator** is a CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Give it a CSV of participants and it produces a fully formatted, print-ready `.xlsx` file with pool draws, match schedules, and elimination trees.
+**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run live pools and scores on the day. Choose how digital you go.
+
+## Three ways to run a tournament
+
+The same toolkit scales from a fully printed event to a fully online one. Pick the mode that matches your venue and equipment.
+
+<div class="grid cards bc-modes" markdown>
+
+-   **Offline**
+
+    ---
+
+    No internet required. Generate the brackets and score sheets as an Excel file, print them, and run the whole day on paper.
+
+    *Needs:* an A4/A3 printer.
+
+    [Generate a bracket](user-guide/web-ui.md)
+
+-   **Partially connected**
+
+    ---
+
+    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the live app, with one device per court. Some printed material is still needed for scoreboards and competitors.
+
+    *Needs:* one device per shiai-jo.
+
+    [Live tournament app](user-guide/mobile-app.md)
+
+-   **Fully digital**
+
+    ---
+
+    On-screen scoreboards and mobile result pages, updated in real time. Organisers still print player tags and numbers.
+
+    *Needs:* a device and monitor per court, plus network access for competitors.
+
+    [Host it online](user-guide/hosting.md)
+
+</div>
 
 ## Tools
 
-| Tool | Command | Use when |
-|------|---------|----------|
-| **Pools & Playoffs** | `create-pools` | Generate a pools + knockout bracket Excel file |
-| **Playoffs Only** | `create-playoffs` | Generate a straight knockout bracket Excel file |
-| **Bracket generator web UI** | `serve` | Browser-based bracket generation (no CSV editing needed) |
-| **Live tournament app** | `mobile-app` | Run pools and scores on the day, live on any device |
+<div class="grid cards" markdown>
+
+-   **CLI**
+
+    ---
+
+    Generate print-ready Excel brackets from the command line.
+
+    `create-pools` (pools + knockout) · `create-playoffs` (straight knockout)
+
+    [Command reference](user-guide/commands/create-pools.md)
+
+-   **Bracket generator web UI**
+
+    ---
+
+    Browser-based bracket generation, no CSV editing needed.
+
+    `serve`
+
+    [Web UI guide](user-guide/web-ui.md)
+
+-   **Live tournament app**
+
+    ---
+
+    Run pools and scores on the day, live on any device.
+
+    `mobile-app`
+
+    [Mobile app guide](user-guide/mobile-app.md)
+
+</div>
 
 ## Quick start
 
-```bash
-# Install
-go install github.com/gitrgoliveira/bracket-creator@latest
+The simplest way to run the live tournament app, no Go toolchain needed:
 
-# Create a pools + playoffs bracket
-bracket-creator create-pools -f participants.csv -o tournament.xlsx
+1. Download the binary for your platform from the [releases page](https://github.com/gitrgoliveira/bracket-creator/releases).
+2. Start the app:
 
-# Or run the bracket generator web UI
-bracket-creator serve
+    ```bash
+    bracket-creator mobile-app --folder ./tournament-data
+    ```
 
-# Or run the live tournament app (for use on the day)
-bracket-creator mobile-app --folder ./tournament-data
-# (or set TOURNAMENT_DATA_DIR / PORT in the environment instead of flags)
-```
+3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [mobile app guide](user-guide/mobile-app.md).
 
-Open `tournament.xlsx` in Excel or LibreOffice and print.
+Prefer Go or Docker? See the [install options](user-guide/getting-started.md).
 
 ## What you need on tournament day
 

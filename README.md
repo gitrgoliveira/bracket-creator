@@ -36,11 +36,11 @@
 </p>
 <br/>
 
-This project lets any club or organisation run kendo tournaments in three ways:
+This project lets any club or organisation run kendo tournaments at whatever level of digitization fits the venue, from fully printed to fully online. Pick the mode that matches your equipment:
 
-* **Offline**: no internet required; relies entirely on printed brackets and score sheets.
-* **Partially connected**: internet available but no display screens; some printed material still needed.
-* **Fully digital**: complete setup with multiple monitors and real-time score tracking.
+* **Offline.** No internet required. Runs entirely on printed brackets and score sheets generated as Excel files.
+* **Partially connected.** Internet is available but there are no display screens. Some printed material is still needed for scoreboards and competitors. Keep every shiai-jo in sync either by sharing the Excel file through Google Sheets, or by running the live tournament app, with one device per shiai-jo.
+* **Fully digital.** A complete online setup with on-screen scoreboards and mobile result pages. Needs one device per shiai-jo table, a monitor for each court, and network access for competitors. Organisers still print player tags and numbers.
 
 I've been using this application to organise the London Cup since ~2023. It reflects everything I've learned from running real tournaments and the feedback I've received. 
 
@@ -302,7 +302,7 @@ The server runs in one of two modes, selected at startup:
 
 ```bash
 # 1. Generate a bcrypt hash for your chosen password.
-# hash-password reads one line from stdin without a prompt or echo masking ,
+# hash-password reads one line from stdin without a prompt or echo masking,
 # pipe from a secrets manager or here-doc rather than typing interactively.
 printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
 # (the hash is printed on stdout)

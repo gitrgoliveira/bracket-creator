@@ -107,6 +107,8 @@ Every tournament is created in one of two **modes**, which decide who may run an
 
 In self-run, each result records its provenance: a score entered by the public is tagged **self-reported**, while one entered by an operator (with the destructive-ops password) is tagged **admin**. In officiated mode every result is **admin**.
 
+Three separate choices use the word *mode*, keep them apart: the **tournament mode** here (who may act), the [authentication mode](#admin-authentication) below (how the admin password is stored), and the [digitization level](../index.md#three-ways-to-run-a-tournament) on the home page (how much equipment you use on the day).
+
 !!! note
     In **file mode**, a self-run tournament must have a destructive-ops password set, otherwise destructive actions would have no gate at all.
 

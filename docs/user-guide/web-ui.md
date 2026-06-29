@@ -32,6 +32,6 @@ After confirming, the assigned seeds are shown inline next to each participant n
 
 ![Seeds assigned](../screenshots/webui-seeds-assigned.png)
 
-## Downloading the bracket
+## Download the bracket
 
 Click **Generate** to produce the Excel file. The browser downloads the `.xlsx` directly (no server-side storage, no account needed).

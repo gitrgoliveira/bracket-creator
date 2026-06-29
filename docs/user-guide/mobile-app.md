@@ -1,14 +1,14 @@
-# Mobile Tournament App
+# Mobile tournament app
 
 The `mobile-app` command starts a real-time tournament management server for use **on the day of the tournament**. Any device on the same network can open the URL to view real-time results or (with the admin password) manage pools and scores.
 
-## Starting the server
+## Start the server
 
 ```bash
 bracket-creator mobile-app --folder ./tournament-data
 ```
 
-The `--folder` and `--port` flags can also be supplied via environment variables (useful for systemd units, Docker, or any deploy that doesn't run via `make`):
+You can also supply the `--folder` and `--port` flags as environment variables (useful for systemd units, Docker, or any deploy not started with `make`):
 
 ```bash
 TOURNAMENT_DATA_DIR=/path/to/data PORT=8082 bracket-creator mobile-app
@@ -38,7 +38,7 @@ Open [http://localhost:8080](http://localhost:8080) in your browser (or share th
 
 New to the app? This is the fastest path from a running server to live results on screen. Each step links to the detail further down; you don't need the rest of this page to get going.
 
-1. **Start the server** and open it ([above](#starting-the-server)). On an empty data folder the app's **Create tournament** flow sets the name, date, venue, number of shiai-jo, and the admin password.
+1. **Start the server** and open it (see [Start the server](#start-the-server)). On an empty data folder the app's **Create tournament** flow sets the name, date, venue, number of shiai-jo, and the admin password.
 2. **Create a competition** from the dashboard: choose individual or team, and a format (playoffs, mixed, league, or Swiss).
 3. **Add competitors.** In the competition's setup, paste a newline-separated roster into the participant panel and click **Apply changes** ([participant setup](#the-participant-setup-view)).
 4. **Generate the draw**, check the preview, then **Start competition** ([draw preview](#the-draw-preview-status-draw-ready-workflow)). Matches now appear to scorers and to the public viewer.
@@ -49,7 +49,7 @@ New to the app? This is the fastest path from a running server to live results o
 
 ![A result entered by a scorer appears on the public viewer instantly, no refresh.](../screenshots/live-update.gif)
 
-Everything below is reference: [authentication and security](#admin-authentication), the full setup and check-in options, the Swiss flow, scheduling, and the on-disk [data format](#data-format). Reach for it when you need it, not before.
+The rest of this page is reference: [authentication and security](#admin-authentication), the full setup and check-in options, the Swiss flow, scheduling, and the on-disk [data format](#data-format). Reach for it when you need it, not before.
 
 ## Who uses what
 
@@ -96,18 +96,18 @@ Each shiai-jo runs **one digital scoreboard** on a TV or projector: a court-scop
 
 ## Admin console
 
-Click **Admin** and enter the tournament password to access the admin console. How the password is stored is set by the [authentication mode](#admin-authentication) (file or locked); *who is allowed to act* is set by the tournament mode just below.
+Click **Admin** and enter the tournament password to access the admin console. How the password is stored is set by the [authentication mode](#admin-authentication) (file or locked); *who is allowed to act* is set by the [tournament mode](#tournament-mode-officiated-or-self-run).
 
 ### Tournament mode: officiated or self-run
 
-Every tournament is created in one of two **modes**, which decide who may run and score matches. The mode is chosen once during **Create tournament** and **cannot be changed afterward**. (This is separate from the file/locked authentication modes below, which only control how the admin password is stored.)
+Every tournament is created in one of two **modes**, which decide who may run and score matches. The mode is chosen once during **Create tournament** and **cannot be changed afterward**. (This is separate from the file and locked [authentication modes](#admin-authentication), which only control how the admin password is stored.)
 
 - **Officiated** (default): the admin password gates the **whole** operator surface. Scoring, check-in, and drawing or starting competitions all happen behind the password, so every result is recorded as entered by an operator.
 - **Self-run**: constructive actions, **scoring, check-in, starting and completing competitions**, are **public** with no admin password, so competitors or table helpers can run and score their own matches. Only **destructive** actions (deleting a competition, editing the roster, discarding a draw) stay gated, behind the [destructive-ops password](#destructive-ops-password-second-password). Self-run also opens a public **self-registration** page where competitors enter themselves (that page returns 404 in officiated mode).
 
 In self-run, each result records its provenance: a score entered by the public is tagged **self-reported**, while one entered by an operator (with the destructive-ops password) is tagged **admin**. In officiated mode every result is **admin**.
 
-Three separate choices use the word *mode*, keep them apart: the **tournament mode** here (who may act), the [authentication mode](#admin-authentication) below (how the admin password is stored), and the [digitization level](../index.md#three-ways-to-run-a-tournament) on the home page (how much equipment you use on the day).
+Three separate choices use the word *mode*, keep them apart: the **tournament mode** here (who may act), the [authentication mode](#admin-authentication) (how the admin password is stored), and the [digitization level](../index.md#three-ways-to-run-a-tournament) on the home page (how much equipment you use on the day).
 
 !!! note
     In **file mode**, a self-run tournament must have a destructive-ops password set, otherwise destructive actions would have no gate at all.
@@ -116,7 +116,7 @@ Three separate choices use the word *mode*, keep them apart: the **tournament mo
 
 **File mode** (default: local / private LAN use):
 
-The admin password lives plaintext in `tournament-data/tournament.md`. Set it during the **Create tournament** flow, or edit the file directly. If you forget the password, browse to `http://<host>/reset` from any device on the same network and choose a new one (no old password required). The reset endpoint is intentionally unauthenticated and is the documented recovery path; for trusted networks this is convenient, and for internet-exposed deployments use locked mode below.
+The admin password lives plaintext in `tournament-data/tournament.md`. Set it during the **Create tournament** flow, or edit the file directly. If you forget the password, browse to `http://<host>/reset` from any device on the same network and choose a new one (no old password required). The reset endpoint is intentionally unauthenticated and is the documented recovery path; for trusted networks this is convenient, and for internet-exposed deployments use locked mode.
 
 **Locked mode** (recommended for any deployment reachable over the internet):
 
@@ -194,7 +194,7 @@ network boundary, run behind TLS and/or `--lock-password`.
 ### Operational notes
 
 - **No rate limiting on `/reset`.** The reset endpoint is unauthenticated by design and the server does not throttle calls to it. On a trusted LAN this is fine (the legitimate operator is the only person at the keyboard); on any network where untrusted clients can reach the server, an attacker can grief the deployment by repeatedly POSTing new passwords and locking the operator out. **Always run with `--lock-password` for internet-exposed deployments**, or front the server with a reverse proxy that rate-limits `/api/tournament/reset`.
-- **Mode switching preserves the stored password.** When you switch from file mode to locked mode, the password on disk in `tournament.md` is **not** erased; it's just ignored at auth time. If you later switch back to file mode (drop `--lock-password`), the original password authenticates again. Treat this as a feature for rollback experimentation, but be aware that the on-disk credential remains discoverable by anyone with filesystem access. If you want to fully retire a file-mode password, run `POST /api/tournament/reset` to a value you don't intend to use before switching to locked mode.
+- **Mode switching preserves the stored password.** When you switch from file mode to locked mode, the password on disk in `tournament.md` is **not** erased; auth ignores it at that point. If you later switch back to file mode (drop `--lock-password`), the original password authenticates again. Treat this as a feature for rollback experimentation, but be aware that the on-disk credential remains discoverable by anyone with filesystem access. If you want to fully retire a file-mode password, run `POST /api/tournament/reset` to a value you don't intend to use before switching to locked mode.
 
 ### Dashboard
 
@@ -216,19 +216,19 @@ From the admin console you can **broadcast a short announcement** to every conne
 
 ### Registration desk
 
-The **Registration desk** (opened from the dashboard) is a cross-competition check-in surface for the welcome table. Instead of checking people in one competition at a time, it lists every competitor across the whole tournament so a helper can mark them present as they arrive. It complements the per-competition [check-in workflow](#optional-check-in-workflow) below.
+The **Registration desk** (opened from the dashboard) is a cross-competition check-in surface for the welcome table. Instead of checking people in one competition at a time, it lists every competitor across the whole tournament so a helper can mark them present as they arrive. It complements the per-competition [check-in workflow](#optional-check-in-workflow).
 
 ### Shiai-jo court console
 
 Each court has a dedicated operator console at `/admin/shiaijo/<court>` (linked from the dashboard's **Shiaijo operator views**). It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court, and nudges the operator to switch to whichever competition next needs the court.
 
-### Setting up a competition
+### Set up a competition
 
 Each competition goes through a **Setup → Draw Preview (status `draw-ready`) → Live play (status `pools` or `playoffs`)** lifecycle. "Swiss" is a *format*, not a separate status; Swiss-format competitions run live under the `pools` status.
 
 ![A competition's overview during setup: a Next steps checklist guides you from create, to add participants, to seeds and settings, to generating the draw.](../screenshots/mobile-participants.png)
 
-#### The Participant Setup View
+#### The participant setup view
 
 ![Participant setup: the Seeding panel (drag-to-rank, shuffle, import seeds) on the left and the line-numbered paste box on the right.](../screenshots/mobile-participant-setup.png)
 
@@ -245,21 +245,21 @@ Format for bulk paste:
 
 To save the bulk import, click the **Apply changes** button at the bottom of the Participant list panel.
 
-#### Participant Edit Modal
+#### Participant edit modal
 
 To edit details of a single competitor (for spelling corrections, dojo transfers, or dan grade updates) without wiping the bulk list:
 1. Click the edit pencil icon next to the participant's name in the Check-in & Seeding panel. Editing is available during setup only; once the draw is generated (status `draw-ready`) the pencil is disabled, so discard the draw first to make corrections.
 2. In the modal that appears, modify the name, dojo, dan grade, or display name.
-3. Click **Save changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Check-in & Seeding panel described above, via drag-and-drop or the seed-rank input, not in a separate tab.
+3. Click **Save changes** to commit. The edits are persisted atomically to `participants.csv` without disrupting existing check-in or seeding states. Seed ranks are managed in the same Check-in & Seeding panel from [the participant setup view](#the-participant-setup-view), using drag-and-drop or the seed-rank input, not in a separate tab.
 
-#### Optional Check-in Workflow
+#### Optional check-in workflow
 
 You can enable check-in for any competition in its **Settings** tab. When check-in is enabled:
 - A check-in panel displays in the viewer roster screen.
 - Operators can check in players individually by checking their checkbox, bulk check in all players from a specific dojo, or click **Check in all** to check in everyone.
-- Check-in affects the draw with **opt-in semantics**: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included, so simply enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
+- Check-in affects the draw with **opt-in semantics**: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants are included (unchecked no-shows are automatically excluded, and their seed assignments dropped); if nobody has checked in yet, everyone is included, so enabling the panel never shrinks the field on its own. (When check-in is disabled for the competition, check-in markers are ignored entirely.)
 
-#### The Draw-Preview (status `draw-ready`) Workflow
+#### The draw preview (status `draw-ready`) workflow
 
 To prevent mistakes and allow manual inspection of the draw before matches are locked and started, the application uses a multi-step **Draw-Preview** workflow:
 
@@ -270,7 +270,7 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 3. An interactive draw preview appears, showing the generated pools, bracket structure, or Swiss Round 1 pairings. 
 4. While a draw is in the `draw-ready` status, **participant roster edits are locked** to prevent TOCTOU data corruption. Check-in toggles remain available during this phase.
 5. If the draw is satisfactory, click **Start competition**. This transitions the status to `pools` (for mixed and Swiss formats) or `playoffs` (for playoffs-only) and exposes the matches to scorers and the public viewer.
-6. If the draw needs changes (e.g., a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
+6. If the draw needs changes (for example, a late-arriving player needs to be added, or a seed rank must be corrected), click **Discard draw**. This deletes the draft pools and bracket files, unlocks the participant list, and returns the competition to the `setup` phase so you can edit and regenerate.
 
 ### Pools
 
@@ -316,7 +316,7 @@ A competition's **Export & print** offers two formats:
 - **Excel (`.xlsx`)**: the print-ready bracket workbook (pool draws, schedules, and trees). Always available, with no extra dependencies.
 - **PDF** (competitor tags, name sheets, and bracket trees): an admin-only export that renders the spreadsheets through **LibreOffice**, so the server needs `soffice` available. Use the PDF-enabled image `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest`, or install LibreOffice on the host. The default lean image omits it to stay small; without LibreOffice the app returns a clear message rather than a broken file.
 
-**QR codes on competitor tags.** When the tournament's **public URL** is set and competitors have numbers, each numbered tag carries a **QR code** that opens that competitor's page on the public viewer (their schedule and results) when scanned, so a player can scan their own tag to follow their matches. Set the public URL under **Admin** (the tournament's details) to an address competitors' phones can reach, for example your deployed `https://...` site (see [Hosting the live app](hosting.md)). Without a public URL the tags still print, just without the QR.
+**QR codes on competitor tags.** When the tournament's **public URL** is set and competitors have numbers, each numbered tag carries a **QR code** that opens that competitor's page on the public viewer (their schedule and results) when scanned, so a player can scan their own tag to follow their matches. Set the public URL under **Admin** (the tournament's details) to an address competitors' phones can reach, for example your deployed `https://...` site (see [Host the live app](hosting.md)). Without a public URL the tags still print, without the QR.
 
 ## Data format
 

@@ -117,7 +117,7 @@ Prefer Go or Docker? See the [install options](user-guide/getting-started.md).
 - **A4 printer**: for the bracket trees
 - Scoreboards, whiteboard markers, scissors, tasuki
 
-### Keeping courts in sync
+### Keep courts in sync
 
 If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar) so all tables share one live document.
 

@@ -81,7 +81,7 @@ nav:
       - Input format: user-guide/input-format.md
       - Web UI: user-guide/web-ui.md
       - Mobile / live tournament app: user-guide/mobile-app.md
-      - Hosting the live app: user-guide/hosting.md
+      - Host the live app: user-guide/hosting.md
       - Commands:
           - create-pools: user-guide/commands/create-pools.md
           - create-playoffs: user-guide/commands/create-playoffs.md

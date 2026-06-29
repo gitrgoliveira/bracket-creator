@@ -100,8 +100,8 @@ of `terraform apply`. `terraform destroy` removes everything (run it after the e
 
 ### Venue connectivity: a four-court event
 
-The cloud/host above is only half the picture. On the venue floor, every operator console,
-display screen, and spectator phone is just a **browser** reaching that one app over the network.
+The cloud and host setup is only half the picture. On the venue floor, every operator console,
+display screen, and spectator phone is a **browser** reaching that one app over the network.
 A typical four-court (shiaijo A–D) layout:
 
 ```mermaid
@@ -140,7 +140,7 @@ flowchart TB
 | Device | What it runs | Notes |
 |---|---|---|
 | Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiaijo |
-| Display screen (1 per court, optional) | public display / scoreboard view | just a browser at a display URL (smart-TV browser, or a mini-PC/laptop driving a TV); read-only, no auth |
+| Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL (smart-TV browser, or a mini-PC/laptop driving a TV); read-only, no auth |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
@@ -150,7 +150,7 @@ clients, comfortably within `SSE_MAX_CLIENTS`, but every live update fans out to
 
 **Two venue patterns:**
 
-- **Cloud-hosted** (topology above): venue devices reach the cloud app over the venue's internet
+- **Cloud-hosted** (the cloud-hosted topology): venue devices reach the cloud app over the venue's internet
   uplink; spectators can use cellular and skip venue Wi-Fi entirely. Needs a working uplink for
   the operators and displays.
 - **On-prem / local**: run the single `mobile-app` binary on a laptop or mini-PC **on the venue
@@ -176,11 +176,11 @@ flowchart LR
 ```
 
 - **No database.** State is human-readable Markdown + CSV on disk. Multi-file changes are made
-  durable via a write-ahead log replayed on startup. The disk survives reboots and stop/start.
+  durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - Backups are trivial: snapshot the disk or copy `tournament-data/` elsewhere.
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks
   (30 GB on GCP, 50 GB on Oracle) are the free-tier **boot-disk** allowances (they hold the OS,
-  Docker, and the app image, with `tournament-data/` alongside). The module simply uses the free
+  Docker, and the app image, with `tournament-data/` alongside). The module uses the free
   cap rather than provisioning a separate data disk.
 
 ## 5. Capacity & scaling
@@ -194,7 +194,7 @@ flowchart LR
     c["1000+ viewers"] --> o["Oracle deployment"]
 ```
 
-Set a **billing budget alert** (e.g. $1) on cloud deployments so you're warned if usage ever
+Set a **billing budget alert** (for example, $1) on cloud deployments so you're warned if usage ever
 exceeds the free allowance. `SSE_MAX_CLIENTS` bounds fan-out cost (default 5000; ~4–10 KB
 resident per client).
 
@@ -222,7 +222,7 @@ are written to a protected, root-owned file on the instance, never baked into th
 
 - **Stateless app, stateful disk**: the container can be recreated freely. Only the data volume
   matters. Auto-restart + a persistent disk = self-healing after reboots.
-- **Zero-dependency runtime**: no DB, no cache, no message broker. Just the binary, a TLS proxy,
+- **Zero-dependency runtime**: no DB, no cache, no message broker. Only the binary, a TLS proxy,
   and a disk.
 - **Graceful shutdown** (30s): lets in-flight writes finish and SSE goroutines exit cleanly before
   a container restart.

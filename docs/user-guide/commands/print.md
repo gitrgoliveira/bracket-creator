@@ -28,7 +28,7 @@ Provide **exactly one**:
 | `tags` | The competitor "Tags" sheets, with title pages (team workbooks excluded). Tags carry a [QR code](../mobile-app.md#export-print) when the tournament's public URL is set. |
 | `pools-trees` | Pool Draw + Tree sheets (a participant booklet), page-numbered |
 | `full-bracket` | Pool Draw + Pool/Elimination Matches + Trees, page-numbered |
-| `all` | All of the above, written into `--output-dir` |
+| `all` | Every type, written into `--output-dir` |
 
 ## Other flags
 
@@ -47,7 +47,7 @@ bracket-creator print --type=all --input=./xlsx/ --output-dir=./pdfs
 # Generate everything from a live tournament-data directory
 bracket-creator print --type=all --tournament-data=tournament-data/ --output-dir=./pdfs
 
-# Just the competitor tags, to a single file
+# Competitor tags only, to a single file
 bracket-creator print --type=tags --input=./xlsx/ -o ./tags.pdf
 ```
 
@@ -61,4 +61,4 @@ The live app's in-app export needs LibreOffice **in the running server**. The CL
 
 ## LibreOffice requirement
 
-`print` renders through **LibreOffice** (`soffice`). Install it via your platform's package manager (ensuring `soffice` is on `PATH`), or set `$LIBREOFFICE_PATH` to the `soffice` binary. If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../hosting.md) image bundles it.
+`print` renders through **LibreOffice** (`soffice`). Install it with your platform's package manager (ensuring `soffice` is on `PATH`), or set `$LIBREOFFICE_PATH` to the `soffice` binary. If LibreOffice is not found, the command exits with installation instructions. The published [`bracket-creator-mobile-pdf`](../hosting.md) image bundles it.

@@ -15,7 +15,7 @@ See the [Mobile Tournament App guide](../mobile-app.md) for a full walkthrough o
 | `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created on first save. |
 | `--port` | `-p` | `8080` (or `$PORT`) | Port to listen on |
 | `--bind` | `-b` | `localhost` (or `$BIND_ADDRESS`) | Address to bind to. Use `0.0.0.0` to reach the server from other devices on the LAN. |
-| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked authentication mode. Requires `TOURNAMENT_PASSWORD_HASH`. See [Authentication](#authentication) below. |
+| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked authentication mode. Requires `TOURNAMENT_PASSWORD_HASH`. See [Authentication](#authentication). |
 
 ## Environment variables
 
@@ -39,7 +39,7 @@ The admin password is stored plaintext in `tournament-data/tournament.md` and co
 
 ### Locked mode (`--lock-password`)
 
-The on-disk password is ignored. Authentication compares the `X-Tournament-Password` header against a bcrypt hash supplied via the `TOURNAMENT_PASSWORD_HASH` environment variable.
+The on-disk password is ignored. Authentication compares the `X-Tournament-Password` header against a bcrypt hash from the `TOURNAMENT_PASSWORD_HASH` environment variable.
 
 ```bash
 # Generate the hash (pipe the secret; bare invocation waits for stdin with no
@@ -61,8 +61,8 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
 #### Operational caveats
 
 - **`POST /api/tournament/reset` has no rate limiting.** The endpoint is unauthenticated and the server does not throttle calls. For internet-exposed deployments, run with `--lock-password` (which 404s `POST /api/tournament/reset`) OR front the server with a reverse proxy that rate-limits that path.
-- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (e.g. nginx's `limit_req`) in addition to `POST /api/tournament/reset`.
-- **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field; auth just stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
+- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (for example, nginx's `limit_req`) in addition to `POST /api/tournament/reset`.
+- **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field; auth stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
 
 ## Examples
 

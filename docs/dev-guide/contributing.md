@@ -79,7 +79,7 @@ An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 2. Rebuild the binary: `make go/build`
 3. Restart the server: `make run-mobile`
 
-Simply editing `.js` files and refreshing the browser will **not** pick up changes; the browser is served the embedded bundle baked into the last binary build.
+Editing `.js` files and refreshing the browser does **not** pick up changes; the browser is served the embedded bundle baked into the last binary build.
 
 ## Create a commit
 

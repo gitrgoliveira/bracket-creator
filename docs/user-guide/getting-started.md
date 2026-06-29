@@ -2,7 +2,7 @@
 
 You can install the pre-compiled binary, use Go, build from source, or use Docker.
 
-Below you can find the steps for each of them.
+The following sections describe each method.
 
 ## Pre-compiled binaries
 
@@ -39,7 +39,7 @@ cd bracket-creator
 make go/build
 ```
 
-The binary will be available at `./bin/bracket-creator`.
+The binary is at `./bin/bracket-creator`.
 
 ## Docker
 
@@ -55,7 +55,7 @@ You can also run the application using Docker.
     docker compose up -d
     ```
 
-    The application will be available at `http://localhost:8080`.
+    The application is available at `http://localhost:8080`.
 
 === "Make"
 

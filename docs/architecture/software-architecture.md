@@ -130,7 +130,7 @@ flowchart TB
 
 Server hardening (constants in `cmd/mobile_app.go`): `ReadHeaderTimeout 10s`, `ReadTimeout 30s`,
 `IdleTimeout 120s`, `MaxHeaderBytes 1 MB`, **`WriteTimeout 0`** (SSE streams are infinite;
-per-request cancellation runs via the request context). Graceful shutdown 30s with
+per-request cancellation runs through the request context). Graceful shutdown 30s with
 `Hub.Close` wired through `RegisterOnShutdown`. Every handler-spawned goroutine uses `safeGo`
 (Gin Recovery only catches the request goroutine).
 

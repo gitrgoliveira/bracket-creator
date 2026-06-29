@@ -585,7 +585,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     <div className="empty">
                         <h3>Unknown shiaijo "{court}"</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                            This court isn't part of the tournament : it may have been renamed or removed.{" "}
+                            This court isn't part of the tournament: it may have been renamed or removed.{" "}
                             <button type="button" onClick={onBack} className="linklike">Back to dashboard</button>.
                         </p>
                         {/* The title-overlay court switcher is gated on courtKnown, so an
@@ -621,7 +621,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className="section-title">Up next</div>
                                     <div className={`shiaijo-upnext__card ${calledKey === matchKey(upNext) ? "is-called" : ""}`}>
                                         <div className="shiaijo-upnext__time">
-                                            {upNext.scheduledAt || ": "} · {upNext.compName}
+                                            {upNext.scheduledAt || "-"} · {upNext.compName}
                                             {upNext.phase === "pool" && upNext.poolPosition > 0 && upNext.poolCount > 0
                                                 ? ` · Match ${upNext.poolPosition} of ${upNext.poolCount}`
                                                 : upNext.phase === "bracket" && upNext.matchNumber > 0
@@ -953,7 +953,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
         <div className={`shiaijo-qrow ${isComplete ? "shiaijo-qrow--complete" : ""}`}>
             <div className="shiaijo-qrow__top">
                 <span className="shiaijo-qrow__time">
-                    {m.scheduledAt || ": "} · {m.compName}
+                    {m.scheduledAt || "-"} · {m.compName}
                     {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
                         ? ` · Match ${m.poolPosition} of ${m.poolCount}`
                         : m.phase === "bracket" && m.matchNumber > 0

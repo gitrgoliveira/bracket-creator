@@ -814,7 +814,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated : the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
+          Draw generated: the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
         </div>
       )}
       {isStarted && (
@@ -830,7 +830,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         <div className="card" style={{ marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div>
             <div className="card__title" style={{ marginBottom: 2 }}>
-              {players.length >= 2 ? "Roster ready: next: generate the draw" : "Add your roster to begin"}
+              {players.length >= 2 ? "Roster ready. Next: generate the draw" : "Add your roster to begin"}
             </div>
             <div className="card__sub">
               {players.length >= 2
@@ -1103,7 +1103,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                      <window.StableInput
                         className="seed-row__input"
                         type="number"
-                        placeholder=":"
+                        placeholder="-"
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
@@ -1183,7 +1183,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
           {nearDupPending && (
             <div className="alert alert--warn" style={{ marginBottom: 12 }} data-testid="near-dup-banner">
-              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved : but these entries look like possible duplicates. Review them:</div>
+              <div style={{ marginBottom: 6, fontWeight: 600 }}>Saved: but these entries look like possible duplicates. Review them:</div>
               <ul style={{ margin: "0 0 8px 16px", padding: 0 }}>
                 {nearDupPending.pairs.map((w, i) => (
                   <li key={i}><strong>{w.a}</strong> and <strong>{w.b}</strong> <span style={{ color: "var(--ink-3)", fontSize: 12 }}>({w.score})</span></li>
@@ -1217,10 +1217,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   <thead><tr>{cols.map(h => <th key={h}>{h}</th>)}</tr></thead>
                   <tbody>{preview.map((p, i) => (
                     <tr key={i}>
-                      <td className={!p.name ? "cell--missing" : ""}>{p.name || ":"}</td>
-                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || ":"}</td>}
-                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || ":"}</td>
-                      <td>{p.danGrade || ":"}</td>
+                      <td className={!p.name ? "cell--missing" : ""}>{p.name || "-"}</td>
+                      {c.withZekkenName && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "-"}</td>}
+                      <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "-"}</td>
+                      <td>{p.danGrade || "-"}</td>
                     </tr>
                   ))}</tbody>
                 </table>

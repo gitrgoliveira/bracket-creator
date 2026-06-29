@@ -79,7 +79,7 @@ func doGetMeta(r *gin.Engine, compID string) *httptest.ResponseRecorder {
 }
 
 // ---------------------------------------------------------------------------
-// GET /register/competitions/:id,  metadata
+// GET /register/competitions/:id, metadata
 // ---------------------------------------------------------------------------
 
 func TestRegistration_GET_SelfRun_ReturnsMetadata(t *testing.T) {
@@ -189,7 +189,7 @@ func TestRegistration_POST_WhitespaceDanGrade_NotPersisted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST /register/competitions/:id,  happy path
+// POST /register/competitions/:id, happy path
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_SelfRun_Setup_CreatesParticipant(t *testing.T) {
@@ -272,7 +272,7 @@ func TestRegistration_POST_NonZekkenComp_DisplayNameStripped(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Reload without zekken,  displayName should NOT be persisted as-is
+	// Reload without zekken, displayName should NOT be persisted as-is
 	players, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, players, 1)
@@ -282,7 +282,7 @@ func TestRegistration_POST_NonZekkenComp_DisplayNameStripped(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  officiated mode → 404
+// POST, officiated mode → 404
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_Officiated_Returns404(t *testing.T) {
@@ -305,7 +305,7 @@ func TestRegistration_POST_Officiated_Returns404(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  competition not in setup → 409
+// POST, competition not in setup → 409
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_CompNotInSetup_Returns409(t *testing.T) {
@@ -338,7 +338,7 @@ func TestRegistration_POST_CompNotInSetup_Returns409(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  duplicate name → 409 with user-friendly message
+// POST, duplicate name → 409 with user-friendly message
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testing.T) {
@@ -357,7 +357,7 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 	})
 	require.Equal(t, http.StatusOK, w1.Code)
 
-	// Try to register Alice again with the SAME dojo,  same (name,dojo) pair
+	// Try to register Alice again with the SAME dojo, same (name,dojo) pair
 	// is a duplicate under the new name+dojo dedup key.
 	w2 := doRegister(r, compID, map[string]any{
 		"name": "Alice Yamamoto", "dojo": "Raizan",
@@ -369,7 +369,7 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// POST,  missing required fields → 400
+// POST, missing required fields → 400
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_MissingRequiredFields(t *testing.T) {
@@ -402,7 +402,7 @@ func TestRegistration_POST_MissingRequiredFields(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  field length validation → 400
+// POST, field length validation → 400
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_FieldLengthValidation(t *testing.T) {
@@ -453,7 +453,7 @@ func TestRegistration_POST_FieldLengthValidation(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  path traversal defense
+// POST, path traversal defense
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_InvalidCompID_Returns400(t *testing.T) {
@@ -479,7 +479,7 @@ func TestRegistration_POST_InvalidCompID_Returns400(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  competition not found → 404
+// POST, competition not found → 404
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_CompNotFound_Returns404(t *testing.T) {
@@ -492,7 +492,7 @@ func TestRegistration_POST_CompNotFound_Returns404(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// POST,  source is always "registered" regardless of caller
+// POST, source is always "registered" regardless of caller
 // ---------------------------------------------------------------------------
 
 func TestRegistration_POST_SourceAlwaysRegistered(t *testing.T) {

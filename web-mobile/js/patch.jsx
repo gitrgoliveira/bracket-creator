@@ -269,8 +269,8 @@ function recomputeBracketQueuePositions(bracket) {
 //
 // Returns:
 //   { duplicate: false, gap: false }: normal forward or first event
-//   { duplicate: true,  gap: false }: seq <= lastSeq (replay/dup)
-//   { gap: true,  duplicate: false }: seq jumped, onGap fired
+//   { duplicate: true, gap: false }: seq <= lastSeq (replay/dup)
+//   { gap: true, duplicate: false }: seq jumped, onGap fired
 //
 // `seq` not a number → treat as no-seq event; state is not mutated.
 // `state.lastSeq === 0` (or absent) → first event; accepted, no gap check.

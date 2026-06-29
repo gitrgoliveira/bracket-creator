@@ -17,8 +17,8 @@ import (
 //
 // Routes:
 //
-//	GET  /api/register/competitions/:id,  competition metadata for the registration form
-//	POST /api/register/competitions/:id,  register a new participant (tag="registered")
+//	GET  /api/register/competitions/:id, competition metadata for the registration form
+//	POST /api/register/competitions/:id, register a new participant (tag="registered")
 func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, hub Broadcaster) {
 	r.GET("/register/competitions/:id", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)

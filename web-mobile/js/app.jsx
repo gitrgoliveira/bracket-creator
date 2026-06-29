@@ -1510,7 +1510,7 @@ function CreateTournament({ onCreated, authConfig }) {
                 required
               />
               <div className="field__hint">
-                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Since this tournament is self-run, scoring is public : this password is the only thing protecting irreversible actions.
+                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Since this tournament is self-run, scoring is public: this password is the only thing protecting irreversible actions.
               </div>
             </div>
           )}

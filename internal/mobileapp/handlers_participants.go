@@ -103,7 +103,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			// Default to "manual" so rows added via this UI carry the same
 			// provenance marker as rows the operator added by hand to the
-			// paste-box import,  keeps source-filter buckets coherent.
+			// paste-box import, keeps source-filter buckets coherent.
 			source := helper.CanonicalRegistrationSource(req.Source)
 			if source == "" {
 				source = "manual"
@@ -164,7 +164,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// Required-field + length validation. Name and dojo must be non-blank
-		// (after trimming),  mirrors the single-add path above. Without this the
+		// (after trimming), mirrors the single-add path above. Without this the
 		// batch path silently accepts a misformatted roster row (e.g. a
 		// two-column "Name, Dojo" line in a zekken competition, which the SPA
 		// parser maps to {displayName: dojo, dojo: ""}), persisting a competitor
@@ -209,7 +209,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load participants: " + err.Error()})
 			return
 		}
-		// Key by (normalizedName, normalizedDojo),  NOT name alone. Tier-1
+		// Key by (normalizedName, normalizedDojo), NOT name alone. Tier-1
 		// dedup allows two same-named competitors from different dojos, so a
 		// name-only key would transfer check-in state between distinct people.
 		checkInKey := func(name, dojo string) string {
@@ -348,7 +348,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return state.ErrCompetitionNotInSetup
 			}
 
-			// Strip displayName for non-zekken competitions,  same CSV-corruption
+			// Strip displayName for non-zekken competitions, same CSV-corruption
 			// guard as the single-add path: a 3-column row written here would be
 			// mis-parsed on the next LoadParticipants(withZekkenName=false) read,
 			// shifting Dojo into Metadata. Empty DisplayName triggers SanitizeName
@@ -408,7 +408,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var warnings []string
 		if isDrawReady && oldName != "" {
 			// Cascade the name/dojo change through draw artifacts outside the
-			// transaction,  WithTransaction's per-comp lock is released above
+			// transaction, WithTransaction's per-comp lock is released above
 			// (non-reentrant mutex), so the cascade function can acquire it.
 			// Use updatedPlayer.DisplayName (the canonical post-save value) so
 			// auto-derived display names propagate correctly into pools.csv.
@@ -421,7 +421,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
 			if cascadeErr != nil {
-				// participants.csv (and seeds.csv) were already updated,  broadcast and
+				// participants.csv (and seeds.csv) were already updated, broadcast and
 				// return 200 with the updated player so the client keeps its local state.
 				// Include any warnings collected before the failure (e.g. dojo conflicts
 				// from pools) and a cascadeError field for operator visibility.

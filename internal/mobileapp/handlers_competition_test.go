@@ -1396,7 +1396,7 @@ func TestPublicViewerCompetitionDetail_InvalidIDReturns400(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions/bad%20id", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"invalid: id on public viewer detail route should 400 (was 500 pre-fix): %s", w.Body.String())
+		"invalid id on public viewer detail route should 400 (was 500 pre-fix): %s", w.Body.String())
 }
 
 // TestRecordBracketMatchResult_PreservesRunningStatus pins the

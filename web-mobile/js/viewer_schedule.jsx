@@ -249,7 +249,7 @@ export function TWMatch({ m, highlight, onClick }) {
   return (
     <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
-        <div className="tw-match__time">{m.scheduledAt || ":"}</div>
+        <div className="tw-match__time">{m.scheduledAt || "-"}</div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (
           <div className="tw-match__queue" style={{ fontSize: 10, fontWeight: 700, color: qp === 1 ? "var(--accent)" : "var(--ink-3)", marginTop: 2 }}>

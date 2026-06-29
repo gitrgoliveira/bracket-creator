@@ -266,7 +266,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           ))}
           {roster.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              This team has no registered members : type each competitor's name directly.
+              This team has no registered members: type each competitor's name directly.
             </div>
           )}
         </div>

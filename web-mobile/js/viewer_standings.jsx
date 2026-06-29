@@ -394,7 +394,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
-        <span className="pool-match-numbered-row__name">{bName || ":"}</span>
+        <span className="pool-match-numbered-row__name">{bName || "-"}</span>
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
@@ -404,7 +404,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
-        <span className="pool-match-numbered-row__name">{aName || ":"}</span>
+        <span className="pool-match-numbered-row__name">{aName || "-"}</span>
       </div>
     </Tag>
   );

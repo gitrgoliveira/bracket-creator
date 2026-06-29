@@ -175,7 +175,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
-                <div className="score-edit-row__time">{m.scheduledAt || ":"}</div>
+                <div className="score-edit-row__time">{m.scheduledAt || "-"}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
@@ -193,7 +193,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     <span className="score-edit-row__scoreval">
                       {m.status === "scheduled"
                         ? <span style={{ fontSize: 11, color: "var(--ink-3)" }}>vs</span>
-                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : ":"}</span>)}
+                        : (seScore || <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{m.status === "running" ? "vs" : "-"}</span>)}
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>

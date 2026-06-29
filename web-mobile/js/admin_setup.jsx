@@ -499,7 +499,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
                 onChange={(e) => setPublicURL(e.target.value)}
                 placeholder="https://my-tournament.example.com"
               />
-              <div className="field__hint">The address participants reach this tournament at : used for QR codes and share links. Leave blank to use the current browser address.</div>
+              <div className="field__hint">The address participants reach this tournament at: used for QR codes and share links. Leave blank to use the current browser address.</div>
               {publicURL.trim() === "" && isNonPublicOrigin(window.location.origin) && (
                 <div className="field__hint" style={{ color: "var(--red)", marginTop: 4 }}>
                   {(() => {
@@ -858,7 +858,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Add competition</h1>
-            <div className="page-head__sub">A competition is one event within the tournament : e.g. Men's Individual, Women's Teams.</div>
+            <div className="page-head__sub">A competition is one event within the tournament: e.g. Men's Individual, Women's Teams.</div>
           </div>
         </div>
 
@@ -1219,11 +1219,11 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                 <tbody>
                   {preview.map(comp => (
                     <tr key={comp.id || comp.name}>
-                      <td>{comp.id || ": "}</td>
-                      <td>{comp.name || ": "}</td>
-                      <td>{comp.format || ": "}</td>
-                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || ": "}</td>
-                      <td>{comp.seeds || ": "}</td>
+                      <td>{comp.id || "-"}</td>
+                      <td>{comp.name || "-"}</td>
+                      <td>{comp.format || "-"}</td>
+                      <td className={!comp.participants ? "cell--missing" : ""}>{comp.participants || "-"}</td>
+                      <td>{comp.seeds || "-"}</td>
                     </tr>
                   ))}
                 </tbody>

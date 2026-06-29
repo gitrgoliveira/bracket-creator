@@ -184,7 +184,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
-        <span className="vsched-item__time">{m.scheduledAt || ":"}</span>
+        <span className="vsched-item__time">{m.scheduledAt || "-"}</span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>

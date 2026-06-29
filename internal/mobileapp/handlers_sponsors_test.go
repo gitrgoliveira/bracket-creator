@@ -143,7 +143,7 @@ func TestPostSponsor_RejectsBadType(t *testing.T) {
 	router, _, cleanup := sponsorTestSetup(t)
 	defer cleanup()
 
-	// PDF magic bytes,  sniffer classifies as application/pdf.
+	// PDF magic bytes, sniffer classifies as application/pdf.
 	pdfBytes := append([]byte("%PDF-1.4\n"), bytes.Repeat([]byte("\x00"), 100)...)
 	body, ct := buildSponsorUpload(t, "PDF Inc", "", "doc.pdf", pdfBytes)
 	w := postSponsor(t, router, body, ct, "secret")
@@ -158,7 +158,7 @@ func TestPostSponsor_RejectsBadLink(t *testing.T) {
 		"javascript:alert(1)",
 		"ftp://files.example",
 		"no-scheme.example",
-		"https://user:pass@example.com", // userinfo rejected,  would leak credentials in href
+		"https://user:pass@example.com", // userinfo rejected, would leak credentials in href
 		"https://",                      // missing host
 	} {
 		body, ct := buildSponsorUpload(t, "Bad Link", badLink, "x.png", tinyPNG)
@@ -238,7 +238,7 @@ func TestGetSponsor_RejectsTraversal(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest(http.MethodGet, "/api/sponsors/"+bad, nil)
 		router.ServeHTTP(w, req)
-		// Path traversal with .. resolves at the URL layer,  Gin returns
+		// Path traversal with .. resolves at the URL layer, Gin returns
 		// 301 or 404. The filename regex covers everything that reaches
 		// the handler. Either way, no file is served. 200 must never
 		// appear.
@@ -332,7 +332,7 @@ func TestDeleteSponsor_HandEditedTraversalFilenameRejected(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, "YAML entry still gets removed; only the file unlink is suppressed")
 
-	// Bystander file must still exist,  the unlink was suppressed by
+	// Bystander file must still exist, the unlink was suppressed by
 	// the filename allowlist check.
 	_, err = os.Stat(bystander)
 	assert.NoError(t, err, "traversal-shaped sponsor filename must not trigger an arbitrary file delete")
@@ -391,7 +391,7 @@ func TestPostSponsor_NoTournament(t *testing.T) {
 }
 
 // TestPostSponsor_SelfRunMode_RejectsAnonymous and Delete equivalent
-// pin the self-run authorization contract,  sponsor management is
+// pin the self-run authorization contract, sponsor management is
 // organiser setup, not operational play, and must not become anonymously
 // writable when the tournament is in self-run mode. The route is added
 // to isSelfRunMainGatedConfigRoute alongside the other config routes.
@@ -418,7 +418,7 @@ func TestPostSponsor_SelfRunMode_RejectsAnonymous(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/api/sponsors", body)
 	req.Header.Set("Content-Type", ct)
 	// No password header. In self-run mode the main-pw gate is bypassed
-	// for operational routes,  but sponsor mutation is config, so 401.
+	// for operational routes, but sponsor mutation is config, so 401.
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code, "self-run sponsor upload must require main-password")
 

@@ -1048,7 +1048,7 @@ function RdRoster({ mode, rows, groupByDojo, query, busy, allChecked, canWalkUp,
   if (groupByDojo) {
     const groups = new Map();
     rows.forEach((row) => {
-      const dojo = (mode === "all" ? row.rec.dojo : row.player.dojo) || ":";
+      const dojo = (mode === "all" ? row.rec.dojo : row.player.dojo) || "-";
       if (!groups.has(dojo)) groups.set(dojo, []);
       groups.get(dojo).push(row);
     });

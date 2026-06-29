@@ -975,7 +975,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                           ) : (
                             rs.playerName
                               ? <span className="tsm-name__static">{rs.playerName}</span>
-                              : <span className="tsm-name__static tsm-name__static--empty">: </span>
+                              : <span className="tsm-name__static tsm-name__static--empty">-</span>
                           )}
                         </div>
                         {/* Row 1: point slots + M/K/D/T/H buttons. In compact

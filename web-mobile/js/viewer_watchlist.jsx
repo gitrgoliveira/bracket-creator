@@ -173,7 +173,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
       <div className="my-match__row">
         <div className="my-match__chip">
           <span className="l">Court</span>
-          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || ":"}</span>
+          <span className="v"><TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court || "-"}</span>
         </div>
         <div className="my-match__chip">
           <span className="l">Time</span>
@@ -342,7 +342,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
 
       {count === 0 ? (
         <div className="hint">
-          Track yourself, a few competitors, or a whole dojo : we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
+          Track yourself, a few competitors, or a whole dojo: we'll surface their next matches and alert you when they're on deck. Add up to {WATCHLIST_MAX}.
         </div>
       ) : (
         <div className="pmf__bar pmf__bar--standalone watchlist-chips">
@@ -368,7 +368,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
           until the user picks a primary. */}
       {multi && !primaryEntry && (
         <div className="hint watchlist-pin-hint">
-          Tap ☆ on a chip to pin your primary : they get the big card and an on-deck chime.
+          Tap ☆ on a chip to pin your primary: they get the big card and an on-deck chime.
         </div>
       )}
 

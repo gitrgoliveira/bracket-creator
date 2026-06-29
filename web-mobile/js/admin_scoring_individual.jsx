@@ -546,7 +546,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   onChange={(e) => setRepPlayerB(e.target.value)}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
-                  <option value="">: Select player : </option>
+                  <option value="">Select player</option>
                   {(m.repRosterB || []).map(nm => <option key={nm} value={nm}>{nm}</option>)}
                 </select>
               </label>
@@ -560,7 +560,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   onChange={(e) => setRepPlayerA(e.target.value)}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
-                  <option value="">: Select player : </option>
+                  <option value="">Select player</option>
                   {(m.repRosterA || []).map(nm => <option key={nm} value={nm}>{nm}</option>)}
                 </select>
               </label>
@@ -833,7 +833,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <span>Not saved yet : will keep retrying until it lands.</span>
+              <span>Not saved yet: will keep retrying until it lands.</span>
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}

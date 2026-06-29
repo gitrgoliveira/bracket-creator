@@ -8,8 +8,8 @@ type IntPair struct {
 // CircleMethodRounds generates a full round-robin schedule for n players using
 // the circle (polygon) method. Player 0 is fixed; players 1..N-1 rotate.
 //
-// For even n:   n-1 rounds,  n/2 matches per round,  n*(n-1)/2 total.
-// For odd n:    n rounds,    (n-1)/2 matches per round (one bye per round),
+// For even n:   n-1 rounds, n/2 matches per round, n*(n-1)/2 total.
+// For odd n:    n rounds, (n-1)/2 matches per round (one bye per round),
 //
 //	n*(n-1)/2 total.
 //

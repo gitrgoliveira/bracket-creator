@@ -21,13 +21,13 @@ const EventSwissRoundGenerated EventType = "swiss_round_generated"
 // RegisterSwissHandlers wires the Swiss-format-specific endpoints
 // onto the admin router group:
 //
-//	POST /api/competitions/:id/swiss/generate-round  ,  generate next round
-//	GET  /api/competitions/:id/swiss/standings       ,  cumulative standings
+//	POST /api/competitions/:id/swiss/generate-round  , generate next round
+//	GET  /api/competitions/:id/swiss/standings       , cumulative standings
 //
 // Both endpoints sit inside the admin group (same as the rest of the
 // competition write/read endpoints). The standings GET is read-only
 // but matches the existing pattern of pool-standings being inside the
-// admin group as well,  viewer-side standings reuse the same Engine
+// admin group as well, viewer-side standings reuse the same Engine
 // helper via the public viewer handlers when needed.
 //
 // FR-050d, FR-050e.
@@ -92,7 +92,7 @@ func RegisterSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 
 // RegisterPublicSwissHandlers wires read-only Swiss endpoints under the
 // public /api group. Standings are derived from completed match results,
-// which are themselves public via the viewer endpoint,  so spectators,
+// which are themselves public via the viewer endpoint, so spectators,
 // coaches, and TV displays need them without admin credentials.
 // Discovered during the post-merge browser UAT pass: the SwissStandings
 // viewer tab broke with "invalid tournament password" because the

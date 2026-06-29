@@ -160,7 +160,7 @@ sequenceDiagram
     H-->>SPA: 200 result
 ```
 
-Core invariant (project constitution): **persist then broadcast**. A write is durable
+Core invariant: **persist then broadcast**. A write is durable
 (`fsync` + atomic rename, WAL for multi-file changes) before the 200 and before any SSE
 fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 
@@ -200,7 +200,9 @@ The operator console is a tablet/desktop surface; the viewer is mobile-first. Th
 **offline write queue, SSE resume, and reconnect resilience** are depicted in
 [Network architecture](network-architecture.md).
 
-## Key design rules (see also [`CLAUDE.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/CLAUDE.md) and [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md))
+## Key design rules
+
+See [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md) for the full visual design system.
 
 - **Persist before broadcast**; scoring is ACID; never drop a legitimate operator change.
 - **Use layout/sheet constants** (`internal/helper/constants.go`), never string literals.

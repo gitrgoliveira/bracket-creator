@@ -70,7 +70,6 @@ web-mobile/node_modules
 specs/*
 specs/*/*
 !specs/openapi.yaml
-!specs/ARCHITECTURE.md
 # UAT screenshot evidence (review.md V5): per-task PNGs captured during browser
 # UAT walks. Tracked so the audit trail survives across machines and reviewers.
 !specs/*/screenshots/

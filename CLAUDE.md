@@ -60,6 +60,30 @@ go test -cover ./internal/helper/...
 - **`internal/engine/`**: Thin adapter that drives `internal/helper` pool/bracket generation from a `state.Competition`. Called by the `POST /api/competitions/:id/start` handler.
 - **`web-mobile/`**: Preact/JSX frontend for the mobile app, served embedded in the binary. Entry point: `web-mobile/index.html`. JS modules in `web-mobile/js/` are grouped by prefix: `admin_*.jsx` (the operator console: setup, participants, pools, scoring, scheduling, lineups, etc.), `viewer_*.jsx` and `display_*.jsx` (public attendee/spectator surfaces), and shared infrastructure (`app.jsx`, `api_client.jsx`, `api_serializers.jsx`, `bracket.jsx`, `data.jsx`, `patch.jsx`, `router.jsx`, `ui.jsx`, `glossary.jsx`). Run `ls web-mobile/js/` for the current set rather than relying on an enumerated list here. Note `admin_participants.jsx` holds the `LinedTextarea` gutter participant paste box and the check-in filter list. CSS in `web-mobile/css/styles.css`. Pre-compiled to `web-mobile/dist/` by esbuild (run automatically as part of `make go/build`).
 
+### Layering and on-disk state
+
+Layered with no upward or circular dependencies: presentation (`cmd/`, `mobileapp/`, `web/`, `web-mobile/`) → business logic (`engine/`, `helper/`, `service/`) → persistence (`state/`, `excel/`) → domain models (`domain/`, the dependency leaf with zero internal deps). `mobileapp` → `engine` (via `deps.go` interfaces) and `state` (direct reads for viewer endpoints); `engine` → `helper` + `excel` + `state`.
+
+Live-tournament state is file-backed under `tournament-data/` (owned by `internal/state/`):
+
+```
+tournament-data/
+├── tournament.md                  YAML front-matter: name, date, venue, courts, password
+├── .wal/                          Pending multi-file transactions (replayed on startup)
+├── branding/  sponsors/           Uploaded logo + sponsor images for display surfaces
+└── competitions/<id>/
+    ├── config.md                  YAML front-matter: format, pool size, courts
+    ├── participants.csv           One participant per line (UUID-prefixed)
+    ├── seeds.csv                  Seed rank to player mapping
+    ├── pools.csv                  Pool assignments after start
+    ├── pool-matches.csv           Pool phase match results
+    ├── bracket.json               Elimination bracket structure + results
+    ├── schedule.csv               Court/time assignments
+    ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
+    ├── lineups.yaml               Team lineups, keyed by round
+    └── overrides.json             Manual ranking overrides
+```
+
 ### Key Algorithms
 
 - **Binary tree brackets** (`helper/tree.go`): `Node` struct with `Left`/`Right` children, recursive subdivision for multi-page output. `maxPlayersPerTree = 16`.
@@ -135,6 +159,17 @@ if p := panicRef.Load(); p != nil {
 ```
 
 See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
+
+### Architectural observations (areas to watch)
+
+In-progress migrations and tech debt to keep in mind (re-derive package sizes with `gocloc` when you need numbers):
+
+- **`mobileapp/` is the largest package** after the decision/eligibility/lineup/daihyosen/Swiss/display/league/registration/announcement/branding/sponsors/print handler families plus supporting infra (rate limiting, broadcast coalescer, viewer single-flight). Grouping into subpackages may be warranted.
+- **`engine/` has grown rapidly**: scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, PDF export. Sub-splitting may be warranted.
+- **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, utilities. The `helper/{bracket,csv,seeding}/` subpackages are an in-progress extraction; `helper/` proper has not shrunk yet.
+- **`excel/` has minimal direct test coverage** (roughly 0.3x source) despite Excel being the primary CLI deliverable; most Excel coverage lives in `helper/*_test.go`.
+- **`domain/` adoption is partial**: much business logic still uses `helper.Player` directly rather than domain types; the migration is incomplete.
+- **No top-level interfaces** for `state.Store` or `engine.Engine`: interface adoption is incremental via `mobileapp/deps.go`; engine-to-state and helper-to-engine calls still use concrete types.
 
 ## Testing Conventions
 

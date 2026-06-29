@@ -60,7 +60,7 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 	t.Run("competition-scoped keys are independent", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
 		// Same bare match id "Pool A-1" in two different competitions must not
-		// share a coalesce window — the call site keys by compID:matchID.
+		// share a coalesce window , the call site keys by compID:matchID.
 		assert.True(t, c.Allow("comp1:Pool A-1", true))
 		assert.False(t, c.Allow("comp1:Pool A-1", true)) // comp1 coalesced
 		assert.True(t, c.Allow("comp2:Pool A-1", true))  // comp2 independent
@@ -84,7 +84,7 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// BenchmarkScoreWrite_TwoCourts — measures per-comp-lock serialisation when
+// BenchmarkScoreWrite_TwoCourts , measures per-comp-lock serialisation when
 // two courts of the SAME competition write running-status scores concurrently.
 //
 // C3 concern: the per-comp mutex (state.WithTransaction) is non-reentrant
@@ -95,13 +95,13 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 //
 // Result (2026-06-15, M1 Pro, -10 GOMAXPROCS): ~47ms/op for a two-court write
 // PAIR, dominated by the engine's per-write CSV persist to the temp data dir
-// (real disk I/O), not by lock contention — the per-comp mutex is held only
+// (real disk I/O), not by lock contention , the per-comp mutex is held only
 // for the in-memory critical section. At the ≤3.3 writes/s-per-court autosave
 // rate this is comfortably non-blocking. No tuning required.
 //
 // (An earlier draft used a per-goroutine fixed rev; under RunParallel that made
-// many out-of-order writes hit the rev-guard's stale fast path — skipping the
-// engine write entirely — so it under-measured. The constant rev below ensures
+// many out-of-order writes hit the rev-guard's stale fast path , skipping the
+// engine write entirely , so it under-measured. The constant rev below ensures
 // every request traverses the full guard + lock + engine path.)
 // ---------------------------------------------------------------------------
 func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
@@ -125,7 +125,7 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 	// A FIXED rev (not a monotonic per-write counter) is intentional here. Under
 	// b.RunParallel, monotonically-increasing revs would arrive out of order, so
 	// a lower rev landing after a higher one would be stale-rejected by the
-	// rev-guard on the fast path — skipping the engine write + per-comp lock
+	// rev-guard on the fast path , skipping the engine write + per-comp lock
 	// entirely, which is exactly the cost this benchmark measures. A constant rev
 	// (equal revs always proceed) makes every request traverse the full
 	// guard + lock + engine path, giving a representative serialisation cost.
@@ -161,7 +161,7 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 }
 
 // ---------------------------------------------------------------------------
-// TestScoreHandler_C3Coalescer — integration: coalesced running writes
+// TestScoreHandler_C3Coalescer , integration: coalesced running writes
 // do not broadcast but completed writes always do.
 // ---------------------------------------------------------------------------
 func TestScoreHandler_C3Coalescer(t *testing.T) {
@@ -179,7 +179,7 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	var broadcastCount atomic.Int64
 	// Subscribe to the hub so we can count broadcasts. The single explicit
 	// Unsubscribe before wg.Wait() (below) closes the channel so the counting
-	// goroutine exits — that's the deterministic cleanup, so no defer is needed.
+	// goroutine exits , that's the deterministic cleanup, so no defer is needed.
 	ch := hub.Subscribe()
 	require.NotNil(t, ch)
 
@@ -220,9 +220,9 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 		return w.Code
 	}
 
-	// First running write — should broadcast.
+	// First running write , should broadcast.
 	assert.Equal(t, http.StatusOK, scoreRunning(1))
-	// Second running write immediately after — should be coalesced (no broadcast).
+	// Second running write immediately after , should be coalesced (no broadcast).
 	assert.Equal(t, http.StatusOK, scoreRunning(2))
 
 	// The first write's broadcast reaches the subscriber goroutine
@@ -232,7 +232,7 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	require.Eventually(t, func() bool { return broadcastCount.Load() == 1 }, time.Second, time.Millisecond,
 		"first running write should broadcast exactly once; second is coalesced within 250ms")
 
-	// Completed write — always broadcasts regardless of coalesce window.
+	// Completed write , always broadcasts regardless of coalesce window.
 	assert.Equal(t, http.StatusOK, scoreCompleted())
 	require.Eventually(t, func() bool { return broadcastCount.Load() >= 2 }, time.Second, time.Millisecond,
 		"completed write must always broadcast")

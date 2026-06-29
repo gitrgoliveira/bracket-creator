@@ -48,7 +48,7 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 		c.JSON(http.StatusOK, ann)
 	})
 
-	// DELETE /api/announcements/:id — dismiss a single announcement.
+	// DELETE /api/announcements/:id , dismiss a single announcement.
 	r.DELETE("/announcements/:id", func(c *gin.Context) {
 		found, list := store.AnnouncementStore().Remove(c.Param("id"))
 		if !found {
@@ -59,7 +59,7 @@ func RegisterAnnouncementHandlers(r *gin.RouterGroup, store *state.Store, hub *H
 		c.Status(http.StatusNoContent)
 	})
 
-	// DELETE /api/announcements — clear all announcements.
+	// DELETE /api/announcements , clear all announcements.
 	r.DELETE("/announcements", func(c *gin.Context) {
 		hub.Broadcast(EventAnnouncement, store.AnnouncementStore().Clear())
 		c.Status(http.StatusNoContent)
@@ -71,7 +71,7 @@ func RegisterPublicAnnouncementHandlers(r *gin.RouterGroup, store *state.Store) 
 		c.JSON(http.StatusOK, store.AnnouncementStore().List())
 	})
 
-	// GET /api/tournament/announcement — legacy single-slot endpoint.
+	// GET /api/tournament/announcement , legacy single-slot endpoint.
 	r.GET("/tournament/announcement", func(c *gin.Context) {
 		ann := store.AnnouncementStore().Get()
 		if ann == nil {

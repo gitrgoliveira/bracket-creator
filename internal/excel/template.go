@@ -46,7 +46,7 @@ func NewFileFromScratch() (*excelize.File, error) {
 }
 
 // mustStyle creates an Excel style and panics if creation fails (malformed
-// style definition — a programming error, not a runtime condition).
+// style definition, a programming error, not a runtime condition).
 func mustStyle(f *excelize.File, s *excelize.Style) int {
 	id, err := f.NewStyle(s)
 	if err != nil {
@@ -126,7 +126,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 		logSetupErr("hdr sty", f.SetCellStyle(s, col+"1", col+"1", hdr))
 	}
 
-	// --- Row 2: scenario — 2 pools, 3-person teams, 3 matches each of 3 min ---
+	// --- Row 2: scenario, 2 pools, 3-person teams, 3 matches each of 3 min ---
 	logSetupErr("A2", f.SetCellInt(s, "A2", 2))
 	logSetupErr("B2", f.SetCellInt(s, "B2", 3))
 	logSetupErr("C2", f.SetCellInt(s, "C2", 3))
@@ -137,7 +137,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 	logSetupErr("sty A2-C2", f.SetCellStyle(s, "A2", "C2", inp))
 	logSetupErr("sty D2-H2", f.SetCellStyle(s, "D2", "H2", tim))
 
-	// --- Row 3: scenario — all zeros (blank starting point) ---
+	// --- Row 3: scenario, all zeros (blank starting point) ---
 	logSetupErr("A3", f.SetCellInt(s, "A3", 0))
 	logSetupErr("B3", f.SetCellInt(s, "B3", 0))
 	logSetupErr("C3", f.SetCellInt(s, "C3", 0))
@@ -168,7 +168,7 @@ func setupTimeEstimatorSheet(f *excelize.File) {
 		logSetupErr("elim hdr sty", f.SetCellStyle(s, col+"7", col+"7", hdr))
 	}
 
-	// --- Row 8: scenario — 5 elim matches, 3-person teams, 4 min each ---
+	// --- Row 8: scenario, 5 elim matches, 3-person teams, 4 min each ---
 	logSetupErr("A8", f.SetCellInt(s, "A8", 5))
 	logSetupErr("B8", f.SetCellInt(s, "B8", 3))
 	logSetupErr("D8", f.SetCellValue(s, "D8", mins(4)))
@@ -314,7 +314,7 @@ func setupTreeSheet(f *excelize.File) {
 	logSetupErr("col B", f.SetColWidth(s, "B", "B", 10))
 	logSetupErr("col C-Z", f.SetColWidth(s, "C", "Z", 3.5))
 
-	// Page layout: A4 portrait — matches the original template.
+	// Page layout: A4 portrait, matches the original template.
 	logSetupErr("SetPageLayout", f.SetPageLayout(s, &excelize.PageLayoutOptions{
 		Size:        intPtr(9),
 		Orientation: strPtr("portrait"),

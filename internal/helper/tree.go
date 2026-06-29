@@ -26,8 +26,8 @@ type Node struct {
 }
 
 // MatchNum returns the sequential match number assigned to this node by
-// AssignMatchNumbers (0 if not yet assigned). Exported so cross-package callers —
-// notably the engine-vs-Excel numbering-parity test — can read the authoritative
+// AssignMatchNumbers (0 if not yet assigned). Exported so cross-package callers ,
+// notably the engine-vs-Excel numbering-parity test , can read the authoritative
 // printed-sheet number without reaching into the unexported field.
 func (n *Node) MatchNum() int64 {
 	if n == nil {
@@ -152,7 +152,7 @@ func parsePoolRank(rankStr string) int64 {
 // The algorithm emits one full pass over the pools per "round" r (r =
 // 0..poolWinners-1). Within a round, pool p contributes the finisher of rank
 // (p + r) % poolWinners. For any fixed pool p, the ranks chosen across the
-// rounds form a cyclic shift of {0..poolWinners-1} — a permutation — so every
+// rounds form a cyclic shift of {0..poolWinners-1} , a permutation , so every
 // "<pool>-<ordinal>" placeholder appears EXACTLY once: no duplicates, none
 // missing, for ALL pool counts and poolWinners values. Adjacent slots hold
 // different pools whose ranks differ by 1 (mod poolWinners), preserving the
@@ -161,7 +161,7 @@ func parsePoolRank(rankStr string) int64 {
 //
 // (The previous formulation gated its round counter on
 // `len(pools)%poolWinners == 0`, which aliased the rank rotation for
-// non-coprime combinations — e.g. poolWinners>=4 with 2/6/10 pools — silently
+// non-coprime combinations , e.g. poolWinners>=4 with 2/6/10 pools , silently
 // duplicating some placeholders and dropping others. Since mp-turx makes these
 // placeholders the leaves of the LIVE in-place knockout, that corrupted real
 // results; this formulation is duplicate-free by construction.)

@@ -277,7 +277,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 	require.NoError(t, err)
 	eng := New(store)
 
-	// Use league format — league auto-completes after all pool matches.
+	// Use league format, league auto-completes after all pool matches.
 	// Mixed format no longer auto-completes: it stays in pools status until
 	// pool finishers are seeded into the knockout incrementally as pools complete.
 	compID := "auto-complete"
@@ -332,7 +332,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 
 	// (Mixed-format MaybeAutoCompletePools behavior is covered in
 	// knockout_test.go: TestMaybeAutoCompletePools_MixedFormat_StaysInPools_WhileScheduled
-	// and TestMaybeAutoCompletePools_MixedFormat_AutoStartsKnockout — auto-start
+	// and TestMaybeAutoCompletePools_MixedFormat_AutoStartsKnockout, auto-start
 	// fires when pools are clean, no transition while a match is pending.)
 
 	t.Run("transitions when there are zero pool matches", func(t *testing.T) {
@@ -509,7 +509,7 @@ func TestRecordMatchResult_RejectsSideRewrite(t *testing.T) {
 // LoadPoolMatches → mutate target match → SavePoolMatches sequentially
 // with no lock held between Load and Save. Two operators scoring
 // DIFFERENT matches on DIFFERENT courts could each load the full pool-
-// matches slice into a separate copy, mutate their target, and save —
+// matches slice into a separate copy, mutate their target, and save,
 // the later save would overwrite the earlier save's mutation with stale
 // data for the OTHER match. One operator's score: silently lost.
 //
@@ -709,7 +709,7 @@ func TestRecordMatchResult_BracketResultSourcePropagated(t *testing.T) {
 // TOCTOU fix in engine.MaybeAutoCompletePools. Pre-atomic-primitive,
 // the LoadCompetition + status check + SaveCompetitionChanged
 // sequence had a window where a concurrent admin invalidate (POST
-// /invalidate) could land between the read and the write — admin's
+// /invalidate) could land between the read and the write, admin's
 // "invalid" status would then be silently overwritten back to
 // "complete" by the auto-complete save.
 //
@@ -717,7 +717,7 @@ func TestRecordMatchResult_BracketResultSourcePropagated(t *testing.T) {
 // state.Store.UpdateCompetitionChanged. The transform re-checks
 // `current.Status == Pools` UNDER the lock; if the admin's
 // invalidate already moved Status to Invalid, the auto-complete
-// transform sees the new value and returns (nil, nil) — no save.
+// transform sees the new value and returns (nil, nil), no save.
 func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 	const iterations = 20
 
@@ -737,7 +737,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 			ID: compID, Name: "Auto vs Invalidate",
 			Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		}))
-		// All matches already completed — auto-complete is eligible.
+		// All matches already completed, auto-complete is eligible.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "P1-1", Status: state.MatchStatusCompleted, Winner: "Alice", SideA: "Alice", SideB: "Bob"},
 		}))
@@ -755,7 +755,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		//       autoCompleted=true  → stored.Status == Complete
 		//       invalidated=true    → stored.Status == Invalid
 		//     Pre-fix this assertion would accept Complete even when
-		//     invalidate landed first — exactly the regression Copilot
+		//     invalidate landed first, exactly the regression Copilot
 		//     flagged. Linking final status to the winner's return value
 		//     forces the test to fail if auto-complete overwrites a
 		//     committed invalidate.
@@ -793,7 +793,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 		// means a save was lost (the racing transform should have
 		// returned (nil, nil) after observing the other's update).
 		assert.False(t, autoCompleted && invalidated,
-			"iter %d: both operations reported changed=true — one must have observed the other's update and returned (nil, nil)",
+			"iter %d: both operations reported changed=true, one must have observed the other's update and returned (nil, nil)",
 			i)
 
 		// Contract 2: final status matches the winner. This is what
@@ -814,11 +814,11 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 			// to write, but both saw the other's commit before their
 			// own SaveCompetitionChanged content-equality check.
 			// Actually with the changed=bool contract, this case means
-			// nobody committed at all — which can't happen here
+			// nobody committed at all, which can't happen here
 			// because at least one must succeed (the matches ARE
 			// completed and the comp IS in Pools). Treat as test bug
 			// rather than a tolerated case.
-			t.Fatalf("iter %d: neither operation committed — pre-condition broken (status stayed %q)",
+			t.Fatalf("iter %d: neither operation committed, pre-condition broken (status stayed %q)",
 				i, stored.Status)
 		}
 		// Cleanup registered via t.Cleanup at iteration start.
@@ -889,7 +889,7 @@ func TestApplyHansokuIppons(t *testing.T) {
 			wantIpponsB: []string{"H", "H"},
 		},
 		{
-			name:        "HansokuA=2 with existing H — no duplicate",
+			name:        "HansokuA=2 with existing H, no duplicate",
 			hansokuA:    2,
 			ipponsB:     []string{"H"},
 			wantIpponsB: []string{"H"},
@@ -911,7 +911,7 @@ func TestApplyHansokuIppons(t *testing.T) {
 			wantIpponsA: []string{"H", "H"},
 		},
 		{
-			name:        "HansokuB=2 with existing H — no duplicate",
+			name:        "HansokuB=2 with existing H, no duplicate",
 			hansokuB:    2,
 			ipponsA:     []string{"H"},
 			wantIpponsA: []string{"H"},
@@ -1118,7 +1118,7 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 	t.Run("regulation→encho transition: same struct retains hansoku count", func(t *testing.T) {
 		r := &state.MatchResult{HansokuA: 1, Encho: nil}
 		applyHansokuIppons(r)
-		require.Nil(t, r.IpponsB) // 1 hansoku in regulation — no ippon yet
+		require.Nil(t, r.IpponsB) // 1 hansoku in regulation, no ippon yet
 
 		r.HansokuA = 2
 		r.Encho = encho1
@@ -1150,7 +1150,7 @@ func TestHansokuCarriesIntoEncho(t *testing.T) {
 // from a completed daihyosen sub-result (Position=-1) when the operator has
 // not explicitly set the bracket match winner.
 func TestDeriveDaihyosenWinner(t *testing.T) {
-	t.Run("winner already set — no change", func(t *testing.T) {
+	t.Run("winner already set, no change", func(t *testing.T) {
 		r := &state.MatchResult{
 			SideA: "TeamA", SideB: "TeamB", Winner: "TeamA",
 			SubResults: []state.SubMatchResult{
@@ -1195,7 +1195,7 @@ func TestDeriveDaihyosenWinner(t *testing.T) {
 		assert.Equal(t, "TeamB", r.Winner)
 	})
 
-	t.Run("daihyosen sub-result has no winner yet — no change", func(t *testing.T) {
+	t.Run("daihyosen sub-result has no winner yet, no change", func(t *testing.T) {
 		r := &state.MatchResult{
 			SideA: "TeamA", SideB: "TeamB",
 			SubResults: []state.SubMatchResult{
@@ -1206,7 +1206,7 @@ func TestDeriveDaihyosenWinner(t *testing.T) {
 		assert.Equal(t, "", r.Winner)
 	})
 
-	t.Run("no daihyosen sub-result — no change", func(t *testing.T) {
+	t.Run("no daihyosen sub-result, no change", func(t *testing.T) {
 		r := &state.MatchResult{
 			SideA: "TeamA", SideB: "TeamB",
 			SubResults: []state.SubMatchResult{
@@ -1217,7 +1217,7 @@ func TestDeriveDaihyosenWinner(t *testing.T) {
 		assert.Equal(t, "", r.Winner)
 	})
 
-	t.Run("nil result — no panic", func(t *testing.T) {
+	t.Run("nil result, no panic", func(t *testing.T) {
 		deriveDaihyosenWinner(nil)
 	})
 }
@@ -1248,13 +1248,13 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, bracket))
 
-	// Score r0m0 with a daihyosen sub-result — Winner field intentionally blank.
+	// Score r0m0 with a daihyosen sub-result, Winner field intentionally blank.
 	result := &state.MatchResult{
 		ID:     "r0m0",
 		SideA:  "TeamA",
 		SideB:  "TeamB",
 		Status: state.MatchStatusCompleted,
-		// No top-level Winner — engine must derive it from the daihyosen sub-result.
+		// No top-level Winner, engine must derive it from the daihyosen sub-result.
 		SubResults: []state.SubMatchResult{
 			{Position: -1, SideA: "PlayerA", SideB: "PlayerB", Winner: "PlayerB",
 				Decision: "daihyosen"},
@@ -1319,7 +1319,7 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 		assert.Contains(t, err.Error(), "not ready to override")
 	})
 
-	// Scheduling a not-yet-resolved match IS allowed — operators may pre-assign
+	// Scheduling a not-yet-resolved match IS allowed, operators may pre-assign
 	// courts/times before the feeder pools finish.
 	t.Run("UpdateMatchCourt allowed on unresolved match", func(t *testing.T) {
 		require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B"))
@@ -1342,8 +1342,8 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 // particular the same-name-head-to-head scoreline-inference branch that the
 // admin score editor relies on (it picks a winner by NAME, sending no
 // WinnerSide hint). The two pre-existing PreservesSideIDs tests both set
-// WinnerSide:"A", so this branch — and the equal-count "leave WinnerID empty"
-// tie — were previously uncovered (mp-jvzy tri-review finding).
+// WinnerSide:"A", so this branch, and the equal-count "leave WinnerID empty"
+// tie, were previously uncovered (mp-jvzy tri-review finding).
 func TestBackfillMatchIdentity(t *testing.T) {
 	const (
 		idA = "11111111-1111-4111-8111-111111111111"
@@ -1411,7 +1411,7 @@ func TestBackfillMatchIdentity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := tc.result
 			// `stored` carries the generation-time ids; `result` (the incoming
-			// score) starts without them — mirrors the real write path.
+			// score) starts without them, mirrors the real write path.
 			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
 			backfillMatchIdentity(&result, stored)
 

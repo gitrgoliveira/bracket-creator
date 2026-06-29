@@ -18,7 +18,7 @@ import (
 //
 // Synchronisation strategy: all goroutines wait behind a readyBarrier so they
 // race into Do() simultaneously. The elected caller holds the in-flight slot
-// for 200ms — more than enough for the other goroutines to enter Do(), find
+// for 200ms, more than enough for the other goroutines to enter Do(), find
 // the key in the map, and block on wg.Wait(). Any goroutine that enters Do()
 // after the barrier but before fn completes will become a waiter, not an
 // independent builder.
@@ -29,7 +29,7 @@ func TestViewerSingleFlight_CollatesConcurrentBuilds(t *testing.T) {
 	var buildCount atomic.Int32
 
 	// readyBarrier ensures all goroutines are spawned and ready before
-	// any of them call Do — eliminates the scheduling window that caused
+	// any of them call Do, eliminates the scheduling window that caused
 	// goroutines to arrive after the elected caller had already finished.
 	var readyBarrier sync.WaitGroup
 	readyBarrier.Add(concurrency)
@@ -108,7 +108,7 @@ func TestViewerSingleFlight_DifferentKeysAreIndependent(t *testing.T) {
 
 // TestViewerSingleFlight_SubsequentCallsReExecute verifies that after an
 // in-flight build completes, a new independent request re-executes fn (the
-// key is not permanently cached — there is no stale-data risk).
+// key is not permanently cached, there is no stale-data risk).
 func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
 	g := newViewerSingleFlight()
 
@@ -130,7 +130,7 @@ func TestViewerSingleFlight_SubsequentCallsReExecute(t *testing.T) {
 // TestViewerSingleFlight_ErrorPropagatedToAllWaiters checks that when the
 // elected fn returns an error, all concurrent waiters receive the same error.
 // The fn stays in-flight long enough for all other goroutines to attach as
-// waiters, and we assert exactly one build ran — confirming the waiter path
+// waiters, and we assert exactly one build ran, confirming the waiter path
 // is reliably exercised.
 func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	const concurrency = 50
@@ -139,7 +139,7 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	var buildCount atomic.Int32
 
 	// readyBarrier ensures all goroutines are spawned before they race
-	// into Do together — same pattern as CollatesConcurrentBuilds.
+	// into Do together, same pattern as CollatesConcurrentBuilds.
 	var readyBarrier sync.WaitGroup
 	readyBarrier.Add(concurrency)
 
@@ -165,7 +165,7 @@ func TestViewerSingleFlight_ErrorPropagatedToAllWaiters(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Only one build should have executed — confirms waiters attached.
+	// Only one build should have executed, confirms waiters attached.
 	assert.Equalf(t, int32(1), buildCount.Load(),
 		"expected exactly 1 build invocation; got %d", buildCount.Load())
 
@@ -223,7 +223,7 @@ func TestViewerSingleFlight_PanicRecoveredToError(t *testing.T) {
 		assert.Nilf(t, r.data, "goroutine %d should have nil data after panic", i)
 	}
 
-	// The key must be cleaned up — a subsequent call should execute normally.
+	// The key must be cleaned up, a subsequent call should execute normally.
 	data, err := g.Do("panic-key", func() ([]byte, error) {
 		return []byte("recovered"), nil
 	})

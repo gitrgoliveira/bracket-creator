@@ -73,7 +73,7 @@ func TestSwissRoundsFieldPersists(t *testing.T) {
 	data, err := yaml.Marshal(&original)
 	require.NoError(t, err)
 
-	// Sanity-check the on-disk key naming — the YAML wire format must
+	// Sanity-check the on-disk key naming; the YAML wire format must
 	// use snake_case (existing competition.go convention) so older
 	// loaders that key-match by snake_case continue to work.
 	yamlText := string(data)
@@ -156,7 +156,7 @@ func TestCopyCompetition_WithPlayersAndCourts(t *testing.T) {
 	cp := store.copyCompetition(comp)
 	require.NotNil(t, cp)
 
-	// Mutate the copy's slice — original must be unaffected.
+	// Mutate the copy's slice; original must be unaffected.
 	cp.Courts[0] = "Z"
 	assert.Equal(t, "A", comp.Courts[0], "original Courts must not be aliased")
 
@@ -254,12 +254,12 @@ func TestSaveCompetitionChanged_NoChange(t *testing.T) {
 		Name: "Same Struct",
 	}
 
-	// First save — file doesn't exist yet, must report changed.
+	// First save; file doesn't exist yet, must report changed.
 	changed1, err := store.SaveCompetitionChanged(comp)
 	require.NoError(t, err)
 	assert.True(t, changed1, "first save must report changed=true")
 
-	// Second save with identical struct — bytes.Equal path, must report false.
+	// Second save with identical struct; bytes.Equal path, must report false.
 	changed2, err := store.SaveCompetitionChanged(comp)
 	require.NoError(t, err)
 	assert.False(t, changed2, "second identical save must report changed=false")

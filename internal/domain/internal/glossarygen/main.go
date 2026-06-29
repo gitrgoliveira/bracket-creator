@@ -1,4 +1,4 @@
-// Package main — glossarygen emits web-mobile/{js,dist}/glossary_data.js
+// Package main, glossarygen emits web-mobile/{js,dist}/glossary_data.js
 // from internal/domain/glossary.go (the Go-side dictionary). Invoked
 // via `go generate ./internal/domain/...` (the //go:generate directive
 // in glossary.go) and from `make go/build` so the JS bundle always
@@ -17,7 +17,7 @@
 //
 // Output shape (web-mobile/js/glossary_data.js):
 //
-//	// AUTO-GENERATED — do not edit by hand.
+//	// AUTO-GENERATED, do not edit by hand.
 //	// Source: internal/domain/glossary.go. Regenerate via:
 //	//   go generate ./internal/domain/...
 //	// or `make go/build`.
@@ -68,7 +68,7 @@ func main() {
 // generate is the pure function under test (or under reuse if/when we
 // ever want a different output target). Returns the file bytes.
 func generate() ([]byte, error) {
-	// Sort keys for deterministic output — without this, map-range
+	// Sort keys for deterministic output, without this, map-range
 	// iteration order would change the file on every regenerate and
 	// CI would chase a phantom diff.
 	keys := make([]string, 0, len(domain.Glossary))
@@ -78,7 +78,7 @@ func generate() ([]byte, error) {
 	sort.Strings(keys)
 
 	var buf bytes.Buffer
-	buf.WriteString("// AUTO-GENERATED — do not edit by hand.\n")
+	buf.WriteString("// AUTO-GENERATED, do not edit by hand.\n")
 	buf.WriteString("// Source: internal/domain/glossary.go.\n")
 	buf.WriteString("// Regenerate via `go generate ./internal/domain/...` or `make go/build`.\n")
 	buf.WriteString("//\n")
@@ -88,7 +88,7 @@ func generate() ([]byte, error) {
 	buf.WriteString("export const GLOSSARY = ")
 
 	// Emit ordered entries by writing the JSON manually rather than
-	// relying on encoding/json's alphabetical key ordering — the
+	// relying on encoding/json's alphabetical key ordering, the
 	// latter would still sort keys but we want a comment-rich, diff-
 	// stable layout (one entry per line, lower-cased keys preserved).
 	buf.WriteString("{\n")

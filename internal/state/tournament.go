@@ -153,7 +153,7 @@ func (s *Store) SaveTournament(t *Tournament) error {
 // UpdateTournamentChanged atomically loads the current tournament under
 // the store's write lock, calls transform(current, desired) which may
 // modify desired in place (e.g. to preserve fields from current), and
-// — if transform returns nil — persists desired. Returns (changed, err)
+// - if transform returns nil, persists desired. Returns (changed, err)
 // like SaveTournamentChanged.
 //
 // This is the race-free primitive for "load the existing record, copy
@@ -165,8 +165,8 @@ func (s *Store) SaveTournament(t *Tournament) error {
 // Specifically motivated by the PUT /api/tournament password-preserve
 // semantics: when the incoming body sends Password == "", the handler
 // must copy the stored Password into the desired record. Two
-// concurrent PUTs — one with empty Password (intent: keep), one with
-// a new password (intent: change) — could race in the old code so
+// concurrent PUTs, one with empty Password (intent: keep), one with
+// a new password (intent: change), could race in the old code so
 // that the empty-Password PUT's late save clobbers the
 // change-Password PUT's earlier save. With this method, the load +
 // transform + save sequence is serialized under the store's lock.
@@ -176,7 +176,7 @@ func (s *Store) SaveTournament(t *Tournament) error {
 // `current` holds the parsed record. When the file exists but the
 // front matter is corrupt, the load below falls back to a default
 // Tournament record (matching LoadTournament's behavior) and that
-// default is passed to `transform` — `current` is still non-nil in
+// default is passed to `transform` ,`current` is still non-nil in
 // that case. transform must handle both cases. If transform returns
 // a non-nil error, no write happens and the error is returned to
 // the caller as-is (callers can use errors.Is to discriminate
@@ -184,7 +184,7 @@ func (s *Store) SaveTournament(t *Tournament) error {
 //
 // IMPORTANT: transform runs while this method holds both s.mu and
 // s.tournamentMu (non-recursive locks). It MUST NOT call back into
-// any Store method that acquires either lock — that includes
+// any Store method that acquires either lock ,that includes
 // LoadTournament, SaveTournament, SaveTournamentChanged, and a
 // recursive UpdateTournamentChanged. Deadlock would result. The
 // transform should only mutate `desired` (possibly by copying fields
@@ -203,7 +203,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 
 	// Load current under the lock. Mirror LoadTournament's parse
 	// fallback so the transform sees the same "default record" view
-	// that the rest of the system gets — except return nil when the
+	// that the rest of the system gets ,except return nil when the
 	// file doesn't exist (so callers can distinguish "first save" from
 	// "subsequent save"; LoadTournament also returns nil in that case).
 	var current *Tournament
@@ -212,7 +212,7 @@ func (s *Store) UpdateTournamentChanged(desired *Tournament, transform func(curr
 		if perr := parseFrontMatter(data, &t); perr == nil {
 			if t.DurationDays == 0 {
 				// Migrate: a legacy file with no duration_days key
-				// deserialises to the zero value (0) — treat as 1.
+				// deserialises to the zero value (0) ,treat as 1.
 				t.DurationDays = 1
 			}
 			current = &t

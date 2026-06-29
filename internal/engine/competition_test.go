@@ -43,7 +43,7 @@ func TestCourtsEqual(t *testing.T) {
 // TestMaybeAutoCompletePools_AllComplete verifies that calling
 // MaybeAutoCompletePools on a league competition whose every match is
 // completed transitions Status to "completed" and returns AutoCompleteTransitioned.
-// NOTE: mixed-format competitions no longer auto-complete after pools — they
+// NOTE: mixed-format competitions no longer auto-complete after pools, they
 // fill the knockout incrementally instead. This test covers the league case only.
 func TestMaybeAutoCompletePools_AllComplete(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -117,7 +117,7 @@ func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 		Status: state.CompStatusPlayoffs,
 		Courts: []string{"A"},
 	}))
-	// No pool matches on disk — all pool match loads return empty.
+	// No pool matches on disk, all pool match loads return empty.
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestStartCompetition_PoolSizeZero(t *testing.T) {
 		Name:      "Pool Size Zero Test",
 		Kind:      "individual",
 		Format:    state.CompFormatMixed,
-		PoolSize:  0, // unset — the bug trigger
+		PoolSize:  0, // unset, the bug trigger
 		Courts:    []string{"A", "B"},
 		StartTime: "09:00",
 		Status:    state.CompStatusSetup,
@@ -284,7 +284,7 @@ func TestStartCompetition_SwissRoundAlreadyGenerated(t *testing.T) {
 
 // TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored verifies Guard 2:
 // pool-matches.csv has scored entries (non-scheduled status) and
-// SwissCurrentRound==0 — StartCompetition must reject to avoid data loss.
+// SwissCurrentRound==0, StartCompetition must reject to avoid data loss.
 // This covers AdvanceSwissRound having partially run (wrote matches, scored
 // a match, but the round-bump UpdateCompetitionChanged failed).
 func TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored(t *testing.T) {
@@ -300,7 +300,7 @@ func TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored(t *testing.T) {
 		Courts:      []string{"A"},
 		StartTime:   "09:00",
 		Status:      state.CompStatusSetup,
-		// SwissCurrentRound deliberately left at 0 — simulates the bump failing
+		// SwissCurrentRound deliberately left at 0, simulates the bump failing
 	}))
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave",
@@ -320,7 +320,7 @@ func TestStartCompetition_SwissMatchesOnDiskRoundZero_Scored(t *testing.T) {
 // TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled verifies that
 // Guard 2 allows retry when all pool-matches.csv entries are still scheduled
 // (no scoring has occurred). This covers StartCompetition itself having
-// partially run — it writes round-1 matches then fails inside
+// partially run, it writes round-1 matches then fails inside
 // UpdateCompetitionChanged. The operator must be able to retry without first
 // manually cleaning up the CSV.
 func TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled(t *testing.T) {
@@ -340,7 +340,7 @@ func TestStartCompetition_SwissMatchesOnDiskRoundZero_AllScheduled(t *testing.T)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave",
 	})
-	// Pre-write purely scheduled matches — simulates a prior StartCompetition
+	// Pre-write purely scheduled matches, simulates a prior StartCompetition
 	// that wrote round-1 matches then failed at UpdateCompetitionChanged.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Swiss-R1-0", Status: state.MatchStatusScheduled},
@@ -645,7 +645,7 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	require.True(t, findPlayerInPools(poolsBefore, "Alice"), "Alice must be in pools before swap")
 
 	// Use derived displayNames (SanitizeName) to match how the handler calls
-	// this in non-zekken competitions — exercises the displayName cascade branch.
+	// this in non-zekken competitions, exercises the displayName cascade branch.
 	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 
@@ -770,21 +770,21 @@ func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 
 	// Seed Alice at rank 1. In the real flow, state.UpdateParticipant
 	// renames seeds.csv before ReplaceParticipantInDraw runs, so the
-	// engine function must NOT touch seeds — verify it leaves them as-is.
+	// engine function must NOT touch seeds, verify it leaves them as-is.
 	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
 		{Name: "Alice", SeedRank: 1},
 	}))
 
 	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
-	assert.Empty(t, warnings, "no seed warnings — seed rename is handled by UpdateParticipant")
+	assert.Empty(t, warnings, "no seed warnings, seed rename is handled by UpdateParticipant")
 
 	// seeds.csv must be unchanged (still "Alice") because the engine
 	// function does not touch seeds.
 	seeds, err := store.LoadSeeds(compID)
 	require.NoError(t, err)
 	require.Len(t, seeds, 1)
-	assert.Equal(t, "Alice", seeds[0].Name, "engine must not rename seeds — that's UpdateParticipant's job")
+	assert.Equal(t, "Alice", seeds[0].Name, "engine must not rename seeds, that's UpdateParticipant's job")
 }
 
 func TestReplaceParticipantInDraw_WrongState(t *testing.T) {

@@ -105,7 +105,7 @@ type stubBroadcaster struct{}
 func (stubBroadcaster) Broadcast(EventType, any) {}
 
 // stubTeamLineupStore is a no-op implementation of TeamLineupStore.
-// Same rationale as the other stubs — proves the interface is
+// Same rationale as the other stubs , proves the interface is
 // mockable for handler tests (Slice 7.B / T127).
 type stubTeamLineupStore struct{}
 
@@ -136,7 +136,7 @@ func (stubTeamLineupStore) LockTeamLineupForMatch(string, string, time.Time) err
 // stubCompetitionTransactor is a no-op implementation of
 // CompetitionTransactor. fn runs immediately with a nil StoreTx; tests
 // that exercise the transactional path use the real *state.Store
-// instead. Same rationale as the other stubs — proves the interface is
+// instead. Same rationale as the other stubs , proves the interface is
 // mockable. (T156.)
 type stubCompetitionTransactor struct{}
 
@@ -155,10 +155,10 @@ func (stubCompetitionTransactor) WithCourtExclusivityLock(fn func() error) error
 // drift is caught before any handler migration breaks at the wire.
 //
 // Per T016: this is the proof that the interfaces are minimal and
-// mockable — any later slice that adds a method narrowly to deps.go
+// mockable , any later slice that adds a method narrowly to deps.go
 // must also extend the stubs above.
 func TestDepsInterfacesCompile(t *testing.T) {
-	// Stubs — proves the interfaces are mockable for handler tests.
+	// Stubs , proves the interfaces are mockable for handler tests.
 	var (
 		_ CompetitionStore      = stubCompetitionStore{}
 		_ ScoringEngine         = stubScoringEngine{}
@@ -169,7 +169,7 @@ func TestDepsInterfacesCompile(t *testing.T) {
 		_ TournamentLoader      = stubTournamentLoader{}
 	)
 
-	// Concrete types — proves the production types remain drop-in
+	// Concrete types , proves the production types remain drop-in
 	// implementations after the interface lands. (NFR-002: existing
 	// concrete types must still satisfy the interfaces so wiring stays
 	// drop-in across the migration.)

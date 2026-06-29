@@ -33,7 +33,7 @@ func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 // PUT/PATCH operations are rejected.
 //
 // Keying (mp-825): when MatchID is non-empty the lineup is
-// match-scoped — a team may field a different order/roster for each
+// match-scoped, a team may field a different order/roster for each
 // encounter (e.g. successive pool matches), and each entry locks
 // independently when its own match starts. When MatchID is empty the
 // lineup is round-scoped (the legacy behavior, still used by bracket
@@ -59,7 +59,7 @@ type TeamLineup struct {
 var (
 	ErrLineupMissingSenpo    = errors.New("team_lineup: senpo must be present")
 	ErrLineupMissingTaisho   = errors.New("team_lineup: taisho must be present")
-	ErrLineupTooManyMissing  = errors.New("team_lineup: 3+ missing positions — team is disqualified")
+	ErrLineupTooManyMissing  = errors.New("team_lineup: 3+ missing positions, team is disqualified")
 	ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positive")
 )
 
@@ -88,7 +88,7 @@ func (t TeamLineup) validateFive() error {
 			return fmt.Errorf("team_lineup: position %q not allowed in 5-person team", pos)
 		}
 	}
-	// Senpo and Taisho are mandatory (R4 — they bookend the match).
+	// Senpo and Taisho are mandatory (R4, they bookend the match).
 	if t.Positions[PosSenpo] == "" {
 		return ErrLineupMissingSenpo
 	}
@@ -133,7 +133,7 @@ func (t TeamLineup) validateNumbered(teamSize int) error {
 // ValidatePositions checks only that the position KEYS are valid for the team
 // size; it does NOT enforce the FIK completeness/vacancy rule. Lineups are
 // entered incrementally while bouts run, so a partial lineup must be
-// persistable — completeness is surfaced as a non-blocking UI warning, not
+// persistable, completeness is surfaced as a non-blocking UI warning, not
 // enforced at write time.
 func (t TeamLineup) ValidatePositions(teamSize int) error {
 	if teamSize <= 0 {

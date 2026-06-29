@@ -79,7 +79,7 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 // TestSubMatchResult_HanteiRoundTrip pins the wire/storage contract for the
 // per-bout hantei flag the viewer reads (mp-8sw). Unlike MatchResult, the
 // SubMatchResult flag is a plain bool, so omitempty omits it when false and
-// emits it when true — across both the JSON HTTP path and the YAML config.md
+// emits it when true; across both the JSON HTTP path and the YAML config.md
 // persistence path.
 func TestSubMatchResult_HanteiRoundTrip(t *testing.T) {
 	t.Run("true survives JSON round-trip", func(t *testing.T) {
@@ -354,7 +354,7 @@ func TestTournament_SponsorsRoundTrip(t *testing.T) {
 	assert.Contains(t, yamlStr, "name: Acme Corp")
 	assert.Contains(t, yamlStr, "link: https://acme.example")
 	// Structural omitempty check: the second sponsor has no link, so the
-	// `link:` key must be entirely absent from the YAML — not `link: ""`
+	// `link:` key must be entirely absent from the YAML; not `link: ""`
 	// or `link: null`. This is what `yaml:"link,omitempty"` guarantees.
 	assert.Contains(t, yamlStr, "name: BetaCo")
 	assert.NotContains(t, yamlStr, "link: \"\"\nname: BetaCo",

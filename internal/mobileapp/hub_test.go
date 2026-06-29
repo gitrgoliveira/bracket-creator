@@ -182,7 +182,7 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 		h.Broadcast(EventMatchUpdated, map[string]int{"i": i})
 	}
 
-	// Simulate reconnect with Last-Event-ID: 2 — should replay 3, 4, 5.
+	// Simulate reconnect with Last-Event-ID: 2, should replay 3, 4, 5.
 	r := gin.New()
 	r.GET("/events", h.HandleEvents())
 
@@ -233,7 +233,7 @@ func TestHubReplaysOnReconnect(t *testing.T) {
 // T216: ring-buffer eviction. With HistorySize=3 the hub keeps only the
 // last 3 envelopes. Broadcasting 5 events then reconnecting with
 // Last-Event-ID=1 means event 2 has been overwritten and the gap is
-// unsatisfiable — since B1 (mp-gpra), the hub emits resync_required at
+// unsatisfiable, since B1 (mp-gpra), the hub emits resync_required at
 // the head seq (5) instead of partially replaying surviving entries.
 func TestHubRingBufferEvicts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -278,7 +278,7 @@ func TestHubRingBufferEvicts(t *testing.T) {
 	assert.NotContains(t, body, "id: 4\n", "surviving entries must not be partially replayed on unsatisfiable gap")
 }
 
-// T216: snapshotHistorySince contract — the helper underlying the
+// T216: snapshotHistorySince contract, the helper underlying the
 // replay path. Tests the edges directly so a regression in the ring
 // index math fails here instead of in the integration test where the
 // gin response writer obscures the cause.
@@ -310,7 +310,7 @@ func TestSnapshotHistorySince(t *testing.T) {
 	})
 
 	t.Run("eviction marks snapshot incomplete", func(t *testing.T) {
-		// Push past capacity (5) — broadcast 4 more → seqs 4..7, total 7.
+		// Push past capacity (5), broadcast 4 more → seqs 4..7, total 7.
 		// Buffer holds seqs 3..7. Asking for since=1 means we wanted
 		// seq 2 too, but it's been overwritten → complete=false.
 		for i := 0; i < 4; i++ {
@@ -495,7 +495,7 @@ func TestHandleEvents_ResyncOnEviction(t *testing.T) {
 	assert.Equal(t, "resync_required", resyncPayload.Type)
 	assert.Equal(t, headSeq, resyncPayload.Seq)
 
-	// Partial entries must NOT be replayed — only the resync frame for headSeq.
+	// Partial entries must NOT be replayed, only the resync frame for headSeq.
 	// Seqs 3/4 are retained but must not appear before the resync frame.
 	assert.NotContains(t, body, "id: 3\n", "partial entries must not be replayed on unsatisfiable gap")
 	assert.NotContains(t, body, "id: 4\n", "partial entries must not be replayed on unsatisfiable gap")
@@ -506,7 +506,7 @@ func TestHandleEvents_ResyncOnEviction(t *testing.T) {
 // resync_required rather than replaying nothing silently.
 func TestHandleEvents_ResyncOnServerRestart(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	// Fresh hub — head seq is 0. Broadcast one event so head is 1.
+	// Fresh hub, head seq is 0. Broadcast one event so head is 1.
 	h := NewHub()
 	h.Broadcast(EventMatchUpdated, map[string]int{"i": 0})
 	headSeq := h.seq.Load() // 1
@@ -520,7 +520,7 @@ func TestHandleEvents_ResyncOnServerRestart(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, "GET", "/events", nil)
-	// Client saw seq 9999 before the server restarted — far ahead of head.
+	// Client saw seq 9999 before the server restarted, far ahead of head.
 	req.Header.Set("Last-Event-ID", "9999")
 
 	done := make(chan struct{})
@@ -608,7 +608,7 @@ func TestHandleEvents_SatisfiableReplayUnchanged(t *testing.T) {
 // B2: the heartbeat frame must be a real data line with no id: line, so the
 // browser's Last-Event-ID is unchanged and the frame fires onmessage. This
 // drives HandleEvents end-to-end with a short HeartbeatInterval and asserts the
-// bytes it actually emits — so it fails if the handler stops sending heartbeats
+// bytes it actually emits, so it fails if the handler stops sending heartbeats
 // or changes the wire format.
 func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -646,7 +646,7 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 
 	body := w.BodyString()
 	require.Contains(t, body, "data: {\"type\":\"heartbeat\"}\n\n", "HandleEvents must emit a heartbeat data frame")
-	// No events were broadcast, so the only frames are heartbeats — none may
+	// No events were broadcast, so the only frames are heartbeats, none may
 	// carry an id: line (which would perturb the browser's Last-Event-ID).
 	assert.NotContains(t, body, "id:", "heartbeat frames must not contain an id: line")
 
@@ -662,13 +662,13 @@ func TestHandleEvents_HeartbeatFrame(t *testing.T) {
 
 // mp-gpra: when the server has broadcast nothing yet (head seq 0) and a client
 // reconnects with a stale positive Last-Event-ID (restart with no new activity),
-// the hub MUST still emit resync_required — otherwise a client that keeps an
+// the hub MUST still emit resync_required, otherwise a client that keeps an
 // in-memory lastSeq across reconnects drops the first post-restart event (seq=1)
 // as a stale duplicate and goes silently stale. The frame must carry NO id: line
 // so the browser's Last-Event-ID isn't forced to "0".
 func TestHandleEvents_ResyncOnRestartWithNoEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewHub() // head seq is 0 — no Broadcast.
+	h := NewHub() // head seq is 0, no Broadcast.
 
 	r := gin.New()
 	r.GET("/events", h.HandleEvents())

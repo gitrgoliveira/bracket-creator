@@ -26,19 +26,19 @@ const (
 	EventParticipantsUpdated     EventType = "participants_updated"
 	// EventPasswordReset fires when the admin password is rotated. Three
 	// broadcast sites (file mode only; never emitted in locked mode):
-	//   - POST /api/tournament/reset — the public recovery endpoint for
+	//   - POST /api/tournament/reset, the public recovery endpoint for
 	//     a forgotten password. Payload: {originatorId} so the submitting
 	//     tab can suppress its own broadcast and avoid clearing the
 	//     credential it just wrote.
-	//   - PUT /api/tournament — when the PUT body contains a non-empty
+	//   - PUT /api/tournament, when the PUT body contains a non-empty
 	//     password that differs from the stored one. Payload: {} (all
 	//     sessions, including the editing tab, should re-authenticate).
-	//   - POST /api/tournament — when a bootstrap POST overwrites an
+	//   - POST /api/tournament, when a bootstrap POST overwrites an
 	//     existing tournament with a different password. Payload: {}.
 	// Consumers in admin mode (app.jsx) clear their localStorage credential
 	// and re-show the AuthModal so a logged-in operator notices immediately
 	// instead of waiting for their next write to fail with 401. Viewers
-	// ignore the event — their flow doesn't depend on the admin password.
+	// ignore the event, their flow doesn't depend on the admin password.
 	EventPasswordReset  EventType = "password_reset"
 	EventAnnouncement   EventType = "announcement"
 	EventDrawGenerated  EventType = "draw_generated"
@@ -50,7 +50,7 @@ const (
 // AutoCompleteErrorHeader is set on score/start responses when the
 // post-write MaybeAutoCompletePools check itself errored. The value is a
 // deliberately generic sentinel (AutoCompleteErrorValue) so we don't leak
-// filesystem paths or other internal store details to clients — full error
+// filesystem paths or other internal store details to clients, full error
 // detail is logged server-side.
 const (
 	AutoCompleteErrorHeader = "X-Auto-Complete-Error"
@@ -73,12 +73,12 @@ const DefaultHistorySize = 100
 // Note: this is the base overhead only. Each queued (buffered) message also
 // keeps its payload bytes alive on the heap until the client drains it. Under
 // bursty broadcasts or slow/stalled clients a fully-backlogged channel could
-// add up to ~100 × (payload size) of additional memory per client — e.g. a
+// add up to ~100 × (payload size) of additional memory per client, e.g. a
 // 2 KB JSON payload × 100 slots = ~200 KB worst-case. Stalled clients are
 // dropped by the non-blocking send (select/default) before the buffer fills
 // in practice, but the extra allocation is real during the drop window.
 //
-// At 5000 active (draining) clients the base cost is ~20–50 MB — comfortably
+// At 5000 active (draining) clients the base cost is ~20–50 MB, comfortably
 // within the RAM budget of a single-core VPS or RPi-class hardware used for
 // large-scale deployments (tens of teams, 1000+ live spectators).
 //
@@ -89,7 +89,7 @@ const DefaultHistorySize = 100
 //
 // Override at startup via the SSE_MAX_CLIENTS env var or by passing a
 // positive value to NewHubWithLimits. A non-positive (zero or negative)
-// value disables the cap entirely — used by tests that need to exceed
+// value disables the cap entirely, used by tests that need to exceed
 // the default and not enforced anywhere in production. The cap is mp-663
 // Phase 4 mitigation for resource-exhaustion via unbounded subscriber maps.
 // Raised from 1000 → 5000 by mp-9afd to support large-scale events (1000+
@@ -102,12 +102,12 @@ const DefaultMaxSSEClients = 5000
 // Seq (T215, A2 closure) is a strictly monotonic counter stamped by the
 // hub on every Broadcast. Consumers use it for two things:
 //
-//  1. Gap detection — if the JS receiver sees seq jump from N to N+2, it
+//  1. Gap detection, if the JS receiver sees seq jump from N to N+2, it
 //     missed N+1 (network reorder/loss is impossible on a single SSE
 //     connection, but a reconnect can leave a gap between the last live
 //     event before the disconnect and the first one after the reconnect)
 //     and triggers a full refetch.
-//  2. Replay on reconnect — `EventSource` automatically resends the last
+//  2. Replay on reconnect, `EventSource` automatically resends the last
 //     `id:` it saw via `Last-Event-ID`; the hub walks its ring buffer to
 //     re-emit events with seq > Last-Event-ID before resuming live
 //     streaming.
@@ -116,7 +116,7 @@ const DefaultMaxSSEClients = 5000
 // plus an SSE `id: 12345` line so the browser sets `Last-Event-ID`
 // automatically on reconnect.
 //
-// Existing JS that ignores `seq` continues to work — the field is purely
+// Existing JS that ignores `seq` continues to work, the field is purely
 // additive.
 type SSEEvent struct {
 	Type EventType `json:"type"`
@@ -126,7 +126,7 @@ type SSEEvent struct {
 
 // historyEntry pairs the stamped seq with the marshalled JSON payload.
 // We store the marshalled form (not the SSEEvent struct) so the reconnect
-// replay path doesn't have to re-marshal — keeps cold-replay cheap and
+// replay path doesn't have to re-marshal, keeps cold-replay cheap and
 // guarantees the replayed bytes are exactly what live clients saw.
 type historyEntry struct {
 	seq     int64
@@ -141,7 +141,7 @@ type historyEntry struct {
 //
 // Both are protected by the same `mu` mutex used for the client set so
 // the order of "stamp seq" / "append to history" / "fan out to clients"
-// is observed atomically — without that, a concurrent reconnect could
+// is observed atomically, without that, a concurrent reconnect could
 // read a partial history slice and replay events out of order.
 type Hub struct {
 	clients map[chan string]bool
@@ -163,7 +163,7 @@ type Hub struct {
 	// MaxClients caps concurrent SSE subscribers (mp-663 Phase 4).
 	// Subscribe returns nil when the cap is reached; HandleEvents
 	// converts that into HTTP 503 so the client knows to back off. A
-	// non-positive value disables the cap (treat as unbounded — useful
+	// non-positive value disables the cap (treat as unbounded, useful
 	// for tests).
 	MaxClients int
 
@@ -199,7 +199,7 @@ func NewHubWithHistory(historySize int) *Hub {
 //
 // maxClients: passed through as-is. A POSITIVE value caps concurrent
 // subscribers at that count (Subscribe returns nil over the cap). A
-// non-positive value (zero or negative) DISABLES the cap entirely —
+// non-positive value (zero or negative) DISABLES the cap entirely,
 // useful for tests that need to exceed DefaultMaxSSEClients without
 // constructing thousands of stub clients to prove the cap fires. It is
 // deliberately not coerced to the default so callers can opt out.
@@ -244,7 +244,7 @@ func (h *Hub) Subscribe() chan string {
 // observes the channel close (the `case msg, ok := <-ch; if !ok`
 // branch) and returns, unblocking http.Server.Shutdown's wait loop.
 //
-// Idempotent — safe to call twice. After Close, Subscribe returns nil
+// Idempotent, safe to call twice. After Close, Subscribe returns nil
 // for all new subscribers and Broadcast becomes a no-op observable to
 // clients (no live channels remain).
 func (h *Hub) Close() {
@@ -280,7 +280,7 @@ func (h *Hub) unsubscribeLocked(ch chan string) {
 // appended to the ring buffer (T216) under the same write lock as the
 // client fan-out. This means concurrent Broadcasts from different
 // goroutines see strictly increasing seqs in the order their lock-acquire
-// sequenced — there's no "stamp before lock, lock for fan-out" window
+// sequenced, there's no "stamp before lock, lock for fan-out" window
 // that would let two seqs land in history in reverse order.
 func (h *Hub) Broadcast(eventType EventType, data any) {
 	h.mu.Lock()
@@ -331,7 +331,7 @@ func (h *Hub) Broadcast(eventType EventType, data any) {
 // greater than `since`, ordered by ascending seq. Returns at most
 // HistorySize entries (older ones have been overwritten in the ring).
 // The bool result is false when the requested `since` is older than the
-// oldest entry retained in the buffer — caller may want to log a "snapshot
+// oldest entry retained in the buffer, caller may want to log a "snapshot
 // needed" sentinel in that case (gap exceeds replay capacity).
 func (h *Hub) snapshotHistorySince(since int64) (entries []historyEntry, complete bool) {
 	h.mu.RLock()
@@ -375,7 +375,7 @@ func (h *Hub) snapshotHistorySince(since int64) (entries []historyEntry, complet
 // automatically by `EventSource` from the last `id:` line the browser
 // saw) and replays any retained events with seq > Last-Event-ID before
 // streaming live events. The replay walks the hub's ring buffer
-// (capacity HistorySize) — if the requested Last-Event-ID is older than
+// (capacity HistorySize), if the requested Last-Event-ID is older than
 // the oldest retained entry, the client gets whatever is still in the
 // buffer plus a warning logged server-side.
 //
@@ -438,7 +438,7 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 			currentHeadSeq := h.seq.Load()
 			// Unsatisfiable when the ring rolled past the client's Last-Event-ID
 			// (eviction) OR the server restarted and its in-memory seq reset below
-			// the client's Last-Event-ID — INCLUDING a fresh restart at head seq 0,
+			// the client's Last-Event-ID, INCLUDING a fresh restart at head seq 0,
 			// before any event has been broadcast (the client's stale Last-Event-ID
 			// is still ahead of 0). That last case must still resync: otherwise a
 			// client that keeps an in-memory lastSeq across reconnects would treat
@@ -504,7 +504,7 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 				// (": keep-alive") are silently swallowed by the browser
 				// EventSource API and are invisible to JS handlers.
 				// Omitting id: means the browser's Last-Event-ID is
-				// unchanged — the heartbeat neither consumes a seq nor
+				// unchanged, the heartbeat neither consumes a seq nor
 				// creates a gap.
 				if _, err := w.Write([]byte("data: {\"type\":\"heartbeat\"}\n\n")); err != nil {
 					return false
@@ -533,7 +533,7 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 // stalling the broadcast path.
 func writeSSEEnvelope(w io.Writer, seq int64, payload string) {
 	if _, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", seq, payload); err != nil {
-		// Don't print every write error — a disconnected client
+		// Don't print every write error, a disconnected client
 		// generates one per buffered event in the worst case. Only
 		// log if the write failed in an unexpected way (best-effort
 		// signal for production diagnostics).
@@ -546,13 +546,13 @@ func writeSSEEnvelope(w io.Writer, seq int64, payload string) {
 // object that contains a numeric `seq` field; we look it up directly
 // rather than going through json.Unmarshal to keep the hot path cheap.
 //
-// Returns 0 if the field is missing or malformed — the SSE handler
+// Returns 0 if the field is missing or malformed, the SSE handler
 // still writes the event in that case, just without an id line, so the
 // browser keeps its previous Last-Event-ID. That's the conservative
 // fallback: a missing id never widens a gap, it just defers the next
 // checkpoint.
 func extractSeq(payload string) int64 {
-	// Cheap structural extraction — the marshalled JSON always has
+	// Cheap structural extraction, the marshalled JSON always has
 	// `"seq":<int>` somewhere. json.Unmarshal into a stripped struct
 	// would also work but allocates more.
 	var stripped struct {

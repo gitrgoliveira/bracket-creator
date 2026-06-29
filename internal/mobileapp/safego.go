@@ -25,7 +25,7 @@ func (p *recoveredPanic) Error() string {
 // for inside it, and `wg.Done()` guaranteed to run even on panic.
 //
 // gin.Default()'s Recovery middleware only catches panics on the
-// request goroutine — a panic in a goroutine spawned by a handler
+// request goroutine, a panic in a goroutine spawned by a handler
 // crashes the whole process. Handlers that fan out concurrent state
 // loads MUST use safeGo (or another helper with equivalent guarantees)
 // so a corrupt file or nil deref doesn't take down the mobile-app
@@ -34,7 +34,7 @@ func (p *recoveredPanic) Error() string {
 // On recover, safeGo logs the panic + stack and stores the first panic
 // it sees into `panicRef`. Subsequent panics in sibling goroutines are
 // still logged (so post-mortem has them all) but the first one wins for
-// reporting purposes — a handler typically returns a single 500
+// reporting purposes, a handler typically returns a single 500
 // regardless of how many goroutines failed.
 func safeGo(wg *sync.WaitGroup, panicRef *atomic.Pointer[recoveredPanic], fn func()) {
 	wg.Add(1)

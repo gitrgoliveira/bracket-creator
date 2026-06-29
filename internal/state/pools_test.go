@@ -313,7 +313,7 @@ func TestParsePoolMatchesBytes_WithData(t *testing.T) {
 // TestParsePoolMatches_EmptyIpponsAreZeroLength is a regression guard: an
 // empty ippon CSV field must parse to a zero-length slice, NOT [""]. The bug
 // was strings.Split("", "|") returning a one-element slice holding "", whose
-// len() == 1 then counted as a phantom point in individual standings —
+// len() == 1 then counted as a phantom point in individual standings.
 // inflating points-lost and breaking pool tie detection (two players who
 // actually tied read as differing by one phantom ippon, so no tiebreaker
 // match was injected).
@@ -449,7 +449,7 @@ func TestLoadPools_FreshStore(t *testing.T) {
 	}
 	require.NoError(t, writeStore.SavePools(compID, pools))
 
-	// Fresh store — no cache, parsePoolsFile will be called
+	// Fresh store, no cache, parsePoolsFile will be called
 	readStore, err := NewStore(dir)
 	require.NoError(t, err)
 
@@ -622,7 +622,7 @@ func TestParsePoolsFile_InvalidPosition(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded[0].Players, 3)
 	// P1 and P2 get append-order defaults (1, 2); P3 gets pos+1=3.
-	// Stable sort: 1 < 2 < 3, so order is P1, P2, P3 — row order preserved.
+	// Stable sort: 1 < 2 < 3, so order is P1, P2, P3; row order preserved.
 	assert.Equal(t, "P1", loaded[0].Players[0].Name)
 	assert.Equal(t, int64(1), loaded[0].Players[0].PoolPosition)
 	assert.Equal(t, "P2", loaded[0].Players[1].Name)
@@ -641,7 +641,7 @@ func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {
 
 	compDir := dir + "/competitions/legacy-test"
 	require.NoError(t, os.MkdirAll(compDir, 0700))
-	// Only pool name + player name columns — no draw-position column.
+	// Only pool name + player name columns ,no draw-position column.
 	csv := "Pool A,Alice\nPool A,Bob\nPool A,Charlie\n"
 	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
 

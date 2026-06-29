@@ -127,7 +127,7 @@ func TestScoreRequestValidate_IpponCounts(t *testing.T) {
 			req:  ScoreRequest{IpponsA: []string{"M", "K"}, IpponsB: []string{"D"}},
 		},
 		{
-			name:      "2-2 rejected (impossible — bout ends at first to 2)",
+			name:      "2-2 rejected (impossible, bout ends at first to 2)",
 			req:       ScoreRequest{IpponsA: []string{"M", "K"}, IpponsB: []string{"D", "T"}},
 			wantErr:   true,
 			wantField: "ippons",
@@ -343,7 +343,7 @@ func TestValidateDecision_KikenBadScoreline(t *testing.T) {
 	req := ScoreRequest{
 		Decision:   "kiken",
 		DecisionBy: "shiro",
-		// No ippons — fails winningScoreline check
+		// No ippons, fails winningScoreline check
 	}
 	err := req.Validate()
 	require.Error(t, err)
@@ -390,7 +390,7 @@ func TestValidateDecision_KachinukiExhaustionOk(t *testing.T) {
 }
 
 // TestValidateMaxLen covers the persisted-string cap helper. Empty
-// strings always pass — presence is enforced separately.
+// strings always pass, presence is enforced separately.
 func TestValidateMaxLen(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -421,7 +421,7 @@ func TestValidateMaxLen(t *testing.T) {
 // TestScoreRequestValidate_LengthCaps verifies the persisted-string
 // caps in ScoreRequest.Validate. decisionReason was previously
 // unbounded on the score endpoint (only DecisionRequest enforced
-// the 200-char contract) — this confirms the gap closure.
+// the 200-char contract), this confirms the gap closure.
 func TestScoreRequestValidate_LengthCaps(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -491,7 +491,7 @@ func TestReasonCaps_ValidateTrimmedValue(t *testing.T) {
 
 // TestValidateBulkScoreLengths covers the bulk-score helper. The
 // bulk-score endpoint bypasses ScoreRequest.Validate's caps because
-// it writes raw state.MatchResult through RecordMatchResult — without
+// it writes raw state.MatchResult through RecordMatchResult, without
 // this helper a 1MB sideA could land on disk via bulk-score even
 // after the score endpoint's caps were added.
 func TestValidateBulkScoreLengths(t *testing.T) {
@@ -634,7 +634,7 @@ func TestValidatePlayerLengths(t *testing.T) {
 
 // TestCompetitorStatusRequestValidate verifies the eligibility request
 // caps. domain.CompetitorStatus.Validate covers presence (PlayerID,
-// Reason on ineligible) but not length — this fills that gap.
+// Reason on ineligible) but not length, this fills that gap.
 func TestCompetitorStatusRequestValidate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -673,10 +673,10 @@ func TestCompetitorStatusRequestValidate(t *testing.T) {
 	}
 }
 
-// TestSuneIpponRoundTrips confirms that "S" (Sune — shin strike, valid in
+// TestSuneIpponRoundTrips confirms that "S" (Sune, shin strike, valid in
 // Naginata) is accepted by validateIpponCounts and ScoreRequest.Validate.
-// The server's ippon-count validator is letter-agnostic (counts only — it
-// does not filter by allowed letter), so "S" must not cause a validation
+// The server's ippon-count validator is letter-agnostic (counts only, it
+// does not filter by allowed letter); so "S" must not cause a validation
 // error regardless of competition type.
 func TestSuneIpponRoundTrips(t *testing.T) {
 	t.Run("S in ipponsA passes validateIpponCounts", func(t *testing.T) {
@@ -770,7 +770,7 @@ func TestScoreRequestValidate_DecidedByHantei(t *testing.T) {
 	})
 
 	t.Run("valid hantei: no encho set (encho is not required)", func(t *testing.T) {
-		// Encho was decoupled from hantei — a tied match may be taken straight
+		// Encho was decoupled from hantei, a tied match may be taken straight
 		// to a judges' decision without an overtime period.
 		req := ScoreRequest{
 			SideA:           "Alice",
@@ -1010,7 +1010,7 @@ func TestScoreRequestValidate_SubBoutDecidedByHantei(t *testing.T) {
 	})
 
 	t.Run("valid: daihyosen hantei without encho (encho not required)", func(t *testing.T) {
-		// Encho was decoupled from hantei — a tied daihyosen may be decided by
+		// Encho was decoupled from hantei, a tied daihyosen may be decided by
 		// judges without an overtime period.
 		req := ScoreRequest{
 			SubResults: []state.SubMatchResult{

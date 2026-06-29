@@ -1,4 +1,4 @@
-// Package mobileapp — handlers_daihyosen.go owns the
+// Package mobileapp, handlers_daihyosen.go owns the
 // `POST /api/competitions/:cid/matches/:mid/daihyosen` endpoint that
 // validates a tied knockout-stage team match and appends a daihyosen
 // (representative-bout) placeholder to its SubResults (T140, FR-046,
@@ -14,7 +14,7 @@
 // Eligibility integration (CHK026): before validating the tie, the
 // handler counts each team's eligible competitors via the competitor-
 // status store. When either side has zero eligible competitors the
-// engine returns ErrInsufficientEligibility and we respond 409 — the
+// engine returns ErrInsufficientEligibility and we respond 409, the
 // caller MUST then forfeit the encounter to the opposing team via the
 // standard score endpoint (this handler intentionally does NOT
 // auto-record the forfeit so the operator confirms it).
@@ -52,7 +52,7 @@ type DaihyosenEngine interface {
 // match, so they run entirely inside WithTransaction and read via the
 // supplied StoreTx (LoadPoolMatches/LoadBracket for the match, plus
 // LoadCompetition/LoadParticipants/LoadCompetitorStatus for the CHK026
-// eligibility count) — keeping the read and the write atomic under one
+// eligibility count), keeping the read and the write atomic under one
 // acquire of the per-comp lock. Calling the public Store.Load* methods
 // inside the closure would deadlock (the lock is non-reentrant), so the
 // store surface here is just the transaction entry point.
@@ -75,7 +75,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 
 		// The whole read-guard-filter-write runs under ONE acquire of the
 		// per-comp lock: re-read the match inside the transaction so the
-		// DH-unscored guard is evaluated against — and the write applied to —
+		// DH-unscored guard is evaluated against, and the write applied to,
 		// the same locked snapshot. Reading outside the lock and overwriting the
 		// whole match (the pre-fix shape) could revert a concurrent bout score
 		// or delete a daihyosen that was scored in the read→write window.
@@ -112,7 +112,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// placeholder: ippons, a winner, a hantei flag, recorded hansoku
 			// penalties, OR a sub-Decision that is no longer the bare
 			// "daihyosen" placeholder (e.g. a withdrawal recorded on the rep
-			// bout) — validateSubBout does not validate sub.Decision, so an
+			// bout), validateSubBout does not validate sub.Decision, so an
 			// acted-on bout can carry a decision without a winner.
 			dh := match.SubResults[dhIdx]
 			if len(dh.IpponsA) > 0 || len(dh.IpponsB) > 0 || dh.Winner != "" || dh.DecidedByHantei ||
@@ -134,7 +134,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// only proceeds when the DH sub is an unscored placeholder (the guard
 			// above rejects if the sub has ippons, a winner, or a non-daihyosen
 			// decision), which means the parent match is still in MatchStatusRunning
-			// — no cross-comp conflict can be introduced by this write.
+			//, no cross-comp conflict can be introduced by this write.
 			u.Status = state.MatchStatusRunning
 			// Clear ALL DH-derived match-level result/decision metadata so the
 			// match returns to a clean running state. MatchResult.Decision has no
@@ -192,7 +192,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		// Read-check-write under ONE acquire of the per-comp lock: the tie that
 		// gates AddDaihyosen is recomputed from the match's PERSISTED SubResults,
 		// so the match must be read under the same lock that writes the appended
-		// daihyosen — otherwise a concurrent bout score between read and write
+		// daihyosen, otherwise a concurrent bout score between read and write
 		// would be reverted, or the tie computed from a stale snapshot.
 		var (
 			updated    state.MatchResult
@@ -216,7 +216,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// Count eligible competitors per side under the same lock (CHK026).
 			// Pre-Slice-7 there are no explicit rosters; eligibility is tracked
 			// per player via competitor-status, so this is a coarse "team has ≥1
-			// eligible participant" count — sufficient for the 0-eligible forfeit
+			// eligible participant" count, sufficient for the 0-eligible forfeit
 			// branch.
 			sideAEligible, sideBEligible, err := countEligibleForSidesTx(stx, id, match.SideA, match.SideB)
 			if err != nil {
@@ -367,7 +367,7 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 // as belonging to both sides and instead require that the total
 // eligible-participant count be positive. That's sufficient for the
 // "0 eligible → forfeit" branch (the only place CHK026 actually fires
-// in practice — a depleted team will have all its members marked
+// in practice, a depleted team will have all its members marked
 // ineligible after kiken).
 //
 // Once team lineups land (T-series owned by the parallel lineup agent)

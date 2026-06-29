@@ -86,7 +86,7 @@ func TestLeagueAllocation_EdgeCases(t *testing.T) {
 		assert.Equal(t, "A", matches[0].Court, "the lone match runs on the only court")
 	})
 
-	t.Run("rejects more courts than floor(players/2) — extras would sit idle", func(t *testing.T) {
+	t.Run("rejects more courts than floor(players/2), extras would sit idle", func(t *testing.T) {
 		// The allocation guard (ValidateCourtCount) caps courts at floor(N/2):
 		// you can't run more simultaneous matches than there are pairs of players.
 		// 2 players → max 1 court; 4 players → max 2 courts.

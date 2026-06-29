@@ -34,7 +34,7 @@ func parseScheduleEnabled(val string) bool {
 	return false
 }
 
-// Server tuning constants for the mobile-app HTTP listener. mp-663 Phase 2:
+// Server tuning constants for the mobile-app HTTP listener. mp-663 Phase 2,
 // closes slowloris and never-drains-connection vectors that the default
 // (zero-timeout) http.Server inherits from r.Run.
 const (
@@ -49,7 +49,7 @@ const (
 	// httpIdleTimeout closes keep-alive connections that sit idle. Bounds
 	// the file-descriptor commitment per idle client.
 	httpIdleTimeout = 120 * time.Second
-	// httpMaxHeaderBytes caps request header size — defends against
+	// httpMaxHeaderBytes caps request header size, defends against
 	// header-bombs (1 MB is generous; default is 1 MB but explicit is
 	// clearer).
 	httpMaxHeaderBytes = 1 << 20
@@ -98,7 +98,7 @@ func newMobileAppCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVarP(&o.port, "port", "p", port, "port number (env: PORT)")
 
-	// --lock-password switches the server into "locked" auth mode:
+	// --lock-password switches the server into "locked" auth mode,
 	//   * /api/tournament/reset returns 404
 	//   * GET /api/auth-config reports mode=locked, resetEnabled=false
 	//   * Authentication compares X-Tournament-Password against a bcrypt
@@ -167,7 +167,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	// SSE subscriber cap is configurable via SSE_MAX_CLIENTS to handle
 	// deployments with unusually high viewer counts; non-numeric values
-	// silently fall back to the default rather than failing startup —
+	// silently fall back to the default rather than failing startup,
 	// the cap is a soft DoS mitigation, not a correctness gate.
 	maxClients := mobileapp.DefaultMaxSSEClients
 	if raw := os.Getenv("SSE_MAX_CLIENTS"); raw != "" {
@@ -205,7 +205,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	// Explicit http.Server with timeouts (mp-663 Phase 2). r.Run uses a
 	// zero-value http.Server, which has no read/write/idle timeouts and
-	// no graceful-shutdown hook — a single slowloris client can pin a
+	// no graceful-shutdown hook, a single slowloris client can pin a
 	// goroutine + fd forever, and SIGTERM kills in-flight requests mid-
 	// response. WriteTimeout is intentionally left at 0 because the SSE
 	// stream is unbounded; per-request write cancellation happens via
@@ -219,7 +219,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		MaxHeaderBytes:    httpMaxHeaderBytes,
 	}
 
-	// Close the SSE hub on shutdown — Shutdown waits for active requests
+	// Close the SSE hub on shutdown, Shutdown waits for active requests
 	// to finish, but SSE handlers loop forever on the per-client channel
 	// and on the request context. Closing the hub closes each client
 	// channel, which makes the per-connection streaming goroutine return
@@ -244,7 +244,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	// listener error) drop the signal subscription. Without this the
 	// shutdown branch left sigCh registered with the signal package,
 	// leaking the channel reference if run() is invoked multiple times
-	// in the same process (notably from tests). Idempotent — signal.Stop
+	// in the same process (notably from tests). Idempotent, signal.Stop
 	// on an already-stopped channel is a no-op.
 	defer signal.Stop(sigCh)
 

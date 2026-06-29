@@ -43,7 +43,7 @@ var ErrCourtBusy = errors.New("court already has a running match")
 // match. Which competitions are scanned depends on the call site:
 //   - StartMatch (non-tx): scans all competitions via store.RunningMatchOnCourt.
 //   - CheckCrossCompCourtBusy (pre-tx gate): scans all competitions except compID.
-//   - StartMatchTx (tx path): scans only within compID — cross-competition
+//   - StartMatchTx (tx path): scans only within compID, cross-competition
 //     conflicts are caught by CheckCrossCompCourtBusy before the tx begins.
 //
 // Courts are tournament-global: one physical shiaijo can host only one match at
@@ -64,7 +64,7 @@ func (e *CourtBusyError) Is(target error) bool {
 
 // AlreadyIneligibleError is returned by RecordDecision when the
 // intended loser already carries Eligible:false from a *different*
-// match — indicating two operators on different courts concurrently
+// match, indicating two operators on different courts concurrently
 // tried to kiken/fusenpai the same player (CHK047, T105, NFR-010).
 type AlreadyIneligibleError struct {
 	PlayerID string
@@ -78,7 +78,7 @@ func (e *AlreadyIneligibleError) Error() string {
 
 // checkConcurrentIneligibility returns *AlreadyIneligibleError when
 // loserName already has Eligible:false from a different match. Returns
-// nil on any lookup failure (non-fatal — missing player IDs, store
+// nil on any lookup failure (non-fatal, missing player IDs, store
 // errors) so a degraded-mode run doesn't break the score flow.
 //
 // CHK047, T105.
@@ -150,7 +150,7 @@ func (e *Engine) CheckEligibility(compID string, playerIDs []string) error {
 // Eligible: false or is already fighting elsewhere; nil when the match
 // may proceed.
 //
-// The status transition itself remains with the score handler — this
+// The status transition itself remains with the score handler, this
 // method is the pre-flight gate.
 //
 // FR-035, T084.
@@ -328,7 +328,7 @@ func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips
 // CompetitorStatus entries whose source MatchID equals excludeMatchID.
 // This lets a match be re-scored (the T103 undo path) even when its
-// own prior kiken/fusenpai created the ineligibility — the status was
+// own prior kiken/fusenpai created the ineligibility, the status was
 // recorded BY that match, so it should not block writing back to it.
 func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []string, excludeMatchID string) error {
 	statuses, err := e.store.LoadCompetitorStatus(compID)
@@ -375,14 +375,14 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	if err != nil {
 		return nil, nil, err
 	}
-	// T105/CHK047: reject concurrent kiken — if the intended loser is
+	// T105/CHK047: reject concurrent kiken, if the intended loser is
 	// already ineligible from a *different* match, two operators are
 	// trying to kiken the same player simultaneously. Return 409 so the
 	// second operator sees the conflict before any write happens.
 	//
 	// Only kiken and fusenpai actually mark the loser ineligible; for
 	// fusensho/daihyosen this check would surface a misleading
-	// "already_ineligible" 409 — the StartMatch eligibility gate is the
+	// "already_ineligible" 409, the StartMatch eligibility gate is the
 	// right place to reject those cases.
 	loserName := sideB
 	if decisionBy == "aka" {
@@ -404,7 +404,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 		priorLoser = loserSideName(prior)
 	}
 	// T103: downstream-match check. The contract scope is "either
-	// participant" — if any subsequent match for either side has been
+	// participant", if any subsequent match for either side has been
 	// started or completed since the kiken/fusenpai, refuse the undo
 	// unless force is set.
 	if priorLoser != "" && !force {
@@ -566,7 +566,7 @@ func (e *Engine) hasDownstreamMatchStarted(compID string, playerNames []string, 
 // for the player named priorLoser on competition compID. Used by the
 // kiken-undo flow (T103) after a previous kiken/fusenpai has been
 // overwritten with a different outcome. matchID is the originating
-// match (the one being undone) — carried for traceability.
+// match (the one being undone), carried for traceability.
 //
 // Returns (nil, nil) when the player can't be resolved (unknown name),
 // so the caller can fall through to the regular response without
@@ -744,7 +744,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 // side, set by the score handler after T077 validation) and falls
 // back to the ippon-count heuristic only when Winner is unset.
 //
-// Returns "" when neither path is conclusive — callers must treat
+// Returns "" when neither path is conclusive, callers must treat
 // that as "no ineligibility recorded" and the operator will need to
 // fix the request shape before the eligibility gate works.
 func loserSideName(result *state.MatchResult) string {
@@ -771,7 +771,7 @@ func loserSideName(result *state.MatchResult) string {
 // withdrawn via kiken-injury (FIK Art. 30). The status must exist,
 // be Eligible: false, and have Reinstateable: true (set by
 // kiken-injury). Voluntary kiken (Art. 31) and fusenpai statuses
-// are not reinstateable — the endpoint returns an error.
+// are not reinstateable, the endpoint returns an error.
 //
 // The check-and-set runs under WithTransaction (K2/CHK047) to close
 // the TOCTOU window between reading the Reinstateable flag and writing

@@ -50,23 +50,23 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 }
 
 // StandardSeedingFull places players into a FULL power-of-two bracket and returns
-// a slice of length NextPow2(len(players)) — or nil for an empty input. Each
+// a slice of length NextPow2(len(players)), or nil for an empty input. Each
 // player is positioned by its seeding RANK via generateBracketOrder, and the
 // surplus high-rank slots are left as zero-value Players (empty Name), i.e. byes.
 //
 // Rank assignment matches StandardSeeding (and the Excel draw): a seeded player
-// (Seed > 0) claims its Seed NUMBER as its rank — so an operator who assigns
+// (Seed > 0) claims its Seed NUMBER as its rank, so an operator who assigns
 // non-contiguous seeds (e.g. {1, 2, 5}) gets the #5 seed at the rank-5 bracket
 // position, not the third-from-top. Genuine unseeded players fill the remaining
 // ranks 1..N in input order; any seed whose number is out of range or collides
 // is then treated as unseeded too (appended after the genuine unseeded players,
-// so a displaced seed's exact slot is unspecified — these are degenerate inputs).
+// so a displaced seed's exact slot is unspecified; these are degenerate inputs).
 //
 // Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
 // caller to pad byes at the end of the leaf array), the byes here are interleaved
 // at their standard positions: a bracket of N players in a 2^k draw gives the top
-// 2^k − N seeds a first-round bye, and — because every bye rank pairs with a
-// distinct low (top-seed) rank in round 1 — the draw never contains an
+// 2^k, N seeds a first-round bye, and because every bye rank pairs with a
+// distinct low (top-seed) rank in round 1, the draw never contains an
 // empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
 // tree matches conventional seeding instead of clustering all byes at the bottom.
 func StandardSeedingFull(players []Player) []Player {
@@ -143,7 +143,7 @@ func StandardSeeding(players []Player) []Player {
 		}
 	}
 
-	// Handle displaced seeds — seeds whose natural bracket position (determined
+	// Handle displaced seeds: seeds whose natural bracket position (determined
 	// by generateBracketOrder) exceeds len(players) because the bracket size
 	// is rounded up to the nearest power of 2 but there are fewer actual
 	// participants.  Each displaced seed is placed in the unoccupied slot that

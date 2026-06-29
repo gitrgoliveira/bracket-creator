@@ -1,4 +1,4 @@
-// Package state — atomic_write.go provides atomic, durable file writes
+// Package state, atomic_write.go provides atomic, durable file writes
 // for all on-disk persistence in internal/state.
 //
 // Constitution Principle VII requires that "tournament and match state
@@ -9,8 +9,8 @@
 // loss). This helper closes both gaps for every save in the package.
 //
 // Algorithm: write to "<path>.tmp-<pid>-<nanos>" next to the target,
-// fsync that file, close it, rename(tmp, target) — atomic on POSIX
-// when src and dst are on the same filesystem — then fsync the parent
+// fsync that file, close it, rename(tmp, target), atomic on POSIX
+// when src and dst are on the same filesystem, then fsync the parent
 // directory so the rename metadata is durable across power loss (a
 // no-op on Windows where directory fsync isn't supported).
 //
@@ -20,7 +20,7 @@
 // (e.g. a stuck-old-process / new-process restart overlap) would
 // otherwise collide on a fixed ".tmp" sibling. The unique suffix also
 // avoids ambiguity if the existing cache layer (getFileCache,
-// pools.go:344) ever grew an mtime poll on directory listings — the
+// pools.go:344) ever grew an mtime poll on directory listings, the
 // .tmp file is invisible to the cache key because the cache is keyed
 // by canonical filename, not by directory scan.
 package state
@@ -49,18 +49,18 @@ import (
 //  2. Write data, then tmp.Sync() to flush the file contents.
 //  3. Close the temp file.
 //  4. Rename tmp -> path. This is atomic on POSIX when both paths live
-//     on the same filesystem (they do — tmp is a sibling of path).
+//     on the same filesystem (they do, tmp is a sibling of path).
 //  5. Open the parent directory and Sync() it so the rename metadata is
 //     itself durable. On Windows this is a graceful no-op.
 //
 // Any failure between steps 1 and 4 removes the temp file before
 // returning the error. A failure at step 5 returns the error but the
-// rename has already happened — the file is visible at path with the
+// rename has already happened, the file is visible at path with the
 // right content; only the directory-entry durability across power loss
 // is at risk, which is the same risk every fsync-less write already
 // has.
 // atomicWrite is the Store-bound write gate. It validates that path is
-// within the store's data folder before delegating to atomicWriteFile,
+// within the store's data folder before delegating to atomicWriteFile;
 // giving CodeQL a verifiable sanitisation boundary for the path value
 // (which ultimately originates from HTTP-supplied competition IDs).
 func (s *Store) atomicWrite(path string, data []byte, perm fs.FileMode) error {
@@ -77,7 +77,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// Store.directWriteWAL via Store.atomicWrite) already validate
 	// that path lives inside the data folder; running filepath.Clean
 	// here ensures the value is normalised at the file-syscall
-	// boundary too, so CodeQL's go/path-injection analysis sees an
+	// boundary too; so CodeQL's go/path-injection analysis sees an
 	// in-function sanitiser and stops flagging the os.OpenFile /
 	// os.Rename / os.Remove sites below as tainted.
 	path = filepath.Clean(path)
@@ -87,8 +87,8 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	}
 
 	// Unique suffix: pid + monotonic-ish nanos. The rename clears it
-	// immediately, so a collision is extremely unlikely even without
-	// the suffix — but the suffix is cheap insurance against stuck-old
+	// immediately; so a collision is extremely unlikely even without
+	// the suffix, but the suffix is cheap insurance against stuck-old
 	// + new-process overlap on shared TOURNAMENT_DATA_DIR mounts.
 	tmpName := fmt.Sprintf("%s.tmp-%d-%d", base, os.Getpid(), time.Now().UnixNano())
 	tmpPath := filepath.Join(dir, tmpName)
@@ -97,7 +97,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// because the unique suffix already guarantees absence; using O_EXCL
 	// would only add a race window between the time.Now() and the open
 	// for nothing.
-	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm) // #nosec G304 — tmpPath is constructed from a caller-supplied target plus a deterministic suffix.
+	tmp, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm) // #nosec G304, tmpPath is constructed from a caller-supplied target plus a deterministic suffix.
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 	// in the on-disk journal/log. Without this, a power loss right
 	// after rename() returns can revert the rename even though the
 	// data file itself was fsync'd. On Windows this returns
-	// "operation not supported" — swallow that specific error.
+	// "operation not supported", swallow that specific error.
 	if err := syncDir(dir); err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func atomicWriteFile(path string, data []byte, perm fs.FileMode) error {
 //     instead of touching the target. After fn returns nil, the
 //     enclosing WithTransaction commits the WAL and Applies it.
 //
-// The signature matches wal.WriteFn so the WAL package and the state
+// The signature matches wal.WriteFn; so the WAL package and the state
 // package can interop without a cross-package adapter.
 type writeFn func(path string, data []byte, perm fs.FileMode) error
 
@@ -177,7 +177,7 @@ func (s *Store) directWrite(path string, data []byte, perm fs.FileMode) error {
 // don't have to special-case the platform.
 //
 // Any other error (e.g. permission denied on POSIX) is returned to
-// the caller — those represent real problems we shouldn't silently
+// the caller, those represent real problems we shouldn't silently
 // ignore.
 func syncDir(dirPath string) error {
 	// On Windows, opening a directory for writing isn't a thing, and
@@ -186,13 +186,13 @@ func syncDir(dirPath string) error {
 		return nil
 	}
 
-	// In-function sanitiser — atomicWriteFile (our only caller) has
+	// In-function sanitiser, atomicWriteFile (our only caller) has
 	// already cleaned the target path before we received `dirPath` as
 	// its filepath.Split-derived directory component, but cleaning
 	// here too keeps the path-injection sanitiser visible to CodeQL
 	// at the os.Open boundary.
 	dirPath = filepath.Clean(dirPath)
-	d, err := os.Open(dirPath) // #nosec G304 — dirPath is derived from the caller's target path.
+	d, err := os.Open(dirPath) // #nosec G304, dirPath is derived from the caller's target path.
 	if err != nil {
 		return err
 	}
@@ -203,7 +203,7 @@ func syncDir(dirPath string) error {
 	if err := d.Sync(); err != nil {
 		// Some filesystems (notably tmpfs on certain kernels, and FUSE
 		// mounts) return ENOTSUP / EINVAL for directory fsync. Treat
-		// those as "best-effort done": the rename already happened,
+		// those as "best-effort done"; the rename already happened,
 		// the data file was fsync'd, and we can't do better on a
 		// filesystem that refuses dir-sync. Other errors propagate.
 		if errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EINVAL) {

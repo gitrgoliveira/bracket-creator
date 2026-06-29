@@ -41,7 +41,7 @@ func TestDeleteCompetitionFile(t *testing.T) {
 	})
 
 	t.Run("idempotent delete of non-existent file", func(t *testing.T) {
-		// bracket.json does not exist yet — should succeed (nil) per idempotent spec.
+		// bracket.json does not exist yet; should succeed (nil) per idempotent spec.
 		err := store.DeleteCompetitionFile(compID, "bracket.json")
 		assert.NoError(t, err)
 	})

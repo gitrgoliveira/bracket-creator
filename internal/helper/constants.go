@@ -51,7 +51,7 @@ const (
 // throughout the workbook; values above this are rejected up front by
 // ValidateCourts so we never silently truncate a user-requested layout.
 //
-// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx —
+// Mirrored client-side as `MAX_COURTS` in web-mobile/js/admin_helpers.jsx,
 // keep the two in lockstep. The JS side is anchored by a comment back here
 // so changes are visible at both edit points.
 const MaxCourts = 26
@@ -59,12 +59,12 @@ const MaxCourts = 26
 // MaxRankOverride is the absolute upper bound for a manual rank override
 // submitted via PUT /api/competitions/:id/pools/:poolId/override-rank.
 // The override-rank handler ALSO validates against the actual pool size
-// (the real semantic constraint — rank within a pool must be in [1..N]
+// (the real semantic constraint, rank within a pool must be in [1..N]
 // where N is the number of players in that pool). This cap is a
 // defense-in-depth overflow guard for the rare case where pools have
 // not been generated yet or LoadPools returns stale/unexpected data.
 //
-// Mirrored client-side as `MAX_RANK` in web-mobile/js/admin_helpers.jsx —
+// Mirrored client-side as `MAX_RANK` in web-mobile/js/admin_helpers.jsx,
 // keep the two in lockstep. 1000 is arbitrary; no real pool has 1000+
 // participants.
 const MaxRankOverride = 1000
@@ -75,12 +75,12 @@ const MaxRankOverride = 1000
 // on every write path so a value the API accepts is also one the
 // admin UI can edit. Without matching bounds, a direct API/import
 // write landing an out-of-range date would block every subsequent
-// admin Settings save — the JS validator re-validates the stored
+// admin Settings save, the JS validator re-validates the stored
 // date on every PUT and surfaces an inline error before reaching the
 // wire.
 //
 // Mirrored client-side as `MIN_YEAR` / `MAX_YEAR` in
-// web-mobile/js/admin_helpers.jsx — keep all four in lockstep. Pin
+// web-mobile/js/admin_helpers.jsx, keep all four in lockstep. Pin
 // tests on both sides assert the literal values so cross-language
 // drift fails CI rather than waiting for a date-related UX bug.
 const (

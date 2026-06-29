@@ -34,7 +34,7 @@ var printTypeList = func() string {
 // "names", "tags", "pools-trees", "full-bracket") plus the meta-selector "all".
 // The set is derived from pdf.Groups at call time so it never drifts.
 //
-// The handler is synchronous — PDF generation via LibreOffice takes 30–60 s
+// The handler is synchronous ,  PDF generation via LibreOffice takes 30–60 s
 // for a typical tournament. That is acceptable for an admin-initiated,
 // one-at-a-time operation. Concurrency is bounded by the package-level
 // sofficeMu mutex in internal/pdf, which serialises every soffice invocation
@@ -89,7 +89,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			return
 		}
 
-		// Generate PDFs — either all groups or the single requested group.
+		// Generate PDFs ,  either all groups or the single requested group.
 		var produced map[string]string
 		if printType == "all" {
 			produced, err = gen.GenerateAll(c.Request.Context(), sources, workDir)

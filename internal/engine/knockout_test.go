@@ -89,7 +89,7 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	assert.Contains(t, sides, "A1", "Pool A 1st must be seeded")
 	assert.Contains(t, sides, "A2", "Pool A 2nd must be seeded")
 	assert.Contains(t, sides, "Pool B-1st", "Pool B placeholders must remain until Pool B finishes")
-	assert.NotContains(t, sides, "B1", "Pool B not finished — must not be seeded yet")
+	assert.NotContains(t, sides, "B1", "Pool B not finished, must not be seeded yet")
 
 	// Competition must remain in pools (Pool B still running).
 	comp, err := store.LoadCompetition(compID)
@@ -113,7 +113,7 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 
 // TestResolveQualifiedPools_ReSeedAfterRescore verifies the re-seedable contract:
 // if an operator re-scores a completed pool match AFTER that pool was seeded into
-// the knockout — changing the finisher order — the new finisher overwrites the
+// the knockout, changing the finisher order, the new finisher overwrites the
 // stale name in the same bracket slot (not silently dropped). This is the mp-turx
 // incremental-seeding desync the /security-review sub-agent caught.
 func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
@@ -213,7 +213,7 @@ func TestResolveQualifiedPools_LonePoolNoMatches(t *testing.T) {
 }
 
 // TestResolveQualifiedPools_DegeneratePoolClampsBye verifies that a completed
-// pool with fewer finishers than PoolWinners does not error — instead the
+// pool with fewer finishers than PoolWinners does not error, instead the
 // unfillable placeholder is resolved as a bye ("") so the bracket advances.
 // This scenario is unreachable via supported flows (generatePools rejects it)
 // but can arise from hand-edited tournament-data or legacy imports.
@@ -236,7 +236,7 @@ func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
 	}))
 
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
-	require.NoError(t, err, "degenerate pool must not return an error — clamp to bye instead")
+	require.NoError(t, err, "degenerate pool must not return an error, clamp to bye instead")
 	assert.True(t, allResolved, "both pools should be fully resolved (B's 2nd-place slot is a bye)")
 
 	b, err := store.LoadBracket(compID)
@@ -388,7 +388,7 @@ func TestBracketMatchPlayable(t *testing.T) {
 
 // TestScoreKnockout_PerMatchGate verifies that the scoring path rejects a
 // knockout match with an unresolved side and accepts one with both sides
-// resolved — replacing the old bracket-wide Preview gate.
+// resolved, replacing the old bracket-wide Preview gate.
 func TestScoreKnockout_PerMatchGate(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "permatch"
@@ -421,7 +421,7 @@ func TestScoreKnockout_PerMatchGate(t *testing.T) {
 }
 
 // TestKnockoutOnly_ScoreableFromDraw verifies that a standalone (knockout-only)
-// playoffs competition is scoreable from draw time — its round-1 leaves are real
+// playoffs competition is scoreable from draw time, its round-1 leaves are real
 // players, so the per-match gate lets them through with no pool resolution.
 func TestKnockoutOnly_ScoreableFromDraw(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -446,7 +446,7 @@ func TestKnockoutOnly_ScoreableFromDraw(t *testing.T) {
 	require.NoError(t, eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
 		SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted,
 	}))
-	// The final is NOT playable yet — its sides are "Winner of …" feeders.
+	// The final is NOT playable yet, its sides are "Winner of …" feeders.
 	err := eng.RecordMatchResult(compID, "m-r2-0", &state.MatchResult{
 		SideA: "Winner of r2-m0", SideB: "Winner of r2-m1", Winner: "Winner of r2-m0", Status: state.MatchStatusCompleted,
 	})

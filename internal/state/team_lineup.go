@@ -1,4 +1,4 @@
-// Package state — team_lineup.go owns the on-disk persistence for
+// Package state, team_lineup.go owns the on-disk persistence for
 // domain.TeamLineup (FR-040, Slice 7.B / T126).
 //
 // One file per competition lives at
@@ -7,7 +7,7 @@
 // submitted yet". All load/mutate/save sequences run under the
 // per-competition write lock (s.getCompLock) so concurrent PUTs to
 // different teams in the same competition serialize correctly without
-// clobbering each other's work — same pattern competitor_status.go
+// clobbering each other's work, same pattern competitor_status.go
 // uses.
 //
 // Locking is a hard requirement here, not a nicety: the FR-040 contract
@@ -43,7 +43,7 @@ type teamLineupFile struct {
 const teamLineupFilename = "lineups.yaml"
 
 // changesRecordedPosition reports whether `incoming` alters or removes any
-// position that `existing` has already filled (a substitution) — as opposed
+// position that `existing` has already filled (a substitution), as opposed
 // to only adding players to previously-empty positions. Adds are always
 // allowed; only changes to a recorded position are blocked once the round
 // has started (they go through the force path + audit reason).
@@ -62,7 +62,7 @@ func changesRecordedPosition(existing, incoming domain.TeamLineup) bool {
 // teamLineupKey is the in-memory map key for a ROUND-scoped lineup. Two
 // lineups for the same team in different rounds coexist (a 5-person team
 // might rotate a kiken'd jiho between round 1 and round 2), so the round
-// is part of the key — not just teamID.
+// is part of the key ,not just teamID.
 func teamLineupKey(teamID string, round int) string {
 	return fmt.Sprintf("%s-%d", teamID, round)
 }
@@ -74,8 +74,8 @@ func teamLineupKey(teamID string, round int) string {
 //
 // The two components are joined with a NUL byte rather than "-" because
 // both teamID and matchID are opaque and routinely contain hyphens (pool
-// match IDs are "PoolA-0"). A "-" delimiter would be ambiguous —
-// ("a-b","c") and ("a","b-c") would collide — so NUL, which cannot
+// match IDs are "PoolA-0"). A "-" delimiter would be ambiguous,
+// ("a-b","c") and ("a","b-c") would collide ,so NUL, which cannot
 // appear in either, is used (same technique as lineupKey in
 // kachinuki_export.go). This key is only ever a map key; it is never
 // persisted or parsed back, so the delimiter choice is free.
@@ -85,7 +85,7 @@ func teamLineupMatchKey(teamID, matchID string) string {
 
 // lineupStorageKey returns the map key a lineup is stored under:
 // match-scoped when MatchID is set, else round-scoped. This is the one
-// place the scope decision lives — every load/set/delete routes through
+// place the scope decision lives ,every load/set/delete routes through
 // it so the two namespaces stay consistent.
 func lineupStorageKey(l domain.TeamLineup) string {
 	if l.MatchID != "" {
@@ -112,7 +112,7 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 
 func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
 	path := s.compPath(compID, teamLineupFilename)
-	data, err := os.ReadFile(path) // #nosec G304 — compPath cleans the path.
+	data, err := os.ReadFile(path) // #nosec G304 ,compPath cleans the path.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.TeamLineup{}, nil
@@ -142,7 +142,7 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 
 // saveTeamLineupsLocked persists the lineups map. Caller MUST hold
 // the per-comp write lock. The write parameter routes the actual
-// file write — directWrite for non-tx callers, WAL-capturing writer
+// file write ,directWrite for non-tx callers, WAL-capturing writer
 // for tx callers. See saveBracketLocked (T211/T212).
 func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.TeamLineup, write writeFn) error {
 	if err := os.MkdirAll(s.compPath(compID), 0700); err != nil {
@@ -166,7 +166,7 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
 // entry for the same (teamID, round). The caller MUST pass the
-// competition's team size — Validate() enforces the FIK back-fill rule
+// competition's team size ,Validate() enforces the FIK back-fill rule
 // against it.
 //
 // Refuses with ErrLineupLocked when the prior entry has a non-nil
@@ -191,7 +191,7 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 // SetTeamLineupForce is SetTeamLineup with the start-of-match freeze bypassed.
 // It is the operator-override path (officiated mode): a table operator who is
 // running behind can still set or correct a team's lineup after the match has
-// started. Lineup validation (FIK position rules) still applies — only the
+// started. Lineup validation (FIK position rules) still applies ,only the
 // LockedAt / running-match refusal is skipped. Callers must be authenticated
 // operators (the HTTP layer already gates this on the admin password).
 func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, teamSize int) error {
@@ -212,7 +212,7 @@ func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, team
 // it (typically via WithTransaction).
 //
 // ValidatePositions() is re-run here so the lock-free path is as safe as
-// the public method — transaction bodies don't have to remember to
+// the public method ,transaction bodies don't have to remember to
 // validate first. (Only position KEYS are checked, not FIK completeness:
 // lineups are entered incrementally while bouts run, so a partial lineup
 // must stay persistable.) The write parameter routes the final save
@@ -232,7 +232,7 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 	if force {
 		lineup.CompetitionID = compID
 		// Preserve any existing LockedAt stamp so a later non-force write
-		// still refuses — the override is per-write, not a permanent unlock.
+		// still refuses ,the override is per-write, not a permanent unlock.
 		if existing, ok := current[key]; ok {
 			lineup.LockedAt = existing.LockedAt
 		}
@@ -249,7 +249,7 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 		}
 		// T128a race-condition guard: a concurrent score-save could have
 		// transitioned this lineup's match to running BETWEEN the caller's
-		// last GET and this PUT — without the lineup file yet recording
+		// last GET and this PUT ,without the lineup file yet recording
 		// LockedAt (the engine wires that as a follow-up). Re-check the
 		// relevant match status inside this lock and refuse the write if it
 		// is no longer mutable. Cheap pure-disk reads, both keyed to the
@@ -290,7 +290,7 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 //     elimination round).
 //   - Pool matches: there's no explicit round field in pool-matches.csv,
 //     so for now every pool match is treated as round 0. This matches
-//     the engine-side TODO at LockTeamLineupsForRound — multi-round
+//     the engine-side TODO at LockTeamLineupsForRound ,multi-round
 //     lineups will need a richer mapping when team-pool-rotation
 //     lands.
 func (s *Store) roundHasRunningOrCompletedMatchLocked(compID string, round int) (bool, error) {
@@ -309,7 +309,7 @@ func (s *Store) roundHasRunningOrCompletedMatchLocked(compID string, round int) 
 			}
 		}
 	}
-	// Pool matches collapse to round 0 — only check when round == 0.
+	// Pool matches collapse to round 0 ,only check when round == 0.
 	if round == 0 {
 		poolParsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
 		if err != nil {
@@ -334,7 +334,7 @@ func (s *Store) roundHasRunningOrCompletedMatchLocked(compID string, round int) 
 // Caller MUST already hold the per-competition lock. Reads pool-matches
 // and bracket directly from disk (bypassing the cache) for the same
 // stale-snapshot reason as the round variant. A match ID not found in
-// either file is treated as not-yet-started (false) — the lineup stays
+// either file is treated as not-yet-started (false) ,the lineup stays
 // editable until its match actually exists and starts.
 func (s *Store) matchIsRunningOrCompletedLocked(compID, matchID string) (bool, error) {
 	bracketParsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
@@ -440,7 +440,7 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 }
 
 // LockTeamLineupForMatch stamps LockedAt on every persisted match-scoped
-// lineup whose MatchID matches `matchID` — i.e. both teams' lineups for
+// lineup whose MatchID matches `matchID` ,i.e. both teams' lineups for
 // that single encounter (mp-825). Round-scoped (legacy) lineups are
 // untouched; those are frozen by LockTeamLineupsForRound. Idempotent:
 // already-locked entries keep their original LockedAt.
@@ -515,7 +515,7 @@ func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.
 // write lock (typically via WithTransaction).
 //
 // Used by the tx-aware score / decision paths (T156) so the lineup
-// freeze runs under the same lock acquire as the score write — without
+// freeze runs under the same lock acquire as the score write ,without
 // this variant the public LockTeamLineupsForRound would deadlock when
 // called from inside a WithTransaction closure (sync.RWMutex is
 // non-recursive). The write parameter routes the save (T211/T212).
@@ -527,7 +527,7 @@ func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt
 	changed := false
 	for k, l := range current {
 		// Match-scoped lineups (mp-825) are frozen per-match by
-		// LockTeamLineupForMatch, never by the round sweep — otherwise a
+		// LockTeamLineupForMatch, never by the round sweep ,otherwise a
 		// live round-0 pool match would freeze every match-scoped pool
 		// lineup (Round defaults to 0 when unset), re-introducing the
 		// exact bug this change fixes.

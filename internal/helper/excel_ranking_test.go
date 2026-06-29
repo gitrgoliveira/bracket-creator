@@ -237,7 +237,7 @@ func TestPoolWinnerCellsPointToRankingFormulas(t *testing.T) {
 
 			// For each rank up to numWinners, the matchWinners cell must
 			// point at the IFERROR(INDEX(...MATCH(rankNum, ...))) formula
-			// that resolves the player name — NOT at a blank cell past the
+			// that resolves the player name, NOT at a blank cell past the
 			// ranking block.
 			for rank := 1; rank <= numWinners; rank++ {
 				key := fmt.Sprintf("Pool A-%s", GetOrdinal(rank))

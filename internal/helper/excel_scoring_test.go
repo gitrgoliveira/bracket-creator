@@ -40,8 +40,8 @@ import (
 // that all SUMPRODUCT ranges are single-cell (B5:B5 etc.) and evaluate correctly.
 
 // scoringSetup2Players creates a 2-player, 1-match pool and calls PrintPoolMatches.
-// SideA/SideB point to &pool.Players[0/1] — the same backing array used for the
-// player→match-record map lookup — so all formula cells are populated correctly.
+// SideA/SideB point to &pool.Players[0/1], the same backing array used for the
+// player→match-record map lookup, so all formula cells are populated correctly.
 func scoringSetup2Players(t *testing.T, teamMatches int) *excelize.File {
 	t.Helper()
 	pool := Pool{
@@ -480,7 +480,7 @@ func TestTeamIVILITPWPLTableFormulas(t *testing.T) {
 			// PW uses total score letters regardless of D5; PL is the opponent's PW.
 			name: "tied sub-match counts in IT; score letters still count in PW",
 			setup: func(f *excelize.File) {
-				setScore(f, "D5", "X") // sub tied — D5="X" alone sets played=true
+				setScore(f, "D5", "X") // sub tied, D5="X" alone sets played=true
 				setScore(f, "B5", "M")
 			},
 			alice: expect{"0", "0", "1", "1", "0"},

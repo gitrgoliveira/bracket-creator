@@ -26,7 +26,7 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	compID := "comp-test-p"
 	// withZekkenName=true so the explicit displayName values in the payload
 	// are persisted as the bib/zekken column rather than stripped (the new
-	// handler enforces "displayName only honored for zekken comps" — without
+	// handler enforces "displayName only honored for zekken comps" ,  without
 	// it, a 3-column row would be mis-parsed on the next load).
 	comp := state.Competition{
 		ID:             compID,
@@ -68,7 +68,7 @@ func TestSingleParticipantAddAndReplace(t *testing.T) {
 	assert.Equal(t, "Test Dojo", addedPlayer.Dojo)
 	assert.Equal(t, []string{"3 Dan"}, addedPlayer.Metadata)
 
-	// Verify player is stored in participants.csv — reload with the same
+	// Verify player is stored in participants.csv ,  reload with the same
 	// withZekkenName=true used at save time so the column layout matches.
 	storedPlayers, err := store.LoadParticipants(compID, true)
 	require.NoError(t, err)
@@ -256,10 +256,10 @@ func TestNameTitleCaseCanonicalization(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
 	assert.Equal(t, "Alice Cooper", added.Name, "AddParticipant must Title-case the stored name")
 
-	// Seed the stored name — it must match what LoadSeeds returns after a reload.
+	// Seed the stored name ,  it must match what LoadSeeds returns after a reload.
 	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{{Name: "Alice Cooper", SeedRank: 1}}))
 
-	// PUT with another non-canonical name — verify the seed is updated to Title-case.
+	// PUT with another non-canonical name ,  verify the seed is updated to Title-case.
 	replBody, _ := json.Marshal(map[string]interface{}{"name": "bob the builder", "dojo": "Builder Dojo"})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+added.ID, bytes.NewBuffer(replBody))
@@ -277,7 +277,7 @@ func TestNameTitleCaseCanonicalization(t *testing.T) {
 	require.Len(t, seeds, 1)
 	assert.Equal(t, "Bob The Builder", seeds[0].Name, "seed name must match the Title-cased participant name")
 
-	// Reload participants — seed merge must succeed (seed rank != 0).
+	// Reload participants ,  seed merge must succeed (seed rank != 0).
 	players, err := store.LoadParticipants(compID, false)
 	require.NoError(t, err)
 	require.Len(t, players, 1)
@@ -306,7 +306,7 @@ func TestDuplicateNameRejection(t *testing.T) {
 	_, err = store.AddParticipant(compID, domain.Player{Name: "Bob", Dojo: "Dojo B"}, false)
 	require.NoError(t, err)
 
-	// 1. POST add duplicate — same (name, dojo) → 409. Different dojo with same
+	// 1. POST add duplicate ,  same (name, dojo) → 409. Different dojo with same
 	// name is allowed (two real people at different clubs), so we must use the
 	// SAME dojo as Alice to trigger the conflict.
 	dupAdd, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "Dojo A"})
@@ -383,8 +383,8 @@ func TestBatchPostDuplicateNameDojo_409(t *testing.T) {
 // TestBatchPostBlankDojo_400 covers the batch (players array) POST path: a row
 // with a blank dojo must be rejected with 400, mirroring the single-add path
 // (which already returns "dojo must not be blank"). Without this, a misformatted
-// roster paste — e.g. a two-column "Name, Dojo" line in a zekken competition,
-// which parseParticipantLines maps to {displayName: dojo, dojo: ""} — would be
+// roster paste ,  e.g. a two-column "Name, Dojo" line in a zekken competition,
+// which parseParticipantLines maps to {displayName: dojo, dojo: ""} ,  would be
 // silently accepted, persisting a competitor with no dojo while the UI reports
 // success. (invalid-submission acceptance bug)
 func TestBatchPostBlankDojo_400(t *testing.T) {
@@ -454,7 +454,7 @@ func TestReplaceDoesNotInheritOldDisplayName(t *testing.T) {
 		Status: state.CompStatusSetup,
 	}))
 
-	// Add Alice Smith — Go will auto-derive displayName = "A. SMITH".
+	// Add Alice Smith ,  Go will auto-derive displayName = "A. SMITH".
 	addBody, _ := json.Marshal(map[string]interface{}{"name": "Alice Smith", "dojo": "Raizan"})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(addBody))
@@ -600,7 +600,7 @@ func TestBulkCheckIn(t *testing.T) {
 
 	t.Run("duplicate pids counted only once", func(t *testing.T) {
 		// Eve (added[4]) already checked in from "unknown pid" sub-test.
-		// Send her PID twice — must count as 1 already_checked_in, not 2.
+		// Send her PID twice ,  must count as 1 already_checked_in, not 2.
 		pids := []string{added[4].ID, added[4].ID}
 		w := doPost(t, pids)
 		require.Equal(t, http.StatusOK, w.Code)
@@ -625,7 +625,7 @@ func TestBulkCheckIn(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, before.ModTime(), after.ModTime(), "participants.csv must not be written for an empty-array call")
 
-		// All participants already checked in — file must also not be written.
+		// All participants already checked in ,  file must also not be written.
 		// At this point Alice, Bob, Carol, Dave, Eve are all checked in.
 		allPIDs := make([]string, len(added))
 		for i, p := range added {
@@ -713,7 +713,7 @@ func mustLoad(t *testing.T, store *state.Store, compID string) []domain.Player {
 }
 
 // TestAddParticipant_DefaultsManualSource pins that an add via the single-add
-// endpoint without an explicit source gets "manual" — so rows added via this UI
+// endpoint without an explicit source gets "manual" ,  so rows added via this UI
 // land in the same source-filter bucket as rows the operator hand-edits into
 // the paste-box import.
 func TestAddParticipant_DefaultsManualSource(t *testing.T) {
@@ -765,7 +765,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 		WithZekkenName: true,
 	}))
 
-	// Add with explicit zekken — must survive a save/load round trip.
+	// Add with explicit zekken ,  must survive a save/load round trip.
 	body, _ := json.Marshal(map[string]interface{}{
 		"name":        "Akira Tanaka",
 		"displayName": "TANAKA",
@@ -806,7 +806,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 	assert.Equal(t, "Akira Yamamoto", loaded[0].Name)
 	assert.Equal(t, "Raizan", loaded[0].Dojo)
 
-	// Replace with empty displayName — the backend must re-derive from the new
+	// Replace with empty displayName ,  the backend must re-derive from the new
 	// name (NOT inherit the previous "YAMAMOTO"), matching non-zekken behavior.
 	replBody, _ = json.Marshal(map[string]interface{}{
 		"name":        "Kenji Sato",
@@ -831,7 +831,7 @@ func TestZekkenAddAndReplace(t *testing.T) {
 // handler serialises the status check and the participant write under one
 // lock acquire (mp-0lc). A goroutine that concurrently flips status to
 // CompStatusPools must produce either a 200 (replace won the race) or a 409
-// (start-competition won the race) — never a 500 or a data-corrupt 200.
+// (start-competition won the race) ,  never a 500 or a data-corrupt 200.
 func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -918,7 +918,7 @@ func TestReplaceParticipant_ConcurrentStartRace(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Whitespace-only danGrade must not persist as a blank metadata entry
-// Tests both POST (add) and PUT (replace) paths — mirrors the registration
+// Tests both POST (add) and PUT (replace) paths ,  mirrors the registration
 // handler's analogous test (TestRegistration_POST_WhitespaceDanGrade_NotPersisted).
 // ---------------------------------------------------------------------------
 
@@ -933,7 +933,7 @@ func TestParticipants_WhitespaceDanGrade_NotPersisted(t *testing.T) {
 		Status: state.CompStatusSetup,
 	}))
 
-	t.Run("POST add — whitespace danGrade not persisted", func(t *testing.T) {
+	t.Run("POST add ,  whitespace danGrade not persisted", func(t *testing.T) {
 		payload := map[string]interface{}{
 			"name":     "Alice Ws",
 			"dojo":     "Dojo",
@@ -952,7 +952,7 @@ func TestParticipants_WhitespaceDanGrade_NotPersisted(t *testing.T) {
 		assert.Empty(t, players[0].Metadata, "whitespace-only danGrade must not persist")
 	})
 
-	t.Run("PUT replace — whitespace danGrade not persisted", func(t *testing.T) {
+	t.Run("PUT replace ,  whitespace danGrade not persisted", func(t *testing.T) {
 		players, err := store.LoadParticipants(compID, false)
 		require.NoError(t, err)
 		require.Len(t, players, 1)
@@ -1138,7 +1138,7 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	// Dojo conflict warning MUST be present — we deterministically created one.
+	// Dojo conflict warning MUST be present ,  we deterministically created one.
 	ws, ok := resp["warnings"]
 	require.True(t, ok, "warnings must be present when dojo conflict exists")
 	wsSlice, ok := ws.([]any)

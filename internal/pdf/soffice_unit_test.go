@@ -27,7 +27,7 @@ func TestLocateSoffice_EnvVar(t *testing.T) {
 	t.Run("non-existent path in LIBREOFFICE_PATH falls through", func(t *testing.T) {
 		t.Setenv("LIBREOFFICE_PATH", "/nonexistent/soffice-fake")
 		// Falls through to PATH lookup and candidates; on most CI boxes without
-		// LibreOffice this returns ErrSofficeNotFound — that's the expected path.
+		// LibreOffice this returns ErrSofficeNotFound, that's the expected path.
 		_, err := LocateSoffice()
 		// Either succeeds (LibreOffice installed) or returns ErrSofficeNotFound.
 		if err != nil {

@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMergePoolNumbersIntoPlayers — mp-13y: numbers from pools.csv must be
+// TestMergePoolNumbersIntoPlayers, mp-13y: numbers from pools.csv must be
 // merged onto comp.Players so the viewer API carries the numberPrefix-derived
 // "K1", "K2", … on every player. The merge is the bridge that lets the TV
 // display / streaming overlay / viewer card render the prefix at all

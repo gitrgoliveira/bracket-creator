@@ -15,9 +15,9 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// mergePoolNumbersIntoPlayersSlice — copy the assigned competitor Number
+// mergePoolNumbersIntoPlayersSlice, copy the assigned competitor Number
 // (e.g. "K1") from pools.csv onto the given players slice in place.
-// participants.csv does NOT persist Number — it is assigned at draw time by
+// participants.csv does NOT persist Number, it is assigned at draw time by
 // AssignPlayerNumbers and only persisted into pools.csv. Without this merge
 // the viewer API never carries the numberPrefix-derived numbers, so
 // TV/overlay/viewer surfaces can't render them (mp-13y). No-op when
@@ -71,7 +71,7 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 	}
 }
 
-// mergePoolNumbersIntoPlayers — thin wrapper that operates on a Competition
+// mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
 // pointer. Existing call sites that hold a *Competition keep their idiomatic
 // form; the work happens in the slice-typed helper below.
 func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
@@ -102,7 +102,7 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // courtFilter scopes the result for the court feed: when non-empty, the comp is
 // included ONLY if it is not in setup AND has at least one real match physically
 // on that court (matchesPresentOnCourt). The gate runs off the same
-// poolMatches/bracket this function already loads — no second read. The
+// poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
 func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
 	comp, _ := viewerLoadCompetition(store, compID)
@@ -173,7 +173,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	// endpoints. Created once per router setup and shared by all requests
 	// via closure capture. Collapses concurrent identical builds (e.g. the
 	// 1000-viewer SSE fan-out storm on every ippon) to O(1) actual builds
-	// per in-flight window without serving stale data — the key is removed
+	// per in-flight window without serving stale data, the key is removed
 	// as soon as the elected caller's fn returns, so each new wave
 	// re-executes.
 	sf := newViewerSingleFlight()
@@ -195,7 +195,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 	r.GET("/competitions", func(c *gin.Context) {
 		// P2 (mp-9afd): collapse concurrent builds to O(1) per in-flight
-		// window. The key is constant — all callers want the same payload.
+		// window. The key is constant, all callers want the same payload.
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
 		data, err := sf.Do("competitions", func() ([]byte, error) {
@@ -217,7 +217,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					// Shared per-comp builder (also used by the court-scoped
 					// /court/:court/matches feed). A nil payload (comp failed to
 					// load) leaves results[idx] as a nil `any` so the collect
-					// loop below skips it — assigning a nil gin.H directly would
+					// loop below skips it, assigning a nil gin.H directly would
 					// box into a non-nil interface and slip past that filter.
 					if payload := buildViewerCompetitionPayload(store, compID, ""); payload != nil {
 						results[idx] = payload
@@ -247,7 +247,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
-		// Validate the :id like the admin handlers do — pre-fix, an
+		// Validate the :id like the admin handlers do, pre-fix, an
 		// invalid ID here returned 500 (LoadCompetition's internal
 		// ValidateCompetitionID surfaced as a generic error response)
 		// while the OpenAPI spec on the CompetitionId parameter
@@ -328,7 +328,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				}
 			}
 
-			// FR-025, T036: derive per-court queue position at serve time —
+			// FR-025, T036: derive per-court queue position at serve time,
 			// see annotateQueuePositions for rationale.
 			annotateQueuePositions(poolMatches)
 			annotateBracketQueuePositions(bracket)

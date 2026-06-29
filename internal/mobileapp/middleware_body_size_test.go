@@ -101,7 +101,7 @@ func TestMaxBodyBytes_SkipsBodylessMethods(t *testing.T) {
 // TestMaxBodyBytes_FiresBeforeAuth pins the wiring contract used by
 // server.go: the body cap middleware is installed BEFORE AuthMiddleware
 // on each admin group, so an unauthenticated POST with an oversized
-// Content-Length gets 413 — not 401. Regression test for the
+// Content-Length gets 413, not 401. Regression test for the
 // mp-663 Phase 3 acceptance criterion.
 func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
@@ -110,7 +110,7 @@ func TestMaxBodyBytes_FiresBeforeAuth(t *testing.T) {
 	// Order matches server.go: body cap, then auth.
 	r.Use(MaxBodyBytes(100))
 	r.Use(func(c *gin.Context) {
-		// Stand-in for AuthMiddleware that always returns 401 — proves
+		// Stand-in for AuthMiddleware that always returns 401, proves
 		// the body cap fired first if the response is 413 instead.
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 	})
@@ -155,7 +155,7 @@ func TestMaxBodyBytes_TinyBodyGroup_FiresBeforeAuth(t *testing.T) {
 	router, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
 	t.Cleanup(limiter.Close)
 
-	// Body just over AnnouncementMaxBodyBytes — no auth header intentionally:
+	// Body just over AnnouncementMaxBodyBytes, no auth header intentionally:
 	// if the body cap fires first (correct), we get 413; if auth fires first
 	// (regression), we get 401.
 	body := strings.Repeat("x", int(AnnouncementMaxBodyBytes)+1)

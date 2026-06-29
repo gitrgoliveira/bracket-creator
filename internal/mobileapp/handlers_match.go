@@ -20,7 +20,7 @@ import (
 // for the per-court (status priority, ScheduledAt, original index) sort.
 //
 // FR-025, T036: queue positions are derived at serve time rather than
-// persisted — a stored value would go stale the instant any match
+// persisted, a stored value would go stale the instant any match
 // transitions and we'd have to recompute on every score write anyway.
 // Match-list endpoints (handlers_viewer.go: GET /competitions and
 // GET /competitions/:id) call this just before c.JSON so viewers see
@@ -55,7 +55,7 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 	}
 
 	// Group pointers per court, preserving the round/position pair as a
-	// stable tie-break key. We can't sort b.Rounds itself — the bracket
+	// stable tie-break key. We can't sort b.Rounds itself, the bracket
 	// tree structure is load-bearing for the renderer.
 	type entry struct {
 		m        *state.BracketMatch
@@ -120,7 +120,7 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 
 // enchoExceedsCap reports whether an encho block would exceed the
 // competition's MaxEnchoPeriods cap. Returns false (within limit) when
-// encho is unset, comp is nil, the cap is 0 (unlimited — FIK default),
+// encho is unset, comp is nil, the cap is 0 (unlimited, FIK default),
 // the count is within the cap, or force is set. T104/CHK029.
 func enchoExceedsCap(encho *state.EnchoMetadata, comp *state.Competition, force bool) bool {
 	if encho == nil || encho.PeriodCount <= 0 {
@@ -146,7 +146,7 @@ func anySubBoutEnchoExceedsCap(subResults []state.SubMatchResult, comp *state.Co
 
 // anySubBoutHasEncho reports whether any sub-result carries encho with at
 // least one period. Used to decide whether the cap check needs to load the
-// competition at all — ordinary team scoring (every bout has SubResults but
+// competition at all, ordinary team scoring (every bout has SubResults but
 // no encho) must not pay that store load.
 func anySubBoutHasEncho(subResults []state.SubMatchResult) bool {
 	for i := range subResults {
@@ -223,12 +223,12 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 	case engine.AutoCompletePoolsResolved:
 		// Some (not all) pools were seeded into the knockout, and/or tiebreakers
 		// were injected. The bracket/schedule changed and newly-playable knockout
-		// matches may now be live — refresh without a full status change.
+		// matches may now be live, refresh without a full status change.
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
 	case engine.AutoCompleteAwaitingLeagueTiebreak:
 		// All regular team-league pool matches are complete but consequential ties
-		// remain — the operator must either generate tie-breaker matches or finalize
+		// remain, the operator must either generate tie-breaker matches or finalize
 		// shared ranks via the league-tiebreak endpoints (Phase 3b). Broadcast both
 		// EventMatchUpdated (reload standings) and EventScheduleUpdated (display
 		// the "tie-breaker required" banner) as documented on AutoCompleteAwaitingLeagueTiebreak.
@@ -279,7 +279,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		var successful []state.MatchResult
 		// Collect eligibility changes so we can broadcast
 		// EventCompetitorStatusUpdated for every kiken/fusenpai result in
-		// the batch — mirrors the single-score handler (T085/T092).
+		// the batch, mirrors the single-score handler (T085/T092).
 		var eligibilityUpdates []*domain.CompetitorStatus
 
 		comp, err := store.LoadCompetition(id)
@@ -317,7 +317,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// Court exclusivity (mp-95mg) is intentionally NOT enforced here:
 			// bulk-score is an admin batch-import/correction tool, not a live
 			// match-start path. It also bypasses StartMatchTx for the same
-			// reason — admin corrections are meant to override normal flow.
+			// reason, admin corrections are meant to override normal flow.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
@@ -330,7 +330,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 							return errors.New("correcting a completed match result requires a non-empty correctionReason")
 						}
 					} else {
-						results[i].CorrectionReason = "" // first finalization — not a correction
+						results[i].CorrectionReason = "" // first finalization, not a correction
 					}
 				}
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
@@ -410,7 +410,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the
-		// engine can stamp WinnerID even when both sides share a name —
+		// engine can stamp WinnerID even when both sides share a name,
 		// the name alone can't tell two same-name participants apart.
 		winner := ""
 		winnerSide := ""
@@ -424,7 +424,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		// Synthesise SubResults so standings IV/IL/IT counts are correct.
-		// Sub-bout SideA/SideB are left empty — individual bout sides are
+		// Sub-bout SideA/SideB are left empty, individual bout sides are
 		// unknown in quick-score mode (no lineup). Winner attribution in
 		// computeStandings uses `sub.Winner == m.SideA` (the match-level
 		// name); the `sub.Winner == sub.SideA` fallback is guarded against
@@ -470,13 +470,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		c.JSON(http.StatusOK, result)
 	})
 
-	// Score endpoint — Slice 0 demonstration of the interface-DI +
+	// Score endpoint, Slice 0 demonstration of the interface-DI +
 	// Validate() pattern (T015 / T017 / NFR-002 / NFR-004). Calls go
 	// through ScoringEngine and Broadcaster (the consumer-boundary
 	// interfaces from deps.go) rather than the concrete types, and the
 	// request body is validated via ScoreRequest.Validate() before any
 	// engine call. The closure captures `*engine.Engine` / `*Hub` and
-	// adapts them to the interfaces at the call boundary — same wire
+	// adapts them to the interfaces at the call boundary, same wire
 	// behaviour as before. T156 added the CompetitionTransactor `tx`
 	// parameter so the match-write + ineligibility-write + lineup-freeze
 	// commit under one per-comp lock acquire.
@@ -496,7 +496,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Cap defensively — the tournament-level validateCourtLabels
+		// Cap defensively, the tournament-level validateCourtLabels
 		// enforces single-char labels but per-match court strings have
 		// historically accepted longer values in engine tests (e.g.
 		// "Court Z"). 32 is generous enough not to break any real
@@ -536,7 +536,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// Trim whitespace from the winner name. Downstream comparisons
 		// (m.Winner == m.SideA / m.SideB in engine/scoring.go and
 		// engine/ranking.go) are exact-string equality, so a padded
-		// "  Foo  " won't match the canonical "Foo" from the roster —
+		// "  Foo  " won't match the canonical "Foo" from the roster,
 		// bracket math silently breaks. The JS prompt site at
 		// admin_competition.jsx now trims client-side, but a
 		// hand-crafted API call could still hit this. Mirrors the
@@ -594,7 +594,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 // and true on success; writes the HTTP error response and returns "",
 // false when the request should be rejected.
 //
-// The finalized-result guard is NOT checked here — it must run inside
+// The finalized-result guard is NOT checked here, it must run inside
 // WithTransaction to prevent TOCTOU races between concurrent anonymous
 // submissions. See checkFinalizedUnderTx.
 //
@@ -697,7 +697,7 @@ func bracketMatchToResult(bm *state.BracketMatch) *state.MatchResult {
 }
 
 // isMatchFinalized reports whether the given result represents a concluded
-// match. Any completed match is finalized — anonymous callers must not
+// match. Any completed match is finalized, anonymous callers must not
 // overwrite it regardless of whether a winner was explicitly recorded.
 func isMatchFinalized(r *state.MatchResult) bool {
 	return r.Status == state.MatchStatusCompleted
@@ -707,7 +707,7 @@ func isMatchFinalized(r *state.MatchResult) bool {
 // the pool-matches CSV or bracket JSON (in that order) without taking
 // any additional lock (caller MUST hold the per-comp lock via
 // WithTransaction). Returns the empty MatchStatus "" when the match
-// cannot be found in either store — callers treat an unknown match as
+// cannot be found in either store, callers treat an unknown match as
 // "not yet completed" (the engine will reject it via errMatchNotFound
 // on the actual score write, so we don't need to fail here).
 func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.MatchStatus {
@@ -749,7 +749,7 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // T156: the match-write + ineligibility-check-and-set + (T128) lineup-
 // freeze now run inside one Store.WithTransaction so they all commit
 // under a single per-comp lock acquire. The kachinuki advance + auto-
-// complete-pools post-writes deliberately run AFTER the tx — both
+// complete-pools post-writes deliberately run AFTER the tx, both
 // reach for other per-comp locked operations (UpdatePoolMatchByID,
 // UpdateCompetitionChanged) which would deadlock inside the tx, and
 // they're already structured as best-effort side effects with their
@@ -760,7 +760,7 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 // runningRev is the per-match value stored in runningRevStore: the highest
 // Rev seen WITHIN a given client scoring session (RevSession). A write whose
 // RevSession differs from the stored one is treated as last-write-wins
-// (concurrent operators — multiple operators may score one shiaijo). The
+// (concurrent operators, multiple operators may score one shiaijo). The
 // completed-match regression guard is the real protection against a stale
 // running write reverting a finished result.
 type runningRev struct {
@@ -777,11 +777,11 @@ type runningRev struct {
 // than the stored high-water mark WITHIN THE SAME RevSession, we silently
 // no-op it (return 200). This prevents out-of-order delivery from a
 // reconnect flush overwriting a more-recent in-flight write. Writes from a
-// DIFFERENT RevSession are treated as last-write-wins — multiple operators
+// DIFFERENT RevSession are treated as last-write-wins, multiple operators
 // may legitimately score the same shiaijo concurrently. The completed-match
 // regression guard (staleAfterComplete, inside the tx) is the authoritative
 // protection: it ensures a running write never reverts a finished match
-// regardless of session. Only "running" writes are gated — completed writes
+// regardless of session. Only "running" writes are gated, completed writes
 // and Rev==0 (unversioned) writes always proceed so the guard never blocks
 // explicit operator submits or legacy clients.
 //
@@ -834,7 +834,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// T104/CHK029: enforce MaxEnchoPeriods cap. The cap is a
 		// per-competition setting; 0 means unlimited (FIK default). The
 		// operator can override by sending ?force=true after confirming
-		// the warning banner — the UI's job is to surface that prompt
+		// the warning banner, the UI's job is to surface that prompt
 		// when the cap is reached.
 		if !enforceEnchoCapWithSubs(c, store, id, req.Encho, req.SubResults, c.Query("force") == "true") {
 			return
@@ -883,7 +883,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		//
 		// Same-session ordering: if the stored high-water mark for this match
 		// (within the same session) is already > the incoming Rev, the write is
-		// stale — return 200 so the client doesn't surface an error but skip the
+		// stale, return 200 so the client doesn't surface an error but skip the
 		// engine write entirely. A higher-or-equal rev advances the mark.
 		//
 		// Different sessions (concurrent operators): last-write-wins. Multiple
@@ -900,7 +900,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				stored := existing.(runningRev)
 				// Same session: a lower rev is a stale out-of-order delivery (e.g.
 				// a reconnect flush). Drop it. DIFFERENT sessions are concurrent
-				// operators (multiple operators may score one shiaijo) — last write
+				// operators (multiple operators may score one shiaijo), last write
 				// wins; the completed-match regression guard below still prevents a
 				// running write from reverting a finished match.
 				if stored.Session == incoming.Session && result.Rev < stored.Rev {
@@ -910,7 +910,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {
 					break
 				}
-				// Lost the CAS race — retry.
+				// Lost the CAS race, retry.
 			}
 		}
 
@@ -920,7 +920,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// court-busy check + per-competition write under a tournament-level
 		// mutex so two concurrent match-starts on the same court in different
 		// competitions can't both pass the cross-comp check before either
-		// commits (TOCTOU). Withdrawal decisions skip the court gate — operators
+		// commits (TOCTOU). Withdrawal decisions skip the court gate, operators
 		// must record kiken/fusenpai regardless of court state.
 		var (
 			engStatus          *domain.CompetitorStatus
@@ -956,14 +956,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// (completed -> completed) is a correction and requires a non-empty
 				// CorrectionReason for traceability. This applies to ANY decision
 				// type, including a withdrawal (kiken/fusenpai) submitted via /score
-				// — exempting those would let a finalized result be overwritten with
+				//, exempting those would let a finalized result be overwritten with
 				// no audit reason. The check runs inside the tx so the is-completed
 				// read is race-free (same lock). A first finalization (existing
 				// status is not completed) needs no reason.
 				if result.Status == state.MatchStatusCompleted {
 					existing := lookupMatchStatusUnderTx(stx, id, mid)
 					if existing == state.MatchStatusCompleted {
-						// Overwriting a finalized result is a correction — require a reason.
+						// Overwriting a finalized result is a correction, require a reason.
 						if result.CorrectionReason == "" {
 							engErr = &ValidationError{
 								Field:   "correctionReason",
@@ -972,7 +972,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 							return nil
 						}
 					} else {
-						// First finalization — not a correction. The contract says the
+						// First finalization, not a correction. The contract says the
 						// reason is omitted here, so drop any client-supplied value.
 						result.CorrectionReason = ""
 					}
@@ -997,7 +997,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it
 				// after the tx returns. The score-write inside the tx already
-				// includes the K3 rollback for the AlreadyIneligible path —
+				// includes the K3 rollback for the AlreadyIneligible path,
 				// returning nil here commits whatever final state the engine
 				// settled on.
 				return nil
@@ -1020,7 +1020,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundErr *engine.NotFoundError
 			if errors.As(txErr, &notFoundErr) {
-				// Match not found — drop any rev-guard entry this request created so
+				// Match not found, drop any rev-guard entry this request created so
 				// fabricated match IDs can't grow runningRevStore unbounded (mirrors
 				// the engErr NotFoundError path; scoring is unauthenticated in
 				// self-run mode).
@@ -1035,7 +1035,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// The rev-guard above stored this running write's session+rev into
 			// runningRevStore (LoadOrStore) before we discovered, inside the
 			// transaction, that the match is already completed. Drop the entry now
-			// — no future running write can legitimately supersede a completed
+			//, no future running write can legitimately supersede a completed
 			// match, so retaining it would leak map memory.
 			runningRevStore.Delete(matchKey)
 			c.JSON(http.StatusOK, gin.H{"stale": true})
@@ -1051,7 +1051,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			if errors.Is(engErr, engine.ErrMatchSideMismatch) {
 				// The payload named competitors that differ from the stored
-				// pairing — refuse rather than rewrite match identity.
+				// pairing, refuse rather than rewrite match identity.
 				c.JSON(http.StatusConflict, gin.H{
 					"error":   "side_mismatch",
 					"message": "The submitted competitors don't match this match's pairing. Reload and try again.",
@@ -1106,7 +1106,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundEngErr *engine.NotFoundError
 			if errors.As(engErr, &notFoundEngErr) {
-				// The match doesn't exist — drop any rev-guard entry this request
+				// The match doesn't exist, drop any rev-guard entry this request
 				// created so fabricated match IDs can't grow runningRevStore
 				// unbounded (scoring is unauthenticated in self-run mode).
 				runningRevStore.Delete(matchKey)
@@ -1142,7 +1142,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				"result":        matchPtrForBroadcast(result),
 			})
 		}
-		// T085/T092 — when a kiken or fusenpai is recorded, the engine
+		// T085/T092, when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.
 		if engStatus != nil {
@@ -1151,7 +1151,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				"status":        engStatus,
 			})
 		}
-		// T135 — kachinuki post-score advancement. Runs OUTSIDE the tx
+		// T135, kachinuki post-score advancement. Runs OUTSIDE the tx
 		// because MaybeAdvanceKachinuki calls UpdatePoolMatchByID /
 		// UpdateBracket which acquire the per-comp lock themselves;
 		// nesting under our tx would deadlock. A non-fatal error here

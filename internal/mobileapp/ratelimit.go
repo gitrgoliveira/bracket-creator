@@ -9,7 +9,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Default per-IP rate limit constants. These are intentionally generous —
+// Default per-IP rate limit constants. These are intentionally generous,
 // no legitimate tournament user (viewer refreshing, admin scoring rapidly)
 // comes close to 100 req/s from a single device. The per-IP layer exists
 // to prevent a single misbehaving client from exhausting the global budget
@@ -71,7 +71,7 @@ func (p *perIPLimiter) allow(ip string) bool {
 }
 
 // cleanupLoop periodically evicts IP entries that haven't been seen
-// recently. This keeps memory bounded — even if 10,000 unique IPs
+// recently. This keeps memory bounded, even if 10,000 unique IPs
 // hit the server in a burst, idle ones are reaped within minutes.
 func (p *perIPLimiter) cleanupLoop() {
 	ticker := time.NewTicker(ipCleanupInterval)
@@ -132,7 +132,7 @@ func (rl *APIRateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
 
-		// Per-IP first — reject known-bad clients cheaply before
+		// Per-IP first, reject known-bad clients cheaply before
 		// consuming a token from the shared global bucket.
 		if !rl.perIP.allow(ip) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{

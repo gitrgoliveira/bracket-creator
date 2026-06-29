@@ -26,7 +26,7 @@ func TestAddPoolsToTreeCellContent(t *testing.T) {
 	_, err = f.NewSheet(SheetData)
 	require.NoError(t, err)
 
-	// Minimal 3-player pool — small enough to enumerate every cell by hand,
+	// Minimal 3-player pool, small enough to enumerate every cell by hand,
 	// large enough to confirm the row pointer advances across multiple
 	// players and applies the post-pool spacer.
 	players := []Player{

@@ -22,7 +22,7 @@ var errMatchNotFound = errors.New("match not found")
 // (sideA/sideB) that differ from the match's stored pairing. Match identity
 // is fixed at generation; a score only carries the *result*, never a new
 // pairing. Rejecting prevents a malformed or buggy client from silently
-// rewriting who is in a match — the live path that produced cross-pool pool
+// rewriting who is in a match, the live path that produced cross-pool pool
 // rows (a stored Pool E bout overwritten with competitors from other pools).
 // Handlers map this to HTTP 409.
 var ErrMatchSideMismatch = errors.New("match side mismatch: score payload competitors differ from the stored pairing")
@@ -30,7 +30,7 @@ var ErrMatchSideMismatch = errors.New("match side mismatch: score payload compet
 // reconcileSides folds the stored pairing into a score payload's result.
 // An empty payload side is backfilled from the stored side (e.g. a payload
 // that omits sides, or a not-yet-resolved bracket slot). A non-empty payload
-// side that disagrees with a non-empty stored side is a mismatch — the caller
+// side that disagrees with a non-empty stored side is a mismatch, the caller
 // must reject rather than overwrite the stored competitor. Returns true on the
 // first such disagreement; result is left partially filled but is discarded by
 // the caller on mismatch.
@@ -57,7 +57,7 @@ func reconcileSides(result *state.MatchResult, storedA, storedB string) (mismatc
 // load + find + mutate + save sequence runs under the per-competition
 // lock. Pre-atomic-primitive, two operators scoring different matches
 // on different courts could each LoadPoolMatches into separate copies,
-// mutate their target match, and SavePoolMatches in sequence — the
+// mutate their target match, and SavePoolMatches in sequence, the
 // later save would overwrite the earlier save's mutation with stale
 // data for the OTHER match. One operator's score would be silently
 // lost during a live tournament.
@@ -82,7 +82,7 @@ func (e *Engine) withPoolMatch(compId, matchId string, mutate func(*state.MatchR
 // state.Store.UpdateBracket which holds the per-competition lock
 // across load + mutate + save. Returning errMatchNotFound from the
 // mutate closure is how we signal "don't save the unchanged bracket
-// back" — see UpdateBracket's docstring.
+// back", see UpdateBracket's docstring.
 func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.BracketMatch)) error {
 	return e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
@@ -184,10 +184,10 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 // mapping. WinnerID is resolved from an explicit WinnerSide hint when present
 // (the only way to tell apart two participants who share a name), else from a
 // name match (unambiguous unless both sides share a name), and as a last
-// resort — for a same-name head-to-head with no side hint — from the scoreline
+// resort, for a same-name head-to-head with no side hint, from the scoreline
 // (the side with more ippons is the winner). `stored` is the on-disk record
 // (with the generation-time ids); `result` is the incoming score. Purely
-// additive — never touches name-based scoring/standings logic.
+// additive, never touches name-based scoring/standings logic.
 //
 // It also preserves the daihyosen/tiebreaker rep-player names (mp-62vr) the
 // same preserve-on-empty way: once the operator records which player each team
@@ -221,7 +221,7 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 		result.WinnerID = result.SideBID
 	case result.Winner != "":
 		// Same-name head-to-head (Winner matches both sides) with no
-		// WinnerSide hint — e.g. the admin score editor, which picks a
+		// WinnerSide hint, e.g. the admin score editor, which picks a
 		// winner by name. The winning side usually has more ippons, so
 		// infer from the scoreline. Equal counts (hantei/undecidable) or a
 		// draw (empty Winner) leave WinnerID empty → name fallback.
@@ -239,7 +239,7 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 // technique was struck, so a waza letter (M/K/D/T/H) would misrepresent the
 // scoreline. Centralised so the two RecordDecision twins (eligibility.go,
 // scoring_tx.go) can't drift onto a Unicode lookalike. countScoringIppons
-// still counts it — it is non-empty and not the "•" placeholder.
+// still counts it, it is non-empty and not the "•" placeholder.
 const defaultWinIppon = "○"
 
 // countScoringIppons counts real ippon marks, ignoring empty entries and the
@@ -307,7 +307,7 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 //
 // The match-score persistence semantics are identical to
 // RecordMatchResult; only the side-effect status is surfaced for the
-// caller's broadcast. Side-effect write failures are still non-fatal —
+// caller's broadcast. Side-effect write failures are still non-fatal,
 // the function returns (nil, nil) and logs.
 //
 // T085/T092.
@@ -384,14 +384,14 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 		return nil, nil
 	}
-	// T128 — same lineup-lock side effect as RecordMatchResult above.
+	// T128, same lineup-lock side effect as RecordMatchResult above.
 	e.maybeLockTeamLineupsForRound(compId, result)
 	return status, nil
 }
 
 // maybeLockTeamLineupsForRound freezes any persisted team lineups for
 // the round this match belongs to, but only when this update marks
-// the match as live (running or completed). Side effect only — any
+// the match as live (running or completed). Side effect only, any
 // store error is logged and swallowed so the score-recording isn't
 // retried (which would double-record the score; same rationale as
 // recordIneligibilityFromDecision above).
@@ -407,7 +407,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 // Once team-pool-rotation or per-round elimination lineups land, this
 // helper grows the bracket-scan lookup. The store-side
 // roundHasRunningOrCompletedMatchLocked in state/team_lineup.go already
-// handles per-round bracket inspection — the gap is just the
+// handles per-round bracket inspection, the gap is just the
 // matchId→round mapping here.
 //
 // FR-040.
@@ -415,7 +415,7 @@ func (e *Engine) maybeLockTeamLineupsForRound(compId string, result *state.Match
 	if result == nil {
 		return
 	}
-	// Only act on the running/completed transition — a "scheduled"
+	// Only act on the running/completed transition, a "scheduled"
 	// update (e.g. time-only adjust) must NOT freeze lineups.
 	if result.Status != state.MatchStatusRunning && result.Status != state.MatchStatusCompleted {
 		return
@@ -478,7 +478,7 @@ func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.Playe
 	if flightResult != nil {
 		return flightResult, nil
 	}
-	// Lost the flight race — read from cache populated by the winner.
+	// Lost the flight race, read from cache populated by the winner.
 	if v, ok := e.standingsCache.Load(compId); ok {
 		return v.(*standingsCacheEntry).result, nil
 	}
@@ -507,7 +507,7 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 // computeStandingsFrom is the single source of truth for pool standings. It
 // reads pools/matches/competition through loader (so a transaction can pass a
 // StoreTx and see its just-applied write), and reads overrides via
-// e.store.LoadOverrides directly — overrides are read-only in the scoring path
+// e.store.LoadOverrides directly, overrides are read-only in the scoring path
 // and are not part of any transaction's mutation set, so no tx variant is
 // needed.
 func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
@@ -633,8 +633,8 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 		// Apply supplementary-bout results as a secondary sort within each tied
 		// group (groups located by the single detectPoolTies Points-equality
-		// walk). Win counts are scoped per group — only bouts between members of
-		// the same tied group count — so results from an unrelated tied group
+		// walk). Win counts are scoped per group, only bouts between members of
+		// the same tied group count, so results from an unrelated tied group
 		// never bleed across. TB (ippon-shobu) applies to all formats; DH
 		// (representative) only to team competitions.
 		applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
@@ -727,14 +727,14 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 // Rows are only marked once ALL regular matches in the pool are complete.
 func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
 	// Gate: there must be at least one regular match, and all must be completed.
-	// With no matches at all the pool hasn't started — everyone is tied at 0
+	// With no matches at all the pool hasn't started, everyone is tied at 0
 	// points, which must NOT surface as amber.
 	if len(regularMatches) == 0 {
 		return
 	}
 	for _, m := range regularMatches {
 		if m.Status != state.MatchStatusCompleted {
-			return // pool not yet finished — no amber
+			return // pool not yet finished, no amber
 		}
 	}
 
@@ -845,14 +845,14 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					// name. Must happen before deriveDaihyosenWinner and
 					// before writing result.Winner back to the bracket. A
 					// non-empty payload side that disagrees with the resolved
-					// bracket side is rejected — a score must not rewrite the
+					// bracket side is rejected, a score must not rewrite the
 					// seeded pairing.
 					if reconcileSides(result, m.SideA, m.SideB) {
 						return ErrMatchSideMismatch
 					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
-					// Preserve incoming Status — pre-fix this was
+					// Preserve incoming Status, pre-fix this was
 					// unconditionally set to Completed, so the scoring
 					// modal's "Start" tap (which sends
 					// `{status: "running"}`) immediately persisted the
@@ -886,7 +886,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 						bracket.Rounds[rIdx][mIdx].SubResults = result.SubResults
 					}
 					// Project the persisted sub-results back into result so the
-					// HTTP response and SSE broadcast reflect committed state —
+					// HTTP response and SSE broadcast reflect committed state,
 					// mirrors the DecidedByHantei projection below. Without this a
 					// nil-preserve re-score would keep the stored bouts on disk but
 					// emit an omitted subResults payload in the same turn.
@@ -902,7 +902,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					// response and SSE broadcast reflect committed state. Without
 					// this, a nil-preserve request would correctly keep a stored
 					// hantei flag on disk but emit an omitted field in the same
-					// turn — clients (and the bracket HT chip) would see the
+					// turn, clients (and the bracket HT chip) would see the
 					// match flip non-hantei until the next refresh. HanteiPtr
 					// returns nil for false so omitempty still drops the field
 					// for non-hantei matches.
@@ -920,7 +920,7 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 
 					// Only propagate the winner when the match is
 					// actually completed. A "running" update is for
-					// live-status display only — the next round's
+					// live-status display only, the next round's
 					// SideA/SideB shouldn't be filled until the match
 					// has a final result.
 					if status == state.MatchStatusCompleted {
@@ -1059,7 +1059,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 // OverrideBracketWinner atomically loads the bracket, locates the
 // target match, sets the winner + IsOverridden + Status, propagates
 // the winner to subsequent rounds, and saves. Same UpdateBracket
-// primitive as recordBracketMatchResult and withBracketMatch — the
+// primitive as recordBracketMatchResult and withBracketMatch, the
 // entire find + mutate + propagate + save sequence runs under the
 // per-competition lock, so a concurrent bracket score / court / time
 // update (also under the same lock via the atomic primitives) can't

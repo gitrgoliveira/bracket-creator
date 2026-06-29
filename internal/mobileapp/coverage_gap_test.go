@@ -428,7 +428,7 @@ func TestRegisterEligibilityHandlers_SetStatusError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Schedule endpoint — unparsable multiplier/courts + queryIntDefault fallback
+// Schedule endpoint , unparsable multiplier/courts + queryIntDefault fallback
 // ---------------------------------------------------------------------------
 
 // TestScheduleEstimate_UnparsableMultiplier covers the "multiplier must be a number"
@@ -454,7 +454,7 @@ func TestScheduleEstimate_UnparsableCourts(t *testing.T) {
 }
 
 // TestScheduleEstimate_InvalidOptionalParam covers the queryIntDefault error
-// fallback (line 118-120 in handlers_schedule.go) — an unparsable optional
+// fallback (line 118-120 in handlers_schedule.go) , an unparsable optional
 // param silently falls back to the default and the request still returns 200.
 func TestScheduleEstimate_InvalidOptionalParam(t *testing.T) {
 	r, _, _, _, _ := setupTestRouter(t)
@@ -465,7 +465,7 @@ func TestScheduleEstimate_InvalidOptionalParam(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Announcement handler — bad JSON body
+// Announcement handler , bad JSON body
 // ---------------------------------------------------------------------------
 
 // TestAnnouncement_BadJSON covers the ShouldBindJSON error branch
@@ -491,7 +491,7 @@ func TestAnnouncement_BadJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Registration GET — invalid comp ID
+// Registration GET , invalid comp ID
 // ---------------------------------------------------------------------------
 
 // TestRegistration_GET_InvalidCompID covers the requireValidCompID !ok branch
@@ -517,7 +517,7 @@ func TestRegistration_POST_BadJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin password endpoint — input validation gaps
+// Admin password endpoint , input validation gaps
 // ---------------------------------------------------------------------------
 
 // TestAdminPassword_BadJSON covers the ShouldBindJSON error path
@@ -557,7 +557,7 @@ func TestAdminPassword_CurrentPasswordTooLong(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Eligibility POST — bad JSON and validate-length error paths
+// Eligibility POST , bad JSON and validate-length error paths
 // ---------------------------------------------------------------------------
 
 // TestEligibilityPOST_BadJSON covers the ShouldBindJSON error path
@@ -594,7 +594,7 @@ func TestEligibilityPOST_ValidateLengthError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Reinstate handler — internal error → 500
+// Reinstate handler , internal error → 500
 // ---------------------------------------------------------------------------
 
 // TestReinstateHandler_InternalError covers the non-ValidationError error path
@@ -612,7 +612,7 @@ func TestReinstateHandler_InternalError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Viewer — competitions with HasParticipantIDs=true
+// Viewer , competitions with HasParticipantIDs=true
 // ---------------------------------------------------------------------------
 
 // TestViewerCompetitions_HasParticipantIDs covers the hasIDsHint-set branch
@@ -644,7 +644,7 @@ func TestViewerCompetitions_HasParticipantIDs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Reset handler — bad JSON body
+// Reset handler , bad JSON body
 // ---------------------------------------------------------------------------
 
 // TestReset_BadJSON covers the ShouldBindJSON error path
@@ -683,7 +683,7 @@ func TestNewRouterWithHub_NilVerifier(t *testing.T) {
 	res := resources.NewResources(nil, fstest.MapFS{
 		"web-mobile/index.html": {Data: []byte("<html></html>")},
 	})
-	// nil verifier is allowed — falls back to NewFileVerifier(store)
+	// nil verifier is allowed , falls back to NewFileVerifier(store)
 	r, _, limiter := NewRouterWithHub(store, eng, res, nil, hub, false)
 	t.Cleanup(limiter.Close)
 	w := httptest.NewRecorder()
@@ -693,7 +693,7 @@ func TestNewRouterWithHub_NilVerifier(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Display handler — match on different court and non-running match
+// Display handler , match on different court and non-running match
 // ---------------------------------------------------------------------------
 
 // TestCourtCurrent_MatchOnDifferentCourt covers the !strings.EqualFold(m.Court, court)
@@ -708,7 +708,7 @@ func TestCourtCurrent_MatchOnDifferentCourt(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches("dc-comp", []state.MatchResult{
 		{ID: "m1", SideA: "P1", SideB: "P2", Status: state.MatchStatusRunning, Court: "A"},
 	}))
-	// Request court B — match is on court A, so the court-mismatch continue fires.
+	// Request court B , match is on court A, so the court-mismatch continue fires.
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/court/B/current", nil)
 	r.ServeHTTP(w, req)
@@ -758,7 +758,7 @@ func TestCourtCurrent_HasParticipantIDs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Swiss generate-round and standings — invalid comp ID
+// Swiss generate-round and standings , invalid comp ID
 // ---------------------------------------------------------------------------
 
 // TestSwissGenerateRound_InvalidCompID covers the requireValidCompID !ok branch
@@ -782,7 +782,7 @@ func TestSwissStandings_InvalidCompID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Competition POST — validation error paths
+// Competition POST , validation error paths
 // ---------------------------------------------------------------------------
 
 // TestCompetitionPOST_NameTooLong covers the validateCompetitionLengths error path
@@ -866,7 +866,7 @@ func TestCompetitionGET_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Quick-score — sideA and sideB length validation
+// Quick-score , sideA and sideB length validation
 // ---------------------------------------------------------------------------
 
 // TestQuickScore_SideATooLong covers the validateMaxLen("sideA") error path

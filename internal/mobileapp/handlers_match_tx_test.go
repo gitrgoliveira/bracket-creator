@@ -1,4 +1,4 @@
-// Package mobileapp — handlers_match_tx_test.go pins the T156
+// Package mobileapp, handlers_match_tx_test.go pins the T156
 // migration invariants on the score and decision handlers under
 // concurrent load. These tests are the safety net against future
 // regressions where someone introduces a sibling engine method that
@@ -91,7 +91,7 @@ func TestScoreHandler_NoDeadlockUnderConcurrentLoad(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("score handler deadlocked under concurrent load — T156 migration regressed")
+		t.Fatal("score handler deadlocked under concurrent load, T156 migration regressed")
 	}
 
 	// Final check: every match landed on disk with the recorded winner.
@@ -177,7 +177,7 @@ func TestDecisionHandler_NoDeadlockOnConcurrentKiken(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("decision handler deadlocked under concurrent kiken — T156 migration regressed")
+		t.Fatal("decision handler deadlocked under concurrent kiken, T156 migration regressed")
 	}
 
 	var winners, losers []res
@@ -288,7 +288,7 @@ func TestBulkScore_CorrectionGateRaceproof(t *testing.T) {
 			select {
 			case <-done:
 			case <-time.After(5 * time.Second):
-				t.Fatalf("round %d: deadlock — handlers did not complete within 5s", round)
+				t.Fatalf("round %d: deadlock, handlers did not complete within 5s", round)
 			}
 
 			res1 := <-ch
@@ -325,7 +325,7 @@ func TestBulkScore_CorrectionGateRaceproof(t *testing.T) {
 			// One write may be a first completion (valid); if the second also
 			// succeeds it overwrote a Completed match without a reason.
 			assert.Falsef(t, putOK && bulkOK,
-				"round %d: both PUT /score and bulk-score succeeded without a correctionReason — TOCTOU gate bypassed; res1=%+v res2=%+v",
+				"round %d: both PUT /score and bulk-score succeeded without a correctionReason, TOCTOU gate bypassed; res1=%+v res2=%+v",
 				round, res1, res2)
 
 			final, err := store.LoadPoolMatches(compID)

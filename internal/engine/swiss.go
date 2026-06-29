@@ -33,7 +33,7 @@ func swissPoolName(round int) string {
 }
 
 // swissMatchID composes the canonical wire ID for the k-th match in a
-// given round. Round and index both 0-based on the wire are wrong —
+// given round. Round and index both 0-based on the wire are wrong,
 // rounds are 1-based by spec, match indices are 0-based per existing
 // pool-match convention.
 func swissMatchID(round, idx int) string {
@@ -61,7 +61,7 @@ func parseSwissMatchRound(id string) (int, bool) {
 }
 
 // swissFieldNamesFromMatches returns the set of competitor names that have
-// appeared in prior Swiss matches (players and bye recipients alike) — i.e.
+// appeared in prior Swiss matches (players and bye recipients alike), i.e.
 // the frozen round-1 field. Used by GenerateSwissRound for rounds > 1 to keep
 // the field stable across rounds regardless of later check-in toggles
 // (mp-w7x; PR #199 review). Names are unique per competition
@@ -84,7 +84,7 @@ func swissFieldNamesFromMatches(matches []state.MatchResult) map[string]bool {
 
 // GenerateSwissRound builds the matches for round `roundNumber` of the
 // Swiss-format competition identified by compID. Returns only the
-// new round's matches — the caller is responsible for merging them
+// new round's matches, the caller is responsible for merging them
 // into the persisted pool-matches.csv. The caller-merge convention
 // mirrors the HTTP handler shape: POST /swiss/generate-round loads
 // existing matches, calls this method, appends, and saves under the
@@ -95,7 +95,7 @@ func swissFieldNamesFromMatches(matches []state.MatchResult) map[string]bool {
 //   - Round 1: fold pairing when seeds are present (1 vs N, 2 vs N-1,
 //     …); deterministic-random pairing otherwise. The deterministic
 //     RNG is keyed on compID so repeated calls produce the same round
-//     1 — important for retry semantics on transient I/O failures.
+//     1, important for retry semantics on transient I/O failures.
 //   - Round N > 1: group active players by win count (desc); within
 //     each group pair top with bottom while avoiding rematches. When
 //     a player can't be paired without a rematch the algorithm pulls
@@ -105,7 +105,7 @@ func swissFieldNamesFromMatches(matches []state.MatchResult) map[string]bool {
 //     pairing.
 //   - Bye handling: if the active-player count is odd, the lowest-
 //     ranked player who has not yet had a bye (or the lowest-ranked
-//     overall if all players already had byes) receives a bye —
+//     overall if all players already had byes) receives a bye,
 //     auto-completed win, zero points scored. The bye-resolution
 //     order is round-by-round within the lowest win-count group
 //     because giving a bye to a top-of-table player would distort
@@ -155,7 +155,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// Determine the Swiss field for this round (mp-w7x; PR #199 review).
 	//
 	// Round 1 (the initial draw): exclude participants who have not checked
-	// in, but ONLY when check-in tracking is enabled (comp.CheckInEnabled) —
+	// in, but ONLY when check-in tracking is enabled (comp.CheckInEnabled),
 	// otherwise a stale/imported checked_in marker would shrink the field even
 	// though the competition doesn't use check-in (PR #199 review). When
 	// enabled, opt-in semantics still apply (see filterCheckedIn).
@@ -199,7 +199,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	}
 
 	// Build the prior-pairings set (for rematch avoidance) and the
-	// per-player win / bye counters. Only Swiss matches contribute —
+	// per-player win / bye counters. Only Swiss matches contribute,
 	// non-Swiss entries (defensively skipped) would skew the standings.
 	priorPair := make(map[string]bool)
 	wins := make(map[string]int)
@@ -265,7 +265,7 @@ func pairKey(a, b string) string {
 // tiebreaking. Players with explicit seeds rank by seed number
 // (ascending = higher rank); unseeded players are ranked after seeded
 // ones by name alphabetical order. The returned map uses Name as key
-// — the rest of the Swiss pipeline operates on names because pool-
+// , the rest of the Swiss pipeline operates on names because pool-
 // matches.csv stores names, not IDs (parsePoolMatchesFile sets
 // MatchResult.SideA / .SideB to names).
 func buildRankByName(players []domain.Player) map[string]int {
@@ -368,7 +368,7 @@ func (e *Engine) firstRoundPairings(
 	}
 
 	// Deterministic random.
-	rng := rand.New(rand.NewSource(seedFromString(compID + ":round1"))) // #nosec G404 — non-crypto deterministic shuffle
+	rng := rand.New(rand.NewSource(seedFromString(compID + ":round1"))) // #nosec G404, non-crypto deterministic shuffle
 	shuffled := append([]string(nil), names...)
 	rng.Shuffle(len(shuffled), func(i, j int) {
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
@@ -447,7 +447,7 @@ func (e *Engine) subsequentRoundPairings(
 
 	bye := ""
 	if len(ordered)%2 == 1 {
-		// Pick the bye from the LOWEST win bucket — giving a bye to
+		// Pick the bye from the LOWEST win bucket, giving a bye to
 		// a leading player would distort the win race. Within the
 		// bucket, lowest-ranked player without a prior bye.
 		lowestWinBucket := lowestWinBucketNames(ordered, wins)
@@ -482,14 +482,14 @@ func lowestWinBucketNames(ordered []string, wins map[string]int) []string {
 // bottom within it. When a player can't be paired without a rematch,
 // the algorithm pulls a partner from the NEXT win group (so the
 // leading player still gets a match, at a slight win-race distortion
-// cost — preferable to forcing a rematch).
+// cost, preferable to forcing a rematch).
 //
 // This is a deliberately simple algorithm rather than a perfect
 // Monrad / weighted-matching implementation: it satisfies the
 // acceptance criteria (avoid rematches, prefer same-win pairings)
 // without the complexity of full graph matching. For tournaments
 // where the "fall through to next group" case dominates, a richer
-// matcher could replace this — the test suite (T175) covers the
+// matcher could replace this, the test suite (T175) covers the
 // happy-path correctness.
 func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[string]bool, rankByName map[string]int) [][2]string {
 	pairs := [][2]string{}
@@ -512,7 +512,7 @@ func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[st
 		}
 		if partnerIdx == -1 {
 			// Every remaining candidate is a rematch. Force the
-			// nearest opponent (first in remaining) — the operator
+			// nearest opponent (first in remaining), the operator
 			// will see a rematch but at least every player gets a
 			// match.
 			partnerIdx = 1
@@ -566,30 +566,30 @@ func buildSwissMatches(pairings [][2]string, byeName string, round int, courts [
 	return matches
 }
 
-// seedFromString derives a stable 64-bit seed from s — used to drive
+// seedFromString derives a stable 64-bit seed from s, used to drive
 // the deterministic round-1 random pairing. SHA-256 is overkill but
 // already imported elsewhere; the first 8 bytes give us a uniform
 // distribution suitable for math/rand.NewSource.
 func seedFromString(s string) int64 {
 	sum := sha256.Sum256([]byte(s))
-	return int64(binary.BigEndian.Uint64(sum[:8])) // #nosec G115 — deterministic test seed, sign doesn't matter
+	return int64(binary.BigEndian.Uint64(sum[:8])) // #nosec G115, deterministic test seed, sign doesn't matter
 }
 
 // SwissStandings computes the cumulative standings for the Swiss
 // competition compID. Ranks are assigned by:
 //
 //  1. Wins (descending)
-//  2. Points scored (descending) — total ippons given across all
+//  2. Points scored (descending), total ippons given across all
 //     completed Swiss matches the player participated in
 //  3. Head-to-head (descending): when (1) and (2) tie, the player
 //     who won the direct match between them ranks higher
 //  4. Stable name order (alphabetical) as a final deterministic
-//     tiebreak — guarantees idempotent output
+//     tiebreak, guarantees idempotent output
 //
 // Returns one entry per participant (including byes), with Rank set
 // 1..N. Excludes participants with no Swiss matches recorded (a
 // future round may still pair them; their absence from the file is
-// a "not yet played" signal, not a "ranked last" one) — but the
+// a "not yet played" signal, not a "ranked last" one), but the
 // participants are still emitted with zeros so the standings page
 // can render the full roster.
 //
@@ -613,7 +613,7 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 
 	// Initialise one PlayerStanding per participant so the response
 	// includes the full roster (matches the existing pool-standings
-	// invariant — operators expect to see every player listed).
+	// invariant, operators expect to see every player listed).
 	byName := make(map[string]*state.PlayerStanding, len(participants))
 	for _, p := range participants {
 		byName[p.Name] = &state.PlayerStanding{
@@ -623,7 +623,7 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 
 	// Tally W/L/D and ippons across every Swiss match. Skip non-Swiss
 	// rows (a stray pool-match in the file would otherwise contribute
-	// to Swiss standings — defensive but should never happen if the
+	// to Swiss standings, defensive but should never happen if the
 	// engine is the only writer).
 	headToHead := make(map[string]map[string]string) // winnerName → opponentName → who won
 	for _, m := range matches {
@@ -646,7 +646,7 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 			continue
 		}
 		// Ippons per side. Bye-marked completed matches above contain
-		// nil ippons, so len(...) = 0 — correct for "0 points".
+		// nil ippons, so len(...) = 0, correct for "0 points".
 		sA.IpponsGiven += len(m.IpponsA)
 		sA.IpponsTaken += len(m.IpponsB)
 		sB.IpponsGiven += len(m.IpponsB)
@@ -728,7 +728,7 @@ func lookupH2H(h2h map[string]map[string]string, a, b string) (string, bool) {
 
 // CurrentSwissRoundCompleted reports whether every match in the
 // currently-active Swiss round is completed. Returns true when the
-// current round is 0 (not started — vacuously "complete enough" so
+// current round is 0 (not started, vacuously "complete enough" so
 // the first round can be generated) or every match in
 // pool-matches.csv whose ID parses to the current round has
 // Status == Completed.
@@ -768,7 +768,7 @@ func (e *Engine) CurrentSwissRoundCompleted(compID string) (bool, error) {
 //  1. Validates that the current round is completed (FR-050d).
 //  2. Generates the next round via GenerateSwissRound.
 //  3. Appends the new matches to pool-matches.csv (merging with
-//     prior rounds — Swiss runs the same persistence shape as
+//     prior rounds, Swiss runs the same persistence shape as
 //     pools, but cross-round, so each save carries the cumulative
 //     state).
 //  4. Atomically bumps SwissCurrentRound on the competition config.

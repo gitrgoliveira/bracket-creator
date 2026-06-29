@@ -262,13 +262,13 @@ func TestLoadBracket_DeepCopyIsolation(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, initial))
 
 	// First load, then mutate every reference field on the returned copy in
-	// place — without calling Save/UpdateBracket.
+	// place; without calling Save/UpdateBracket.
 	first, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	first.Rounds[0][0].Encho.PeriodCount = 99
 	// Scalar field on an existing element: only stays isolated if the
 	// SubResults backing array itself was copied (a shallow slice copy would
-	// share the element and leak this write). append() can't prove this — it
+	// share the element and leak this write). append() can't prove this; it
 	// reallocates when cap==len, so an aliased slice's length wouldn't change.
 	first.Rounds[0][0].SubResults[0].SideA = "MUTATED"
 	first.Rounds[0][0].SubResults[0].IpponsA[0] = "MUTATED"
@@ -298,7 +298,7 @@ func TestParseBracketFile_MalformedJSON(t *testing.T) {
 
 // TestLoadBracketLocked_InvalidCompID covers the ValidateCompetitionID
 // error branch in loadBracketLocked (called without holding a lock in
-// unit-test context — safe because no concurrent writer exists).
+// unit-test context; safe because no concurrent writer exists).
 func TestLoadBracketLocked_InvalidCompID(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	require.NoError(t, err)

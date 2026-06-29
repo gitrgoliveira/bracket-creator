@@ -77,7 +77,7 @@ func TestAtomicWrite_OutsideDataDir(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewStore(dir)
 	require.NoError(t, err)
-	// Request a write to /tmp — outside the store folder.
+	// Request a write to /tmp, outside the store folder.
 	err = store.atomicWrite(os.TempDir()+"/test.txt", []byte("x"), 0o600)
 	assert.Error(t, err, "write outside data dir must return error")
 }
@@ -258,7 +258,7 @@ func TestUpdateTournamentChanged_ParseFailureFallback(t *testing.T) {
 	// Write a file with invalid front matter.
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "tournament.md"),
-		[]byte("invalid content — no front-matter"), 0o600))
+		[]byte("invalid content, no front-matter"), 0o600))
 
 	var sawDefault bool
 	_, err = store.UpdateTournamentChanged(
@@ -275,7 +275,7 @@ func TestUpdateTournamentChanged_ParseFailureFallback(t *testing.T) {
 // TestSetTeamLineup_BracketParseErrorFromRoundCheck verifies that a malformed
 // bracket.json propagates as error from roundHasRunningOrCompletedMatchLocked
 // when the write CHANGES an already-recorded position (triggering the bracket
-// parse). A NEW lineup (no prior entry) skips the bracket check entirely —
+// parse). A NEW lineup (no prior entry) skips the bracket check entirely.
 // the parse error is only triggered on a change-to-recorded path.
 func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 	dir := t.TempDir()
@@ -292,7 +292,7 @@ func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 		filepath.Join(dir, "competitions", compID, "bracket.json"),
 		[]byte("{not valid json"), 0o600))
 
-	// Now try to CHANGE a recorded position — this triggers the bracket parse.
+	// Now try to CHANGE a recorded position ,this triggers the bracket parse.
 	changed := fiveStarter("team-alpha", 0)
 	changed.Positions[domain.PosJiho] = "p2-changed"
 	err = store.SetTeamLineup(compID, changed, 5)
@@ -348,7 +348,7 @@ func TestSetCompetitorStatusLocked_InvalidStatus(t *testing.T) {
 }
 
 // TestCopyTournament_WithCourts verifies that copyTournament performs a deep
-// copy of the Courts slice — mutation of the copy must not affect the original.
+// copy of the Courts slice ,mutation of the copy must not affect the original.
 func TestCopyTournament_WithCourts(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	require.NoError(t, err)

@@ -19,7 +19,7 @@ import (
 // setupResetTest spins up a router exposing only the reset + auth-config
 // public routes, plus the relevant tournament-handler GET for assertions
 // that the password actually changed. AuthMiddleware isn't installed in
-// this test — the reset endpoint is registered on the unauthenticated
+// this test ,  the reset endpoint is registered on the unauthenticated
 // public group in production, so testing it without auth is faithful.
 func setupResetTest(t *testing.T, verifier PasswordVerifier) (*state.Store, *gin.Engine, *Hub) {
 	t.Helper()
@@ -183,7 +183,7 @@ func TestReset_CrossOriginPost_Rejected(t *testing.T) {
 	assert.Equal(t, "old", loaded.Password, "stored password must not change on rejected request")
 }
 
-// Same-origin browser POST (Origin matches Host) is accepted — the
+// Same-origin browser POST (Origin matches Host) is accepted ,  the
 // legitimate path when the operator opens /reset in their browser tab.
 func TestReset_SameOriginPost_Accepted(t *testing.T) {
 	store, err := state.NewStore(t.TempDir())
@@ -226,7 +226,7 @@ func TestReset_LanIPSameOrigin_Accepted(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	// LAN IP — Origin matches Host, so same-origin check passes.
+	// LAN IP ,  Origin matches Host, so same-origin check passes.
 	req.Header.Set("Origin", "http://192.168.1.100:8080")
 	req.Host = "192.168.1.100:8080"
 	w := httptest.NewRecorder()
@@ -257,7 +257,7 @@ func TestReset_SchemeMismatch_Rejected(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://tournament.local:8080")
 	req.Host = "tournament.local:8080"
-	// req.TLS is nil by default (http) — scheme mismatch with https Origin
+	// req.TLS is nil by default (http) ,  scheme mismatch with https Origin
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -268,7 +268,7 @@ func TestReset_SchemeMismatch_Rejected(t *testing.T) {
 
 // Browsers send `Origin: null` for sandboxed iframes, file:// pages,
 // and data: URLs. None of these are legitimate operator contexts for
-// /reset — they all indicate a request smuggled in through a
+// /reset ,  they all indicate a request smuggled in through a
 // non-conventional security boundary. Treat the same as cross-origin
 // (reject) rather than accepting an empty host string.
 func TestReset_OriginNull_Rejected(t *testing.T) {
@@ -330,7 +330,7 @@ func TestReset_OriginMalformed_Rejected(t *testing.T) {
 	}
 }
 
-// Non-browser caller (no Origin header — curl, scripted clients) is
+// Non-browser caller (no Origin header ,  curl, scripted clients) is
 // accepted. Browsers automatically set Origin on cross-origin POSTs
 // but not all clients do, and we don't want to lock out legitimate
 // operator-shell access.

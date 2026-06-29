@@ -200,7 +200,7 @@ func TestQuickScoreHandler(t *testing.T) {
 		assert.Equal(t, "TeamA", result.Winner)
 		assert.Len(t, result.SubResults, 5) // 3+1+1
 
-		// Sub-bouts must NOT carry team names — they're individual bout
+		// Sub-bouts must NOT carry team names, they're individual bout
 		// slots without known competitors in quick-score mode.
 		for _, sub := range result.SubResults {
 			assert.Empty(t, sub.SideA, "sub-bout SideA must be empty, not team name")
@@ -326,7 +326,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 		return w.Code, body
 	}
 
-	// scoreRunningNoSession sends Rev>0 but no RevSession — the guard must treat
+	// scoreRunningNoSession sends Rev>0 but no RevSession, the guard must treat
 	// it as unversioned and always proceed (defends against partial-rollout /
 	// older clients collapsing into the "" session).
 	scoreRunningNoSession := func(rev int64) (int, map[string]any) {
@@ -392,7 +392,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 	})
 
 	t.Run("stale running write is dropped with stale=true, stored result unchanged", func(t *testing.T) {
-		// Send rev=3 after rev=5 is the stored mark — should be stale.
+		// Send rev=3 after rev=5 is the stored mark, should be stale.
 		code, body := scoreRunning(3)
 		assert.Equal(t, http.StatusOK, code)
 		stale, ok := body["stale"].(bool)
@@ -401,7 +401,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 
 	t.Run("rev>0 without a RevSession is unversioned (always proceeds)", func(t *testing.T) {
 		// Stored mark for session "rg-sess" is 5. A sessionless write with a
-		// lower rev=1 must NOT be compared against it — missing RevSession is
+		// lower rev=1 must NOT be compared against it, missing RevSession is
 		// treated as unversioned, so it proceeds rather than being dropped.
 		code, body := scoreRunningNoSession(1)
 		assert.Equal(t, http.StatusOK, code)
@@ -419,7 +419,7 @@ func TestScoreHandler_RevGuard(t *testing.T) {
 // TestScoreHandler_RevGuard_SessionTakeover validates that a write from a NEW
 // RevSession always proceeds even when the stored high-water mark (from a prior
 // session) has a higher Rev. This models a page reload or a different device
-// starting a fresh session at rev=1 — it must never be dropped as stale.
+// starting a fresh session at rev=1, it must never be dropped as stale.
 func TestScoreHandler_RevGuard_SessionTakeover(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -663,7 +663,7 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	// Sibling of the rank-override TrimSpace test in
 	// handlers_competition_test.go. Downstream bracket math compares
 	// m.Winner to roster names by exact string equality, so padded
-	// "  Foo  " won't match canonical "Foo" — pin the trim contract.
+	// "  Foo  " won't match canonical "Foo", pin the trim contract.
 	t.Run("Override Bracket Winner Trims Whitespace", func(t *testing.T) {
 		bracket := &state.Bracket{
 			Rounds: [][]state.BracketMatch{
@@ -695,7 +695,7 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Bracket Winner Rejects Whitespace-Only", func(t *testing.T) {
-		// Whitespace-only winnerName trims to empty — same shape as the
+		// Whitespace-only winnerName trims to empty, same shape as the
 		// rank-override empty-after-trim rejection.
 		reqBody, _ := json.Marshal(map[string]string{"winnerName": "   "})
 		w := httptest.NewRecorder()
@@ -759,7 +759,7 @@ func TestMatchHandlers_Extended(t *testing.T) {
 // TestScoreHandler_CompletionBroadcastContract verifies that scoring the final
 // pool match emits EventCompetitionCompleted exactly once, and that scoring a
 // non-final match does not emit it.
-// NOTE: uses league format — mixed format no longer auto-completes after pools
+// NOTE: uses league format, mixed format no longer auto-completes after pools
 // (it stays in pools status; the knockout fills in incrementally as each pool finishes).
 func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
@@ -798,13 +798,13 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	}
 
-	// Partial completion — no EventCompetitionCompleted
+	// Partial completion, no EventCompetitionCompleted
 	scoreMatch("PoolA-1", "P1")
 	partial := drainHubEvents(t, ch, 30*time.Millisecond)
 	assert.Equal(t, 0, countCompletedEvents(t, partial, "pools1"),
 		"partial completion must not broadcast competition_completed")
 
-	// Final match — EventCompetitionCompleted must be emitted exactly once
+	// Final match, EventCompetitionCompleted must be emitted exactly once
 	scoreMatch("PoolA-2", "P1")
 	final := drainHubEvents(t, ch, 100*time.Millisecond)
 	assert.Equal(t, 1, countCompletedEvents(t, final, "pools1"),
@@ -849,7 +849,7 @@ func countCompletedEvents(t *testing.T, events []SSEEvent, wantCompID string) in
 // TestBulkScoreHandler_CompletionBroadcastContract verifies that bulk-scoring
 // the last remaining pool matches emits EventCompetitionCompleted exactly
 // once (and partial bulk completion does not).
-// NOTE: uses league format — mixed format no longer auto-completes after pools.
+// NOTE: uses league format, mixed format no longer auto-completes after pools.
 func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -878,7 +878,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	}
 
-	// Partial bulk completion (1 of 3) — no competition_completed
+	// Partial bulk completion (1 of 3), no competition_completed
 	bulkScore([]state.MatchResult{
 		{ID: "PoolA-1", Winner: "P1", Status: state.MatchStatusCompleted},
 	})
@@ -886,7 +886,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	assert.Equal(t, 0, countCompletedEvents(t, partial, "bulk1"),
 		"partial bulk completion must not broadcast competition_completed")
 
-	// Final batch closes out the comp — exactly one competition_completed
+	// Final batch closes out the comp, exactly one competition_completed
 	bulkScore([]state.MatchResult{
 		{ID: "PoolA-2", Winner: "P1", Status: state.MatchStatusCompleted},
 		{ID: "PoolA-3", Winner: "P2", Status: state.MatchStatusCompleted},
@@ -899,7 +899,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 // TestQuickScoreHandler_CompletionBroadcastContract verifies that
 // quick-scoring the last remaining pool match emits EventCompetitionCompleted
 // exactly once, and a non-final quick-score does not.
-// NOTE: uses league format with TeamSize=3 — mixed format no longer auto-completes
+// NOTE: uses league format with TeamSize=3, mixed format no longer auto-completes
 // after pools (it stays in pools status; the knockout fills in incrementally as each pool finishes).
 func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
@@ -931,13 +931,13 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	}
 
-	// First match — no completion
+	// First match, no completion
 	quickScore("PoolA-1", "TeamA", "TeamB", 2, 1, 0)
 	partial := drainHubEvents(t, ch, 30*time.Millisecond)
 	assert.Equal(t, 0, countCompletedEvents(t, partial, "qs1"),
 		"partial quick-score must not broadcast competition_completed")
 
-	// Final match — TeamA wins 3-0 so TeamC gets 0 IV (vs TeamB's 1 IV),
+	// Final match, TeamA wins 3-0 so TeamC gets 0 IV (vs TeamB's 1 IV),
 	// avoiding a tie that would defer completion via tiebreaker injection.
 	quickScore("PoolA-2", "TeamA", "TeamC", 3, 0, 0)
 	final := drainHubEvents(t, ch, 100*time.Millisecond)
@@ -947,7 +947,7 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 
 // TestTryAutoCompletePools_SanitizesErrorHeader locks in the contract that
 // when MaybeAutoCompletePools fails, the response carries the generic
-// AutoCompleteErrorValue sentinel — never the raw error string, which can
+// AutoCompleteErrorValue sentinel, never the raw error string, which can
 // contain filesystem paths or other internal store details.
 func TestTryAutoCompletePools_SanitizesErrorHeader(t *testing.T) {
 	_, _, eng, hub, tempDir := setupTestRouter(t)
@@ -970,7 +970,7 @@ func TestTryAutoCompletePools_SanitizesErrorHeader(t *testing.T) {
 		"raw validation error text must not leak into the response header")
 }
 
-// TestPostScoreKikenAutoFillsRegulation — T086: POST /score with
+// TestPostScoreKikenAutoFillsRegulation, T086: POST /score with
 // decision=kiken, decisionBy=shiro, encho=null and a 0-2 scoreline
 // returns 200 and the persisted match round-trips the decision metadata.
 //
@@ -1013,7 +1013,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 	assert.Equal(t, "Alice", stored[0].Winner)
 }
 
-// TestPostScoreKikenInEncho — T087: POST /score with
+// TestPostScoreKikenInEncho, T087: POST /score with
 // decision=kiken, decisionBy=shiro, encho.periodCount=1 and a 0-1
 // scoreline returns 200.
 func TestPostScoreKikenInEncho(t *testing.T) {
@@ -1053,7 +1053,7 @@ func TestPostScoreKikenInEncho(t *testing.T) {
 	assert.Equal(t, 1, stored[0].Encho.PeriodCount)
 }
 
-// TestPostScoreKikenInvalidScoreline — T088: POST /score with
+// TestPostScoreKikenInvalidScoreline, T088: POST /score with
 // decision=kiken, encho=null, and a 0-1 scoreline (regulation requires
 // 2-0) returns 400 with the validator's field message.
 func TestPostScoreKikenInvalidScoreline(t *testing.T) {
@@ -1174,7 +1174,7 @@ func TestEnforceEnchoCap_ScoreHandler(t *testing.T) {
 		admin := r.Group("/api")
 		// Wire the score handler with a failing CompetitionStore so the
 		// cap check exercises the new fail-closed branch. The engine
-		// keeps the real store but never gets called — enforceEnchoCap
+		// keeps the real store but never gets called, enforceEnchoCap
 		// aborts the request first.
 		registerScoreHandler(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
 
@@ -1334,7 +1334,7 @@ func TestEnforceEnchoCapWithSubs(t *testing.T) {
 	})
 }
 
-// TestBulkScore_FailsClosedOnLoadError — when the cap-check load
+// TestBulkScore_FailsClosedOnLoadError, when the cap-check load
 // fails for a bulk-score request, the entire batch is rejected with
 // 500 rather than silently bypassing the MaxEnchoPeriods cap on every
 // entry.
@@ -1393,7 +1393,7 @@ func TestAnnotateQueuePositions_Empty(t *testing.T) {
 // sorts per-court by ScheduledAt rather than relying on slice order.
 // UpdateMatchTime / UpdateMatchCourt mutate the underlying CSV in place
 // without reordering rows, so the server-side annotation must derive
-// ordering from the data — not the storage order — to agree with the
+// ordering from the data, not the storage order, to agree with the
 // viewer's render order and the client-side SSE recompute. Copilot
 // flagged this on PR #124 (web-mobile/js/patch.jsx:110).
 func TestAnnotateQueuePositions_ScheduledAtOrder(t *testing.T) {
@@ -1413,7 +1413,7 @@ func TestAnnotateQueuePositions_ScheduledAtOrder(t *testing.T) {
 
 // TestAnnotateQueuePositions_StaleReset verifies that non-scheduled rows
 // have their QueuePosition forced to 0 even if a stale persisted value
-// were present — mirroring the bracket-variant guard so omitempty drops
+// were present, mirroring the bracket-variant guard so omitempty drops
 // the field cleanly on the wire.
 func TestAnnotateQueuePositions_StaleReset(t *testing.T) {
 	matches := []state.MatchResult{
@@ -1521,7 +1521,7 @@ func TestAnnotateBracketQueuePositions_RunningRanksFirst(t *testing.T) {
 	// Only the scheduled match gets a 1-indexed position; the running
 	// match keeps QueuePosition=0 (it isn't "in queue"). But because the
 	// running match ranks ahead in the sort, the counter doesn't
-	// increment past it before reaching the scheduled match — so the
+	// increment past it before reaching the scheduled match, so the
 	// scheduled match's position is still 1, not 2.
 	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "running has no queue position")
 	assert.Equal(t, 1, b.Rounds[0][0].QueuePosition, "lone scheduled = position 1")
@@ -1825,8 +1825,8 @@ func TestSelfRunScoreHandler(t *testing.T) {
 			},
 		}))
 
-		// A withdrawal (kiken) overwrite — valid decision payload (decisionBy +
-		// 2-0 scoreline + winner) but no correctionReason — must still be
+		// A withdrawal (kiken) overwrite, valid decision payload (decisionBy +
+		// 2-0 scoreline + winner) but no correctionReason, must still be
 		// rejected: the decision field must not bypass the correction gate.
 		body, _ := json.Marshal(state.MatchResult{
 			ID:         "PoolA-1",
@@ -1851,7 +1851,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 	t.Run("first completion does not require correctionReason", func(t *testing.T) {
 		r, _, compID := setupSelfRunScoreRouter(t, "secret")
 
-		// The pre-seeded match has no status — completing it is a first
+		// The pre-seeded match has no status, completing it is a first
 		// submission, not a correction, so no correctionReason is needed.
 		body, _ := json.Marshal(state.MatchResult{
 			ID:      "PoolA-1",
@@ -1873,7 +1873,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 		r, store, compID := setupSelfRunScoreRouter(t, "secret")
 
 		// First completion (the pre-seeded match has no status) carrying a stray
-		// correctionReason — it must NOT be persisted (the reason is only for a
+		// correctionReason, it must NOT be persisted (the reason is only for a
 		// completed→completed correction).
 		body, _ := json.Marshal(state.MatchResult{
 			ID:               "PoolA-1",
@@ -2002,7 +2002,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 //
 // The test exercises the txErr NotFoundError path: a competition with courts is
 // saved (so CheckCrossCompCourtBusy runs and looks up the match's court), but
-// the target match is never saved — CheckCrossCompCourtBusy's court-lookup
+// the target match is never saved, CheckCrossCompCourtBusy's court-lookup
 // returns NotFoundError which propagates as txErr.
 func TestScoreHandler_FabricatedMid_TxNotFound(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -2118,7 +2118,7 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	stale, ok := body["stale"].(bool)
 	assert.True(t, ok && stale, "stale running write must return {stale:true}")
 
-	// Step 4: match must still be completed — not reverted to running.
+	// Step 4: match must still be completed, not reverted to running.
 	assert.Equal(t, state.MatchStatusCompleted, loadStatus(), "running write must not revert a completed match")
 
 	// Step 5: no lingering runningRevStore entry.
@@ -2172,12 +2172,12 @@ func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 
 	// The runningRevStore must NOT contain the attacker's epoch/rev.
 	// If enforceSelfRunPolicy zeroed Rev and RevSession the guard ran with
-	// Rev==0, which is the "unversioned" opt-out — no entry is stored.
+	// Rev==0, which is the "unversioned" opt-out, no entry is stored.
 	val, present := runningRevStore.Load(matchKey)
 	if present {
 		stored := val.(runningRev)
 		assert.Equal(t, int64(0), stored.Rev, "self-run write must not populate runningRevStore with attacker rev")
 		assert.Empty(t, stored.Session, "self-run write must not populate runningRevStore with attacker session")
 	}
-	// (If not present at all, the guard skipped storage — also correct.)
+	// (If not present at all, the guard skipped storage, also correct.)
 }

@@ -247,7 +247,7 @@ func TestGenerateFinals(t *testing.T) {
 
 // TestGenerateFinals_NoDuplicatesOrMissing sweeps poolWinners 1..6 × pool counts
 // 2..10 and asserts the output multiset is EXACTLY {each pool} × {1st..poolWinners}
-// — every placeholder present exactly once, none duplicated, none missing. This
+// , every placeholder present exactly once, none duplicated, none missing. This
 // is the invariant the old `len(pools)%poolWinners` round-gate violated for
 // non-coprime combos (e.g. poolWinners>=4 with 2/6/10 pools), which silently
 // corrupted the live in-place knockout (mp-turx). The previous tests only checked
@@ -1237,7 +1237,7 @@ func TestTreeToLeafArray(t *testing.T) {
 			wantReal:  2,
 		},
 		{
-			name:  "3 leaves — A gets bye",
+			name:  "3 leaves , A gets bye",
 			input: makeLeaves("A", "B", "C"),
 			// CreateBalancedTree splits [A] left, [B,C] right
 			// left → ["A"], right → ["B","C"]
@@ -1248,7 +1248,7 @@ func TestTreeToLeafArray(t *testing.T) {
 			wantReal:  3,
 		},
 		{
-			name:     "4 leaves — identity",
+			name:     "4 leaves , identity",
 			input:    makeLeaves("A", "B", "C", "D"),
 			wantLen:  4,
 			wantReal: 4,
@@ -1266,7 +1266,7 @@ func TestTreeToLeafArray(t *testing.T) {
 			wantReal: 7,
 		},
 		{
-			name:     "8 leaves — identity",
+			name:     "8 leaves , identity",
 			input:    makeLabels(8),
 			wantLen:  8,
 			wantReal: 8,

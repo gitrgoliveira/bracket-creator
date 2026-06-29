@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// directWrite is a tiny WriteFn that does a plain os.WriteFile — fine
+// directWrite: a tiny WriteFn that does a plain os.WriteFile, fine
 // for tests where we don't need the full atomic-rename ceremony the
 // production wiring uses.
 func directWrite(path string, data []byte, perm os.FileMode) error {
@@ -61,10 +61,10 @@ func TestWALCommitApplyDone(t *testing.T) {
 	require.NoError(t, w.Apply())
 
 	// Both targets exist with the staged content.
-	gotA, err := os.ReadFile(targetA) // #nosec G304 — test path
+	gotA, err := os.ReadFile(targetA) // #nosec G304, test path
 	require.NoError(t, err)
 	assert.Equal(t, "AAA", string(gotA))
-	gotB, err := os.ReadFile(targetB) // #nosec G304 — test path
+	gotB, err := os.ReadFile(targetB) // #nosec G304, test path
 	require.NoError(t, err)
 	assert.Equal(t, "BBB", string(gotB))
 
@@ -100,7 +100,7 @@ func TestWALScanReplaysCommittedWAL(t *testing.T) {
 
 	// Replay: Apply + Done.
 	require.NoError(t, pending[0].Apply())
-	got, err := os.ReadFile(target) // #nosec G304 — test path
+	got, err := os.ReadFile(target) // #nosec G304 ,test path
 	require.NoError(t, err)
 	assert.Equal(t, "HELLO", string(got))
 
@@ -129,7 +129,7 @@ func TestWALScanIgnoresUnCommittedWAL(t *testing.T) {
 	pending, err := Scan(walDir, directWrite)
 	require.NoError(t, err)
 	assert.Empty(t, pending,
-		"uncommitted WAL must not be visible to Scan — Append is in-memory only")
+		"uncommitted WAL must not be visible to Scan ,Append is in-memory only")
 
 	_, err = os.Stat(target)
 	assert.True(t, os.IsNotExist(err),
@@ -160,7 +160,7 @@ func TestWALAppendCoalesces(t *testing.T) {
 
 	require.NoError(t, w.Commit())
 	require.NoError(t, w.Apply())
-	got, err := os.ReadFile(target) // #nosec G304 — test path
+	got, err := os.ReadFile(target) // #nosec G304 ,test path
 	require.NoError(t, err)
 	assert.Equal(t, "third", string(got),
 		"target file must contain only the last-written content")
@@ -169,7 +169,7 @@ func TestWALAppendCoalesces(t *testing.T) {
 }
 
 // TestWALApplyIsIdempotent pins that calling Apply twice on the same
-// WAL produces the same on-disk state — required because the replay
+// WAL produces the same on-disk state ,required because the replay
 // path may re-Apply a WAL that already partially landed before the
 // crash. The atomic-write primitive itself is idempotent for
 // identical bytes; this test pins that Apply preserves that property.
@@ -187,7 +187,7 @@ func TestWALApplyIsIdempotent(t *testing.T) {
 	require.NoError(t, w.Apply())
 	require.NoError(t, w.Apply())
 
-	got, err := os.ReadFile(target) // #nosec G304 — test path
+	got, err := os.ReadFile(target) // #nosec G304 ,test path
 	require.NoError(t, err)
 	assert.Equal(t, "FINAL", string(got))
 
@@ -195,7 +195,7 @@ func TestWALApplyIsIdempotent(t *testing.T) {
 }
 
 // TestWALApplyPropagatesError pins that a writer error during Apply
-// surfaces the error AND leaves the WAL file in place — so the next
+// surfaces the error AND leaves the WAL file in place ,so the next
 // Scan picks it up for retry. Without the on-disk WAL surviving the
 // failure, the second-file failure case would silently lose the
 // transaction.
@@ -205,7 +205,7 @@ func TestWALApplyPropagatesError(t *testing.T) {
 	targetA := filepath.Join(root, "data", "first.txt")
 	targetB := filepath.Join(root, "data", "second.txt")
 
-	// Succeeds for targetA (call 2 — call 1 was Commit) then fails on targetB.
+	// Succeeds for targetA (call 2 ,call 1 was Commit) then fails on targetB.
 	injected := os.ErrPermission
 	wf := failingWrite(t, 2, injected)
 	w, err := BeginTx(walDir, "tx-applyfail", wf)
@@ -241,7 +241,7 @@ func TestWALWriteFnCaptures(t *testing.T) {
 	// Saver-shape call: write some bytes via the captured WriteFn.
 	require.NoError(t, wf(target, []byte("captured-bytes"), 0o600))
 
-	// Target must NOT exist yet — only Apply lands it.
+	// Target must NOT exist yet ,only Apply lands it.
 	_, err = os.Stat(target)
 	require.True(t, os.IsNotExist(err),
 		"WriteFn must defer the write, not land it immediately")
@@ -255,7 +255,7 @@ func TestWALWriteFnCaptures(t *testing.T) {
 
 // TestScanReturnsEmptyForMissingWalDir pins the fresh-data-folder
 // case: on a first-ever startup with no .wal/ directory yet, Scan
-// must return (nil, nil) — NOT an error — so Store.NewStore can call
+// must return (nil, nil) ,NOT an error ,so Store.NewStore can call
 // it unconditionally without special-casing.
 func TestScanReturnsEmptyForMissingWalDir(t *testing.T) {
 	pending, err := Scan(filepath.Join(t.TempDir(), "does-not-exist"), directWrite)

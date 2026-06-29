@@ -53,7 +53,7 @@ func TestPublishAtomic(t *testing.T) {
 
 		require.NoError(t, publishAtomic(src, dst))
 
-		got, err := os.ReadFile(dst) // #nosec G304 — test-only temp path
+		got, err := os.ReadFile(dst) // #nosec G304, test-only temp path
 		require.NoError(t, err)
 		assert.Equal(t, "pdf-content", string(got))
 
@@ -75,7 +75,7 @@ func TestPublishAtomic(t *testing.T) {
 
 		require.NoError(t, publishAtomic(src, dst))
 
-		got, err := os.ReadFile(dst) // #nosec G304 — test-only temp path
+		got, err := os.ReadFile(dst) // #nosec G304, test-only temp path
 		require.NoError(t, err)
 		assert.Equal(t, "new-content", string(got))
 	})

@@ -12,7 +12,7 @@ import (
 // TestLegacyBoolMigrates verifies NFR-025 / R6 backward-compatibility:
 // historical YAML saves stored `decision` as a Go bool (true == draw flag).
 // After Slice 5.A the field becomes a Decision string, and legacy values
-// must migrate on unmarshal — `true` -> DecisionHikiwake, `false` (when the
+// must migrate on unmarshal, `true` -> DecisionHikiwake, `false` (when the
 // match was completed) -> DecisionFought. A new-format string value must
 // also round-trip unchanged.
 //

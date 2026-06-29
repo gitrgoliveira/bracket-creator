@@ -55,7 +55,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNoContent, w.Code)
 
-		// 2. Reject: pools status (in progress) — must be invalidated first.
+		// 2. Reject: pools status (in progress), must be invalidated first.
 		comp3 := state.Competition{ID: "delete-started", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp3)
 		w = httptest.NewRecorder()
@@ -330,7 +330,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// admin UI's POST/PUT path now trims them too (defense against
 	// hand-crafted API requests sending padded values that would slip
 	// past dropdowns / time / date pickers). Pin the contract on both
-	// endpoints — drop one TrimSpace and a downstream switch on the
+	// endpoints, drop one TrimSpace and a downstream switch on the
 	// non-canonical value silently falls through.
 	t.Run("All String Fields Trimmed On Create", func(t *testing.T) {
 		comp := state.Competition{
@@ -385,7 +385,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// a hand-crafted POST with `{id: "foo", name: "   "}` lands as
 	// Name="" on disk (slugifyID is bypassed when ID is explicit, and
 	// checkUniqueCompName("", ...) passes when no other empty-named
-	// competition exists) — admin UI then shows a blank competition card.
+	// competition exists), admin UI then shows a blank competition card.
 	t.Run("Whitespace-Only Name Rejected On Create", func(t *testing.T) {
 		comp := state.Competition{ID: "blank-name", Name: "   "}
 		body, _ := json.Marshal(comp)
@@ -434,7 +434,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&seed))
 
 		badDates := []string{
-			"2026-05-12", // ISO shape — not accepted
+			"2026-05-12", // ISO shape, not accepted
 			"31-02-2026", // Feb 31 semantically invalid
 			"32-01-2026", // day 32 invalid
 			"12-13-2026", // month 13 invalid
@@ -452,7 +452,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 				"POST /competitions with Date=%q must return 400", badDate)
 			assert.Contains(t, w.Body.String(), "date must be DD-MM-YYYY")
 
-			// PUT — body Date is bad; comp must still exist with the seeded date.
+			// PUT, body Date is bad; comp must still exist with the seeded date.
 			put := state.Competition{ID: "date-fmt-test", Name: "Date Fmt Test", Date: badDate}
 			body, _ = json.Marshal(put)
 			w = httptest.NewRecorder()
@@ -471,7 +471,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// validateDateDMY must reject years outside minDateYear..maxDateYear
 	// (mirroring JS MIN_YEAR/MAX_YEAR). Without matching server bounds,
 	// a direct API call landing e.g. "01-01-1800" on a competition would
-	// block every subsequent admin Settings save — saveLater re-validates
+	// block every subsequent admin Settings save, saveLater re-validates
 	// the stored date on every PUT.
 	t.Run("Year Out Of Range Rejected On Create And Update", func(t *testing.T) {
 		seed := state.Competition{ID: "year-range-test", Name: "Year Range Test", Date: "01-01-2026"}
@@ -505,7 +505,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 
 	// validateCompetitionCourts must reject duplicate court labels.
 	// The frontend keys per-court rendering and `byCourt[m.court]`
-	// bucketing on the label string — duplicates collapse two courts'
+	// bucketing on the label string, duplicates collapse two courts'
 	// matches into one lane and trigger React duplicate-key warnings.
 	t.Run("Duplicate Court Labels Rejected On Create And Update", func(t *testing.T) {
 		seed := state.Competition{ID: "dup-courts-test", Name: "Dup Courts Test", Date: "01-01-2026", Courts: []string{"A", "B"}}
@@ -541,7 +541,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// whitespace labels because `label == ""` is false and
 	// `len([]rune(" ")) == 1`. Such a label persists to disk and becomes
 	// a React `key={cc}` value, schedule `byCourt[m.court]` bucket key,
-	// and filter dropdown value — visually blank but structurally
+	// and filter dropdown value, visually blank but structurally
 	// distinct from "". Each whitespace shape (space, tab, NBSP) needs
 	// rejection.
 	t.Run("Whitespace-Only Court Labels Rejected On Create And Update", func(t *testing.T) {
@@ -592,7 +592,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// Single-segment payloads that gin will deliver verbatim to the
 		// handler (vs traversal payloads which the router may reject).
 		// Same set as the Path_Traversal_IDs_Rejected single-segment
-		// list — every one violates ValidateCompetitionID's char rule.
+		// list, every one violates ValidateCompetitionID's char rule.
 		invalidIDs := []string{
 			"foo bar",
 			"foo.bar",
@@ -619,7 +619,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 
 	// Tri-review finding: an embedded roster on POST /competitions and the
 	// roster-PUT branch of PUT /competitions/:id only ran validatePlayerLengths
-	// (max-length) — never the blank-name/dojo guard that POST /participants
+	// (max-length), never the blank-name/dojo guard that POST /participants
 	// has. A two-column "Name, Dojo" paste in a zekken competition maps to
 	// {displayName: dojo, dojo: ""}, so a blank dojo persisted a corrupted
 	// competitor while the UI reported success. Both paths now share
@@ -675,7 +675,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// gates every site. A compID like "../../../etc/passwd" would
 	// otherwise reach compPath(id, ...) which does filepath.Clean(Join())
 	// and cleanly escapes the data dir. Sample a handful of routes
-	// (GET / PUT / DELETE / nested) — the helper centralises the logic,
+	// (GET / PUT / DELETE / nested), the helper centralises the logic,
 	// so testing every route is redundant.
 	t.Run("Path Traversal IDs Rejected", func(t *testing.T) {
 		// Per ValidateCompetitionID (regex ^[a-zA-Z0-9][a-zA-Z0-9_-]*$):
@@ -686,13 +686,13 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		//
 		//   1. Multi-segment / path-traversal payloads (contain "/" or
 		//      URL-encoded "/"). These may match no route at the gin
-		//      level — handy as a smoke test that NOTHING returns 200,
+		//      level, handy as a smoke test that NOTHING returns 200,
 		//      but they don't prove requireValidCompID itself ran.
 		//
 		//   2. Single-segment IDs containing characters outside
 		//      [A-Za-z0-9_-] (".", " ", "%2e"). These DO reach the
 		//      handler, so the helper is the only thing standing
-		//      between them and a 200 — perfect for asserting 400.
+		//      between them and a 200, perfect for asserting 400.
 		//
 		// Mix both: traversal payloads sweep for "no 200 ever";
 		// single-segment payloads assert the precise 400 from the helper.
@@ -711,7 +711,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			"foo+bar",   // plus
 			"foo@bar",   // at-sign
 		}
-		// Representative endpoints across the affected handler set —
+		// Representative endpoints across the affected handler set,
 		// competition, participants/seeds, AND at least one match route
 		// (handlers_match.go also uses requireValidCompID; without a
 		// match-route case here, a regression there would slip past).
@@ -760,14 +760,14 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// Sweep 2: single-segment payloads reach the handler. The helper
 		// must produce a 400. A 404 here would mean either the route
 		// shape is wrong (router miss) OR the handler skipped
-		// requireValidCompID and downstream code 404'd on the bad id —
+		// requireValidCompID and downstream code 404'd on the bad id,
 		// both regressions.
 		//
 		// Asserting only the status code is vacuous for PUT/POST routes
 		// that bind JSON after the ID check: dropping requireValidCompID
 		// from such a handler would still return 400 (from ShouldBindJSON
 		// on the empty body). To prove the helper itself ran, also
-		// require the response body to mention "competition ID" — the
+		// require the response body to mention "competition ID", the
 		// substring is unique to ValidateCompetitionID's error message
 		// ("competition ID contains invalid characters (allowed: ...)").
 		// ShouldBindJSON's empty-body error looks like
@@ -796,7 +796,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// PUT contract: distinguish omitted Players (settings-only PUT) from
 	// explicit empty Players (clear roster). Pre-fix the handler keyed
 	// the participants save on `len(comp.Players) > 0`, which collapsed
-	// both into "skip save" — so the AdminParticipants "clear roster"
+	// both into "skip save", so the AdminParticipants "clear roster"
 	// flow showed "Saved 0 participants" while the prior roster stayed
 	// on disk. Post-fix the gate is `comp.Players != nil`: omitted is
 	// nil → skip, explicit [] is non-nil empty → save empty CSV.
@@ -863,8 +863,8 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// Copilot finding (PR #104 round-9-followup): the PUT handler
 	// unconditionally copied every settings field from the request body
 	// onto the freshly loaded `current`. The AdminParticipants page
-	// sends `{ ...c, players: np }` — where `c` is a possibly stale
-	// frontend snapshot — so a roster save would silently revert any
+	// sends `{ ...c, players: np }`, where `c` is a possibly stale
+	// frontend snapshot, so a roster save would silently revert any
 	// concurrent settings change (poolSize, courts, startTime, etc.)
 	// that landed on the server after the page loaded its `c` snapshot.
 	//
@@ -876,7 +876,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		const cid = "roster-save-preserve-settings"
 		// Seed the disk record with the server-side "current" settings
 		// (post-concurrent-change). The roster-save body carries STALE
-		// versions of these — they must NOT land on disk.
+		// versions of these, they must NOT land on disk.
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID:           cid,
 			Name:         "Server Current Name",
@@ -962,7 +962,7 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 		Date: "2026-05-12", // ISO format, would fail validateDateDMY
 	}))
 
-	// Roster-only PUT — AdminParticipants spreads `{ ...c, players: np }`
+	// Roster-only PUT, AdminParticipants spreads `{ ...c, players: np }`
 	// where c.date is the on-disk legacy ISO date.
 	body, _ := json.Marshal(state.Competition{
 		ID:   cid,
@@ -981,7 +981,7 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 		"roster-only PUT must succeed even with non-DMY date in body: %s", w.Body.String())
 
 	// Verify the roster landed and the legacy date is preserved on disk
-	// (the PUT didn't touch the settings field — that's the whole point).
+	// (the PUT didn't touch the settings field, that's the whole point).
 	parts, _ := store.LoadParticipants(cid, false)
 	assert.Len(t, parts, 1, "roster must have landed")
 	stored, _ := store.LoadCompetition(cid)
@@ -1013,7 +1013,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Y"},
 	}))
 
-	// Settings-only PUT — body OMITS players. Just renaming.
+	// Settings-only PUT, body OMITS players. Just renaming.
 	body := []byte(`{"id":"with-roster","name":"With Roster Renamed","date":"12-05-2026"}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -1021,7 +1021,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
-	// Parse the response — the Players field must be a non-null array
+	// Parse the response, the Players field must be a non-null array
 	// reflecting the on-disk roster.
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -1031,13 +1031,13 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 	assert.Equal(t, "Bob", resp.Players[1].Name)
 
 	// Also verify the response body's JSON literally has a players array,
-	// not the string "null" — Go's nil slice serializes to "null", which
+	// not the string "null", Go's nil slice serializes to "null", which
 	// is the bug shape we're guarding against.
 	assert.NotContains(t, w.Body.String(), `"players":null`,
-		"response must not ship `players: null` — clients merge this into local state")
+		"response must not ship `players: null`, clients merge this into local state")
 }
 
-// mp-p7n: Copilot PR #185 round-3 finding — regenerating ids on save
+// mp-p7n: Copilot PR #185 round-3 finding, regenerating ids on save
 // would orphan CompetitorStatus.PlayerID / team-lineup PlayerIDs that
 // reference the original ids. Fix: keep the id verbatim on save; the loader
 // (consulting Competition.HasParticipantIDs for the strip decision) handles
@@ -1047,7 +1047,7 @@ func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
 //   - The PUT body's non-UUID ids round-trip to the response intact
 //     (no regeneration).
 //   - Name/Dojo are correctly aligned in the response (no column shift
-//     on load — the loader trusts HasParticipantIDs).
+//     on load, the loader trusts HasParticipantIDs).
 //   - A second PUT with the same body produces an idempotent round-trip
 //     (ids don't churn).
 //
@@ -1132,20 +1132,20 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Players, 2)
 
-	// Ids preserved — regeneration would orphan dependent stores.
+	// Ids preserved, regeneration would orphan dependent stores.
 	assert.Equal(t, "asddasd-p1", resp.Players[0].ID,
 		"non-UUID id must round-trip intact; regeneration orphans competitor_status refs")
 	assert.Equal(t, "asddasd-p2", resp.Players[1].ID)
 
-	// Name and Dojo correctly aligned — no column shift on load.
+	// Name and Dojo correctly aligned, no column shift on load.
 	assert.Equal(t, "Aaron Adams", resp.Players[0].Name)
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 	assert.Empty(t, resp.Players[0].Metadata,
-		"Metadata must be empty — pre-fix column shift dumped Dojo into Metadata[0]")
+		"Metadata must be empty, pre-fix column shift dumped Dojo into Metadata[0]")
 	assert.Equal(t, "Albus Blake", resp.Players[1].Name)
 	assert.Equal(t, "Team Delta", resp.Players[1].Dojo)
 
-	// Idempotent second PUT — ids stay stable.
+	// Idempotent second PUT, ids stay stable.
 	body2 := fmt.Appendf(nil, `{
 		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
 		"format":"playoffs","kind":"individual","courts":["A"],
@@ -1167,7 +1167,7 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 
 // mp-p7n: uppercase-UUID id round-trips intact (no canonicalisation,
 // no regeneration). The loader's HasParticipantIDs-based strip handles
-// any shape — case isn't load-bearing for the id-strip decision once
+// any shape, case isn't load-bearing for the id-strip decision once
 // the flag is consulted.
 func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -1247,11 +1247,11 @@ func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 	// Round-6 contract: a flip failure surfaces as 500, NOT a 200 with
 	// a stale flag.
 	require.Equal(t, http.StatusInternalServerError, w.Code,
-		"flip failure must surface as 500 (round-6 contract) — got %d: %s", w.Code, w.Body.String())
+		"flip failure must surface as 500 (round-6 contract), got %d: %s", w.Code, w.Body.String())
 	assert.Contains(t, w.Body.String(), "HasParticipantIDs",
 		"error body must mention HasParticipantIDs (round-6 flip-failure branch); got %s", w.Body.String())
 
-	// The roster file itself DID land before the flip — confirm the
+	// The roster file itself DID land before the flip, confirm the
 	// participants were saved (the failure is only in the metadata flip,
 	// which is why the operator's retry is idempotent). Read with an
 	// explicit HasIDs hint: a no-hint read would reproduce the column
@@ -1270,8 +1270,8 @@ func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 
 // mp-p7n / Copilot PR #185 round-5: when the roster-PUT response
 // re-loads participants, the deferred HasParticipantIDs=true flip is
-// best-effort (failures only log). If the flip never lands — or simply
-// hasn't landed yet — the loader's default branch reads the stale flag
+// best-effort (failures only log). If the flip never lands, or simply
+// hasn't landed yet, the loader's default branch reads the stale flag
 // (false) and falls back to uuidRE-on-row-0, mis-classifying non-UUID
 // ids as "no ids" and returning the column-shifted roster.
 //
@@ -1286,7 +1286,7 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	defer os.RemoveAll(tempDir)
 
 	cid := "stale-flag"
-	// Note: HasParticipantIDs explicitly FALSE — simulating either the
+	// Note: HasParticipantIDs explicitly FALSE, simulating either the
 	// pre-flip window (race) or a failed deferred flip (logged but not
 	// surfaced). The reload must not trust this flag.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -1319,7 +1319,7 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	// would have returned Name="Stale-Flag-P1", Dojo="Aaron Adams",
 	// metadata=["Team Alpha"] (column shift).
 	assert.Equal(t, "Aaron Adams", resp.Players[0].Name,
-		"reload must use HasIDs=&true hint, not the stale comp flag — non-UUID id must be stripped from column 0")
+		"reload must use HasIDs=&true hint, not the stale comp flag, non-UUID id must be stripped from column 0")
 	assert.Equal(t, "Team Alpha", resp.Players[0].Dojo)
 	assert.Empty(t, resp.Players[0].Metadata)
 	assert.Equal(t, "stale-flag-p1", resp.Players[0].ID,
@@ -1334,7 +1334,7 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 // HasParticipantIDs=true BEFORE the post-transform SaveParticipants
 // call. If SaveParticipants then failed (disk full, EISDIR, etc.) the
 // config carried HasParticipantIDs=true while participants.csv
-// retained the OLD non-UUID format — the HasIDs-hinted loader would
+// retained the OLD non-UUID format, the HasIDs-hinted loader would
 // then misparse the file. The flag flip is now deferred to AFTER
 // SaveParticipants succeeds.
 func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
@@ -1346,7 +1346,7 @@ func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
 		ID: cid, Name: "Save Fails", HasParticipantIDs: false,
 	}))
 
-	// Plant a directory where participants.csv should be — the
+	// Plant a directory where participants.csv should be, the
 	// SaveParticipants -> WriteFile call will fail with EISDIR.
 	plantedDir := filepath.Join(tempDir, "competitions", cid, "participants.csv")
 	require.NoError(t, os.MkdirAll(plantedDir, 0o700))
@@ -1365,7 +1365,7 @@ func TestPUTCompetition_DefersHasParticipantIDsOnSaveFailure(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, w.Code,
 		"save failure must surface as 500 (got %s): %s", w.Code, w.Body.String())
 
-	// HasParticipantIDs must NOT have been flipped to true — the file
+	// HasParticipantIDs must NOT have been flipped to true, the file
 	// save failed, so the metadata flag stays in sync with the still-
 	// missing file.
 	stored, err := store.LoadCompetition(cid)
@@ -1390,7 +1390,7 @@ func TestPublicViewerCompetitionDetail_InvalidIDReturns400(t *testing.T) {
 	// is normalised by the router into a different route, so use an
 	// invalid character that ValidateCompetitionID would reject (a
 	// space). Pre-fix: 500. Post-fix: 400.
-	// URL is the public viewer route — no auth required, no admin
+	// URL is the public viewer route, no auth required, no admin
 	// password header.
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions/bad%20id", nil)
@@ -1433,7 +1433,7 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 		},
 	}))
 
-	// "Start" payload — admin tapping Start on the scoring modal.
+	// "Start" payload, admin tapping Start on the scoring modal.
 	body := []byte(`{"id":"r1-m0","sideA":"Alice","sideB":"Bob","status":"running"}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/r1-m0/score", bytes.NewBuffer(body))
@@ -1451,7 +1451,7 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 	assert.Equal(t, state.MatchStatusRunning, m.Status,
 		"bracket match must reflect the incoming `running` status, not be forced to completed")
 	assert.Equal(t, "", m.Winner,
-		"running match must have no winner — pre-fix the force-completed path also propagated empty winner upstream")
+		"running match must have no winner, pre-fix the force-completed path also propagated empty winner upstream")
 }
 
 // TestValidateCompetitionDurations_Negative verifies that a negative duration
@@ -1497,7 +1497,7 @@ func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
 		Date: "12-05-2026",
 	}))
 
-	// Settings-only PUT — enable check-in tracking.
+	// Settings-only PUT, enable check-in tracking.
 	body := []byte(`{"id":"checkin-persist","name":"CheckIn Test","date":"12-05-2026","checkInEnabled":true}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
@@ -1884,7 +1884,7 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/awards-elev/awards", bytes.NewBuffer(body2))
 		req.Header.Set("Content-Type", "application/json")
-		// Do NOT set X-Admin-Password — should be rejected with 401 (wrong credential).
+		// Do NOT set X-Admin-Password, should be rejected with 401 (wrong credential).
 		hr.ServeHTTP(w, req)
 		assert.Equalf(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
 	})
@@ -2274,7 +2274,7 @@ func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
 		Kind:   "individual",
 	}))
 
-	// PUT with poolSize / poolWinners set — they must be zeroed on save.
+	// PUT with poolSize / poolWinners set, they must be zeroed on save.
 	body, _ := json.Marshal(state.Competition{
 		ID:          "league-edit",
 		Name:        "League Edit",
@@ -2299,7 +2299,7 @@ func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
 // TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart verifies that the
 // league tie-breaker knobs (leagueTiebreakTopN / leagueTwoThirdPlaces) can be
 // changed before the competition starts but are rejected (400) once it has
-// progressed past setup — changing them mid-league would alter the
+// progressed past setup, changing them mid-league would alter the
 // consequential-tie set and which ties already-played tie-breakers resolve.
 func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -2411,7 +2411,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"format":      state.CompFormatMixed,
 			"kind":        "individual",
 			"courts":      []string{"A"},
-			"poolSize":    5, // changed from stored 4 — output-affecting
+			"poolSize":    5, // changed from stored 4, output-affecting
 			"poolWinners": 2,
 			"roundRobin":  false,
 			"mirror":      false,
@@ -2426,7 +2426,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "discard",
 			"409 body must mention discarding the draw")
 
-		// Status must remain draw-ready — gate must not mutate state.
+		// Status must remain draw-ready, gate must not mutate state.
 		stored, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
@@ -2440,7 +2440,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id":          cid,
 			"name":        "Draw Ready Gate",
-			"format":      "", // changed from stored "mixed" TO empty — must still 409
+			"format":      "", // changed from stored "mixed" TO empty, must still 409
 			"kind":        "individual",
 			"courts":      []string{"A"},
 			"poolSize":    4,
@@ -2507,7 +2507,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		// output-affecting change is detected and the rename is allowed.
 		body, _ := json.Marshal(map[string]any{
 			"id":          cid,
-			"name":        "Draw Ready Gate Renamed", // cosmetic change — allowed
+			"name":        "Draw Ready Gate Renamed", // cosmetic change, allowed
 			"format":      state.CompFormatMixed,
 			"kind":        "individual",
 			"courts":      []string{"A"},
@@ -2530,7 +2530,7 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		require.NotNil(t, stored)
 		assert.Equal(t, "Draw Ready Gate Renamed", stored.Name,
 			"cosmetic Name change must persist through the draw-ready gate")
-		// Status must remain draw-ready — a rename does not discard the draw.
+		// Status must remain draw-ready, a rename does not discard the draw.
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 }

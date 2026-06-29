@@ -14,7 +14,7 @@ import (
 var titleSafeName = regexp.MustCompile(`[^\w]+`)
 
 // titlePageHTML renders the A4-portrait (or A3-landscape) title-page HTML with
-// the given title centred, 36pt bold — mirroring make_title_page_pdf in the
+// the given title centred, 36pt bold, mirroring make_title_page_pdf in the
 // Python reference. The title is HTML-escaped to stay safe with arbitrary
 // tournament names.
 func titlePageHTML(title string, a3Landscape bool) string {

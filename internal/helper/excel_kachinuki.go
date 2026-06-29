@@ -1,23 +1,23 @@
 package helper
 
-// excel_kachinuki.go renders the "Kachinuki Detail" sheet — one section per
+// excel_kachinuki.go renders the "Kachinuki Detail" sheet, one section per
 // kachinuki ("winner-stays-on") team match with full bout-by-bout detail.
 //
 // The main Pool Matches / Elimination Matches sheets continue to render
 // kachinuki team matches using the existing 8-column-per-court layout
 // (CourtsColumnsPerCourt = 8 in constants.go). This separate sheet uses a
-// flexible 8-column layout chosen for readability — NOT bound by
-// CourtsColumnsPerCourt — and is emitted only by the engine export path
+// flexible 8-column layout chosen for readability, NOT bound by
+// CourtsColumnsPerCourt, and is emitted only by the engine export path
 // (internal/engine/export.go) when a competition has teamMatchType=kachinuki
 // AND at least one kachinuki match carries bout data.
 //
 // Layout per match section (rows are 1-based relative to the section start):
 //
-//	Row 1: Title — "<label> (Kachinuki)"
-//	Row 2: Subtitle — "<Side A team> vs <Side B team>"
-//	Row 3: Column headers — Bout #, Side A, Score A, vs, Score B, Side B, Winner, Decision
+//	Row 1: Title, "<label> (Kachinuki)"
+//	Row 2: Subtitle, "<Side A team> vs <Side B team>"
+//	Row 3: Column headers, Bout #, Side A, Score A, vs, Score B, Side B, Winner, Decision
 //	Rows 4..N+3: one row per bout (N = len(bouts))
-//	Row N+4: Summary — eliminations per team, match outcome
+//	Row N+4: Summary, eliminations per team, match outcome
 //
 // Sections are separated by a single blank row. The first section starts at
 // row 1.
@@ -35,7 +35,7 @@ import (
 type KachinukiBout struct {
 	Position  int    // 1-based bout index within the team match
 	SideAName string // player name for Side A
-	SideAPos  string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho) — may be empty
+	SideAPos  string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho), may be empty
 	ScoreA    string // accumulated ippon string (e.g. "MK", "MMK") or empty
 	SideBName string
 	SideBPos  string
@@ -59,7 +59,7 @@ type KachinukiMatchDetail struct {
 }
 
 // kachinukiDetailColumns enumerates the column letters used on the detail
-// sheet. The layout is flexible — NOT bound by CourtsColumnsPerCourt — so
+// sheet. The layout is flexible, NOT bound by CourtsColumnsPerCourt, so
 // readability wins over alignment with the main match sheets.
 const (
 	kachinukiColBout     = "A"
@@ -74,11 +74,11 @@ const (
 
 // WriteKachinukiDetailSheet creates the SheetKachinukiDetail sheet and
 // writes one section per match. When matches is empty the sheet is NOT
-// created — the caller is responsible for checking the input length AND
+// created, the caller is responsible for checking the input length AND
 // the renderer guards against accidental emission of an empty sheet.
 func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail) error {
 	// Skip when there are no matches to render. The detail sheet is
-	// purely additive — never create an empty sheet (T201 acceptance).
+	// purely additive, never create an empty sheet (T201 acceptance).
 	if len(matches) == 0 {
 		return nil
 	}
@@ -97,7 +97,7 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 	sheet := SheetKachinukiDetail
 	// Create the sheet if it doesn't already exist. (Engine export creates
 	// the workbook via NewFileFromScratch which does NOT include the
-	// detail sheet — it's opt-in.)
+	// detail sheet, it's opt-in.)
 	if idx, err := f.GetSheetIndex(sheet); err != nil || idx < 0 {
 		if _, err := f.NewSheet(sheet); err != nil {
 			return fmt.Errorf("creating sheet %q: %w", sheet, err)
@@ -126,7 +126,7 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 	row := 1
 	for i, match := range matches {
 		if len(match.Bouts) == 0 {
-			// Skip matches with no bouts — they would render an empty
+			// Skip matches with no bouts, they would render an empty
 			// section. The summary row alone has no value without a
 			// bout list to give it context.
 			continue
@@ -226,7 +226,7 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, bout KachinukiBout, r
 	// Column F: Side B name + position
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideB+rowStr, formatKachinukiPlayer(bout.SideBName, bout.SideBPos)))
 
-	// Column G: Winner (left blank on hikiwake — decision column carries the
+	// Column G: Winner (left blank on hikiwake, decision column carries the
 	// outcome label).
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColWinner+rowStr, bout.Winner))
 
@@ -246,7 +246,7 @@ func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMat
 
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColBout+rowStr, "Summary"))
 
-	// Column B: Side A eliminations — e.g. "1 eliminated"
+	// Column B: Side A eliminations, e.g. "1 eliminated"
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideA+rowStr,
 		fmt.Sprintf("%d eliminated", match.EliminationA)))
 
@@ -266,7 +266,7 @@ func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMat
 
 // formatKachinukiPlayer is a pure helper that combines a player's name and
 // lineup position for display on the detail sheet. Empty position → just
-// the name; empty name → empty string (defensive — the renderer should
+// the name; empty name → empty string (defensive, the renderer should
 // never receive an empty player name for a played bout).
 func formatKachinukiPlayer(name, position string) string {
 	if name == "" {

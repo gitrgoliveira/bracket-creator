@@ -14,7 +14,7 @@ import (
 // runHashPassword executes the hash-password subcommand with the given
 // args and stdin string. Always injects stdin via cmd.SetIn (even for
 // the empty-string case) so the empty-stdin test exercises a deliberate
-// EOF rather than the real process stdin — without the always-swap, the
+// EOF rather than the real process stdin, without the always-swap, the
 // test could block in environments where stdin is open. Internal helper
 // used by every test case below.
 func runHashPassword(t *testing.T, stdin string, args []string) (string, error) {
@@ -53,7 +53,7 @@ func TestHashPassword_FromStdin_TrimsLF(t *testing.T) {
 // TestHashPassword_FromStdin_TrimsCRLF guards against the Windows
 // regression: PowerShell / cmd.exe pipe \r\n line endings, and an
 // untrimmed \r in the hash input produces a hash that authenticates
-// "secret\r" — but the browser then sends "secret" and auth fails.
+// "secret\r", but the browser then sends "secret" and auth fails.
 // The fix is in hash_password.go's TrimRight on both \r and \n.
 func TestHashPassword_FromStdin_TrimsCRLF(t *testing.T) {
 	out, err := runHashPassword(t, "mysecret\r\n", []string{})

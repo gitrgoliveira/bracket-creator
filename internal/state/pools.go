@@ -66,7 +66,7 @@ func parsePoolsFile(path string) (any, error) {
 		// leaves PoolPosition at the zero value (which would misplace the player
 		// at the front of the stable sort and corrupt Excel pool-draw labels).
 		// col 2 overrides this only when it is present, parseable, AND non-negative.
-		// savePoolsLocked writes it as strconv.Itoa(i) — 0-indexed — so add 1 to
+		// savePoolsLocked writes it as strconv.Itoa(i), 0-indexed, so add 1 to
 		// align with the 1-based convention used by Excel pool/draw exporters.
 		// (Other producer paths may use different conventions; this +1 applies only
 		// to the CSV round-trip used by LoadPools.)
@@ -170,7 +170,7 @@ func (s *Store) SavePools(compID string, pools []helper.Pool) error {
 }
 
 // loadPoolsLocked reads pools.csv directly from disk without acquiring the
-// per-competition lock. Caller MUST already hold the per-comp write lock —
+// per-competition lock. Caller MUST already hold the per-comp write lock.
 // typically from inside a WithTransaction closure.
 func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
 	path := s.compPath(compID, "pools.csv")
@@ -183,7 +183,7 @@ func (s *Store) loadPoolsLocked(compID string) ([]helper.Pool, error) {
 }
 
 // savePoolsLocked writes pools.csv without acquiring the per-competition lock.
-// Caller MUST already hold the per-comp write lock — typically from inside a
+// Caller MUST already hold the per-comp write lock, typically from inside a
 // WithTransaction closure. Writes directly to disk (not WAL-staged) but is
 // crash-safe via atomicWrite.
 func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
@@ -241,7 +241,7 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 
 // LoadPoolMatchesLocked loads pool matches WITHOUT acquiring the
 // per-competition lock. Caller MUST already hold the write lock for
-// this competition — typically from inside a transform passed to
+// this competition ,typically from inside a transform passed to
 // UpdatePoolMatchByID, UpdateBracket, or UpdateCompetitionChanged.
 // Bypasses the cache deliberately: the cache mtime can lag a
 // concurrent writer that the caller may be in the middle of making,
@@ -305,11 +305,11 @@ func parsePoolMatchesBytes(raw []byte) ([]MatchResult, error) {
 // splitIppons parses a "|"-joined ippon field into a slice, mapping an
 // EMPTY field to an empty slice. strings.Split("", "|") returns [""] (a
 // one-element slice holding the empty string), which len() then counts as a
-// phantom ippon — inflating points-won/lost in standings and corrupting
+// phantom ippon ,inflating points-won/lost in standings and corrupting
 // individual pool tie detection (two players who actually tied read as
 // differing by a phantom point). An empty field maps to a zero-length slice
 // across every consumer; we return a non-nil empty slice (not nil) so the
-// JSON projection stays a stable array ([]), not null — the viewer endpoints
+// JSON projection stays a stable array ([]), not null ,the viewer endpoints
 // serialize IpponsA/IpponsB and an array field should never flip to null.
 func splitIppons(s string) []string {
 	if s == "" {
@@ -381,7 +381,7 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		if len(rec) > 19 {
 			m.CorrectionReason = rec[19]
 		}
-		// Rep-player columns (appended after CorrectionReason) — the individual
+		// Rep-player columns (appended after CorrectionReason) ,the individual
 		// fighters each team fields for a pool/league daihyosen/tiebreaker rep
 		// bout. Absent in files written before mp-62vr → stay empty.
 		if len(rec) > 20 {
@@ -413,7 +413,7 @@ func (s *Store) SavePoolMatches(compID string, results []MatchResult) error {
 // Used by both SavePoolMatches (which takes the lock) and
 // UpdatePoolMatchByID (which holds the lock across load + mutate + save).
 //
-// The write parameter routes the actual file write — directWrite for
+// The write parameter routes the actual file write ,directWrite for
 // non-tx callers, a WAL-capturing writer for tx callers. See
 // saveBracketLocked for the cache-refresh rationale (T211/T212).
 func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, write writeFn) error {
@@ -496,15 +496,15 @@ func (s *Store) savePoolMatchesLocked(compID string, results []MatchResult, writ
 // store for elimination-round matches).
 //
 // The entire load + find + mutate + save sequence runs under the
-// per-competition lock so concurrent calls — even for different
-// match IDs in the same competition — serialize correctly without
+// per-competition lock so concurrent calls ,even for different
+// match IDs in the same competition ,serialize correctly without
 // losing each other's mutations.
 //
 // Without this primitive, the equivalent engine helper
 // (engine.withPoolMatch) had a TOCTOU window: two operators scoring
 // different matches on different courts could each LoadPoolMatches
 // into separate copies, mutate their target match, and SavePoolMatches
-// in sequence — the later save would overwrite the earlier save's
+// in sequence ,the later save would overwrite the earlier save's
 // mutation with stale data for the OTHER match. One operator's score
 // would be silently lost during a live tournament.
 func (s *Store) UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error) {

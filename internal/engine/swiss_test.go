@@ -103,7 +103,7 @@ func completeSwissMatch(t *testing.T, store *state.Store, compID, matchID, winne
 }
 
 // TestSwissRound1FoldPairing verifies FR-050b: when seeds are present,
-// round 1 uses fold pairing — seed 1 vs seed N, 2 vs N-1, etc.
+// round 1 uses fold pairing, seed 1 vs seed N, 2 vs N-1, etc.
 func TestSwissRound1FoldPairing(t *testing.T) {
 	names := []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"}
 	seeds := map[string]int{
@@ -126,7 +126,7 @@ func TestSwissRound1FoldPairing(t *testing.T) {
 
 	// Each match has both sides populated, all unique IDs, and the
 	// pairing matches the fold expectation (either A vs B or B vs A
-	// is acceptable — assignment of seat A/B is implementation detail).
+	// is acceptable, assignment of seat A/B is implementation detail).
 	seen := make(map[string]bool)
 	for i, m := range matches {
 		require.NotEmptyf(t, m.SideA, "match %d missing SideA", i)
@@ -233,7 +233,7 @@ func TestSwissRound2PairsByWins(t *testing.T) {
 // TestSwissOddPlayerBye verifies FR-050c: with 7 players, the lowest-
 // ranked unmatched player gets a bye (auto-completed win, 0 points).
 // Without seeds, "lowest-ranked" is the player with no wins yet so far
-// in round 1 every player is at 0 wins — the implementation picks one
+// in round 1 every player is at 0 wins, the implementation picks one
 // deterministically. We assert there is exactly one bye, that the bye
 // player has no SideB and Status = Completed, and that the remaining
 // 3 matches cover all other 6 players exactly once.
@@ -360,7 +360,7 @@ func TestSwissStandingsRanking(t *testing.T) {
 	// matches.csv (preserving prior rounds), and complete all played
 	// matches by awarding wins to a caller-supplied set of winners.
 	//
-	// GenerateSwissRound returns ONLY the new round's matches — the
+	// GenerateSwissRound returns ONLY the new round's matches, the
 	// caller is responsible for merging with prior rounds before save.
 	// This mirrors the HTTP handler shape: POST /swiss/generate-round
 	// loads existing pool-matches, calls the engine, appends, saves.
@@ -375,7 +375,7 @@ func TestSwissStandingsRanking(t *testing.T) {
 		require.NoError(t, store.SavePoolMatches(compID, merged))
 		for _, m := range ms {
 			if m.SideB == "" {
-				// Already a completed bye — skip.
+				// Already a completed bye, skip.
 				continue
 			}
 			winner := ""
@@ -444,7 +444,7 @@ func TestSwissStandingsRanking(t *testing.T) {
 	}
 
 	// Sanity: rank ordering respects wins (descending). Within a
-	// tie-bucket we accept any deterministic order — but a player with
+	// tie-bucket we accept any deterministic order, but a player with
 	// more wins must rank higher than a player with fewer.
 	for i := 1; i < len(standings); i++ {
 		assert.GreaterOrEqual(t, standings[i-1].Wins, standings[i].Wins,
@@ -733,7 +733,7 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 		Name:              "Swiss Team Test",
 		Kind:              "team",
 		Format:            state.CompFormatSwiss,
-		TeamSize:          0, // intentionally 0 — the bug: stored config missing the default
+		TeamSize:          0, // intentionally 0, the bug: stored config missing the default
 		SwissRounds:       3,
 		Courts:            []string{"A"}, // single court so matches sequence
 		StartTime:         "09:00",
@@ -779,7 +779,7 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 	for i := 1; i < len(times); i++ {
 		gap := parse(times[i]) - parse(times[i-1])
 		assert.GreaterOrEqual(t, gap, 10,
-			"consecutive matches on the same court should be at least 10 min apart for a team competition; got %d min between %q and %q — TeamSize default was not applied",
+			"consecutive matches on the same court should be at least 10 min apart for a team competition; got %d min between %q and %q, TeamSize default was not applied",
 			gap, times[i-1], times[i])
 	}
 }

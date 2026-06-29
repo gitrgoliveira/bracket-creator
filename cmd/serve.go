@@ -79,7 +79,7 @@ func NewRouter() *gin.Engine {
 		c.Next()
 	})
 
-	// Get web directory — fall back to the global helper.WebFs if appResources
+	// Get web directory, fall back to the global helper.WebFs if appResources
 	// has not been set (e.g. during integration tests that call NewRouter directly).
 	var webFS fs.FS = helper.WebFs
 	if res := GetResources(); res != nil {
@@ -102,7 +102,7 @@ func NewRouter() *gin.Engine {
 		})
 	}
 
-	// Stateless schedule estimator — shared between the CLI web UI and
+	// Stateless schedule estimator, shared between the CLI web UI and
 	// the mobile app frontend (T152a). Routed under /api so the same
 	// fetch path works in both server modes. Uses gin.Engine.Group("/")
 	// to obtain a RouterGroup pointer to pass to the shared registrar.
@@ -169,7 +169,7 @@ func NewRouter() *gin.Engine {
 		c.Redirect(http.StatusMovedPermanently, "/create")
 	})
 
-	// Tournament generation endpoint — handler shared with the mobile-app
+	// Tournament generation endpoint, handler shared with the mobile-app
 	// server (registered in cmd/mobile_app.go) so both run the same generator.
 	r.POST("/create", createTournamentHandler)
 
@@ -183,8 +183,8 @@ func init() {
 // downloadReadyTTL bounds how long an unconsumed download-ready token lingers
 // in downloadStatus. The serve web app consumes the token via the
 // /api/download-status poll (consumeDownloadReady deletes it), but a client
-// that navigates away — or the mobile-app server, which mounts /create without
-// that poll endpoint — would otherwise leak the entry forever. The TTL keeps
+// that navigates away, or the mobile-app server, which mounts /create without
+// that poll endpoint, would otherwise leak the entry forever. The TTL keeps
 // the map bounded regardless of which server runs the handler.
 const downloadReadyTTL = 60 * time.Second
 

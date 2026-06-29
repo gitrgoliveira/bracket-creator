@@ -78,7 +78,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(initialDecidedByHantei);
   const [submitting, setSubmitting] = useStateA(false);
-  // F5: pending-write state : set when a terminal submit resolves { queued:true }
+  // F5: pending-write state: set when a terminal submit resolves { queued:true }
   // (offline / transient failure). While pending the modal stays open and shows a
   // sticky "Not saved yet" banner. Cleared when the queue drains for this match
   // (subscribeSyncStatus + hasPendingTerminalWrite). pendingFn holds the last
@@ -86,7 +86,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [pendingWrite, setPendingWrite] = useStateA(false);
   const pendingFnRef = useRefA(null);
   // F5: set when a queued terminal write is PERMANENTLY rejected (non-retryable
-  // 4xx on retry) : the write never landed, so we must show an explicit "not
+  // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason } | null
   // T104/CHK029: MaxEnchoPeriods cap from the competition config.
@@ -151,17 +151,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // - encho rides along when the operator has marked overtime so the server
   //   can attach the periodCount metadata to the resulting MatchResult.
   // - On success we close the modal (matching the Save button contract) UNLESS
-  //   the decision is kiken : in that case we keep the modal open and surface
+  //   the decision is kiken: in that case we keep the modal open and surface
   //   the RemainingMatchesPanel so the operator can chain default-win awards.
   // - T103/CHK024: when the server replies 409 decision_locked (the
   //   prior kiken on this match can't be safely overwritten because a
   //   subsequent match for either side has started), prompt the
   //   operator to confirm and re-send with force=true.
-  // Shared factory (admin_scoring_shared.jsx) : the individual + team modals had
+  // Shared factory (admin_scoring_shared.jsx): the individual + team modals had
   // byte-identical copies; "competitors" is the only per-modal wording.
   // Item 7: a non-kiken decision (fusenpai) routes through onAfterDecision when
   // the host page provides it (and this isn't a correction) so the court
-  // advances to the next match : mirroring the Finish + Start Next flow. Hantei
+  // advances to the next match: mirroring the Finish + Start Next flow. Hantei
   // advance is handled separately in submitHantei below. Kiken keeps the modal
   // open for RemainingMatchesPanel regardless.
   const submitDecision = makeSubmitDecision({
@@ -175,7 +175,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
   // Hansoku Hs are now physically present in the opponent's pts array
   // (folded in at the 2-foul boundary by applyFoulIncrement). The counter
-  // is "outstanding fouls" : no derived addends needed.
+  // is "outstanding fouls": no derived addends needed.
   const aTotal = aPts.filter((x) => x !== "•").length;
   const bTotal = bPts.filter((x) => x !== "•").length;
 
@@ -185,7 +185,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     const cur = side === "a" ? aPts : bPts;
     if (cur.length >= 2) return; // fast no-op path: don't mark dirty / autosave
     // The functional updater re-checks the cap against the AUTHORITATIVE current
-    // state (p), not the render-closure cur : so the 2-ippon invariant holds even
+    // state (p), not the render-closure cur: so the 2-ippon invariant holds even
     // if addPt is called twice before a re-render (React batching / rapid taps).
     if (side === "a") setAPts((p) => p.length < 2 ? [...p, letter] : p);
     else setBPts((p) => p.length < 2 ? [...p, letter] : p);
@@ -247,12 +247,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Hantei submit: tied scoreline (with or without encho). Operator picks a
   // side; we send a completed patch with the chosen side as winner, the
   // *entered* ippon arrays preserved (so a 1–1 score stays visible alongside the Ht
-  // marker : clearing them would lose the tied score history that the
+  // marker: clearing them would lose the tied score history that the
   // viewer/Excel renderers display under the hantei suffix), and the
   // decidedByHantei flag set. This is a dedicated affordance because the
   // regular flow assumes an ippon-derived win.
   //
-  // Item 7: mirror the Finish button's isComplete ? onSubmit : onSubmitAndNext
+  // Item 7: mirror the Finish button's isComplete ? onSubmit: onSubmitAndNext
   // choice so a hantei finish also advances to the next match on the same
   // court (when onSubmitAndNext is available and this isn't a correction).
   const submitHantei = (winnerSide) => {
@@ -315,7 +315,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   useEffectA(() => {
     if (!m.compId || !m.id) return;
     // Guard the window globals: in unit/render tests (and during boot ordering)
-    // subscribeSyncStatus / API can be absent : mirror SyncStatusPill's guard so
+    // subscribeSyncStatus / API can be absent: mirror SyncStatusPill's guard so
     // the modal never throws on mount.
     if (typeof window.subscribeSyncStatus !== 'function') return;
     const unsub = window.subscribeSyncStatus((status) => {
@@ -332,7 +332,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }, [m.compId, m.id]);
 
   // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a queued
-  // retry) as an explicit "not saved" state : otherwise the write is silently
+  // retry) as an explicit "not saved" state: otherwise the write is silently
   // dropped and the pending banner clears to look saved. Guarded like above.
   useEffectA(() => {
     if (!m.compId || !m.id) return;
@@ -341,7 +341,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (!mountedRef.current) return;
       if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
       setWriteFailed({ reason: info.reason || `save rejected (${info.status || 'error'})` });
-      setPendingWrite(false); // the queued write is gone : it failed, not pending
+      setPendingWrite(false); // the queued write is gone: it failed, not pending
     });
     return unsub;
   }, [m.compId, m.id]);
@@ -351,7 +351,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const initialIsDrawToggled = window.isHikiwake(m.score?.type) || window.isHikiwake(m.decision);
   const [isDrawToggled, setIsDrawToggled] = useStateA(initialIsDrawToggled);
 
-  // Arranged as [left, right] : left is always SHIRO (White), right is always AKA (Red).
+  // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
   // every 2nd foul on this side discharges into a hansoku ippon ("H") for
   // the OPPONENT and resets this side's counter to 0.
@@ -380,7 +380,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     },
   ];
 
-  // Bout is decided once either side reaches 2 ippons : disable add-ippon
+  // Bout is decided once either side reaches 2 ippons: disable add-ippon
   // buttons on BOTH sides (mirrors validateIpponCounts on the server).
   const boutDecided = isBoutDecided(aPts, bPts);
 
@@ -389,7 +389,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Finish/Enter so the patch can't accidentally mark an ippon-decided match
   // as hantei-decided. Keyboard Enter is also gated on canFinish.
   // A knockout match can't end in a draw (it's decided by encho then hantei),
-  // so the hikiwake toggle is suppressed in the bracket phase : m.phase ===
+  // so the hikiwake toggle is suppressed in the bracket phase: m.phase ===
   // "bracket" is the in-modal KO signal (see TeamScoreEditorModal).
   const isKnockoutPhase = m.phase === "bracket";
   const canFinish = !decidedByHantei && (isDrawToggled || aTotal > 0 || bTotal > 0);
@@ -412,7 +412,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== initialDecidedByHantei;
   const handleDismiss = async () => {
-    // Don't close while any save/decision request is in flight : letting
+    // Don't close while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
@@ -458,7 +458,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           return;
         }
         const patch = s.buildPatch("completed");
-        // A correction (completed match) saves the current match only : never
+        // A correction (completed match) saves the current match only: never
         // auto-advance / start-next, even when onSubmitAndNext is wired.
         if (s.onSubmitAndNext && !s.isComplete) s.doSubmit(() => s.onSubmitAndNext(patch));
         else s.doSubmit(() => s.onSubmit(patch));
@@ -484,7 +484,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       }
       if (k === "x" || k === "X") {
         ev.preventDefault();
-        // No hikiwake in a knockout match : leave the key inert there.
+        // No hikiwake in a knockout match: leave the key inert there.
         if (s.isKnockoutPhase && !s.isDrawToggled) return;
         const r = decideDrawToggle({ isDrawToggled: s.isDrawToggled, aTotal: s.aTotal, bTotal: s.bTotal });
         if (r.action === "cancel") { setIsDrawToggled(false); s.markScoringDirty(); } // C1
@@ -497,7 +497,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
   // a11y: label the dialog with the match/court context so screen readers
   // announce who is fighting and on which shiaijo when the modal opens.
-  const dialogLabel = `Score editor : ${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
+  const dialogLabel = `Score editor: ${m.sideB?.name || "Shiro"} vs ${m.sideA?.name || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
 
   const inner = (
     <>
@@ -514,7 +514,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
-              {/* C2: sync status indicator : inline on the title line (no dedicated
+              {/* C2: sync status indicator: inline on the title line (no dedicated
                   row); SyncStatusPill renders nothing unless the match is running. */}
               <SyncStatusPill isRunning={m.status === "running"} />
             </div>
@@ -575,7 +575,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (
-                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked : hantei already recorded" : "Hantei armed : choose a winner above, or cancel") : "Click to remove"}>
+                          <button key={i} className={`sb-slot ${s.pts[i] ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
                             {s.pts[i] || "·"}
                           </button>
                         ))}
@@ -602,7 +602,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             else if (r.action === "enter") { setIsDrawToggled(true); setAPts([]); setBPts([]); markScoringDirty(); } // C1
                           }}
                           disabled={decidedByHantei || (!isDrawToggled && (aTotal > 0 || bTotal > 0)) || (!isDrawToggled && isKnockoutPhase)}
-                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked : hantei already recorded" : "Hantei armed : choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw : decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
+                          title={decidedByHantei ? (initialDecidedByHantei ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : (!isDrawToggled && isKnockoutPhase ? "Knockout matches can't draw: decide by hantei after encho" : (!isDrawToggled && (aTotal > 0 || bTotal > 0) ? "Clear scores before marking a draw" : (isDrawToggled ? "Cancel draw" : "Mark as draw (hikiwake)")))}
                           aria-label={isDrawToggled ? "Cancel draw (hikiwake)" : "Mark as draw (hikiwake)"}
                         >{isDrawToggled ? "Cancel draw" : "Mark draw"}</button>
                       </div>
@@ -641,7 +641,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             />
           </div>
 
-          {/* Ippon-type letter legend : discoverable "?" affordance mapping
+          {/* Ippon-type letter legend: discoverable "?" affordance mapping
               M/K/D/T/H (+S in naginata) to their kendo meaning, so operators
               don't depend on the viewer-only glossary. */}
           <IpponLegend isNaginata={isNaginata} />
@@ -743,7 +743,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     </button>
                     <GlossaryHintAS name="fusenpai" />
                   </div>
-                  {/* Per-bout fusensho is a sub-match concept : implemented inside
+                  {/* Per-bout fusensho is a sub-match concept: implemented inside
                       TeamScoreEditorModal. This placeholder explains the affordance
                       to operators who open the individual-match editor. */}
                   <div className="decision-btn-group">
@@ -785,7 +785,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
         {/* Sticky navigation + action footer */}
         <div className="editor-modal__foot editor-modal__foot--nav">
-          {/* Audit reason prompt : shown when correcting a completed match.
+          {/* Audit reason prompt: shown when correcting a completed match.
               Operator must confirm a reason before the patch is submitted. */}
           {isComplete && showCorrectionPrompt && (
             <ReasonPrompt
@@ -797,7 +797,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 setShowCorrectionPrompt(false);
                 // Re-trigger submit with the now-populated reason.
                 // buildPatch reads correctionReason from state, but state
-                // updates are async : pass r inline via a local override
+                // updates are async: pass r inline via a local override
                 // so the patch is correct on the very first submit.
                 const patch = { ...buildPatch("completed"), correctionReason: r };
                 doSubmit(() => onSubmit(patch));
@@ -805,7 +805,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               onCancel={() => setShowCorrectionPrompt(false)}
             />
           )}
-          {/* F5: PERMANENT-failure banner : a queued terminal write was rejected
+          {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
               (non-retryable 4xx) and dropped, so it never saved. Non-dismissible
               danger state; the operator must re-enter and submit again. Takes
               precedence over the (now-cleared) pending banner. */}
@@ -814,7 +814,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               <span>Not saved : {writeFailed.reason}. Re-enter the result and submit again.</span>
               {/* Only offer Retry when we still hold the submit closure. After a
                   reopen/hydration it can't be recovered from the serialized queue,
-                  so a Retry button would be permanently disabled and misleading : 
+                  so a Retry button would be permanently disabled and misleading: 
                   the banner text already tells the operator to re-enter. */}
               {pendingFnRef.current && (
                 <button
@@ -828,14 +828,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
             </div>
           )}
-          {/* F5: pending-write banner : shown when a terminal submit was only queued
+          {/* F5: pending-write banner: shown when a terminal submit was only queued
               (offline / transient failure). The write is durable in localStorage
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
               <span>Not saved yet : will keep retrying until it lands.</span>
               {/* Only show Retry when we hold the submit closure. On a hydrated
-                  re-open it can't be restored from the serialized queue : but the
+                  re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}
               {pendingFnRef.current && (
                 <button
@@ -890,8 +890,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     </>
   );
 
-  // Inline variant (shiaijo operator view): no backdrop / overlay / aria-modal
-  // : the panel lives in the page. The shiaijo page passes no prevMatch/
+  // Inline variant (shiaijo operator view): no backdrop / overlay / aria-modal:
+  // the panel lives in the page. The shiaijo page passes no prevMatch/
   // nextMatch (queue drives navigation) so the foot's prev/next render as
   // empty spans; Cancel/Close still call onClose to deselect.
   if (variant === "inline") {

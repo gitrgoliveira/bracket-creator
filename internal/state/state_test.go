@@ -892,7 +892,7 @@ func TestStore_Seeds_PerCompLocking(t *testing.T) {
 	store, err := NewStore(dir)
 	require.NoError(t, err)
 
-	// (1) Bogus comp ID ,must surface as a validation error, same as
+	// (1) Bogus comp ID, must surface as a validation error, same as
 	// LoadParticipants / LoadPools / etc.
 	_, err = store.LoadSeeds("../escape")
 	assert.Error(t, err, "LoadSeeds must validate the comp ID")
@@ -1036,7 +1036,7 @@ func TestIsDraw(t *testing.T) {
 	assert.False(t, IsDraw("hikewake"), "legacy misspelling no longer accepted")
 	assert.False(t, IsDraw(""))
 	assert.False(t, IsDraw("ippon"))
-	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive ,wire format is lowercase")
+	assert.False(t, IsDraw("HIKIWAKE"), "case-sensitive, wire format is lowercase")
 }
 
 // --- UpdateTournamentChanged ---

@@ -677,8 +677,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// field snapshot above; participants and seeds live in separate
 	// files and have no per-field snapshot, so use the file mtime as a
 	// fingerprint. A concurrent AdminParticipants PUT between our outer
-	// Load and the atomic commit below changes participants.csv mtime
-	//, if we don't detect it, our generated pools.csv / bracket.json
+	// Load and the atomic commit below changes participants.csv mtime,
+	// if we don't detect it, our generated pools.csv / bracket.json
 	// reflect a stale roster while participants.csv on disk has the new
 	// one. The transform below aborts the start with a validation error
 	// when either file's mtime changed; the operator retries against
@@ -825,8 +825,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// listed in the validation block below). If a concurrent settings
 	// save changed any of those between our outer Load (the basis
 	// for the pools/playoffs files we just generated) and this atomic
-	// commit, the generated artifacts no longer match the new config
-	//, e.g. a Format change from "mixed" to "playoffs" would leave
+	// commit, the generated artifacts no longer match the new config,
+	// e.g. a Format change from "mixed" to "playoffs" would leave
 	// pools.csv on disk while Status committed to "playoffs". Better
 	// to abort with a 409-style conflict than to commit inconsistent
 	// state. Note: TeamSize and PoolWinners are deliberately NOT in
@@ -956,8 +956,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// (e.g. AdminParticipants persisting a UUID roster in parallel
 		// with this start). Combined with the no-roster-rewrite path
 		// NOT rewriting participants.csv, the result was a UUID file
-		// on disk paired with a HasParticipantIDs=false metadata flag
-		//, and the list-view's HasIDs hint would then misparse the
+		// on disk paired with a HasParticipantIDs=false metadata flag,
+		// and the list-view's HasIDs hint would then misparse the
 		// UUID as part of each player's Name.
 		//
 		// The participants/seeds drift check above already aborts the

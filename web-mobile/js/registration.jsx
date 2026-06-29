@@ -1,9 +1,9 @@
-// registration.jsx : public self-registration page for self-run tournaments.
+// registration.jsx: public self-registration page for self-run tournaments.
 //
 // Mounted by app.jsx when the URL is /register/:compId.
 // The backing endpoints are:
-//   GET  /api/register/competitions/:id : competition metadata (name, withZekkenName)
-//   POST /api/register/competitions/:id : register a participant (tag="registered")
+//   GET  /api/register/competitions/:id: competition metadata (name, withZekkenName)
+//   POST /api/register/competitions/:id: register a participant (tag="registered")
 //
 // Both endpoints return 404 in officiated-mode tournaments.
 
@@ -115,7 +115,7 @@ function RegistrationForm({ compId, onBack }) {
         if (msg.toLowerCase().includes("closed")) {
           setErr("Registration is closed for this competition.");
         } else {
-          // Duplicate name : use the friendly message from the server verbatim.
+          // Duplicate name: use the friendly message from the server verbatim.
           setErr(msg || "A participant with this name is already registered.");
         }
       } else {

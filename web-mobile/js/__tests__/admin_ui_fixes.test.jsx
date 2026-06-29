@@ -204,7 +204,7 @@ describe('AdminScoreEditor chained-nav court scoping', () => {
   it('does not surface a different-court match as prev or next', () => {
     const filtered = [make('m1', 'A'), make('m2', 'B'), make('m3', 'A')];
     const { prev, next } = pickChainedMatches(filtered, filtered[1]);
-    // Only B match in the list ; nothing to chain to.
+    // Only B match in the list; nothing to chain to.
     expect(prev).toBeNull();
     expect(next).toBeNull();
   });
@@ -227,7 +227,7 @@ describe('AdminScoreEditor chained-nav court scoping', () => {
 // Mirrors the sort in AdminScoreEditor (see admin_schedule.jsx near
 // `const order`). Status keys must match the API's MatchStatus values:
 // running, scheduled, completed. Anything else (including `pending`,
-// `in_progress`, `complete`) gets `?? 99` and sorts last ; same as prod.
+// `in_progress`, `complete`) gets `?? 99` and sorts last; same as prod.
 // An earlier version used `in_progress`/`complete` which silently fell
 // through to the scheduledAt tiebreaker for running and finished matches.
 function sortScoreEdit(matches) {

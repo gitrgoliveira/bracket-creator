@@ -60,14 +60,14 @@ type PasswordVerifier interface {
 	// is defense-in-depth against the F4 sentinel-into-auth scenario in
 	// file mode (an empty stored password would let `password != t.Password`
 	// pass vacuously for an empty header). In locked mode the stored
-	// password is irrelevant, so the guard would 403 every request , it
+	// password is irrelevant, so the guard would 403 every request, it
 	// must be disabled.
 	EnforceEmptyStoredGuard() bool
 
 	// RedactStoredPassword reports whether the on-disk Tournament.Password
 	// field is non-authoritative for authentication and must therefore be
 	// stripped from API responses AND ignored on writes. True for any
-	// verifier whose authentication does not consult `tournament.md` ,
+	// verifier whose authentication does not consult `tournament.md`,
 	// today that's the bcrypt locked verifier; tomorrow it might be an
 	// OIDC or LDAP variant. Centralizing the test here means handlers
 	// don't grow scattered `verifier.Mode() == "locked"` string compares
@@ -85,7 +85,7 @@ type filePasswordVerifier struct {
 
 // NewFileVerifier constructs the default verifier. Returns the
 // PasswordVerifier interface so callers cannot accidentally reach
-// into the concrete type , the interface is the canonical contract,
+// into the concrete type, the interface is the canonical contract,
 // and any future verifier (LDAP, OIDC) can be wired in without
 // breaking signatures.
 func NewFileVerifier(store *state.Store) PasswordVerifier {
@@ -109,12 +109,12 @@ func (v *filePasswordVerifier) AllowsFileBootstrap() bool     { return true }
 func (v *filePasswordVerifier) EnforceEmptyStoredGuard() bool { return true }
 
 // RedactStoredPassword: in file mode the on-disk Password IS the
-// authoritative credential , never strip it.
+// authoritative credential, never strip it.
 func (v *filePasswordVerifier) RedactStoredPassword() bool { return false }
 
 // bcryptPasswordVerifier implements PasswordVerifier for locked mode. The
 // hash is captured once at construction (process start) so a rotation
-// requires a restart , intentional, since the hash lives in an env var
+// requires a restart, intentional, since the hash lives in an env var
 // outside the application's control and re-reading on every request would
 // give a confusing partial-rotation window.
 type bcryptPasswordVerifier struct {
@@ -125,7 +125,7 @@ type bcryptPasswordVerifier struct {
 // and returns a verifier that compares incoming X-Tournament-Password
 // values against it. The validation runs `bcrypt.Cost([]byte(hash))`
 // which parses the hash header (algorithm + cost prefix) without leaking
-// any timing oracle on the secret itself , malformed hashes are caught
+// any timing oracle on the secret itself, malformed hashes are caught
 // at startup so the operator gets a clear error rather than a 401-on-every-
 // request runtime puzzle.
 //
@@ -147,7 +147,7 @@ func NewBcryptVerifier(hash string) (PasswordVerifier, error) {
 // Longer inputs cause CompareHashAndPassword to return ErrPasswordTooLong
 // rather than a mismatch. We pre-check the length so an unauthenticated
 // client cannot trip a 500 from the middleware by sending an oversized
-// header , that would also let them probe whether locked mode is active
+// header, that would also let them probe whether locked mode is active
 // by distinguishing 500 (locked, length-exceeded) from 401 (file mode
 // or short-input mismatch). Treat oversize as a normal auth failure.
 const bcryptMaxInputBytes = 72
@@ -157,7 +157,7 @@ func (v *bcryptPasswordVerifier) Verify(presented string) (bool, error) {
 		return false, nil
 	}
 	if len(presented) > bcryptMaxInputBytes {
-		// Oversized header , same outcome as a wrong password. No 500,
+		// Oversized header, same outcome as a wrong password. No 500,
 		// no information leak via differential error codes.
 		return false, nil
 	}
@@ -182,7 +182,7 @@ func (v *bcryptPasswordVerifier) ResetEnabled() bool { return false }
 // AllowsFileBootstrap returns false. Anonymous bootstrap on an
 // internet-exposed locked deployment would let a network-reachable
 // attacker race-claim the initial tournament record before the
-// operator does , even though the submitted password is discarded
+// operator does, even though the submitted password is discarded
 // (so the attacker can't inject a credential), they could fill the
 // store with garbage Name/Date/Venue/Courts data the operator then
 // has to clean up out-of-band. The SPA's CreateTournament form
@@ -198,6 +198,6 @@ func (v *bcryptPasswordVerifier) EnforceEmptyStoredGuard() bool { return false }
 // responses (to avoid leaking a stale or pre-migration credential)
 // and ignored on writes (PUT preserves the stored value but the
 // response redacts it). The on-disk value is preserved so an
-// operator who later switches back to file mode can recover ,
+// operator who later switches back to file mode can recover,
 // documented in docs/user-guide/mobile-app.md.
 func (v *bcryptPasswordVerifier) RedactStoredPassword() bool { return true }

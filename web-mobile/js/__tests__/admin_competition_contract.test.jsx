@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import * as adminCompetition from '../admin_competition.jsx';
 
-// mp-hpe3 Phase 0 safety net : PUBLIC-SURFACE CONTRACT for admin_competition.jsx.
+// mp-hpe3 Phase 0 safety net: PUBLIC-SURFACE CONTRACT for admin_competition.jsx.
 //
 // This is the regression oracle for the upcoming split of the 1.7k-line
 // admin_competition.jsx into cohesive modules. The split keeps the original
-// file as a THIN ENTRY that must re-export the FULL public surface : both the
-// ES `export {…}` block AND the `window.*` component assignments : so that
+// file as a THIN ENTRY that must re-export the FULL public surface: both the
+// ES `export {…}` block AND the `window.*` component assignments: so that
 // dependent test files and non-module admin scripts keep resolving symbols.
 //
 // vitest's lenient resolver + esbuild's per-file transpile do NOT catch a
@@ -17,7 +17,7 @@ import * as adminCompetition from '../admin_competition.jsx';
 // fails loudly in CI instead of silently blanking the SPA in production.
 //
 // When the public surface legitimately changes, update the manifests below in
-// the same commit : that diff is the intentional record of the change.
+// the same commit: that diff is the intentional record of the change.
 
 // ES named exports the thin entry must expose (consumed by the vitest suite).
 const EXPECTED_ES_EXPORTS = [
@@ -32,8 +32,8 @@ const EXPECTED_ES_EXPORTS = [
 ];
 
 // Components assigned to window at module load. Importing admin_competition.jsx
-// evaluates every section sub-module : overview via the side-effect import,
-// settings/bracket/swiss via the helper re-exports : so ALL of these
+// evaluates every section sub-module: overview via the side-effect import,
+// settings/bracket/swiss via the helper re-exports: so ALL of these
 // assignments run during this test. A split that drops any `window.X = X`
 // would render that section undefined in the browser; this pins all six so it
 // fails loudly in CI instead.
@@ -55,7 +55,7 @@ describe('admin_competition.jsx public-surface contract (mp-hpe3 split oracle)',
       });
     }
 
-    it('exposes exactly the expected function exports : no more, no less', () => {
+    it('exposes exactly the expected function exports: no more, no less', () => {
       // True exact-set guard: the set of function-valued ES exports must EQUAL
       // the manifest. Fails on a dropped export (split lost a re-export) AND on
       // an unexpected addition (a new public symbol that should be added to
@@ -73,7 +73,7 @@ describe('admin_competition.jsx public-surface contract (mp-hpe3 split oracle)',
         // The module was imported above for its side effects; the assignments
         // at the tail of admin_competition.jsx (window.AdminCompetition = …)
         // run at load regardless of the React stub.
-        expect(window[name], `window.${name} not set : split dropped the assignment`).toBeDefined();
+        expect(window[name], `window.${name} not set: split dropped the assignment`).toBeDefined();
         expect(typeof window[name], `window.${name} should be a component (function)`).toBe('function');
       });
     }

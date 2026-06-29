@@ -170,7 +170,7 @@ func TestRequireElevatedPassword_FileMode(t *testing.T) {
 
 func TestRequireElevatedPassword_LockedUnconfigured503(t *testing.T) {
 	r := elevatedTestRouter(NewLockedUnconfiguredElevatedVerifier())
-	// Even a (wrong or right-looking) header can't help , no credential exists.
+	// Even a (wrong or right-looking) header can't help, no credential exists.
 	w := doGated(r, "anything", true)
 	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	assert.Contains(t, w.Body.String(), "not configured")

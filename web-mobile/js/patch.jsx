@@ -5,7 +5,7 @@
 // competition's poolMatches and bracket.rounds, looked up each match by
 // id in the SSE event payload, and merged via mergeMatchPatch (declared
 // in data.jsx). This module is the single source of truth for that
-// logic : both app.jsx and admin.jsx now import it.
+// logic: both app.jsx and admin.jsx now import it.
 //
 // The match-update SSE payload is shaped as either:
 //   { result: { id, ipponsA, ipponsB, hansokuA, hansokuB, ... } }
@@ -37,7 +37,7 @@
 // silently dropped court/scheduledAt preservation when data.jsx hadn't
 // loaded yet (a test-time hazard, since production index.html ordering
 // always loaded data.js first). The explicit import makes the
-// dependency a build-graph contract : esbuild will fail loudly rather
+// dependency a build-graph contract: esbuild will fail loudly rather
 // than fall through to a wrong-shape merge.
 import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
@@ -79,7 +79,7 @@ function _orderByCourtKey(entries) {
 // Recompute queuePosition on poolMatches per court after any SSE patch
 // that could invalidate the queue. The backend recomputes server-side
 // on the next GET (see internal/state/match.go), but SSE patches only
-// carry the single updated match : without this client-side step the
+// carry the single updated match: without this client-side step the
 // UI would show stale "N before yours" labels until the next viewer
 // refresh. FR-025, R3.
 //
@@ -102,8 +102,8 @@ function _orderByCourtKey(entries) {
 function recomputeQueuePositions(matches) {
     if (!matches || matches.length === 0) return matches;
 
-    // Build per-court ordered buckets and derive positions unconditionally
-    // : even when no matches are scheduled : because we also need to
+    // Build per-court ordered buckets and derive positions unconditionally:
+    // even when no matches are scheduled: because we also need to
     // clear stale non-zero queuePosition values on matches that just
     // transitioned off `scheduled` (the last scheduled match becoming
     // running/completed must drop its "Next up" label to 0).
@@ -140,7 +140,7 @@ function recomputeQueuePositions(matches) {
 // annotateBracketQueuePositions in internal/mobileapp/handlers_match.go:
 // per-court entries are sorted by (status priority, scheduledAt) before
 // the counter is incremented, so positions match the order the viewer's
-// ScheduleViewer actually renders rows in : including when a match's
+// ScheduleViewer actually renders rows in: including when a match's
 // scheduledAt or court changed under SSE and storage order no longer
 // reflects display order.
 //
@@ -153,8 +153,8 @@ function recomputeQueuePositions(matches) {
 // preserving React identity for memoised bracket components.
 function recomputeBracketQueuePositions(bracket) {
     if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
-    // Run unconditionally : even when no bracket match is currently
-    // scheduled : because we also need to clear stale non-zero
+    // Run unconditionally: even when no bracket match is currently
+    // scheduled: because we also need to clear stale non-zero
     // queuePosition values on matches that just transitioned off
     // `scheduled` (last scheduled bracket match completing must drop
     // its qp to 0). _mergeMatchPatch preserves fields not in the patch,
@@ -220,7 +220,7 @@ function recomputeBracketQueuePositions(bracket) {
 // through, so handling status events here keeps the dispatch in one place
 // without restructuring the surrounding subscribers. Subscribers (the
 // schedule list, the score editor, the import panel) listen on
-// `competitor-status-updated` and trigger a refetch : the simplest
+// `competitor-status-updated` and trigger a refetch: the simplest
 // invalidator that doesn't require restructuring the prop-driven
 // tournament state.
 //
@@ -231,7 +231,7 @@ function recomputeBracketQueuePositions(bracket) {
 // bracket.rounds plus seed/participant lists. A full refetch is cheaper
 // to reason about and matches what the existing match_updated path does
 // after applying the partial patch.
-// T217 / A2 : SSE ordering gap detection. The backend stamps every
+// T217 / A2: SSE ordering gap detection. The backend stamps every
 // envelope with a strictly-monotonic `seq` (T215) and retains the last
 // N events for replay-on-reconnect (T216). The frontend tracks the
 // highest seq seen and reacts on three conditions:
@@ -256,21 +256,21 @@ function recomputeBracketQueuePositions(bracket) {
 // a single counter. Decoupling from a module-level singleton makes the
 // helper safe to reuse across multiple competitions or test fixtures.
 
-// checkSeqGap : pure seq bookkeeping extracted from applyPatchOrdered.
+// checkSeqGap: pure seq bookkeeping extracted from applyPatchOrdered.
 // Handles only the monotonic-seq tracking without touching the patch
 // payload. Consumers MUST call this on every SSE event that carries a
-// numeric `seq` so the counter advances accurately : otherwise an
+// numeric `seq` so the counter advances accurately: otherwise an
 // untracked seq'd event makes the next patched event falsely look like a
-// gap. It is safe (and a no-op) to call on events WITHOUT a numeric seq :
+// gap. It is safe (and a no-op) to call on events WITHOUT a numeric seq:
 // heartbeats and other non-seq frames early-return without mutating state,
 // so callers can pass every event through unconditionally rather than
 // special-casing them out (and risk filtering a real event by mistake).
 // Heartbeats do NOT advance the seq counter.
 //
 // Returns:
-//   { duplicate: false, gap: false } : normal forward or first event
-//   { duplicate: true,  gap: false } : seq <= lastSeq (replay/dup)
-//   { gap: true,  duplicate: false } : seq jumped, onGap fired
+//   { duplicate: false, gap: false }: normal forward or first event
+//   { duplicate: true,  gap: false }: seq <= lastSeq (replay/dup)
+//   { gap: true,  duplicate: false }: seq jumped, onGap fired
 //
 // `seq` not a number → treat as no-seq event; state is not mutated.
 // `state.lastSeq === 0` (or absent) → first event; accepted, no gap check.
@@ -282,7 +282,7 @@ function checkSeqGap(state, seq, onGap) {
     if (!state) return { duplicate: false, gap: false };
     const last = (typeof state.lastSeq === "number") ? state.lastSeq : 0;
     if (last > 0 && seq <= last) {
-        // Duplicate / replay : do NOT advance lastSeq.
+        // Duplicate / replay: do NOT advance lastSeq.
         return { duplicate: true, gap: false };
     }
     if (last > 0 && seq > last + 1) {
@@ -309,12 +309,12 @@ function applyPatchOrdered(prev, event, state, onGap) {
     if (state && incoming != null) {
         const result = checkSeqGap(state, incoming, onGap);
         if (result.duplicate) {
-            // Duplicate / replay : drop silently. We've already
+            // Duplicate / replay: drop silently. We've already
             // merged this seq's patch into `prev`; re-applying would
             // be harmless but wastes a render.
             return prev;
         }
-        // gap:true or gap:false (normal) : fall through to applyPatch.
+        // gap:true or gap:false (normal): fall through to applyPatch.
         // checkSeqGap already advanced state.lastSeq and fired onGap.
     }
     return applyPatch(prev, event);
@@ -329,7 +329,7 @@ function applyPatch(prev, event) {
                 window.dispatchEvent(new CustomEvent("competitor-status-updated", { detail: event.data }));
             }
         } catch (_) { /* ignore dispatch failures in non-DOM environments */ }
-        // No tournament-state mutation here : caller re-fetches on the
+        // No tournament-state mutation here: caller re-fetches on the
         // same event via a window listener (see admin_schedule.jsx /
         // app.jsx subscribeToEvents). Return prev unchanged so memoised
         // children don't re-render gratuitously.
@@ -347,24 +347,24 @@ function applyPatch(prev, event) {
     // only then is a queue-position recompute meaningful.
     let needsQueueRecompute = false;
 
-    // Built lazily : most events won't hit any of our match IDs (e.g.
+    // Built lazily: most events won't hit any of our match IDs (e.g.
     // sibling-competition updates) so we skip the O(participants) scan
     // until we actually find a match that needs normalization (T093).
     let playerMap;
     const getPlayerMap = () => playerMap ?? (playerMap = buildPlayerMap(prev));
 
     // Queue positions count *scheduled* matches only, so a recompute
-    // is needed whenever a match's "scheduled-ness" changes : leaving
+    // is needed whenever a match's "scheduled-ness" changes: leaving
     // (→ running / completed / cancelled / forfeit / kiken / …) OR
     // entering (admin correction reverts a completed match back to
-    // scheduled) : and whenever a still-scheduled match's
+    // scheduled): and whenever a still-scheduled match's
     // court/scheduledAt moves so siblings on either side re-rank.
     const isScheduleAffecting = (prevStatus, nextStatus, prevMatch, nextMatch) => {
         // Any change in scheduled-ness flips the per-court queue's
         // membership: either releasing a slot (leaving scheduled) or
         // claiming one (entering scheduled). Both directions matter.
         if ((prevStatus === "scheduled") !== (nextStatus === "scheduled")) return true;
-        // Court or scheduledAt move while still scheduled : the
+        // Court or scheduledAt move while still scheduled: the
         // per-court bucket itself changes (or the within-court sort
         // order does), so siblings on either side need to re-rank.
         if (prevStatus === "scheduled" && nextStatus === "scheduled") {
@@ -404,7 +404,7 @@ function applyPatch(prev, event) {
                     bChanged = true; changed = true;
                     // Map MatchResult to BracketMatch fields. Bracket
                     // matches keep ippons as joined strings (scoreA/scoreB),
-                    // not arrays : without this the next render would see
+                    // not arrays: without this the next render would see
                     // scoreA undefined and the bracket cell would go blank.
                     const patch = { ...update };
                     if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");

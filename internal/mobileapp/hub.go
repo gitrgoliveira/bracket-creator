@@ -241,7 +241,7 @@ func (h *Hub) Subscribe() chan string {
 
 // Close marks the hub as shutting down and closes every subscriber
 // channel. The per-connection streaming goroutine in HandleEvents
-// observes the channel close (the `case msg, ok := <-ch; if !ok`
+// observes the channel close (the `case msg, ok:= <-ch; if !ok`
 // branch) and returns, unblocking http.Server.Shutdown's wait loop.
 //
 // Idempotent, safe to call twice. After Close, Subscribe returns nil

@@ -801,7 +801,7 @@ function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
 }
 
-// StartAllModal : three-phase dialog for the dashboard "Start all" action.
+// StartAllModal: three-phase dialog for the dashboard "Start all" action.
 // Follows the shared .modal-backdrop / .modal pattern (mirrors
 // AnnouncementModal). The confirm and result phases are dismissable (backdrop
 // click + Escape); the running phase is NOT. Closing mid-start would orphan

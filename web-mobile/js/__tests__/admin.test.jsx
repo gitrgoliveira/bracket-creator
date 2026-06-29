@@ -111,7 +111,7 @@ describe('mergeCompetitionsIntoTournament', () => {
 // Fix: a `refreshCompsAfterCreate(created, ...)` helper that ALSO
 // merges the created record into local state when refresh fails.
 // The mutator pattern is:
-//   comps => comps.some(c => c.id === created.id) ? comps : [...comps, created]
+//   comps => comps.some(c => c.id === created.id) ? comps: [...comps, created]
 // It's idempotent (no duplicates if `created` is already in `comps`,
 // e.g. via an SSE update that landed during the in-flight create).
 //

@@ -49,8 +49,8 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 
 // generatePoolPreviewBracket builds the in-place knockout bracket for a mixed
 // (Pools + Knockout) competition at draw time. Its leaves start as pool-origin
-// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals
-// , the same hyphenated labels the Excel Tree sheet uses, and the bracket is
+// placeholders ("Pool A-1st", "Pool B-2nd", …) produced by helper.GenerateFinals,
+// the same hyphenated labels the Excel Tree sheet uses, and the bracket is
 // scheduled here so knockout matches have court/time slots from the start. As
 // each pool finishes, ResolveQualifiedPools replaces that pool's placeholders
 // with the real finishers IN PLACE (no separate playoffs competition, no manual

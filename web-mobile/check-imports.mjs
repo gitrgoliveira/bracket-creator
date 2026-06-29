@@ -49,7 +49,7 @@ const CHECK_MODULES = [
 function extractExports(src) {
   const names = new Set();
 
-  // export { a, b as c, … } , possibly multiline
+  // export { a, b as c, … }, possibly multiline
   for (const m of src.matchAll(/export\s*\{([^}]+)\}/gs)) {
     for (const item of stripComments(m[1]).split(',')) {
       // 'local as exported' → exported is what importers see

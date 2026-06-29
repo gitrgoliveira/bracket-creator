@@ -168,7 +168,7 @@ func TestWithTransaction_NestedCallDoesNotDeadlock(t *testing.T) {
 }
 
 // TestWithTransaction_InvalidCompIDRejected pins that WithTransaction
-// itself runs the ValidateCompetitionID precondition ,every other
+// itself runs the ValidateCompetitionID precondition, every other
 // per-comp Store method does, and a transactional entry-point that
 // skipped it would let a path-traversal compID through to whatever
 // the fn body did with t.compID. The fn must NOT run when the ID is
@@ -191,7 +191,7 @@ func TestWithTransaction_InvalidCompIDRejected(t *testing.T) {
 }
 
 // TestWithTransaction_SerialisesAcrossGoroutines pins that two
-// concurrent WithTransaction calls on the SAME compID serialise ,one
+// concurrent WithTransaction calls on the SAME compID serialise, one
 // must finish before the other observes its writes. Without this, the
 // whole point of T155 (atomic multi-file commits per competition) is
 // undone.
@@ -222,7 +222,7 @@ func TestWithTransaction_SerialisesAcrossGoroutines(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			// Insert a yield to widen any race window ,if the lock
+			// Insert a yield to widen any race window, if the lock
 			// were absent, this would let the OTHER goroutine load
 			// the same pre-mutation state and we'd lose one marker.
 			time.Sleep(5 * time.Millisecond)
@@ -241,7 +241,7 @@ func TestWithTransaction_SerialisesAcrossGoroutines(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, loaded)
 	assert.Len(t, loaded.Name, 4,
-		"both markers must land ,if Name has only 2 chars, the per-comp lock isn't serialising the tx bodies")
+		"both markers must land, if Name has only 2 chars, the per-comp lock isn't serialising the tx bodies")
 }
 
 // TestWithTransaction_CrossFile_PoolMatchesAndBracket exercises the
@@ -291,7 +291,7 @@ func TestWithTransaction_CrossFile_PoolMatchesAndBracket(t *testing.T) {
 // TestWithTransaction_MultiFileAtomicityCrashAfterCommit pins the A1
 // WAL contract: a multi-file transaction that crashes after the WAL
 // is committed but before all Applies finish must replay on next
-// startup and land every staged write ,not just the ones that ran
+// startup and land every staged write, not just the ones that ran
 // before the crash.
 //
 // Simulates the crash by:
@@ -307,7 +307,7 @@ func TestWithTransaction_CrossFile_PoolMatchesAndBracket(t *testing.T) {
 //  5. Asserts both target files now reflect the staged writes.
 //
 // Without the WAL, the first Apply would land file A on disk while
-// file B remains the pre-tx state ,a permanent inconsistency.
+// file B remains the pre-tx state, a permanent inconsistency.
 // With the WAL replay, the next startup completes the work.
 func TestWithTransaction_MultiFileAtomicityCrashAfterCommit(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-tx-wal-*")
@@ -336,7 +336,7 @@ func TestWithTransaction_MultiFileAtomicityCrashAfterCommit(t *testing.T) {
 	// this is to wedge in a poison-write FileIntent that no
 	// FS-level write can succeed on, but that's complex; the
 	// simpler proof is to NOT crash mid-tx and let the WAL run to
-	// completion, then verify the resulting state ,which we
+	// completion, then verify the resulting state, which we
 	// already cover via TestWithTransaction_BasicLoadSave. Here
 	// we directly exercise the replay path:
 	//   - Build a WAL with two intents using the wal package
@@ -451,7 +451,7 @@ func TestWithTransaction_AbortLeavesNoWAL(t *testing.T) {
 // that does only reads (no SavePoolMatches / SaveBracket / etc.)
 // produces zero WAL intents, so WithTransaction skips Commit/Apply/
 // Done entirely. Catches a regression where the WAL would write an
-// empty intent file for every read-only tx ,a hot-path waste of
+// empty intent file for every read-only tx, a hot-path waste of
 // disk and fsync.
 func TestWithTransaction_NoWriteSkipsWAL(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-tx-wal-*")
@@ -484,7 +484,7 @@ func TestWithTransaction_NoWriteSkipsWAL(t *testing.T) {
 // rejects a compID different from the one WithTransaction was opened
 // with. Without the guard, a stale or copy-pasted compID inside fn
 // would dispatch the *Locked helper for another competition while
-// holding only the original's lock ,unlocked I/O.
+// holding only the original's lock, unlocked I/O.
 //
 // The body never reads or writes the "wrong" competition (no fixture
 // for it exists); the guard short-circuits before the locked helper
@@ -640,7 +640,7 @@ func TestStoreTx_LoadCompetitorStatusAndSet(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "TX Status"}))
 
 	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
-		// LoadCompetitorStatus inside tx (no prior write ,reads from disk)
+		// LoadCompetitorStatus inside tx (no prior write, reads from disk)
 		statuses, err := tx.LoadCompetitorStatus(compID)
 		if err != nil {
 			return err
@@ -997,7 +997,7 @@ func TestStoreTx_LoadCompetition_ReadYourOwnWrites(t *testing.T) {
 		if err := tx.SaveCompetition(&Competition{ID: compID, Name: "TxUpdated"}); err != nil {
 			return err
 		}
-		// Re-load within the same tx ,should see staged value (pending path)
+		// Re-load within the same tx, should see staged value (pending path)
 		c, err := tx.LoadCompetition(compID)
 		if err != nil {
 			return err
@@ -1029,7 +1029,7 @@ func TestStoreTx_UpdateBracket_ReadYourOwnWrites(t *testing.T) {
 		if err := tx.SaveBracket(compID, b); err != nil {
 			return err
 		}
-		// Now UpdateBracket ,should read from staged WAL (pending path)
+		// Now UpdateBracket, should read from staged WAL (pending path)
 		return tx.UpdateBracket(compID, func(bracket *Bracket) error {
 			if len(bracket.Rounds) == 0 || bracket.Rounds[0][0].ID != "M1" {
 				return errors.New("UpdateBracket ROYW: staged bracket not visible")
@@ -1126,7 +1126,7 @@ func TestStoreTx_LockTeamLineupsForRound_ReadYourOwnWrites(t *testing.T) {
 		if err := tx.SetTeamLineup(compID, lineup, 5); err != nil {
 			return err
 		}
-		// Lock the round ,reads from staged WAL (pending path)
+		// Lock the round, reads from staged WAL (pending path)
 		return tx.LockTeamLineupsForRound(compID, 2, lockedAt)
 	})
 	require.NoError(t, txErr)
@@ -1148,13 +1148,13 @@ func TestStoreTx_SetCompetitorStatus_DoubleWrite(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "CS Double"}))
 
 	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
-		// First write ,non-pending path.
+		// First write, non-pending path.
 		if err := tx.SetCompetitorStatus(compID, domain.CompetitorStatus{
 			PlayerID: "player-A", Eligible: false, Reason: "kiken", MatchID: "m1",
 		}); err != nil {
 			return err
 		}
-		// Second write ,pending path (merge).
+		// Second write, pending path (merge).
 		return tx.SetCompetitorStatus(compID, domain.CompetitorStatus{
 			PlayerID: "player-B", Eligible: false, Reason: "kiken", MatchID: "m2",
 		})
@@ -1330,7 +1330,7 @@ func TestStoreTx_CheckCompIDMismatch(t *testing.T) {
 
 // TestStoreTx_ValidateCompetitionID covers the ValidateCompetitionID error
 // branches inside storeTx methods. These branches are only reachable by
-// constructing storeTx directly with an invalid compID ,WithTransaction
+// constructing storeTx directly with an invalid compID, WithTransaction
 // validates the ID upfront, so a storeTx with an illegal ID is never created
 // through the normal API.
 //
@@ -1341,7 +1341,7 @@ func TestStoreTx_ValidateCompetitionID(t *testing.T) {
 	defer cleanup()
 
 	// "id.bad" passes checkCompID but fails ValidateCompetitionID.
-	// wal is nil ,none of these methods reach t.txWriteFn().
+	// wal is nil, none of these methods reach t.txWriteFn().
 	const badID = "id.bad"
 	tx := &storeTx{store: store, compID: badID}
 
@@ -1553,7 +1553,7 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 	})
 
 	t.Run("LockTeamLineupsForRound no-change in staged bytes (already locked)", func(t *testing.T) {
-		// Stage a round-1 lineup, then ask to lock round 0 ,no round-0 lineups
+		// Stage a round-1 lineup, then ask to lock round 0, no round-0 lineups
 		// exist in staged bytes so changed stays false (the !changed path).
 		cid := "pp-lock-nochange"
 		newComp(cid)

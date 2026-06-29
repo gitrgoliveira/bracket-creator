@@ -10,7 +10,7 @@ var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 
 // IsUUIDv4 reports whether s has the lowercase canonical-UUID shape
 // (8-4-4-4-12 lowercase hex). Despite the historical name, this is a
-// SHAPE check , it does NOT enforce the v4 version nibble or the
+// SHAPE check, it does NOT enforce the v4 version nibble or the
 // 8/9/a/b variant nibble. Many in-repo test fixtures use non-v4 or
 // invalid-variant UUIDs (e.g. `…-7c3a-11e7-…` v1 timestamps,
 // `…-4ddd-dddd-dddd-…` synthetic ids) and pass this check. Callers

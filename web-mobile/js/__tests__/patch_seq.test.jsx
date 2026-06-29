@@ -122,7 +122,7 @@ describe('applyPatchOrdered', () => {
       { type: "match_updated", seq: 2, data: { result: { id: "p2", winner: "B" } } },
       // Gap (3, 4 missing): onGap fires once with {3, 4}.
       { type: "match_updated", seq: 5, data: { result: { id: "p1", winner: "C" } } },
-      // Replay of seq 2 (duplicate) : dropped.
+      // Replay of seq 2 (duplicate): dropped.
       { type: "match_updated", seq: 2, data: { result: { id: "p2", winner: "OLD" } } },
       // Normal continuation.
       { type: "match_updated", seq: 6, data: { result: { id: "p2", winner: "D" } } },
@@ -160,7 +160,7 @@ describe('applyPatchOrdered', () => {
 
   it('still applies competitor_status_updated patches via the underlying applyPatch', () => {
     // competitor_status_updated returns prev unchanged but dispatches a
-    // window CustomEvent : applyPatchOrdered must not short-circuit
+    // window CustomEvent: applyPatchOrdered must not short-circuit
     // that. We verify by checking the event handler fires.
     const prev = makeState();
     const state = {};

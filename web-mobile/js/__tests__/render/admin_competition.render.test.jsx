@@ -117,7 +117,7 @@ function makeTournament(comp, overrides = {}) {
 }
 
 // Mount within act() so async effects (e.g. AdminSettings' schedule-estimate
-// fetch) flush and settle their state updates inside the act boundary : the
+// fetch) flush and settle their state updates inside the act boundary: the
 // render harness fails the test on the "not wrapped in act(...)" console.error
 // otherwise. Returns the render result; a throw during mount fails the test.
 async function mountSection(section, { comp = makeCompetition(), tweaks = {} } = {}) {

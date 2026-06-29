@@ -171,7 +171,7 @@ describe('subscribeToEvents: shared singleton', () => {
         // Late subscriber: no shared source exists right now (it was nulled on
         // error). subscribeToEvents only replays a status when a source ALREADY
         // exists; here it opens a fresh source (CONNECTING) and waits for that
-        // source's onopen/onerror : so status2 is NOT called synchronously.
+        // source's onopen/onerror: so status2 is NOT called synchronously.
         const status2 = vi.fn();
         const unsub2 = API.subscribeToEvents(() => {}, status2);
 
@@ -189,7 +189,7 @@ describe('subscribeToEvents: shared singleton', () => {
         const src1 = FakeEventSource.instances[0];
         src1.simulateOpen();
 
-        // Remove all subscribers : should close the source immediately.
+        // Remove all subscribers: should close the source immediately.
         unsub1();
         unsub2();
 
@@ -271,7 +271,7 @@ describe('subscribeToEvents: shared singleton', () => {
         src.simulateOpen();
         src.simulateError();
 
-        // Timer should be scheduled : advance it and check a new source opens.
+        // Timer should be scheduled: advance it and check a new source opens.
         expect(FakeEventSource.instances).toHaveLength(1);
         vi.advanceTimersByTime(5000);
         expect(FakeEventSource.instances).toHaveLength(2);
@@ -294,7 +294,7 @@ describe('subscribeToEvents: shared singleton', () => {
         const src = FakeEventSource.instances[0];
         src.simulateOpen();
 
-        // Error on the *active* source : NOT a stale orphan.
+        // Error on the *active* source: NOT a stale orphan.
         src.simulateError();
 
         vi.advanceTimersByTime(10000);
@@ -312,7 +312,7 @@ describe('subscribeToEvents: shared singleton', () => {
         unsub1();
 
         vi.advanceTimersByTime(5000);
-        // Timer should have been cleared : no new source.
+        // Timer should have been cleared: no new source.
         expect(FakeEventSource.instances).toHaveLength(1);
     });
 
@@ -330,7 +330,7 @@ describe('subscribeToEvents: shared singleton', () => {
         const unsub2 = API.subscribeToEvents(() => {});
         expect(FakeEventSource.instances).toHaveLength(2);
 
-        // Advance past the original 5s retry : it must have been cancelled, so
+        // Advance past the original 5s retry: it must have been cancelled, so
         // NO third source is created (pre-fix this would be length 3 and leak).
         vi.advanceTimersByTime(5000);
         expect(FakeEventSource.instances).toHaveLength(2);

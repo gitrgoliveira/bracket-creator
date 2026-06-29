@@ -4,7 +4,7 @@ This document explains how the bracket-creator live tournament app is deployed o
 **Google Cloud Always Free tier**, what gets created, and what to expect. For step-by-step
 deployment instructions, see [README.md](README.md).
 
-> Cloud free-tier allowances change over time. The figures below were accurate as of June 2026 ,
+> Cloud free-tier allowances change over time. The figures below were accurate as of June 2026,
 > confirm them against Google's current [Free Tier](https://cloud.google.com/free) page before you
 > rely on them.
 

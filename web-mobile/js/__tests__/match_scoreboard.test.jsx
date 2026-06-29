@@ -20,7 +20,7 @@ function findInTree(node, pred) {
   for (const k of [].concat(kids)) { const f = findInTree(k, pred); if (f) return f; }
   return null;
 }
-// BoutSubRow children of TeamScoreboard are component vnodes (not expanded) :
+// BoutSubRow children of TeamScoreboard are component vnodes (not expanded):
 // identify them by their `sub` prop.
 function boutRows(node, out = []) {
   if (!node || typeof node !== 'object') return out;
@@ -75,7 +75,7 @@ describe('match_scoreboard: teamIVPW', () => {
 
   it('prefers the explicit winner when no ippon letters are recorded (quick-score / forfeit)', () => {
     const subs = [
-      // winner set, no ippons : fusensho/kiken style. sideA=aka, sideB=shiro.
+      // winner set, no ippons: fusensho/kiken style. sideA=aka, sideB=shiro.
       { position: 1, sideA: 'Aka P', sideB: 'Shiro P', winner: 'Shiro P', ipponsA: [], ipponsB: [] },
       { position: 2, sideA: 'Aka P', sideB: 'Shiro P', winner: 'Aka P', ipponsA: [], ipponsB: [] },
     ];
@@ -151,7 +151,7 @@ describe('match_scoreboard components', () => {
     expect(findInTree(tree, n => n?.props?.['data-testid'] === 'foul-mark-a')).toBeNull();
   });
 
-  it('fills ippons from the OUTSIDE inward : aka (right) outer cell first', () => {
+  it('fills ippons from the OUTSIDE inward: aka (right) outer cell first', () => {
     // First point scored = letters[0] = OUTER cell. Shiro outer = left, aka
     // outer = right. So for two ippons D (1st) then M (2nd):
     //   shiro visual L→R = "D","M"  (D outer-left)
@@ -168,7 +168,7 @@ describe('match_scoreboard components', () => {
 
   it('BoutSubRow falls back to sub.sideA / sub.sideB when no lineup is pinned (kachinuki)', () => {
     // mp-13y: kachinuki bouts carry the per-bout competitor names on the sub.
-    // Without a lineup, the row should show those names : not bare bout numbers.
+    // Without a lineup, the row should show those names: not bare bout numbers.
     const sub = { position: 3, sideA: 'Aka Player', sideB: 'Shiro Player', ipponsB: ['M'], ipponsA: [] };
     const tree = runtime.mount(BoutSubRow, { sub, index: 2, lineupA: null, lineupB: null, teamSize: 5 });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
@@ -315,7 +315,7 @@ describe('match_scoreboard components', () => {
     expect(states).not.toContain('now');
   });
 
-  it('TeamScoreboard leaves an up-next board (no scored bouts) all queued : no "now"', () => {
+  it('TeamScoreboard leaves an up-next board (no scored bouts) all queued: no "now"', () => {
     const tree = runtime.mount(TeamScoreboard, { subResults: [], lineupA: null, lineupB: null, teamSize: 5, showDH: false });
     const states = boutRows(tree).map(r => r.state);
     expect(states.length).toBe(5);
@@ -415,7 +415,7 @@ describe('match_scoreboard components', () => {
       subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: true,
       shiroName: 'White Team', akaName: 'Red Team',
     });
-    // Find the DH bout row : its sub must carry teamB/teamA.
+    // Find the DH bout row: its sub must carry teamB/teamA.
     const dhRow = boutRows(tree).find(r => r.isDH);
     expect(dhRow).toBeTruthy();
     expect(dhRow.sub.teamB).toBe('White Team');

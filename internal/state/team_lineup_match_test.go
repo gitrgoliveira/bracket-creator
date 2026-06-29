@@ -151,7 +151,7 @@ func TestMatchLineup_RoundLockSkipsMatchScoped(t *testing.T) {
 // TestMatchLineup_SetGuardedByOwnMatchStatus: SetTeamLineup for a
 // match-scoped lineup is only blocked when THAT match is running AND the write
 // changes an already-recorded position. A NEW lineup (no prior entry) can
-// always be saved ,even while its match is running (live table entry).
+// always be saved, even while its match is running (live table entry).
 func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -166,11 +166,11 @@ func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
 		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
 	}))
 
-	// PoolA-0 is running but no prior lineup ,NEW lineup must succeed.
+	// PoolA-0 is running but no prior lineup, NEW lineup must succeed.
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
 		"saving a new match-scoped lineup while the match is running must succeed (live table entry)")
 
-	// PoolA-0 is running AND a lineup is recorded ,CHANGING a position must be blocked.
+	// PoolA-0 is running AND a lineup is recorded, CHANGING a position must be blocked.
 	changed := fiveStarterForMatch("team-alpha", "PoolA-0")
 	changed.Positions[domain.PosJiho] = "p2-substitute"
 	require.ErrorIs(t, store.SetTeamLineup(compID, changed, 5),
@@ -194,7 +194,7 @@ func TestSetTeamLineupForce_BypassesMatchFreeze(t *testing.T) {
 		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
 	}))
 
-	// Normal path: NEW lineup while match is running ,now SUCCEEDS.
+	// Normal path: NEW lineup while match is running, now SUCCEEDS.
 	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
 		"new lineup while match is running must succeed (live table entry)")
 
@@ -239,7 +239,7 @@ func TestSetTeamLineup_InTxPendingForGuardsLiveMatch(t *testing.T) {
 	}))
 
 	err := store.WithTransaction(compID, func(tx StoreTx) error {
-		// 1. NEW lineup on the running match ,stages lineups.yaml, so every
+		// 1. NEW lineup on the running match, stages lineups.yaml, so every
 		//    subsequent write in this tx hits the pendingFor branch.
 		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5); e != nil {
 			return e
@@ -313,7 +313,7 @@ func TestDeleteTeamLineupForMatch(t *testing.T) {
 // TestDeleteTeamLineupForMatch_RefusesWhenMatchLive guards the
 // delete-side TOCTOU window (PR #197 review): even with no LockedAt
 // stamp yet, a running/completed match must block DELETE so it cannot
-// reopen a live encounter's lineup ,mirroring SetTeamLineup's guard.
+// reopen a live encounter's lineup, mirroring SetTeamLineup's guard.
 func TestDeleteTeamLineupForMatch_RefusesWhenMatchLive(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()

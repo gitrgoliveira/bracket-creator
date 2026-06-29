@@ -2,13 +2,13 @@
 // and per-pool drill-down. See web-mobile/admin_split_plan.md.
 
 // Canonical pool-id parser shared with the display surfaces (single source of
-// truth : ./pool_ids.jsx is a leaf module with no import chain).
+// truth: ./pool_ids.jsx is a leaf module with no import chain).
 import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
-// Canonical rank cap (admin_helpers.jsx) : mirrors helper.MaxRankOverride
+// Canonical rank cap (admin_helpers.jsx): mirrors helper.MaxRankOverride
 // on the Go side. The override-rank handler ALSO validates against the
 // actual pool size; this cap is the absolute overflow guard.
 const MAX_RANK = window.MAX_RANK;
@@ -17,7 +17,7 @@ const ScoreEditorModal = window.ScoreEditorModal;
 
 // Pure decision logic for what RankInput.handleBlur should do, given the
 // state of its refs and props at blur time. Returned as a tagged action so
-// callers (handleBlur) just dispatch : no React state lives in here.
+// callers (handleBlur) just dispatch: no React state lives in here.
 //
 // Cases (in priority order):
 //   1. `cancelled` (Esc was pressed) → noop. The Esc handler already
@@ -32,7 +32,7 @@ const ScoreEditorModal = window.ScoreEditorModal;
 //      accepted. MAX_RANK mirrors the server-side overflow cap
 //      (helper.MaxRankOverride); the backend ALSO rejects when the
 //      rank exceeds the actual pool size, which is the real semantic
-//      constraint : this cap is the overflow guard.
+//      constraint: this cap is the overflow guard.
 //   4. Valid edit different from initial → commit String(parsed).
 //      Same value as initial (e.g. typed "02" when initial is 2,
 //      or no-op retype) → noop.
@@ -59,7 +59,7 @@ function decideRankCommit({ v, initial, focusValue, cancelled }) {
 // Filter a flat poolMatches array down to entries belonging to a single pool.
 // Uses poolNameOf (./pool_ids.jsx) so DH/TB suffix variants are handled correctly.
 //
-// pool.matches (helper.Match) carries only sideA/sideB : no id, status, or
+// pool.matches (helper.Match) carries only sideA/sideB: no id, status, or
 // score data. poolMatches (state.MatchResult) has the full data including the
 // id required by the score API endpoint. Score buttons in the pool-card view
 // must use poolMatchesForPool to get the correct MatchResult objects.
@@ -73,16 +73,16 @@ function poolMatchesForPool(poolMatches, poolName) {
 // ScoreEditorModal reads off the match prop. Pool matches arrive as the
 // raw MatchResult shape (id, status, sides, ippons, decision) with none
 // of the comp-level fields the modal needs:
-//   * compKind / teamSize : picks TeamScoreEditorModal vs individual editor
-//   * compId : fetches competition details (maxEnchoPeriods, naginata)
+//   * compKind / teamSize: picks TeamScoreEditorModal vs individual editor
+//   * compId: fetches competition details (maxEnchoPeriods, naginata)
 //              and is the path for decision/score endpoints
-//   * compName : header eyebrow
-//   * phase / poolName : header subtitle ("CompName · PoolName")
+//   * compName: header eyebrow
+//   * phase / poolName: header subtitle ("CompName · PoolName")
 //
 // Pool name falls back to the prefix of the match id ("PoolName-MatchIdx"
 // per parsePoolMatchesRecords in internal/state/pools.go) when the caller
 // can't supply a known pool name. Existing falsy fields on `m` are
-// overwritten with derived values : truthy fields are preserved so a
+// overwritten with derived values: truthy fields are preserved so a
 // server-injected compId or compKind from a later refresh is not clobbered.
 //
 // sideA/sideB are normalized from plain strings to {id,name} objects via
@@ -107,7 +107,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
   // Pool daihyosen ("Pool X-DH-N") and tiebreaker ("Pool X-TB-N") bouts are
   // single representative/ippon-shobu matches, scored as INDIVIDUAL even in a
-  // team competition : force compKind=""/teamSize=0 so ScoreEditorModal routes
+  // team competition: force compKind=""/teamSize=0 so ScoreEditorModal routes
   // to the individual editor (one bout), not the 5-person team sheet. This
   // mirrors the same override in viewer.jsx compMatches; without it, scoring a
   // team pool-DH from the Pools tab opens the wrong (team) scorer.
@@ -153,7 +153,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // swap-flicker until the second call landed.
 //
 // `focusedRef` suppresses the upstream-sync useEffect while the user is
-// mid-edit : otherwise an SSE-driven standings refresh (another admin
+// mid-edit: otherwise an SSE-driven standings refresh (another admin
 // completing a match) would clobber the half-typed value.
 //
 // `focusValueRef` snapshots `v` at focus time so we can detect
@@ -190,7 +190,7 @@ function RankInput({ initial, className, onCommit, style }) {
       // immediately reflects what's being saved. Without this, typing
       // "5abc" then blurring would commit rank=5 to the server but
       // leave the input displaying "5abc" until the SSE-driven prop
-      // refresh re-runs the upstream-sync useEffect : a confusing
+      // refresh re-runs the upstream-sync useEffect: a confusing
       // few-hundred-ms window where the visible value doesn't match
       // what was sent.
       setV(result.value);
@@ -229,7 +229,7 @@ function RankInput({ initial, className, onCommit, style }) {
   );
 }
 
-// poolDisplayLabel : returns the user-facing label for a pool heading.
+// poolDisplayLabel: returns the user-facing label for a pool heading.
 // League competitions use a single pool that spans the full roster; calling
 // it "Pool A" would be confusing, so we show "League table" instead.
 function poolDisplayLabel(pool, format) {
@@ -446,19 +446,19 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
   // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
   // teamSize, compName, phase, poolName). Pool-match objects from
-  // pools[i].matches carry only the MatchResult shape : no comp-level
-  // enrichment : so we wrap them at the modal boundary via the pure
+  // pools[i].matches carry only the MatchResult shape: no comp-level
+  // enrichment: so we wrap them at the modal boundary via the pure
   // enrichPoolMatchWithComp helper. See its docstring for the rationale.
   const enrichPoolMatch = (m, poolNameOverride) => enrichPoolMatchWithComp(m, c, poolNameOverride);
 
-  // pool.matches (helper.Match) only carries sideA/sideB : no id, status, or
+  // pool.matches (helper.Match) only carries sideA/sideB: no id, status, or
   // score data. poolMatches (state.MatchResult) has the full data including
   // the id used by the score API endpoint. Use poolMatchesFor filtered by
   // pool name for rendering match rows so Score/Edit buttons have the real id.
   // See poolMatchesForPool's docstring for the full rationale.
   //
   // Precompute a Map<poolName, MatchResult[]> so poolMatchesFor is O(1) per
-  // lookup instead of O(pools × matches) : each card in the grid called the
+  // lookup instead of O(pools × matches): each card in the grid called the
   // old inline filter independently, scanning the full array per pool.
   const poolMatchesMap = useMemoA(() => {
     const map = new Map();
@@ -667,7 +667,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               tabIndex={0}
               onClick={() => setSelectedPoolName(pool.poolName)}
               // Only fire when the card itself has focus, not a nested
-              // rank input or per-match Score button : those handle their
+              // rank input or per-match Score button: those handle their
               // own activation.
               onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSelectedPoolName(pool.poolName); } }}
               style={{ cursor: "pointer" }}
@@ -771,7 +771,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
 window.AdminPools = AdminPools;
 
-// ES export for the vitest suite : pure helpers only. The component
+// ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
 
 // Build a map of match id → MatchResult for O(1) running-state lookups.
@@ -780,7 +780,7 @@ function buildRunningById(poolMatches) {
 }
 
 // Returns true when rank inputs should be locked (competition is past the
-// pools phase : playoffs, completed, setup, invalid, or unknown status).
+// pools phase: playoffs, completed, setup, invalid, or unknown status).
 function isRanksLocked(compStatus) {
   return compStatus !== "pools";
 }

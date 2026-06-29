@@ -1,4 +1,4 @@
-// ViewerHome : top-level home component + routing helpers.
+// ViewerHome: top-level home component + routing helpers.
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
@@ -17,7 +17,7 @@ const EmptyState = window.EmptyState;
 
 // Canonical "match has both sides for real participants" predicate.
 // Replaces the local `m.sideA && m.sideB` shorthand that treated the
-// `{id:"",name:""}` placeholder from normalizeMatch as a real side :
+// `{id:"",name:""}` placeholder from normalizeMatch as a real side:
 // see admin_helpers.jsx for the full bug shape and rationale.
 //
 // Wrapped as a lazy callable rather than `const x = window.hasBothSides`
@@ -45,7 +45,7 @@ export function shouldShowRegister(tournament, competition, hasHandler) {
 //   1. ?player= as exact id (UUID) match
 //   2. ?playerNumber= as exact number match (mp-yin4 tag QR)
 //   3. ?name= (or ?player= as backward-compatible fallback) as case-insensitive
-//      name substring : allows legacy links that used ?player=<name> to keep working
+//      name substring: allows legacy links that used ?player=<name> to keep working
 // Returns null when no participant matches, else { player: {id,name} }.
 export function resolveDeepLink(searchString, roster) {
   const params = new URLSearchParams(searchString || "");
@@ -97,7 +97,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const [selectedMatch, setSelectedMatch] = useState(null);
 
   // mp-xhaa: per-viewer personalisation is now a single unified watchlist of
-  // up to 50 entities : individual players OR whole dojos. Exactly one entity
+  // up to 50 entities: individual players OR whole dojos. Exactly one entity
   // is "primary" (implicitly when there is one, or by an explicit pin when ≥2);
   // the primary gets the hero card and the loud on-deck chime. The legacy
   // single "followed player" is migrated into the list once (see useWatchlist).
@@ -111,7 +111,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // T114 / mp-xhaa: parse `?player=<uuid>` (and optionally `?name=<name>`) deep
   // links from QR codes exactly once. Adding to the watchlist is
   // non-destructive (unlike the old single-follow overwrite), so we just add
-  // the resolved player : they become the implicit primary when they land as
+  // the resolved player: they become the implicit primary when they land as
   // the sole entry.
   const deepLinkApplied = useRefV(false);
   React.useEffect(() => {
@@ -127,12 +127,12 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const allMatches = useMemo(() => tournamentMatches(t), [t]);
   const bothSidesMatches = useMemo(() => allMatches.filter(hasBothSides), [allMatches]);
   // Running-comp set: gates the home NOW / Up-next strips and the running dot.
-  // BOTH setup and draw-ready are excluded : a draw-ready comp has a published
+  // BOTH setup and draw-ready are excluded: a draw-ready comp has a published
   // draw but no match has been called, so it is NOT running. (The competition
   // detail view still shows its Pools/Bracket tabs; that is governed separately
   // by isPreStart in ViewerCompetition.)
   const runningCompIds = useMemo(() => new Set((t.competitions || []).filter(c => c.status && c.status !== "setup" && c.status !== "draw-ready").map(c => c.id)), [t.competitions]);
-  // Apply hasBothSides here too : pre-fix, a bracket match marked
+  // Apply hasBothSides here too: pre-fix, a bracket match marked
   // `running` while one side was still an unresolved "Winner of rX-mY"
   // placeholder would appear in the public NOW strip, even though
   // the upcoming list / cards / detail view all reject placeholder
@@ -148,7 +148,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const primaryIds = useMemo(() => new Set(resolveEntryPlayerIds(primaryEntry, roster)), [primaryEntry, roster]);
   const primaryNextMatch = useMemo(() => buildPrimaryNextMatch(primaryEntry, roster, bothSidesMatches), [primaryEntry, roster, bothSidesMatches]);
 
-  // Compact list of running and upcoming watched matches : shown when ≥2 entities
+  // Compact list of running and upcoming watched matches: shown when ≥2 entities
   // are watched (coach multi-watch). Includes running matches so they can be
   // excluded from the global-NOW hero section (mp-42rg de-dup). Bounded so it
   // stays glanceable on a phone.
@@ -157,7 +157,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     [resolvedWatched, bothSidesMatches]
   );
 
-  // mp-42rg: de-duplicate the global NOW section : exclude matches already
+  // mp-42rg: de-duplicate the global NOW section: exclude matches already
   // visible in the watched-upcoming list so the same card doesn't appear
   // twice on a phone viewport. When every running match is tracked, the
   // hero-running section disappears entirely (hybrid approach).
@@ -208,7 +208,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
     // chime stays enabled (chime-only mode) and on "on" everything is in sync.
     const outcome = await notifEnable();
     if (outcome === "off") {
-      setChimeMuted(true); // revert optimistic flip : point-in-time snapshot avoids
+      setChimeMuted(true); // revert optimistic flip: point-in-time snapshot avoids
       // a second toggle() call which could land on the wrong value if another
       // instance dispatched CHIME_SYNC_EVENT during the async permission dialog.
     }
@@ -269,7 +269,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           </div>
 
           {/* mp-4fd / mp-xhaa: loud on-deck alert for the PRIMARY watched
-              entity : chime + title flash already fired by the hook; this is
+              entity: chime + title flash already fired by the hook; this is
               the dismissible banner. */}
           {showAlertBanner && (
             <MyMatchAlertBanner
@@ -280,7 +280,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
           )}
 
           {/* mp-xhaa: QUIET banner for a non-primary watched player going
-              on-deck : no chime, no title flash, rate-limited by the hook. */}
+              on-deck: no chime, no title flash, rate-limited by the hook. */}
           {showSecondaryBanner && (
             <MyMatchAlertBanner
               match={secondaryAlert}
@@ -327,7 +327,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               <span className="viewer-nav-card__chev">→</span>
             </button>
 
-            {/* mp-koqh: Results summary : only shown when at least one comp has completed. */}
+            {/* mp-koqh: Results summary: only shown when at least one comp has completed. */}
             {onOpenResults && completedCount > 0 && (
               <button type="button" className="viewer-nav-card" onClick={onOpenResults} data-testid="open-results-btn">
                 <span className="viewer-nav-card__icon">🏅</span>
@@ -442,7 +442,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
             </a>
           </div>
 
-          {/* T069 / FR-016: "Display modes" : links into the public
+          {/* T069 / FR-016: "Display modes": links into the public
               /display routes for TV screens, lobby boards, and OBS browser
               sources. Each link opens in a new tab so the host page
               (viewer) keeps its tab and stays interactive. Collapsed by
@@ -458,7 +458,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   );
 }
 
-// DisplayModes : viewer-home section linking to the public /display routes.
+// DisplayModes: viewer-home section linking to the public /display routes.
 // Collapsed by default inside a <details> element. Contains one "all-courts
 // overview" link plus two compact inline rows (court displays, streaming
 // overlays) each listing per-court links inline rather than one card per
@@ -467,7 +467,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
 // surface that consumes the display routes rather than rendering them.
 function DisplayModes({ tournament }) {
   const courts = (tournament && tournament.courts) || [];
-  // No court list : render nothing rather than a confusing single "all"
+  // No court list: render nothing rather than a confusing single "all"
   // card. The tournament setup flow guarantees ≥1 court in practice; this
   // guard exists for the very-early-bootstrap window before tournament
   // data has loaded fully.

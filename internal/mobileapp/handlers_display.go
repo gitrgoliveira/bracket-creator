@@ -31,7 +31,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/court/:court/current", func(c *gin.Context) {
 		// Streaming clients poll this on a 1-2s cadence; resolveCourt pins the
 		// no-store + CORS headers so the polled-surface guarantee survives
-		// router refactors, normalises the :court param, and writes the 503/404.
+		// router refactors, normalises the: court param, and writes the 503/404.
 		court, ok := resolveCourt(c, store)
 		if !ok {
 			return
@@ -170,7 +170,7 @@ func courtMatchSidesReal(a, b string) bool {
 
 // resolveCourt is the shared preamble for the court-scoped display surfaces. It
 // pins the no-store + CORS headers (streaming clients poll on a 1-2s cadence and
-// must never be cached), normalises the :court param, validates it against the
+// must never be cached), normalises the: court param, validates it against the
 // active tournament, and writes the error response on failure. Returns
 // (court, true) on success; ("", false) after writing a 503 (no tournament) or
 // 404 (unknown court), in which case the handler must return immediately.

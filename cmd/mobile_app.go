@@ -223,7 +223,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	// to finish, but SSE handlers loop forever on the per-client channel
 	// and on the request context. Closing the hub closes each client
 	// channel, which makes the per-connection streaming goroutine return
-	// (the `case msg, ok := <-ch` arm sees !ok). Without this, Shutdown
+	// (the `case msg, ok:= <-ch` arm sees !ok). Without this, Shutdown
 	// hangs until httpShutdownTimeout elapses on every SIGTERM.
 	srv.RegisterOnShutdown(hub.Close)
 	// Stop the per-IP rate limiter cleanup goroutine.

@@ -955,8 +955,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// Correction audit: overwriting an already-completed result
 				// (completed -> completed) is a correction and requires a non-empty
 				// CorrectionReason for traceability. This applies to ANY decision
-				// type, including a withdrawal (kiken/fusenpai) submitted via /score
-				//, exempting those would let a finalized result be overwritten with
+				// type, including a withdrawal (kiken/fusenpai) submitted via /score,
+				// exempting those would let a finalized result be overwritten with
 				// no audit reason. The check runs inside the tx so the is-completed
 				// read is race-free (same lock). A first finalization (existing
 				// status is not completed) needs no reason.
@@ -1034,8 +1034,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		if staleAfterComplete {
 			// The rev-guard above stored this running write's session+rev into
 			// runningRevStore (LoadOrStore) before we discovered, inside the
-			// transaction, that the match is already completed. Drop the entry now
-			//, no future running write can legitimately supersede a completed
+			// transaction, that the match is already completed. Drop the entry now,
+			// no future running write can legitimately supersede a completed
 			// match, so retaining it would leak map memory.
 			runningRevStore.Delete(matchKey)
 			c.JSON(http.StatusOK, gin.H{"stale": true})

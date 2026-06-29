@@ -17,10 +17,10 @@ function sendAnnouncementLabel(inFlight) {
   return inFlight ? "Sending..." : "Send announcement";
 }
 
-// AnnouncementComposer : the broadcast card body (active-announcements
+// AnnouncementComposer: the broadcast card body (active-announcements
 // list + message + duration + send). Owns all announcement state and
 // handlers. `password` is forwarded to the mutating API calls; `showToast`
-// surfaces success/error feedback. Both are optional : guarded at call sites.
+// surfaces success/error feedback. Both are optional: guarded at call sites.
 function AnnouncementComposer({ password, showToast }) {
   const [announcementMessage, setAnnouncementMessage] = useStateAn("");
   const [announcementDuration, setAnnouncementDuration] = useStateAn(5);
@@ -141,7 +141,7 @@ function AnnouncementComposer({ password, showToast }) {
   );
 }
 
-// AnnouncementModal : dashboard entry point (mp-djc). Wraps the composer
+// AnnouncementModal: dashboard entry point (mp-djc). Wraps the composer
 // in the shared .modal-backdrop / .modal pattern (mirrors AuthModal in
 // app.jsx). Backdrop click + Escape close.
 const Modal = window.Modal;
@@ -157,6 +157,6 @@ function AnnouncementModal({ password, showToast, onClose }) {
 window.AnnouncementComposer = AnnouncementComposer;
 window.AnnouncementModal = AnnouncementModal;
 
-// ES export for the vitest suite : pure helpers only. Components stay
+// ES export for the vitest suite: pure helpers only. Components stay
 // behind the window.* pattern to match the rest of admin_*.jsx.
 export { isSendAnnouncementDisabled, sendAnnouncementLabel };

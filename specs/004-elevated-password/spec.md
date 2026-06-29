@@ -1,7 +1,7 @@
-# Spec 004 : Elevated (second) password for destructive operations
+# Spec 004: Elevated (second) password for destructive operations
 
 **Issue:** mp-e21
-**Status:** Draft : awaiting approval before implementation
+**Status:** Draft: awaiting approval before implementation
 **Author:** Claude (Opus 4.8) with Ricardo Oliveira
 **Date:** 2026-05-29
 
@@ -9,13 +9,13 @@
 
 ## 0. Revision history
 
-- **v2 (2026-05-29, post critical-thinking review)** : fixed two fatal flaws in v1:
+- **v2 (2026-05-29, post critical-thinking review)**: fixed two fatal flaws in v1:
   1. v1 said to store/return `adminPassword` mirroring `Password`. That would have
      **leaked** the elevated password via `GET /tournament` and **allowed
-     overwrite** via `PUT /tournament` : both gated only by the main password,
+     overwrite** via `PUT /tournament`: both gated only by the main password,
      defeating the feature. v2 makes the field **write-only** (`json:"-"`, §6) and
      moves setting it to a **dedicated elevated-gated endpoint** (§6a).
-  2. Added an explicit **threat model** (§1a) : this is an insider speed bump, not
+  2. Added an explicit **threat model** (§1a): this is an insider speed bump, not
      a network control; over HTTP both secrets are sniffable.
 
 ## 1. Problem
@@ -23,8 +23,8 @@
 Today the mobile app has a single admin credential, resolved at startup by one
 `PasswordVerifier` ([internal/mobileapp/auth_source.go](../../internal/mobileapp/auth_source.go)):
 
-- **file mode** (default) : plaintext compare against `password:` in `tournament.md`.
-- **locked mode** (`--lock-password` + `TOURNAMENT_PASSWORD_HASH`) : bcrypt compare.
+- **file mode** (default): plaintext compare against `password:` in `tournament.md`.
+- **locked mode** (`--lock-password` + `TOURNAMENT_PASSWORD_HASH`): bcrypt compare.
 
 Any operator who knows the admin password can perform *every* action, including
 irreversible ones (deleting a competition, wiping a generated draw, rewriting the
@@ -38,31 +38,31 @@ manage check-in without being able to destroy data.
 State this in the operator docs so the feature is not over-trusted.
 
 **Defends against:** an *insider* who legitimately holds the shared main password
-(table/scoring staff) but is not entrusted with the elevated password : accidental
+(table/scoring staff) but is not entrusted with the elevated password: accidental
 or unauthorized deletion of competitions, draws, overrides, and roster edits. This
 is the operator's actual stated need.
 
 **Does NOT defend against:**
-- A **network attacker** on an HTTP (non-TLS) deployment : the documented LAN
+- A **network attacker** on an HTTP (non-TLS) deployment: the documented LAN
   default. Both `X-Tournament-Password` and `X-Admin-Password` travel in cleartext
   and are sniffable. The second password adds nothing here. Operators wanting a
   real network boundary must run behind TLS and/or `--lock-password`.
-- Anyone with **filesystem access** to `tournament.md` (file mode) : they read
+- Anyone with **filesystem access** to `tournament.md` (file mode): they read
   both plaintext passwords directly. The credential boundary is API-level only.
 
 The feature is a **privilege-separation speed bump for shared-credential
 operation**, not a cryptographic access-control system. RBAC / per-user identity
 is explicitly out of scope (§12).
 
-## 2. Decisions (locked with the user : 2026-05-29)
+## 2. Decisions (locked with the user: 2026-05-29)
 
 | # | Question | Decision |
 |---|----------|----------|
 | D1 | Which operations are gated? | **Data-destructive ops only** (see §3). |
 | D2 | Session model? | **Re-prompt every time.** No elevation token, no `/auth/elevate` endpoint, no in-memory token store. The password travels in a per-request header. |
 | D3 | Locked-mode storage? | **Separate bcrypt env var** `TOURNAMENT_ADMIN_PASSWORD_HASH`. If unset, gated endpoints return **503**. |
-| D4 | Does the elevated password gate `/api/tournament/reset`? | **No.** That endpoint is the *forgotten-main-password recovery path* : it is intentionally public and already protected by a same-origin check + locked-mode 404. Gating it behind a second password would create a recovery lockout. |
-| D5 | Gate draw/override deletions + invalidate? | **Yes** : they discard generated bracket/pool data. |
+| D4 | Does the elevated password gate `/api/tournament/reset`? | **No.** That endpoint is the *forgotten-main-password recovery path*: it is intentionally public and already protected by a same-origin check + locked-mode 404. Gating it behind a second password would create a recovery lockout. |
+| D5 | Gate draw/override deletions + invalidate? | **Yes**: they discard generated bracket/pool data. |
 
 ### Key correction captured during research
 The bd issue framed "tournament reset" as "wipes all tournament data." That is
@@ -71,7 +71,7 @@ The bd issue framed "tournament reset" as "wipes all tournament data." That is
 admin password** and is the recovery path for a forgotten password. There is **no
 data-wipe endpoint** in the codebase. Per D4 the recovery endpoint is left untouched.
 
-## 3. Scope : gated operations
+## 3. Scope: gated operations
 
 All gated endpoints already sit behind `AuthMiddleware` (main password). The
 elevated check is an **additional** middleware layered on top, so a gated request
@@ -87,8 +87,8 @@ must present **both** `X-Tournament-Password` **and** `X-Admin-Password`.
 | `DELETE /api/competitions/:id/overrides` | handlers_competition.go:1355 | Discards manual rank overrides |
 | `POST /api/competitions/:id/participants` | handlers_participants.go:34 | Roster add / full-list replace |
 | `PUT /api/competitions/:id/participants/:pid` | handlers_participants.go:222 | Roster edit |
-| `PUT /api/competitions/:id` *(when body has non-nil `players`)* | handlers_competition.go:396 | **Bulk roster writer** : persists participants/seeds via `SaveParticipants`/`SaveSeeds`. The SPA's *primary* roster flow (paste/import, seed edits go through `API.updateCompetition`). Gated **inline** (not via route middleware, which runs before the body is bound) using the shared `enforceElevated`. Settings-only PUTs (`players == nil`) stay single-factor. **Added after Copilot caught that gating only the dedicated participant endpoints left this path open (PR #193).** |
-| `POST /api/tournament/import` | handlers_import.go:57 | CSV import : replaces roster wholesale |
+| `PUT /api/competitions/:id` *(when body has non-nil `players`)* | handlers_competition.go:396 | **Bulk roster writer**: persists participants/seeds via `SaveParticipants`/`SaveSeeds`. The SPA's *primary* roster flow (paste/import, seed edits go through `API.updateCompetition`). Gated **inline** (not via route middleware, which runs before the body is bound) using the shared `enforceElevated`. Settings-only PUTs (`players == nil`) stay single-factor. **Added after Copilot caught that gating only the dedicated participant endpoints left this path open (PR #193).** |
+| `POST /api/tournament/import` | handlers_import.go:57 | CSV import: replaces roster wholesale |
 
 > **Why the bulk PUT needs an inline gate, not route middleware.** `RequireElevatedPassword`
 > runs before the handler binds the JSON body, so it can't see whether the request
@@ -100,22 +100,22 @@ must present **both** `X-Tournament-Password` **and** `X-Admin-Password`.
 > **Seeds:** the dedicated `PUT /api/competitions/:id/seeds` endpoint (which calls only
 > `SaveSeeds`, never the roster file) remains **ungated** per the "seeds are a ranking
 > aid" decision. But the SPA's seed-reorder UI submits the *full roster payload* through
-> `API.updateCompetition`, which rewrites `participants.csv` : so those flows take the
+> `API.updateCompetition`, which rewrites `participants.csv`: so those flows take the
 > roster gate. This is correct: anything that rewrites the roster file is gated; the
 > seed-only endpoint that never touches it is not. The roster file cannot be replaced
 > through any ungated path. (`POST /competitions` rejects an existing ID with 400, so it
 > can only create new competitions, never overwrite an existing roster.)
 
-**NOT gated (routine live-tournament ops : main password only):**
+**NOT gated (routine live-tournament ops: main password only):**
 
 - Check-in toggles: `PUT/DELETE .../checkin`, `POST .../checkin-bulk`
 - Seeds: `PUT /api/competitions/:id/seeds` (ranking aid, not roster membership)
 - Competition lifecycle: `start`, `generate-draw`, `complete`, `playoffs`
 - Match scoring, decisions, lineups, daihyosen, swiss, announcements
-- `POST /api/tournament/reset` (recovery path : see D4)
+- `POST /api/tournament/reset` (recovery path: see D4)
 - All `GET` / viewer / public endpoints
 
-> **Open confirmation:** there is no `DELETE participant` route today : roster
+> **Open confirmation:** there is no `DELETE participant` route today: roster
 > deletion happens via the full-list `POST .../participants` body. Gating the POST
 > covers it.
 
@@ -148,10 +148,10 @@ type ElevatedVerifier interface {
 
 Two implementations, mirroring `auth_source.go`:
 
-- **`fileElevatedVerifier{store}`** : loads `tournament.md`, reads new
+- **`fileElevatedVerifier{store}`**: loads `tournament.md`, reads new
   `AdminPassword` field, plaintext compares. `GateActive()`/`Configured()` ==
   `AdminPassword != ""`.
-- **`bcryptElevatedVerifier{hash []byte}`** : locked mode, env-var bcrypt. Reuses
+- **`bcryptElevatedVerifier{hash []byte}`**: locked mode, env-var bcrypt. Reuses
   the exact hardening already proven in `bcryptPasswordVerifier` (length pre-check
   at `bcryptMaxInputBytes`, `errors.Is` on `ErrMismatchedHashAndPassword` /
   `ErrPasswordTooLong`, no timing/differential-error leak). `GateActive()` always
@@ -200,18 +200,18 @@ server.go.
 ### Wiring
 Two viable shapes; recommend **(a)** for minimal blast radius:
 
-- **(a) Per-route** : `RegisterCompetitionHandlers` / `RegisterParticipantHandlers`
+- **(a) Per-route**: `RegisterCompetitionHandlers` / `RegisterParticipantHandlers`
   / `RegisterImportHandlers` gain an `elevated ElevatedVerifier` param and attach
   `RequireElevatedPassword(elevated)` to exactly the gated routes via
   `group.DELETE(path, RequireElevatedPassword(ev), handler)`.
-- (b) A dedicated sub-group : awkward because gated routes are interleaved with
+- (b) A dedicated sub-group: awkward because gated routes are interleaved with
   non-gated ones sharing the same `:id` prefix.
 
 ## 6. Storage ([internal/state/models.go](../../internal/state/models.go))
 
 > **⚠ Corrected after critical review (see §0).** The elevated password is a
 > *higher* privilege than the main password that gates `/tournament`. It must
-> therefore be **write-only over the API in every mode** : never serialized in a
+> therefore be **write-only over the API in every mode**: never serialized in a
 > response, never settable through the main-password-gated PUT. This is the
 > opposite of how `Password` is handled, and the difference is the whole point of
 > the feature.
@@ -234,14 +234,14 @@ AdminPassword string `yaml:"admin_password,omitempty" json:"-"`
   stored record. Because the bound struct's `AdminPassword` is always `""`
   (json:"-"), the transform MUST copy `AdminPassword` from the current on-disk
   record forward (exactly as it already does for `Password` at
-  handlers_tournament.go:298-303) : otherwise a routine settings save would wipe
+  handlers_tournament.go:298-303): otherwise a routine settings save would wipe
   the elevated password. Add a regression test for this.
 - **Locked mode**: `AdminPassword` is irrelevant to auth (env hash wins). With
   `json:"-"` it is never emitted regardless of mode, so no extra
   `RedactStoredPassword`-style branch is needed for it. A stale on-disk value is
   inert.
 
-## 6a. Setting / rotating the elevated password : dedicated endpoint
+## 6a. Setting / rotating the elevated password: dedicated endpoint
 
 A new endpoint owns the credential, so the privilege rules live in one place:
 
@@ -255,8 +255,8 @@ Gating logic (bootstrap = trust-on-first-use, rotation = prove-you-hold-it):
 | State | Auth required | Rationale |
 |-------|---------------|-----------|
 | No admin password set yet | Main password only (`X-Tournament-Password`) | TOFU bootstrap. There is no elevated secret to prove yet; the operator setting it for the first time is the same trust level as configuring the tournament. |
-| Admin password already set | Main password **AND** `X-Admin-Password` matching the *current* value | Rotation must prove possession of the current elevated secret : otherwise a main-password holder could silently re-set it (Finding 2). Equivalent to "change-password requires old password". |
-| Locked mode | : | `404`. The credential is the env-var hash; not settable via API. SPA shows the read-only "controlled by env var" message. |
+| Admin password already set | Main password **AND** `X-Admin-Password` matching the *current* value | Rotation must prove possession of the current elevated secret: otherwise a main-password holder could silently re-set it (Finding 2). Equivalent to "change-password requires old password". |
+| Locked mode |: | `404`. The credential is the env-var hash; not settable via API. SPA shows the read-only "controlled by env var" message. |
 
 This endpoint lives **outside** the bulk `/tournament` PUT precisely so the
 conditional gating (TOFU vs prove-current) is explicit and testable, not smuggled
@@ -264,9 +264,9 @@ into a handler whose other fields only need the main password.
 
 ## 7. UI ([web-mobile/](../../web-mobile/))
 
-- **Settings page** : new "Admin / destructive-ops password" control next to the
+- **Settings page**: new "Admin / destructive-ops password" control next to the
   existing tournament password input. The current value is **never displayed**
-  (write-only, §6) : the field is an empty "set / change" input, like any
+  (write-only, §6): the field is an empty "set / change" input, like any
   change-password form.
   - file mode → editable; saved via the **dedicated** `PUT /api/auth/admin-password`
     endpoint (§6a), **not** the general tournament PUT. When a value is already
@@ -302,7 +302,7 @@ at all and whether to render the Settings field editable.
   the field in Settings. **No breaking change.**
 - **Locked mode**: a deployment that upgrades and does *not* set
   `TOURNAMENT_ADMIN_PASSWORD_HASH` will get **503 on the gated endpoints** (per D3).
-  This **is** a behavior change for locked deployments : documented as a release
+  This **is** a behavior change for locked deployments: documented as a release
   note and in `docs/user-guide/mobile-app.md`. Rationale: locked mode is the
   hardened, internet-exposed posture; fail-closed on destructive ops is the
   correct default there.
@@ -350,13 +350,13 @@ at all and whether to render the Settings field editable.
 
 ## 13. Phased delivery
 
-1. **Phase 1 : core**: `auth_admin.go` + verifier tests; `AdminPassword` field
+1. **Phase 1: core**: `auth_admin.go` + verifier tests; `AdminPassword` field
    (`json:"-"`, write-only) + PUT-preserve logic; the dedicated
    `PUT /api/auth/admin-password` endpoint (§6a) with TOFU/rotation gating;
    construction in `cmd/mobile_app.go`.
-2. **Phase 2 : middleware + wiring**: `RequireElevatedPassword`, per-route
+2. **Phase 2: middleware + wiring**: `RequireElevatedPassword`, per-route
    attachment, CORS header, endpoint integration tests.
-3. **Phase 3 : auth-config**: extend response + tests.
-4. **Phase 4 : UI**: Settings field, prompt modal, client helper, vitest.
-5. **Phase 5 : docs**: `docs/user-guide/mobile-app.md`, release note for the
+3. **Phase 3: auth-config**: extend response + tests.
+4. **Phase 4: UI**: Settings field, prompt modal, client helper, vitest.
+5. **Phase 5: docs**: `docs/user-guide/mobile-app.md`, release note for the
    locked-mode 503 behavior change.

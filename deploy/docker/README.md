@@ -60,7 +60,7 @@ sudo chown -R 65534:65534 ./tournament-data
 ```
 
 If you skip this step, the app cannot write to the data directory (a permission
-error) and exits on first write. The app logs a clear diagnostic in this case ,
+error) and exits on first write. The app logs a clear diagnostic in this case,
 check `docker compose logs app` if the container exits immediately.
 
 ## SSE and Caddy buffering

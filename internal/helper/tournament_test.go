@@ -130,7 +130,7 @@ func TestCreatePlayersSourceColumn(t *testing.T) {
 		t.Errorf("Metadata = %v, want empty (source consumed)", players[0].Metadata)
 	}
 
-	// Legacy "reserved" alias migrates to "manual" on parse , it must NOT shift
+	// Legacy "reserved" alias migrates to "manual" on parse, it must NOT shift
 	// into Metadata (which marshalParticipantsCSV would then drop).
 	legacy, err := CreatePlayers([]string{"Jane Doe, Osaka, reserved"}, false)
 	if err != nil {

@@ -6,22 +6,22 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const JS_DIR = resolve(__dirname, '..');
 
-// mp-hpe3 Phase 0 safety net ; STATIC CROSS-MODULE EXPORT CHECKER.
+// mp-hpe3 Phase 0 safety net; STATIC CROSS-MODULE EXPORT CHECKER.
 //
 // THE failure mode of splitting a monolith into ES modules is an import that
 // names a symbol the target module does not actually export. Native ESM throws
-// "does not provide an export named X" and blanks the SPA ; but vitest's
+// "does not provide an export named X" and blanks the SPA; but vitest's
 // lenient resolver and esbuild's per-file transpile BOTH silently let it pass.
 // Nothing in the JS gate catches it today.
 //
 // This test closes that gap: it walks every production .jsx module, finds each
 //   import { a, b as c } from './sibling.jsx'
-// (relative siblings only ; npm packages are out of scope), and asserts the
+// (relative siblings only; npm packages are out of scope), and asserts the
 // target file exports every named symbol. It validates the entire existing
 // cross-module graph now, and becomes the guardrail for the admin_competition
 // (mp-hpe3) and viewer (mp-pxxc) splits.
 //
-// Parsing is regex-based ; deliberately simple, matching the project's
+// Parsing is regex-based; deliberately simple, matching the project's
 // readFileSync-introspection convention. It handles multi-line import/export
 // blocks and `as` aliasing. All statement regexes are anchored to line-start
 // (the `m` flag + `^\s*`): real ES import/export statements are module-level
@@ -65,8 +65,8 @@ function collectExports(src) {
 
 // Each relative-.jsx import OR re-export edge: { specifiers } and the resolved
 // target path. Both `import { X } from './y.jsx'` and `export { X } from
-// './y.jsx'` are cross-module edges that must name a real export of the target
-// ; re-export drift (the entry re-exporting a helper a section module no longer
+// './y.jsx'` are cross-module edges that must name a real export of the target;
+// re-export drift (the entry re-exporting a helper a section module no longer
 // exports) is exactly the failure the mp-hpe3 split could introduce, and native
 // ESM throws on it just the same. The name we must find in the target is the
 // left-hand side of `as` (the source binding), or the bare name otherwise.
@@ -125,7 +125,7 @@ describe('cross-module ES export integrity (mp-hpe3 / mp-pxxc split guardrail)',
         }
         for (const name of wanted) {
           if (!targetExports.has(name)) {
-            violations.push(`${rel}: imports { ${name} } from '${spec}' ; not exported there`);
+            violations.push(`${rel}: imports { ${name} } from '${spec}'; not exported there`);
           }
         }
       }

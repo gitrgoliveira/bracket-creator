@@ -641,7 +641,7 @@ func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {
 
 	compDir := dir + "/competitions/legacy-test"
 	require.NoError(t, os.MkdirAll(compDir, 0700))
-	// Only pool name + player name columns ,no draw-position column.
+	// Only pool name + player name columns, no draw-position column.
 	csv := "Pool A,Alice\nPool A,Bob\nPool A,Charlie\n"
 	require.NoError(t, os.WriteFile(compDir+"/pools.csv", []byte(csv), 0600))
 

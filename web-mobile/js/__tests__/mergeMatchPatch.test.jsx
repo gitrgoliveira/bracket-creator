@@ -46,7 +46,7 @@ describe('mergeMatchPatch', () => {
     expect(merged.scheduledAt).toBe("10:00");
   });
 
-  it('only guards court and scheduledAt : other fields follow normal spread semantics', () => {
+  it('only guards court and scheduledAt: other fields follow normal spread semantics', () => {
     const existing = { id: "m1", winner: "P1", status: "completed", court: "A" };
     // status: "" is a normal empty string and *should* overwrite (we only special-case scheduling fields)
     const patch = { status: "" };

@@ -348,7 +348,7 @@ func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
 	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
 	tourn := newTournament(1.0, 10, "", "", "") // 1.0x, explicit 10% buffer
 
-	// pool: 2*3=6 ; playoff: 2*5=10 ; sequential sum = 16 ; *1.10 = 17.6 → 18.
+	// pool: 2*3=6; playoff: 2*5=10; sequential sum = 16; *1.10 = 17.6 → 18.
 	combined := EstimateForCounts(2, 2, comp, tourn)
 	poolOnly := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
 	playoffOnly := EstimateForCounts(0, 2, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))

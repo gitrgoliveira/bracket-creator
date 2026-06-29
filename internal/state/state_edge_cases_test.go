@@ -292,7 +292,7 @@ func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
 		filepath.Join(dir, "competitions", compID, "bracket.json"),
 		[]byte("{not valid json"), 0o600))
 
-	// Now try to CHANGE a recorded position ,this triggers the bracket parse.
+	// Now try to CHANGE a recorded position, this triggers the bracket parse.
 	changed := fiveStarter("team-alpha", 0)
 	changed.Positions[domain.PosJiho] = "p2-changed"
 	err = store.SetTeamLineup(compID, changed, 5)
@@ -348,7 +348,7 @@ func TestSetCompetitorStatusLocked_InvalidStatus(t *testing.T) {
 }
 
 // TestCopyTournament_WithCourts verifies that copyTournament performs a deep
-// copy of the Courts slice ,mutation of the copy must not affect the original.
+// copy of the Courts slice, mutation of the copy must not affect the original.
 func TestCopyTournament_WithCourts(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	require.NoError(t, err)

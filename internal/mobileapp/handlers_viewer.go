@@ -247,7 +247,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	})
 
 	r.GET("/competitions/:id", func(c *gin.Context) {
-		// Validate the :id like the admin handlers do, pre-fix, an
+		// Validate the: id like the admin handlers do, pre-fix, an
 		// invalid ID here returned 500 (LoadCompetition's internal
 		// ValidateCompetitionID surfaced as a generic error response)
 		// while the OpenAPI spec on the CompetitionId parameter

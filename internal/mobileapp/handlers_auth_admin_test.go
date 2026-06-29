@@ -16,7 +16,7 @@ import (
 )
 
 // elevatedHandlerRouter mounts the tournament + admin-password + auth-config
-// handlers for a given verifier. No AuthMiddleware , the main-password gate
+// handlers for a given verifier. No AuthMiddleware, the main-password gate
 // is orthogonal to the elevated-password logic under test here.
 func elevatedHandlerRouter(t *testing.T, store *state.Store, verifier PasswordVerifier) (*gin.Engine, ElevatedVerifier) {
 	t.Helper()
@@ -132,7 +132,7 @@ func TestTournamentPut_CannotSetOrWipeAdminPassword(t *testing.T) {
 	// the original still does (preserve-on-write).
 	ok, err := ev.Verify("attacker")
 	require.NoError(t, err)
-	assert.False(t, ok, "PUT /tournament overwrote the admin password , privilege escalation")
+	assert.False(t, ok, "PUT /tournament overwrote the admin password, privilege escalation")
 	ok, err = ev.Verify("original-admin")
 	require.NoError(t, err)
 	assert.True(t, ok, "routine PUT /tournament wiped the admin password")
@@ -192,7 +192,7 @@ func TestAdminPasswordEndpoint_LockedMode404(t *testing.T) {
 // Regression for the bypass Copilot caught on PR #193: the elevated gate on
 // the dedicated participant endpoints was circumventable via PUT
 // /api/competitions/:id, which persists the roster (SaveParticipants/SaveSeeds)
-// whenever the body has a non-nil Players field , and that is the SPA's
+// whenever the body has a non-nil Players field, and that is the SPA's
 // primary roster flow. The bulk PUT must now enforce the same gate, but ONLY
 // when it carries a roster mutation; settings-only PUTs stay single-factor.
 func TestBulkCompetitionPut_RosterMutationIsGated(t *testing.T) {
@@ -233,7 +233,7 @@ func TestBulkCompetitionPut_RosterMutationIsGated(t *testing.T) {
 		assert.Equal(t, "Alice", players[0].Name)
 	})
 	t.Run("settings-only PUT (no players) is NOT gated", func(t *testing.T) {
-		// No admin header, gate active , must still succeed because the body
+		// No admin header, gate active, must still succeed because the body
 		// carries no roster mutation.
 		assert.Equal(t, http.StatusOK, putComp(settingsBody, "", false).Code)
 	})

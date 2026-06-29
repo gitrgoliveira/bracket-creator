@@ -1,4 +1,4 @@
-// Tests for watchSustainedDisconnect : the timer that escalates the admin
+// Tests for watchSustainedDisconnect: the timer that escalates the admin
 // connection indicator from the calm "Reconnecting…" pill to the full-width
 // alert banner only after the SSE feed has been down past a threshold (so
 // routine 5s reconnect blips never trip the banner). The component effect that
@@ -19,7 +19,7 @@ describe('watchSustainedDisconnect', () => {
     const m = watchSustainedDisconnect(THRESHOLD, onSustained);
 
     m.note(false); // disconnected
-    expect(onSustained).not.toHaveBeenCalled(); // transient : no escalation yet
+    expect(onSustained).not.toHaveBeenCalled(); // transient: no escalation yet
 
     vi.advanceTimersByTime(THRESHOLD - 1);
     expect(onSustained).not.toHaveBeenCalled();
@@ -39,7 +39,7 @@ describe('watchSustainedDisconnect', () => {
     m.note(true); // reconnected before the threshold
     expect(onSustained).toHaveBeenLastCalledWith(false);
 
-    // The pending timer must have been cleared : advancing past it does nothing.
+    // The pending timer must have been cleared: advancing past it does nothing.
     vi.advanceTimersByTime(5000);
     expect(onSustained).not.toHaveBeenCalledWith(true);
     m.stop();
@@ -51,7 +51,7 @@ describe('watchSustainedDisconnect', () => {
 
     m.note(false);
     vi.advanceTimersByTime(THRESHOLD - 2000);
-    m.note(false); // another error mid-outage : must not reset the clock
+    m.note(false); // another error mid-outage: must not reset the clock
     vi.advanceTimersByTime(2000); // total downtime now == THRESHOLD
     expect(onSustained).toHaveBeenCalledWith(true);
     m.stop();

@@ -5,18 +5,18 @@
 import { withNumber } from './match_scoreboard.jsx';
 import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
-// NOTE: this module is the shared *leaf* in the display graph : presentation
+// NOTE: this module is the shared *leaf* in the display graph: presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
 // Within this file, hooks are NOT destructured off `React` at module-eval time;
 // StreamingQR and TermD call React.* lazily at render time instead.
 // The import of `withNumber` from `match_scoreboard.jsx` is a transitive
 // dependency on `React` being global, which every display surface already
-// requires before mounting : this is not a new constraint introduced here.
+// requires before mounting: this is not a new constraint introduced here.
 
 // TermD: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and display.jsx doesn't matter.
 // On TV/lobby surfaces (public, fullscreen) the popover provides a
-// gloss but operators rarely interact with these screens : the wrap
+// gloss but operators rarely interact with these screens: the wrap
 // is more about consistency than discoverability. U1 / glossary.md.
 function TermD(props) {
   if (typeof window !== 'undefined' && window.Term) {
@@ -120,8 +120,8 @@ function findUpcomingOnCourt(competitions, court, limit = 2) {
 function countCourtMatches(competitions, court) {
     let running = 0, scheduled = 0, completed = 0;
     if (!competitions || !court) return { running, scheduled, completed };
-    // Count only matches with two real sides : reject "Winner of rX-mY" feeders
-    // AND "Pool A-1st" pool-origin leaves : so a half-resolved bracket doesn't
+    // Count only matches with two real sides: reject "Winner of rX-mY" feeders
+    // AND "Pool A-1st" pool-origin leaves: so a half-resolved bracket doesn't
     // inflate the "scheduled" count and prevent the "All matches completed"
     // empty state from firing. (bracketSidesReady mirrors admin_helpers.hasBothSides
     // without a module-eval window dependency.)
@@ -150,7 +150,7 @@ function countCourtMatches(competitions, court) {
 
 // Active courts = courts with at least one running or scheduled match.
 // Filters out idle courts so LobbyDisplay doesn't waste real estate on
-// "Shiaijo D : no matches" cards. Preserves the tournament's declared
+// "Shiaijo D: no matches" cards. Preserves the tournament's declared
 // court order (A, B, C, …) instead of an arbitrary iteration order.
 function findActiveCourts(tournament, competitions) {
     const all = (tournament && tournament.courts) || [];
@@ -179,7 +179,7 @@ function findActiveCourts(tournament, competitions) {
 // Contract (evaluated in this order):
 //   1. status !== "scheduled"           → "" (no queue label on running /
 //      completed / cancelled rows, even if queuePosition or scheduledAt
-//      is set : this gate takes precedence over everything below).
+//      is set: this gate takes precedence over everything below).
 //   2. status === "scheduled" + qp ===1 → "Next up".
 //   3. status === "scheduled" + qp > 1  → "(qp - 1) before yours".
 //   4. status === "scheduled" + falsy qp + scheduledAt → "Scheduled hh:mm".
@@ -211,7 +211,7 @@ function queueLabelCompact(m) {
     if (!m) return null;
     if (m.status !== "scheduled") return null;
     const qp = Number(m.queuePosition);
-    // Use Number.isFinite so Infinity/-Infinity are rejected alongside NaN :
+    // Use Number.isFinite so Infinity/-Infinity are rejected alongside NaN:
     // matches queueLabel's guard. isNaN alone would let Infinity through and
     // render "#Infinity".
     if (!Number.isFinite(qp) || qp <= 0) return null;
@@ -223,7 +223,7 @@ function queueLabelCompact(m) {
 //
 // `format` (optional) is the competition format. A league is a single
 // round-robin table, so the per-match round-robin round number is noise to a
-// spectator : and it varies per match across the feed (4, 5, 6, 0…), reading
+// spectator: and it varies per match across the feed (4, 5, 6, 0…), reading
 // like a bug. Suppress it; the completed/total counter carries the progress.
 function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     if (format === "league") return "";
@@ -235,7 +235,7 @@ function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     // Pool matches reach the feed with a pool-shaped id "<PoolName>-<index>"
     // (regular bouts use round === -1 sentinel; DH/TB supplementary bouts are
     // left at round 0 by the engine). Derive the pool name from the id so we
-    // never render a bare "-1" or "0" : covers regular, daihyosen and tiebreaker
+    // never render a bare "-1" or "0": covers regular, daihyosen and tiebreaker
     // bouts alike via poolNameOf. Guard on !isBracket: poolNameOf matches any
     // "*-<digits>" shape, so a bracket id like "m-r1-0" would otherwise yield a
     // bogus "m-r1" pool-like label when window.roundLabel is unavailable.

@@ -4,7 +4,7 @@
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
-// TermBC : kendo-glossary tooltip wrapper. Lazy lookup so the script
+// TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
 function TermBC(props) {
   if (typeof window !== 'undefined' && window.Term) {
@@ -13,7 +13,7 @@ function TermBC(props) {
   return React.createElement('span', null, props.children);
 }
 
-// Local hikiwake check : bracket.jsx is tested in isolation, so we don't rely
+// Local hikiwake check: bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
 function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
@@ -23,7 +23,7 @@ function roundLabel(roundIdx, total) {
   if (fromEnd === 0) return "Final";
   if (fromEnd === 1) return "Semifinals";
   if (fromEnd === 2) return "Quarterfinals";
-  // mp-13y #8: abbreviated column header : R{N} where N is the bracket size
+  // mp-13y #8: abbreviated column header: R{N} where N is the bracket size
   // = 2^(fromEnd+1). Keeps column labels tight for wide brackets (R32, R128).
   return `R${2 ** (fromEnd + 1)}`;
 }
@@ -45,7 +45,7 @@ function sideLabel(side) {
 //   decision == "fusenpai"    → "Fus."
 //   decision == "daihyosen"   → "DH"
 // Encho (overtime) appends " (E)" on top of any other suffix so a kiken-in-
-// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout only : handled by
+// overtime renders "0–2 Kiken (E)". `fusensho` is per-bout only: handled by
 // a separate bout badge, not by this helper. Pure and DOM-free so it can be
 // reused by display.jsx (which builds its own scoreline) without dragging in
 // the rest of formatIpponsScore's bye/hantei special cases.
@@ -67,10 +67,10 @@ function decisionSuffix(match) {
 
 // Derive an ippon array from a Go-formatted scoreA/scoreB string.
 // The backend formatScore() appends "(HN)" for outstanding hansoku, e.g.
-// "MK(H1)" : and inserts a SPACE separator between ippons and the suffix
+// "MK(H1)": and inserts a SPACE separator between ippons and the suffix
 // when both are present, e.g. "MK (H1)" (see engine/scoring.go:715-724).
-// Splitting the raw string would inject "(", "H", "1", ")" : plus a
-// stray " " for the spaced shape : as bogus ippon letters. This helper
+// Splitting the raw string would inject "(", "H", "1", ")": plus a
+// stray " " for the spaced shape: as bogus ippon letters. This helper
 // strips the suffix AND the separator space first.
 function ipponsFromScore(scoreStr) {
   if (!scoreStr) return [];
@@ -81,14 +81,14 @@ function ipponsFromScore(scoreStr) {
 // Returns something like "MM–K", "M–·", "X" (hikiwake, scored or not), "BYE".
 // Hantei (judges' decision after tied encho) is NOT a separate return value;
 // it surfaces as an "Ht" suffix appended by decisionSuffix when
-// decidedByHantei=true : e.g. "M–K (E) Ht".
+// decidedByHantei=true: e.g. "M–K (E) Ht".
 //
 // FR-033: when `encho` carries a positive periodCount, append " (E)" to the
 // rendered string so operators and viewers see at a glance that the match
 // went to overtime. Argument is optional and defaults to no-encho when absent.
 //
 // T097: kiken / fusenpai / daihyosen append labelled suffixes alongside the
-// encho marker : wired through decisionSuffix() so the same string is used
+// encho marker: wired through decisionSuffix() so the same string is used
 // by display.jsx's hand-rolled score block. The decision-derived suffix
 // supersedes the bare " (E)" so we don't double-print "(E)" alongside
 // "Kiken (E)".
@@ -105,20 +105,20 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   const isDraw = isHikiwakeBC(decision) || isHikiwakeBC(score?.type);
   if (isDraw) {
     if (!aStr && !bStr) {
-      // Scoreless draw (operator pressed X with no ippons entered) : canonical
+      // Scoreless draw (operator pressed X with no ippons entered): canonical
       // hikiwake glyph. This is the draw marker, not the hansoku triangle.
       return "X" + suffix;
     }
     // Scored equal draw (e.g. 1–1 M–K hikiwake): show the actual points so
     // the operator and viewer see what was struck, not a bare X. The hikiwake
-    // type is still recorded on the server : this is a display-only change.
+    // type is still recorded on the server: this is a display-only change.
     return `${aStr || "·"}–${bStr || "·"}` + suffix;
   }
   if (!aStr && !bStr) {
     // Fall back when the per-side ippon arrays are absent but a score object
     // exists (e.g. server-provided bracket scores). Prefer the winner's waza
     // LETTERS (score.ippons) over a bare count so the schedule always shows
-    // technique letters when the data carries them : only the loser, which is
+    // technique letters when the data carries them: only the loser, which is
     // stored as a count not letters, falls back to a number. Winner-first
     // order matches the historical numeric fallback (no orientation change).
     if (score?.type === "ippon" && (score.winnerPts > 0 || score.loserPts > 0)) {
@@ -127,7 +127,7 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
       return `${winnerStr}–${score.loserPts}` + suffix;
     }
     // No scores but a decision was recorded (e.g. kiken before any ippon
-    // was struck) : still print the suffix so the operator sees "Kiken".
+    // was struck): still print the suffix so the operator sees "Kiken".
     return suffix ? suffix.trimStart() : "";
   }
   return `${aStr || "·"}–${bStr || "·"}` + suffix;
@@ -137,7 +137,7 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
 // from persisted subResults. Mirrors Go engine.ComputeTeamSummary: skip the daihyosen
 // sentinel (position < 0); award IV to whichever match-level side won each bout (winner
 // matches the match-level OR sub-level side name); empty winner = hikiwake (no IV).
-// Orientation: sideB = Shiro (left), sideA = Aka (right) : matches the (ipponsB, ipponsA)
+// Orientation: sideB = Shiro (left), sideA = Aka (right): matches the (ipponsB, ipponsA)
 // call order used everywhere. Returns null when there are no subResults (individual
 // matches) so callers fall back to formatIpponsScore.
 function teamIVScore(m) {
@@ -176,7 +176,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
           {player.number ? <span className="num-prefix">{player.number}</span> : null}
           {player.name}
         </span>
-        {/* Reserve the dojo line on every side when dojos are shown : a real
+        {/* Reserve the dojo line on every side when dojos are shown: a real
             player without a dojo, or a "Winner of…" placeholder, gets an
             invisible spacer line so all sides (and thus all bracket cards) keep
             a uniform height (mp-7f2w). When showDojo is off, no line is rendered
@@ -247,7 +247,7 @@ MatchCard.displayName = "MatchCard";
 
 // Anchor connectors to the midline of a card's two competitor sides rather than
 // the card's geometric centre. A card stacks a meta header (time/court) above the
-// two .bc-side rows, so its geometric centre sits inside the upper (Aka) row : a
+// two .bc-side rows, so its geometric centre sits inside the upper (Aka) row: a
 // connector landing there reads as pointing at one competitor instead of the seam
 // where the two feeders merge. The sides-block midline is the visual join point;
 // the offset from geometric centre is uniform across cards, so the arms stay
@@ -356,7 +356,7 @@ function buildDisplayModel(rounds) {
     // Structural-bye slots: for non-leaf matches whose feeder[i] is "" (meaning
     // one side had no upstream match and the player seeded directly), insert a
     // visible placeholder card in the upstream column so the tree layout
-    // communicates the skip spatially : mirroring the Excel Tree sheet output.
+    // communicates the skip spatially: mirroring the Excel Tree sheet output.
     // Leaf-round matches (displayRound === maxDR) always have "" feeders for real
     // players; those don't need placeholders.
     const feedersById = {};
@@ -379,9 +379,9 @@ function buildDisplayModel(rounds) {
       feedersById[m.id] = resolvedFeeders;
     });
     // Match numbers: earliest round first (highest displayRound), then by position
-    // extracted from the id suffix : mirrors the Excel FillInMatches order so
+    // extracted from the id suffix: mirrors the Excel FillInMatches order so
     // card labels ("M1", "M2") match what referees see on the printed sheet.
-    // id format: "m-r{ROUND}-{POS}" : last segment is the 0-based within-round index.
+    // id format: "m-r{ROUND}-{POS}": last segment is the 0-based within-round index.
     const posFromId = (id) => { const p = id.split("-"); return parseInt(p[p.length - 1], 10) || 0; };
     const numbered = [...real].sort((a, b) => {
       const dr = b.displayRound - a.displayRound;
@@ -393,12 +393,12 @@ function buildDisplayModel(rounds) {
   }
   // Legacy: columns = rounds. Connectors are positional (BracketConnectors
   // derives the 2i/2i+1 feeders from `rounds` itself), so no feeder graph is
-  // produced here : feedersById stays empty to match the empty-input shape.
+  // produced here: feedersById stays empty to match the empty-input shape.
   return { hasMeta: false, columns: rounds, feedersById: {} };
 }
 
 // computeMetaTops lays out an (uneven) effective-round bracket. It walks the
-// feeder graph from the final: matches with no feeders ("seeded" entrants : real
+// feeder graph from the final: matches with no feeders ("seeded" entrants: real
 // players or bye recipients) are stacked top-to-bottom in depth-first encounter
 // order, and every parent is centred so its OWN connector anchor sits at the mean
 // of its feeders' anchors. Returns a map of matchId → absolute top (px).
@@ -408,7 +408,7 @@ function buildDisplayModel(rounds) {
 // midline for match cards, the geometric centre for bye-slot cards). Centring on
 // the mean of feeder ANCHORS rather than geometric centres keeps the elbow on each
 // card's seam even when a tall, header-offset match card feeds a child alongside a
-// shorter bye-slot card : otherwise the asymmetric offset shifts the merge ~6px
+// shorter bye-slot card: otherwise the asymmetric offset shifts the merge ~6px
 // off the seam (delta != 0). `offsets` defaults to h/2 for any id it omits, so a
 // caller that passes only heights gets the prior geometric-centre-of-mass layout.
 function computeMetaTops(columns, feedersById, heights, offsets = {}) {
@@ -423,7 +423,7 @@ function computeMetaTops(columns, feedersById, heights, offsets = {}) {
     // Cycle guard (mirrors the DisplayRound!=0 guard in the Go BFS): anchorOf is
     // only set post-order for parents, so a cyclic feeders graph would recurse
     // forever. The engine only emits acyclic trees, but a corrupt/hand-edited
-    // bracket.json must not crash the renderer : break the cycle and return 0.
+    // bracket.json must not crash the renderer: break the cycle and return 0.
     if (inProgress.has(id)) return 0;
     inProgress.add(id);
     const fs = (feedersById[id] || []).filter(Boolean);
@@ -465,7 +465,7 @@ function computeMetaTops(columns, feedersById, heights, offsets = {}) {
 // layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
 // feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
 // correctly. Bye-slot placeholder cards (isByeSlot) appear in the feeder graph
-// and in refMap, so they DO receive connector lines from their parent match : 
+// and in refMap, so they DO receive connector lines from their parent match: 
 // the elbow terminates at the bye card, mirroring the Excel Tree sheet.
 function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
   const [paths, setPaths] = useStateBC([]);
@@ -529,7 +529,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
   // Reset the measured layout only when the TOPOLOGY changes, not on every new
   // `columns` reference. Match ids and the feeder graph are frozen at generation
   // time, so a score update (which only mutates sideA/sideB/status/score) yields
-  // the same signature and the measured tops are preserved : avoiding a reset-to-
+  // the same signature and the measured tops are preserved: avoiding a reset-to-
   // null reflow flash on every in-progress-court update. Genuine height changes on
   // resolution are still caught by the measure effect's ResizeObserver below.
   const topoSig = React.useMemo(
@@ -550,7 +550,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
           if (!el) return;
           const rect = el.getBoundingClientRect();
           heights[m.id] = rect.height;
-          // Anchor offset from the card top : the y the SVG connectors join at.
+          // Anchor offset from the card top: the y the SVG connectors join at.
           // Mirrors anchorY(): sides-block midline for match cards, geometric
           // centre for bye-slot cards (no .bc-side). Passing this to computeMetaTops
           // centres parents on feeder ANCHORS, not geometric centres, so the elbow
@@ -593,7 +593,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
     window.addEventListener("resize", measure);
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
     // showDojo/variant affect card heights, so re-measure (and reposition) when
-    // they change : not just on topology/version. The convergence guard keeps a
+    // they change: not just on topology/version. The convergence guard keeps a
     // no-op recompute from causing a render.
   }, [columns, feedersById, version, showDojo, variant]);
 
@@ -620,7 +620,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
               const inner = m.isByeSlot ? (
                 <div
                   className="bc-bye-slot"
-                  aria-label={`${m.playerName || "Bye"} : advances without an opponent`}
+                  aria-label={`${m.playerName || "Bye"}: advances without an opponent`}
                   ref={(el) => { if (el) refMap.current[m.id] = el; }}
                 >
                   {m.playerName
@@ -656,7 +656,7 @@ function BracketTreeMeta({ columns, feedersById, matchNumById, variant = 1, show
 // supplied display metadata) and the legacy balanced-rounds renderer.
 function BracketTree(props) {
   // Memoise on rounds identity: buildDisplayModel returns fresh arrays, and the
-  // meta renderer's effects key on those : recomputing every render would reset
+  // meta renderer's effects key on those: recomputing every render would reset
   // the measured layout in a loop.
   const model = React.useMemo(() => buildDisplayModel(props.rounds), [props.rounds]);
   if (model.hasMeta) {
@@ -672,14 +672,14 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
   // Measured absolute top (px) for each round≥1 card, keyed by match id. Round 0
   // flows naturally; every later card is then positioned at the exact midpoint of
   // its two real feeder centres. This is measured rather than derived from a fixed
-  // slot pitch because card heights are not uniform within a bracket : a filled
+  // slot pitch because card heights are not uniform within a bracket: a filled
   // name+dojo card (~118px) is taller than a TBD/placeholder card (~104px), so no
   // single pitch can centre every parent on its children.
   const [cardTops, setCardTops] = useStateBC(null);
 
   // On a bracket change, clear measured positions so the new rounds render in
   // natural flow for one frame (their match ids differ, so stale tops wouldn't
-  // apply anyway) until the layout effect re-measures : avoids any stale-position
+  // apply anyway) until the layout effect re-measures: avoids any stale-position
   // flash. The version bump re-runs the measure effect.
   useEffectBC(() => { setCardTops(null); setVersion((v) => v + 1); }, [rounds]);
 
@@ -690,7 +690,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
       const rmEls = tree.querySelectorAll(".bc-round-matches");
       if (rmEls.length < rounds.length) return;
       const heights = {};
-      const centers = []; // centers[r][i] : card centre relative to its round-matches top
+      const centers = []; // centers[r][i]: card centre relative to its round-matches top
       for (let r = 0; r < rounds.length; r++) {
         const rmTop = rmEls[r].getBoundingClientRect().top;
         if (r === 0) {
@@ -729,7 +729,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
           const prevKeys = Object.keys(prev);
           if (keys.length === prevKeys.length &&
               keys.every((k) => Math.abs((prev[k] ?? 0) - tops[k]) < 0.5)) {
-            return prev; // unchanged : avoid a re-render loop
+            return prev; // unchanged: avoid a re-render loop
           }
         }
         return tops;
@@ -796,7 +796,7 @@ function matchScoreStr(m, ipponsB, ipponsA) {
     || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
 }
 
-// matchStateCell : the centre score-cell content for a compact match row, shared
+// matchStateCell: the centre score-cell content for a compact match row, shared
 // so every list renders the SAME lifecycle cue: completed → score string,
 // running → "vs" (the row's .is-running highlight is the "now" signal, NOT a
 // centre dot), scheduled → "–". The labelled "● NOW" badge used in headers/

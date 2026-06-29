@@ -93,8 +93,8 @@ func saveCompetitionWithPlayers(comp *state.Competition, store *state.Store) (bo
 	if err := store.SaveSeeds(comp.ID, assignments); err != nil {
 		// SaveSeeds is best-effort by historical contract (the same
 		// Printf-warning pattern is used in the PUT handler's
-		// participants block). seeds.csv missing is recoverable
-		//, the operator can re-set seeds without re-creating the
+		// participants block). seeds.csv missing is recoverable,
+		// the operator can re-set seeds without re-creating the
 		// competition. No rollback to avoid surprising the caller
 		// with a deleted record over a non-critical write.
 		fmt.Printf("Warning: failed to save seeds: %v\n", err)
@@ -463,11 +463,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Validate the derived OR caller-supplied ID upfront with a 400.
 		// Without this, a non-empty but invalid ID (e.g. "../../etc/passwd"
 		// or "foo bar") would skip the derive block, then LoadCompetition
-		// would silently drop the validation error (`_, _ :=`), and the
+		// would silently drop the validation error (`_, _:=`), and the
 		// SaveCompetitionChanged inside saveCompetitionWithPlayers would
 		// surface "invalid competition ID" as a 500, masking malformed
 		// input as a server failure. The middleware.requireValidCompID
-		// helper does the equivalent check for routes that take :id in
+		// helper does the equivalent check for routes that take: id in
 		// the URL; this is the body-supplied-id sibling.
 		if err := state.ValidateCompetitionID(comp.ID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -920,7 +920,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				}
 				// Existence first, uniqueness second. Pre-fix order ran
 				// checkUniqueCompFields BEFORE the transform, so a PUT to
-				// a missing :id whose body Name happened to collide with
+				// a missing: id whose body Name happened to collide with
 				// an existing competition would 400 "name already exists"
 				// instead of the documented 404 missing. Folding the
 				// check into the transform, after current == nil, is
@@ -1133,8 +1133,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// mp-p7n: pass HasIDs=&true explicitly when we just
 			// persisted a non-empty roster. We can rely on the
 			// HasParticipantIDs flag being already set on disk by
-			// this point (round-6 made the flip part of the contract
-			//, flip failures return 500 above and never reach this
+			// this point (round-6 made the flip part of the contract,
+			// flip failures return 500 above and never reach this
 			// reload), so the loader's default branch would resolve
 			// the same way. The explicit hint is purely declarative:
 			// it pins the call-site invariant ("we just wrote a non-
@@ -1462,7 +1462,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Pool-size validation: rank within a pool is bounded by the
 		// number of players in that pool. Load the comp's pools and
-		// look up the target pool by name (the URL :poolId matches
+		// look up the target pool by name (the URL: poolId matches
 		// Pool.PoolName). Pre-fix, the only check was an absolute 1000
 		// cap which let a stale/hand-crafted request store
 		// rank=500 against a 4-player pool, meaningless override

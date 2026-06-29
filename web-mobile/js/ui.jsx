@@ -36,12 +36,12 @@ function formatDate(d) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// Toast : single visible slot. Success toasts auto-dismiss quickly and are
+// Toast: single visible slot. Success toasts auto-dismiss quickly and are
 // polite (announced when the SR is idle). ERROR toasts dwell ≥8s, expose a
 // manual dismiss control, and are assertive (announced immediately) so an
 // operator in a noisy hall doesn't miss a failed action. The Toast component
 // itself (not the host) refuses to overwrite a still-visible error with a
-// later non-error toast : it latches the shown payload and ignores a
+// later non-error toast: it latches the shown payload and ignores a
 // suppressed prop change (see the effect below). These dwell constants are
 // module-local; they are not exported.
 const TOAST_SUCCESS_DWELL_MS = 2700;
@@ -81,11 +81,11 @@ function Toast({ message, type, onClose }) {
     setVisible(true);
   }, [message, type]);
 
-  // Auto-dismiss sequence, keyed on the SHOWN payload identity : NOT on
+  // Auto-dismiss sequence, keyed on the SHOWN payload identity: NOT on
   // `visible`. t1 hides at dwell; t2 fires onClose (host setToast(null) →
   // unmount) 300ms later. `visible` must NOT be a dep: when t1 flips it false
   // the effect would re-run, and its cleanup would clear the still-pending t2
-  // before it could fire : so onClose never ran and the toast stuck on screen
+  // before it could fire: so onClose never ran and the toast stuck on screen
   // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
   // payload restarts the dwell for each new toast, which is the intent.
   React.useEffect(() => {
@@ -142,7 +142,7 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   // Cancel the 200ms debounce on unmount so the timer can't fire
   // onChange(val) (which is the parent's setState) after teardown.
   // Pre-existing in this component before the PR but fits the same
-  // teardown-race theme as the admin-side mountedRef sweep : fixing
+  // teardown-race theme as the admin-side mountedRef sweep: fixing
   // here while the file is open for the NaN-display changes.
   React.useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -150,7 +150,7 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     const raw = e.target.value;
     // For number inputs: empty string → NaN, so a cleared input doesn't
     // collapse to 0 via `+""`. Non-empty strings still parse via unary +
-    // (so "2.5" stays 2.5, "abc" becomes NaN : same as before for those).
+    // (so "2.5" stays 2.5, "abc" becomes NaN: same as before for those).
     const val = type === 'number' ? (raw === "" ? NaN : +raw) : raw;
     setLocal(val);
 
@@ -235,7 +235,7 @@ function formatLabelShort(format) {
 //   confirmDialog  → resolves true on confirm, false on cancel/Escape/backdrop.
 //   promptDialog   → resolves the typed string on OK, or null on cancel/Escape/
 //                    backdrop (an empty submit resolves null, matching the old
-//                    `pw ? pw : null` callers).
+//                    `pw ? pw: null` callers).
 let _dialogReq = null; // the active request, or null
 let _dialogSeq = 0;     // monotonic id, used as the dialog node's React key
 const _dialogListeners = new Set();
@@ -248,7 +248,7 @@ function _setDialogReq(req) {
     _dialogReq._resolve(_dialogReq.kind === "confirm" ? false : null);
   }
   // Stamp a unique id so a request that REPLACES an open one gets a fresh React
-  // key on the dialog node : forcing a remount so the callback ref re-runs and
+  // key on the dialog node: forcing a remount so the callback ref re-runs and
   // re-captures the trigger / re-focuses the new input (otherwise the trap and
   // focus would stay pinned to the first dialog). Cheap insurance for the
   // defensive replace path above.
@@ -307,13 +307,13 @@ function DialogHost() {
   }, []);
 
   // Modal focus management (WCAG 2.4.3 / ARIA APG dialog) via a callback ref on
-  // the dialog node : fires synchronously on mount (open) and unmount (close),
+  // the dialog node: fires synchronously on mount (open) and unmount (close),
   // which is more reliable here than a [req] effect. On open: remember the
   // trigger, move focus into the dialog (prompt → input; confirm → the dialog
   // container, so no button is "armed" for an accidental Enter), trap Tab, and
   // lock background scroll. On close: tear all that down and restore focus to
   // the trigger. NB: DialogHost renders *inside* #root, so we must NOT set
-  // `inert` on #root (it would disable the dialog itself) : the focus trap plus
+  // `inert` on #root (it would disable the dialog itself): the focus trap plus
   // aria-modal carry the background-isolation contract instead.
   const dialogRefCb = React.useCallback((node) => {
     if (node) {
@@ -336,7 +336,7 @@ function DialogHost() {
       document.addEventListener("keydown", onKeyDown, true);
       // Move focus into the dialog on a 0ms timer: focusing synchronously
       // during the commit phase gets reset afterwards, and rAF doesn't fire in
-      // non-painting/headless contexts : setTimeout(0) defers past commit and
+      // non-painting/headless contexts: setTimeout(0) defers past commit and
       // still fires. Prompt → input (focus+select the default); confirm → the
       // first real focusable (the close "×", whose Enter is a safe cancel),
       // since a tabindex=-1 container doesn't reliably take programmatic focus.
@@ -374,7 +374,7 @@ function DialogHost() {
   // Escape-to-cancel is handled ON the dialog container (not via the global
   // useEscapeToClose window listener). The dialog frequently opens on top of a
   // surface that ALSO has a window-level Escape handler (e.g. the scoring
-  // modal's handleDismiss). A window listener would let one Escape fire BOTH :
+  // modal's handleDismiss). A window listener would let one Escape fire BOTH:
   // cancelling the dialog and re-dismissing the underlying modal. Because focus
   // is trapped inside the dialog, the keydown bubbles through this container
   // first; stopPropagation() keeps it from reaching any window listener.
@@ -400,7 +400,7 @@ function DialogHost() {
               placeholder={req.placeholder}
               // Accessible name: the field has no visible <label>, so name it
               // from the dialog's own prompt (message preferred, title as
-              // fallback) : otherwise screen readers announce a bare text field.
+              // fallback): otherwise screen readers announce a bare text field.
               aria-label={req.message || req.title}
               autoComplete={req.password ? "current-password" : "off"}
               onChange={(e) => setValue(e.target.value)}
@@ -417,7 +417,7 @@ function DialogHost() {
   );
 }
 
-// Icon : small single-stroke inline SVG set (lucide geometry) for primary admin
+// Icon: small single-stroke inline SVG set (lucide geometry) for primary admin
 // chrome, replacing OS emoji so glyphs inherit the token palette via
 // `currentColor`, render identically across the tablets/laptops operators use,
 // and stay on-brand for a serious tournament tool. Decorative by default

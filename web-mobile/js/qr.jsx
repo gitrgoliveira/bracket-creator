@@ -1,4 +1,4 @@
-// qr.jsx : Zero-dependency QR Code Model 2 generator.
+// qr.jsx: Zero-dependency QR Code Model 2 generator.
 // Encodes byte-mode data, error correction level M, versions 2-10.
 // (Version 1 / 21×21 modules is excluded: too small for reliable phone scanning.)
 // Implements ISO/IEC 18004:2015.
@@ -105,7 +105,7 @@ function selectVersion(byteLen) {
 }
 
 // ---------------------------------------------------------------------------
-// Data encoding : byte mode
+// Data encoding: byte mode
 // ---------------------------------------------------------------------------
 function encodeByte(text, version) {
   const bytes = new TextEncoder().encode(text);
@@ -389,7 +389,7 @@ function placeFormatInfo(mat, size, maskId) {
   // using pushBit which makes the FIRST cell read the MSB (bit 14) of the
   // accumulated word it compares against the FORMAT_INFO_TABLE.
   // Therefore we must place bit 14 at the first position (8,0) and bit 0 at
-  // the last position (0,8) : i.e. place bit (14-i) at sequence position i.
+  // the last position (0,8): i.e. place bit (14-i) at sequence position i.
   //
   // First copy: around top-left finder (ISO 18004:2015 Table C.1 sequence).
   const tlR = [8, 8, 8, 8, 8, 8, 8, 8, 7, 5, 4, 3, 2, 1, 0];
@@ -398,7 +398,7 @@ function placeFormatInfo(mat, size, maskId) {
     mat[tlR[i] * size + tlC[i]] = (fmt >> (14 - i)) & 1;
   }
 
-  // Second copy : bottom-left vertical (jsQR reads rows size-1..size-7, col 8,
+  // Second copy: bottom-left vertical (jsQR reads rows size-1..size-7, col 8,
   // then cols size-8..size-1, row 8, accumulating MSB-first via pushBit).
   // Rows size-1..size-7 carry bits 14..8 (7 cells), row size-8 is the dark module.
   for (let i = 0; i < 7; i++) {
@@ -406,7 +406,7 @@ function placeFormatInfo(mat, size, maskId) {
   }
   // (Row size-8, col 8 = dark module; set separately in buildQR.)
 
-  // Second copy : top-right horizontal (cols size-8..size-1, row 8; 8 cells).
+  // Second copy: top-right horizontal (cols size-8..size-1, row 8; 8 cells).
   // jsQR pushes these after the 7 bottom-left cells, so col size-8 carries bit 7
   // and col size-1 carries bit 0.
   for (let i = 0; i < 8; i++) {
@@ -475,7 +475,7 @@ export function renderQR(canvas, text, { moduleSize = 6, quietZone = 4 } = {}) {
   canvas.height = pxHeight;
 
   const ctx = canvas.getContext("2d");
-  if (!ctx) return; // defensive : should never happen in a real browser
+  if (!ctx) return; // defensive: should never happen in a real browser
   // Reset any prior transform (prevents scale accumulation on re-renders),
   // then apply the backing-to-CSS ratio so the scale matches the rounded
   // pixel dimensions exactly on non-integer devicePixelRatios.

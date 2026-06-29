@@ -43,14 +43,14 @@
 // in-memory intent map: tx-internal reads (tx.LoadCompetition,
 // tx.LoadBracket, etc.) check the pending intents BEFORE going to
 // disk, so a tx that saves pool-matches and then re-loads them sees
-// the just-saved data ,not the stale on-disk version (which won't
+// the just-saved data, not the stale on-disk version (which won't
 // update until Apply runs after fn returns). Without this, the
 // existing TestWithTransaction_NestedCallDoesNotDeadlock contract
 // (load-save-load round-trip) would silently see stale data.
 //
 // Lock ordering. The per-comp lock is a sync.RWMutex; WithTransaction
 // holds the WRITE lock for fn's entire duration. fn MUST call the
-// load/save methods on the supplied StoreTx ,those bypass re-locking.
+// load/save methods on the supplied StoreTx, those bypass re-locking.
 // Calling any Store method directly from fn (e.g. s.LoadCompetition,
 // s.SavePoolMatches) would deadlock because RWMutex is non-recursive.
 // This mirrors the same advisory that already attaches to
@@ -79,7 +79,7 @@ var ErrMismatchedTxCompID = errors.New("compID does not match transaction's comp
 
 // StoreTx is the transactional handle passed to fn in WithTransaction.
 // Methods mirror the corresponding *Store methods but DO NOT re-acquire
-// the per-competition lock ,that's already held by WithTransaction.
+// the per-competition lock, that's already held by WithTransaction.
 //
 // The compID parameter on each method is intentional duplication: it
 // keeps StoreTx methods source-compatible with their *Store siblings,
@@ -116,7 +116,7 @@ type StoreTx interface {
 	// UpdateBracket is the tx-aware twin of Store.UpdateBracket. The
 	// mutate closure may modify the bracket arbitrarily and signal "match
 	// not found" by returning an error (typically wrapping the engine's
-	// match-not-found sentinel ,see engine.withBracketMatch).
+	// match-not-found sentinel, see engine.withBracketMatch).
 	UpdateBracket(compID string, mutate func(*Bracket) error) error
 	// LockTeamLineupsForRound is the tx-aware twin of
 	// Store.LockTeamLineupsForRound. Used by the score-path tx body
@@ -133,7 +133,7 @@ type StoreTx interface {
 	// can serialise a competition-status pre-check (via LoadCompetition
 	// in the same tx body) and the participant write under one lock
 	// acquire. Participants.csv and seeds.csv are written directly via
-	// atomic rename ,they are not staged through the WAL ,but each
+	// atomic rename, they are not staged through the WAL, but each
 	// write is individually crash-safe, and no other WAL-staged file
 	// is touched by this path, so cross-file atomicity is not required.
 	UpdateParticipant(compID, pid string, withZekkenName bool, transform func(*domain.Player) error) (*domain.Player, error)
@@ -141,7 +141,7 @@ type StoreTx interface {
 
 // WithTransaction runs fn under the per-competition write lock for
 // compID. fn receives a StoreTx that can call multiple load/save
-// methods without re-acquiring the lock ,the lock is held for the
+// methods without re-acquiring the lock, the lock is held for the
 // entire fn body and released exactly once on return (success OR
 // error).
 //
@@ -155,7 +155,7 @@ type StoreTx interface {
 // (Store.NewStore scans the directory); a crash before Commit
 // leaves no on-disk trace and the partial in-memory work is dropped.
 // Multi-file transactions that previously could land file A but not
-// file B now either land both or replay both ,cross-file atomicity
+// file B now either land both or replay both, cross-file atomicity
 // across a process crash (closing the v3 review A1 finding).
 // Exception: UpdateParticipant is NOT WAL-staged (see WAL caveat
 // below); it writes immediately and is not rolled back on error.
@@ -173,18 +173,18 @@ type StoreTx interface {
 // staged, so if fn returns an error after calling UpdateParticipant
 // the participant write is NOT rolled back. Do not mix
 // UpdateParticipant with WAL-staged tx saves (e.g. tx.SaveCompetition)
-// and expect cross-file crash-atomicity ,each write lands
+// and expect cross-file crash-atomicity, each write lands
 // independently.
 //
 // fn read-after-write within the same tx. Tx-internal reads
 // (tx.LoadCompetition, tx.LoadBracket, etc.) read from disk via the
-// *Locked helpers and DO NOT see the WAL-staged writes ,the on-disk
+// *Locked helpers and DO NOT see the WAL-staged writes, the on-disk
 // file isn't updated until Apply runs after fn returns. The current
 // engine paths (RecordMatchResultWithIneligibilityTx,
 // RecordDecisionTx, K3 rollback) read BEFORE they write within a
 // single tx and never read-after-write the same file, so this
 // limitation is invisible to them. If a future tx body needs to
-// read its own pending write, the WAL exposes Intents() ,but that's
+// read its own pending write, the WAL exposes Intents(), but that's
 // a code-smell and probably indicates the load/save should be
 // re-ordered.
 //
@@ -210,7 +210,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		// Abort path: the WAL is in-memory only at this point
 		// (Commit was never called), so there's nothing to clean
 		// up on disk. But the savers DID update the file caches
-		// with the staged (uncommitted) data ,those caches now
+		// with the staged (uncommitted) data, those caches now
 		// hold a phantom value that didn't land on disk. Invalidate
 		// every cache the would-be intents touched so the next
 		// reader re-parses from the (untouched) on-disk file and
@@ -222,7 +222,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	// Fast path: a tx that called nothing through the WAL writer
 	// (e.g., pure read-only or a no-op save like
 	// SaveCompetitionChanged returning false-changed) has no
-	// intents. Skip Commit/Apply/Done ,they'd just write and
+	// intents. Skip Commit/Apply/Done, they'd just write and
 	// remove an empty WAL file for nothing.
 	if len(w.Intents()) == 0 {
 		return nil
@@ -235,17 +235,17 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		// Apply failed mid-way. The WAL is committed and remains on
 		// disk; the next Store.NewStore startup will replay it.
 		// Surface the error so the caller can react (e.g., HTTP
-		// 500) ,the next process startup is what guarantees
+		// 500), the next process startup is what guarantees
 		// completion.
 		return fmt.Errorf("WithTransaction %q: Apply: %w", compID, err)
 	}
 
 	// Cache reconciliation. In WAL mode, the savers populated the
 	// file caches with the in-memory result BEFORE Apply landed the
-	// bytes ,so cache.mtime was captured from the OLD file (or 0
+	// bytes, so cache.mtime was captured from the OLD file (or 0
 	// if absent). After Apply the on-disk file has a NEW mtime, and
 	// the next reader would see mtime != cache.mtime and re-parse
-	// from disk ,silently losing any in-memory-only fields the
+	// from disk, silently losing any in-memory-only fields the
 	// parser doesn't know about (e.g., MatchResult.DecisionBy and
 	// MatchResult.Encho, which pool-matches.csv doesn't serialize).
 	// Walk the WAL intents and refresh each touched cache's mtime
@@ -254,7 +254,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	s.refreshCachesAfterWALApply(compID, w.Intents())
 
 	if err := w.Done(); err != nil {
-		// Done failed but Apply succeeded ,target files are in
+		// Done failed but Apply succeeded, target files are in
 		// the right state, the WAL file is stale. Next startup
 		// will see the WAL, re-Apply (no-op for identical bytes),
 		// and re-attempt Done. The transaction is effectively
@@ -268,9 +268,9 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 
 // directWriteWAL is the WriteFn the WAL uses for both its OWN file
 // (during Commit) and the target files (during Apply). Both go
-// through Store.atomicWrite ,which validates that the path stays
+// through Store.atomicWrite, which validates that the path stays
 // inside the store's data folder before delegating to
-// atomicWriteFile ,so the WAL writes inherit the same write-tmp +
+// atomicWriteFile, so the WAL writes inherit the same write-tmp +
 // fsync + rename dance AND the same path-injection sanitiser the
 // rest of the package uses. Routing through s.atomicWrite (rather
 // than calling atomicWriteFile directly) keeps the CodeQL
@@ -307,7 +307,7 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 // refreshCachesAfterWALApply walks each WAL intent and re-stamps the
 // matching file cache's mtime to the post-Apply on-disk mtime. Only
 // touches caches that already exist (the saver populated them during
-// the staged write) ,never creates a new cache entry from scratch.
+// the staged write), never creates a new cache entry from scratch.
 //
 // Why this is necessary. The savers update the cache with the
 // in-memory struct immediately when they're called, capturing the
@@ -316,7 +316,7 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 // the time Apply finishes. Without this refresh, the next reader
 // sees cache.mtime ≠ file.mtime, re-parses from disk, and silently
 // loses fields the on-disk format doesn't carry (e.g.,
-// MatchResult.DecisionBy, MatchResult.Encho ,pool-matches.csv
+// MatchResult.DecisionBy, MatchResult.Encho, pool-matches.csv
 // doesn't have columns for them, so the in-memory cache is the only
 // authoritative source for those fields after a save).
 func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileIntent) {
@@ -324,7 +324,7 @@ func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileInte
 		base := filepath.Base(in.Path)
 		// The cache keys we know how to refresh; if a WAL intent
 		// targets a path we don't recognize, skip it (no cache to
-		// refresh ,the saver didn't populate one).
+		// refresh, the saver didn't populate one).
 		switch base {
 		case "config.md",
 			"pool-matches.csv",
@@ -342,7 +342,7 @@ func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileInte
 }
 
 // storeTx implements StoreTx by delegating to the store's *Locked
-// helpers ,the ones that DO NOT acquire the per-comp lock. Caller
+// helpers, the ones that DO NOT acquire the per-comp lock. Caller
 // (WithTransaction) is responsible for the lock; this type just
 // dispatches.
 //
@@ -358,8 +358,8 @@ type storeTx struct {
 
 // txWriteFn adapts the WAL package's WriteFn (which uses os.FileMode)
 // to the state package's writeFn (which uses fs.FileMode). The two
-// types are identical at the value level ,fs.FileMode is an alias
-// of os.FileMode ,but Go's strict named-function-type rule won't
+// types are identical at the value level, fs.FileMode is an alias
+// of os.FileMode, but Go's strict named-function-type rule won't
 // let one pass directly where the other is expected. A trivial
 // shim closure converts.
 func (t *storeTx) txWriteFn() writeFn {
@@ -565,7 +565,7 @@ func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int
 				// transitioned this lineup's match to running BETWEEN the
 				// caller's GET and this write, before the engine persisted
 				// LockedAt. The handler checks match status upstream on the
-				// FORCE path only ,the non-force path does not ,so re-check
+				// FORCE path only, the non-force path does not, so re-check
 				// here under the held per-comp lock and refuse if the match is
 				// no longer mutable. Match-scoped when MatchID is set (a live
 				// match must not block a sibling match's lineup), else
@@ -682,7 +682,7 @@ func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt tim
 		}
 		changed := false
 		for k, l := range current {
-			// Skip match-scoped entries ,see lockTeamLineupsForRoundLocked.
+			// Skip match-scoped entries, see lockTeamLineupsForRoundLocked.
 			if l.MatchID != "" {
 				continue
 			}

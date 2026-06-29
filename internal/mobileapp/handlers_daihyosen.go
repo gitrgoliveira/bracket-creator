@@ -133,8 +133,8 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// Court exclusivity (mp-95mg) is not required here: DELETE /daihyosen
 			// only proceeds when the DH sub is an unscored placeholder (the guard
 			// above rejects if the sub has ippons, a winner, or a non-daihyosen
-			// decision), which means the parent match is still in MatchStatusRunning
-			//, no cross-comp conflict can be introduced by this write.
+			// decision), which means the parent match is still in MatchStatusRunning,
+			// no cross-comp conflict can be introduced by this write.
 			u.Status = state.MatchStatusRunning
 			// Clear ALL DH-derived match-level result/decision metadata so the
 			// match returns to a clean running state. MatchResult.Decision has no

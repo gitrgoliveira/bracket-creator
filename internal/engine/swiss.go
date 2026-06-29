@@ -264,8 +264,8 @@ func pairKey(a, b string) string {
 // buildRankByName computes a 1-based rank for each player suitable for
 // tiebreaking. Players with explicit seeds rank by seed number
 // (ascending = higher rank); unseeded players are ranked after seeded
-// ones by name alphabetical order. The returned map uses Name as key
-// , the rest of the Swiss pipeline operates on names because pool-
+// ones by name alphabetical order. The returned map uses Name as key,
+// the rest of the Swiss pipeline operates on names because pool-
 // matches.csv stores names, not IDs (parsePoolMatchesFile sets
 // MatchResult.SideA / .SideB to names).
 func buildRankByName(players []domain.Player) map[string]int {

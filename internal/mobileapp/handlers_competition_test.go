@@ -179,7 +179,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 
 	t.Run("Override Rank Rejects Unknown Pool With 404", func(t *testing.T) {
 		// Pool-size validation requires looking up the pool by name.
-		// A bogus :poolId (no matching Pool.PoolName) returns 404.
+		// A bogus: poolId (no matching Pool.PoolName) returns 404.
 		// The JS frontend only offers existing pools; this is a
 		// defense-in-depth check against hand-crafted API callers.
 		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools}
@@ -586,7 +586,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// LoadCompetition which silently dropped the validation error,
 	// then SaveCompetitionChanged returned "invalid competition ID"
 	// mapped to a 500. The fix validates `id` upfront with a 400
-	// (same shape as requireValidCompID does for routes with :id
+	// (same shape as requireValidCompID does for routes with: id
 	// in the URL).
 	t.Run("POST Rejects Invalid Body ID With 400", func(t *testing.T) {
 		// Single-segment payloads that gin will deliver verbatim to the
@@ -671,7 +671,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	// Path-traversal guard. ValidateCompetitionID was only called at 2 of
-	// the 14 :id handler sites pre-fix; the requireValidCompID helper now
+	// the 14: id handler sites pre-fix; the requireValidCompID helper now
 	// gates every site. A compID like "../../../etc/passwd" would
 	// otherwise reach compPath(id, ...) which does filepath.Clean(Join())
 	// and cleanly escapes the data dir. Sample a handful of routes
@@ -702,7 +702,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			"foo/bar",
 		}
 		// Single-segment IDs that reach the handler. Gin treats these
-		// as one :id value; ValidateCompetitionID rejects each on the
+		// as one: id value; ValidateCompetitionID rejects each on the
 		// invalid-character rule.
 		singleSegmentIDs := []string{
 			"foo bar",   // space
@@ -1396,7 +1396,7 @@ func TestPublicViewerCompetitionDetail_InvalidIDReturns400(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions/bad%20id", nil)
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code,
-		"invalid :id on public viewer detail route should 400 (was 500 pre-fix): %s", w.Body.String())
+		"invalid: id on public viewer detail route should 400 (was 500 pre-fix): %s", w.Body.String())
 }
 
 // TestRecordBracketMatchResult_PreservesRunningStatus pins the

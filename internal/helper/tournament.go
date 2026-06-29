@@ -179,7 +179,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 // IsRegistrationSource reports whether s is a recognised participant
 // registration source (case-insensitive): manual / registered / transfer.
 // Exported so the API boundary validator can reject unknown values before they
-// are persisted , the CSV loader only recognises these tokens, so an unexpected
+// are persisted, the CSV loader only recognises these tokens, so an unexpected
 // value would otherwise shift into Metadata on reload.
 func IsRegistrationSource(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
@@ -216,7 +216,7 @@ func TitleCaseName(name string) string {
 // names. Exported so state.SaveParticipants can detect display names that
 // match the auto-derived form and avoid round-trip data corruption (a 3-column
 // row whose DisplayName equals SanitizeName(Name) carries no extra information
-// and must not be written for non-zekken competitions , see
+// and must not be written for non-zekken competitions, see
 // internal/state/participants.go).
 func SanitizeName(name string) string {
 	//removing extra spaces
@@ -241,7 +241,7 @@ func SanitizeName(name string) string {
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an
-	// integer divide-by-zero. Reject it here , the lowest shared point , so
+	// integer divide-by-zero. Reject it here, the lowest shared point, so
 	// every caller (engine draw, schedule estimator, CLI) is panic-proof
 	// regardless of how PoolSize reached it. (mp-ebgz)
 	if poolSize <= 0 {

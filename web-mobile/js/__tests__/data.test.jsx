@@ -93,7 +93,7 @@ describe('parseParticipantLines', () => {
   });
 
   it('does NOT set checkedIn when only 2 parts (below threshold)', () => {
-    // "Name, checked_in" has only 2 parts ; must not be treated as the flag.
+    // "Name, checked_in" has only 2 parts; must not be treated as the flag.
     const [p] = parseParticipantLines(['Name, checked_in'], false);
     expect(p.checkedIn).toBe(false);
     // The second column is read as dojo.

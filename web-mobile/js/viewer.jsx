@@ -1,4 +1,4 @@
-// Viewer side : mobile-first. Single tournament. Shows competitions as the home;
+// Viewer side: mobile-first. Single tournament. Shows competitions as the home;
 // each competition opens to its own Overview/Bracket/Pools/Schedule/Results.
 //
 // Thin entry point (mp-pxxc): the implementation lives in the viewer_*.jsx
@@ -34,7 +34,7 @@ export { resolveDeepLink } from './viewer_home.jsx';
 // --- window.* surface for non-module consumers ---
 // (viewer_awards.jsx sets window.{buildAllWinnersPublic,AllWinnersView}; the
 // viewer_schedule.jsx/_utils.jsx/_notifications.jsx modules set their own
-// window globals at module-eval time : those are NOT re-set here.)
+// window globals at module-eval time: those are NOT re-set here.)
 // All assignments share one `typeof window` guard so this module can be
 // imported in a non-browser context (tooling/SSR) without a ReferenceError.
 // resolveCompetitionAwards is read off window by admin_shell.jsx (non-module).

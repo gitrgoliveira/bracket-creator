@@ -1,11 +1,11 @@
-// Sponsors admin section : embedded in the Edit Tournament page (mp-c38).
+// Sponsors admin section: embedded in the Edit Tournament page (mp-c38).
 // Shows existing sponsor logos with delete controls and an upload form.
 //
 // Endpoints (via window.API.uploadSponsor / window.API.deleteSponsor):
 //   POST   /api/sponsors        multipart {name, link?, file}
 //   DELETE /api/sponsors/:index
 // Live list is seeded from tournament.sponsors on first render and then
-// maintained in local state : updates come from API responses, not the
+// maintained in local state: updates come from API responses, not the
 // parent prop. This keeps unsaved tournament-form edits above intact
 // when a sponsor is added or deleted (no page reload needed).
 
@@ -15,7 +15,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   const cap = maxSponsors || 6;
 
   // Manage the sponsor list in local state so upload/delete don't
-  // force window.location.reload() : that would wipe any unsaved edits
+  // force window.location.reload(): that would wipe any unsaved edits
   // in the tournament form above. We seed from the tournament prop on
   // first render and update locally from the API response shape:
   //   POST /api/sponsors → returns the created Sponsor

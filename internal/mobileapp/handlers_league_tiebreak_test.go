@@ -554,8 +554,8 @@ func TestLeagueTiebreakFinalize_MaybeAutoCompleteError(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// Still returns 200 with the finalized flag (same pattern as tryAutoCompletePools
-	//, the score itself succeeded; the auto-complete failure is a background concern
+	// Still returns 200 with the finalized flag (same pattern as tryAutoCompletePools,
+	// the score itself succeeded; the auto-complete failure is a background concern
 	// surfaced via the error header).
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, AutoCompleteErrorValue, w.Header().Get(AutoCompleteErrorHeader))
@@ -614,14 +614,14 @@ func TestLeagueTiebreakCandidates_EngineNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// GET, requireValidCompID returns false (empty :id → 400).
+// GET, requireValidCompID returns false (empty: id → 400).
 func TestLeagueTiebreakCandidates_InvalidID(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// A route param that fails ValidateCompetitionID (e.g. empty string via
-	// a sub-path that doesn't carry :id, use a contrived bad value).
+	// a sub-path that doesn't carry: id, use a contrived bad value).
 	req := httptest.NewRequest("GET", "/api/competitions/%00/league-tiebreak/candidates", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

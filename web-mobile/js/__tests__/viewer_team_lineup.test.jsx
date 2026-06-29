@@ -1,4 +1,4 @@
-// mp-13y: Per-match lineup rendering : unit tests for shared logic and
+// mp-13y: Per-match lineup rendering: unit tests for shared logic and
 // view-layer components added in the lineup-rendering PR.
 //
 // Covers:

@@ -1,16 +1,16 @@
 // Tests for the pure competitionNextSteps helper (mp-a5d6).
-// The function is unit-testable without mounting any component : it takes
+// The function is unit-testable without mounting any component: it takes
 // a plain competition object and returns a step array.
 import { describe, it, expect } from 'vitest';
 import { competitionNextSteps, overviewViewMode, overviewResultsSection } from '../admin_competition_overview.jsx';
 
 // ---------------------------------------------------------------------------
-// overviewResultsSection : format → results/standings section
+// overviewResultsSection: format → results/standings section
 // ---------------------------------------------------------------------------
 // Regression guard (Copilot review on PR #312): swiss competitions have no
 // pools/bracket section, so a Results/podium CTA must route to "swiss", not the
-// pools/bracket default : otherwise the operator lands on an empty/hidden view.
-describe('overviewResultsSection : results routing', () => {
+// pools/bracket default: otherwise the operator lands on an empty/hidden view.
+describe('overviewResultsSection: results routing', () => {
   it('routes swiss competitions to the "swiss" section regardless of bracket presence', () => {
     expect(overviewResultsSection('swiss', false)).toBe('swiss');
     expect(overviewResultsSection('swiss', true)).toBe('swiss');
@@ -28,13 +28,13 @@ describe('overviewResultsSection : results routing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// overviewViewMode : status → render-mode mapping
+// overviewViewMode: status → render-mode mapping
 // ---------------------------------------------------------------------------
 // Regression guard (mp-a5d6): the active phases are "pools" and "playoffs",
 // NOT a literal "running". An earlier version checked `status === "running"`,
 // which is never true in production, so a running competition mis-rendered the
 // "completed" card. These assertions lock the mapping against that drift.
-describe('overviewViewMode : status mapping', () => {
+describe('overviewViewMode: status mapping', () => {
   it('maps setup-ish statuses to "setup"', () => {
     expect(overviewViewMode('setup')).toBe('setup');
     expect(overviewViewMode('')).toBe('setup');
@@ -90,7 +90,7 @@ function makePlayer(seed = null) {
 // ---------------------------------------------------------------------------
 // Basic shape
 // ---------------------------------------------------------------------------
-describe('competitionNextSteps : basic shape', () => {
+describe('competitionNextSteps: basic shape', () => {
   it('returns an array of step objects', () => {
     const steps = competitionNextSteps(makeComp());
     expect(Array.isArray(steps)).toBe(true);
@@ -155,9 +155,9 @@ describe('competitionNextSteps : basic shape', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Individual competition : setup states
+// Individual competition: setup states
 // ---------------------------------------------------------------------------
-describe('competitionNextSteps : individual, 0 players', () => {
+describe('competitionNextSteps: individual, 0 players', () => {
   it('participants step is active when 0 players', () => {
     const steps = competitionNextSteps(makeComp({ players: [] }));
     const p = steps.find(s => s.id === 'participants');
@@ -222,7 +222,7 @@ describe('competitionNextSteps : individual, 0 players', () => {
 // ---------------------------------------------------------------------------
 // Team competition
 // ---------------------------------------------------------------------------
-describe('competitionNextSteps : team competition', () => {
+describe('competitionNextSteps: team competition', () => {
   it('includes a lineups step for team comps', () => {
     const steps = competitionNextSteps(makeComp({ kind: 'team' }));
     expect(steps.find(s => s.id === 'lineups')).toBeDefined();
@@ -274,9 +274,9 @@ describe('competitionNextSteps : team competition', () => {
 // ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
-describe('competitionNextSteps : edge cases', () => {
+describe('competitionNextSteps: edge cases', () => {
   it('handles null/undefined comp gracefully (returns array)', () => {
-    // Should not throw : caller may pass a partially-loaded comp.
+    // Should not throw: caller may pass a partially-loaded comp.
     expect(() => competitionNextSteps(null)).not.toThrow();
     expect(Array.isArray(competitionNextSteps(null))).toBe(true);
   });
@@ -312,7 +312,7 @@ describe('competitionNextSteps : edge cases', () => {
 // draw-ready / running / completed: pure helper is only for setup state, but
 // it should still be callable with any comp without throwing.
 // ---------------------------------------------------------------------------
-describe('competitionNextSteps : non-setup statuses', () => {
+describe('competitionNextSteps: non-setup statuses', () => {
   it('does not throw for draw-ready status', () => {
     expect(() => competitionNextSteps(makeComp({ status: 'draw-ready', players: [makePlayer(), makePlayer()] }))).not.toThrow();
   });

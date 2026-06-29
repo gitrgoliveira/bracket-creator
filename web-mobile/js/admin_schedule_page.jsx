@@ -95,7 +95,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       {/* T097: formatIpponsScore appends "Kiken / Fus. / DH / (E)" suffixes
           for non-fought decisions and overtime. The match-level decision
           covers kiken / fusenpai / daihyosen here; per-bout fusensho is a
-          SubMatchResult and is rendered inside the score modal : the row
+          SubMatchResult and is rendered inside the score modal: the row
           here doesn't expose individual bout cells.
           TODO(T096): once per-bout fusensho is wired through the team-score
           serializer and the schedule row exposes bout details, append an
@@ -208,7 +208,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   // Resolve the active court filter: URL ?court= wins; localStorage is the
   // fallback when the URL is bare. Whenever the URL carries a court we
   // persist it back to localStorage so a later bare-URL visit on the same
-  // device restores the same shiaijo. Wrapped in try/catch : Safari private
+  // device restores the same shiaijo. Wrapped in try/catch: Safari private
   // mode disables localStorage entirely.
   const effectiveCourt = (() => {
     if (courtFromURL && courtFromURL.trim() !== "") {
@@ -240,7 +240,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
 
   // Guard against a nil courts slice: the JSON tag has no omitempty, so the
   // API can serialize `courts: null`. The rest of the codebase guards
-  // `t.courts || []` (e.g. the score editor) : match that to avoid a render
+  // `t.courts || []` (e.g. the score editor): match that to avoid a render
   // crash on courts.forEach/map/includes below.
   const courts = tournament.courts || [];
   const byCourt = {};
@@ -255,7 +255,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   });
   const courtOrder = (a, b) => {
     const order = { running: 0, scheduled: 1, completed: 2 };
-    // Unknown / new statuses sink to "completed" (=2) : matches the
+    // Unknown / new statuses sink to "completed" (=2): matches the
     // ScheduleViewer in viewer.jsx and the patch.jsx _orderByCourtKey
     // helper, so admin and viewer surfaces stay in sync if a new
     // terminal status (kiken / fusenpai / forfeit) ever appears.
@@ -267,7 +267,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   Object.values(byCourt).forEach((list) => list.sort(courtOrder));
   unassigned.sort(courtOrder);
 
-  // Pace stats must reflect the full per-court workload : the admin uses
+  // Pace stats must reflect the full per-court workload: the admin uses
   // the panel to rebalance scheduling, not to inspect filter results.
   // Build a separate by-court bucket from allMatches (still narrowed by
   // the explicit ?court= scope so the panel can be reviewed one court at
@@ -276,7 +276,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   courts.forEach((cc) => paceByCourt[cc] = []);
   // Also bucket matches on courts not in the current config (stale/moved)
   // so the pace panel stays accurate even after court list changes.
-  // Trim before bucketing : whitespace-only courts are treated as unassigned
+  // Trim before bucketing: whitespace-only courts are treated as unassigned
   // by the rest of the UI and must not create phantom pace tiles.
   filterMatchesByCourt(allMatches, effectiveCourt).forEach((m) => {
     const court = (m.court || "").trim();
@@ -291,7 +291,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
 
   // Duration estimation: earliest start to latest finish across all matches.
   // clampMatchDuration coerces NaN / fractional / sub-1 values to the
-  // 3-minute default before any arithmetic : see helper for the full
+  // 3-minute default before any arithmetic: see helper for the full
   // rationale (Copilot found that addMinutes("00:00", 2.5) → "00:2.5",
   // which then persists as an invalid scheduledAt string).
   const safeMatchDuration = clampMatchDuration(matchDuration);
@@ -316,11 +316,11 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
 
   // Auto-schedule: assign sequential times to matches within a competition per court.
   // Operate on allMatches so UI filters (player/dojo/competition pill) don't
-  // shrink the set being scheduled : otherwise it's easy to time only a subset.
+  // shrink the set being scheduled: otherwise it's easy to time only a subset.
   const autoSchedule = async () => {
     const comp = tournament.competitions.find(c => c.id === autoComp);
     if (!comp) return;
-    // Skip matches with no/unknown court : the per-court scheduler assumes
+    // Skip matches with no/unknown court: the per-court scheduler assumes
     // each match lives on one of the configured courts; otherwise we'd
     // create a phantom bucket and time matches that the user hasn't placed.
     const compMatches = allMatches.filter(m => m.compId === autoComp && courts.includes(m.court));
@@ -332,7 +332,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     try {
       // Assign times: each court runs in parallel from autoStart, matches spaced by matchDuration
       for (const [_ct, list] of Object.entries(byCt)) {
-        // ?? not || so "00:00" (0 minutes : midnight) doesn't fall through to 09:00.
+        // ?? not || so "00:00" (0 minutes: midnight) doesn't fall through to 09:00.
         let cursor = timeToMinutes(autoStart) ?? 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
           await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", cursor), password);
@@ -390,7 +390,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                    while safeMatchDuration's Number.isFinite check (above)
                    keeps providing the 3-minute fallback for scheduling.
                    step="1" makes the browser's up/down arrows step in
-                   whole minutes : typing fractions like "2.5" is still
+                   whole minutes: typing fractions like "2.5" is still
                    physically possible, so safeMatchDuration also guards
                    Number.isInteger. Belt-and-braces. */
                 value={Number.isFinite(matchDuration) ? matchDuration : ""}

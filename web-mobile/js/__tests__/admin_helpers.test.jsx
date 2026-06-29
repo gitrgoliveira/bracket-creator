@@ -98,7 +98,7 @@ describe('hasBothSides', () => {
   });
 
   // Copilot round-4 finding on PR #104: the prefix-match `startsWith("Winner of ")`
-  // was too broad : it rejected real participants whose names happened to
+  // was too broad: it rejected real participants whose names happened to
   // start with "Winner of " (e.g. "Winner of the 2025 Cup"). The placeholder
   // pattern emitted by the bracket generator is the exact shape
   // `Winner of r<digits>-m<digits>`; only that should be rejected.
@@ -113,7 +113,7 @@ describe('hasBothSides', () => {
 
   it('still rejects the exact placeholder shape Winner of r<n>-m<n>', () => {
     // Pin the regex against representative bracket-generator outputs.
-    // internal/engine/bracket.go emits "Winner of r%d-m%d" : round and
+    // internal/engine/bracket.go emits "Winner of r%d-m%d": round and
     // match indices are zero-based non-negative integers.
     expect(hasBothSides({ sideA: "Winner of r0-m0", sideB: "Alice" })).toBe(false);
     expect(hasBothSides({ sideA: "Winner of r10-m255", sideB: "Alice" })).toBe(false);
@@ -121,7 +121,7 @@ describe('hasBothSides', () => {
   });
 
   it('returns a real boolean (not a truthy/falsy value) for use in JSX guards', () => {
-    // Important for `{hasBothSides(m) ? <Component /> : null}` rendering :
+    // Important for `{hasBothSides(m) ? <Component />: null}` rendering:
     // returning a non-boolean truthy value (e.g. a string) would render
     // it as a text node in JSX.
     const t = hasBothSides({ sideA: real("a", "Alice"), sideB: real("b", "Bob") });
@@ -132,8 +132,8 @@ describe('hasBothSides', () => {
 });
 
 // hasPoolOriginPlaceholder gates the admin "Knockout filling in" banner. Unlike
-// !hasBothSides it must be TRUE only for pool-origin "Pool A-1st" placeholders :
-// NOT for "Winner of rX-mY" feeders or structural byes : so the banner doesn't
+// !hasBothSides it must be TRUE only for pool-origin "Pool A-1st" placeholders:
+// NOT for "Winner of rX-mY" feeders or structural byes: so the banner doesn't
 // show for standalone playoffs or bye-containing brackets (Copilot round-7 finding).
 describe('hasPoolOriginPlaceholder', () => {
   it('returns true when a side is a pool-origin "Pool X-Nth" placeholder', () => {
@@ -475,7 +475,7 @@ describe('validateAndNormalizeDate', () => {
     // Pin the user-visible text so an accidental string change is
     // caught by tests (the test failure tells whoever changes it to
     // also update any screenshot fixtures, docs, etc.). DATE_ERR_YEAR_RANGE
-    // is a template literal built from MIN_YEAR/MAX_YEAR : if you bump
+    // is a template literal built from MIN_YEAR/MAX_YEAR: if you bump
     // those, also update this pin.
     expect(DATE_ERR_INVALID_FORMAT).toBe("Invalid date. Please pick a valid day.");
     expect(DATE_ERR_YEAR_RANGE).toBe("Year must be between 1900 and 2100.");
@@ -497,7 +497,7 @@ describe('numeric bounds constants', () => {
     // docs / screenshot fixtures / saveNow's still-inline usage.
     //
     // Mirrors helper.MinDateYear / helper.MaxDateYear in
-    // internal/helper/constants.go : the Go HTTP handlers
+    // internal/helper/constants.go: the Go HTTP handlers
     // (validateDateDMY in handlers_tournament.go) reject out-of-range
     // years on every write path. Bumping these here without bumping
     // the Go side (or vice versa) would let the UI offer dates the
@@ -529,7 +529,7 @@ describe('numeric bounds constants', () => {
     // ALSO validates against the actual pool size (real semantic
     // constraint); this constant is the defense-in-depth overflow
     // guard. Mirrors helper.MaxRankOverride in
-    // internal/helper/constants.go : keep both in lockstep.
+    // internal/helper/constants.go: keep both in lockstep.
     expect(MAX_RANK).toBe(1000);
   });
 
@@ -543,7 +543,7 @@ describe('numeric bounds constants', () => {
   });
 
   it('isValidDate is a thin wrapper that returns error === null', () => {
-    // Verify the two helpers stay in lockstep : isValidDate is now
+    // Verify the two helpers stay in lockstep: isValidDate is now
     // implemented as `validateAndNormalizeDate(d).error === null`.
     const cases = ["13-05-2026", "2026-05-13", "32-13-2026", "31-12-1899", "", null];
     cases.forEach((c) => {
@@ -598,7 +598,7 @@ describe('decideNumericUpdate', () => {
   });
 
   describe('below min → keep value but do not save', () => {
-    it('"0" with min=1 → no save (the original bug : backend rejected 0)', () => {
+    it('"0" with min=1 → no save (the original bug: backend rejected 0)', () => {
       expect(decideNumericUpdate("0", 1)).toEqual({ value: 0, shouldSave: false });
     });
 
@@ -629,7 +629,7 @@ describe('decideNumericUpdate', () => {
     });
 
     it('"5abc" → {value:NaN, shouldSave:false}', () => {
-      // `+"5abc"` is NaN, not 5 : JS coercion doesn't substring-parse.
+      // `+"5abc"` is NaN, not 5: JS coercion doesn't substring-parse.
       const result = decideNumericUpdate("5abc", 1);
       expect(Number.isNaN(result.value)).toBe(true);
       expect(result.shouldSave).toBe(false);

@@ -77,7 +77,7 @@ describe('API Utils', () => {
       // `result.DecidedByHantei != nil`). The frontend still forwards true
       // for two reasons: (a) defence-in-depth in case the backend
       // preserve-on-nil contract regresses, (b) pool matches use `*r =
-      // *result` and WOULD clear on nil ; although FIK doesn't permit
+      // *result` and WOULD clear on nil; although FIK doesn't permit
       // hantei in pool play, the codepath exists so we keep the wire
       // payload self-describing.
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
@@ -111,7 +111,7 @@ describe('API Utils', () => {
         ipponsA: ['M'],
         ipponsB: [],
       }, match);
-      // No key ; server-side omitempty drops it from the persisted record.
+      // No key; server-side omitempty drops it from the persisted record.
       expect('decidedByHantei' in result).toBe(false);
     });
 
@@ -127,7 +127,7 @@ describe('API Utils', () => {
 
     it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
       const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
-      // Mumeishi won ; even on a tied scoreline the id disambiguates the side.
+      // Mumeishi won; even on a tied scoreline the id disambiguates the side.
       const result = toBackendMatchResult({ winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' }, status: 'complete', ipponsA: ['M'], ipponsB: ['M'], score: { type: 'ippon' }, decidedByHantei: true }, match);
       expect(result.winnerId).toBe('id-mumeishi');
     });
@@ -172,10 +172,10 @@ describe('API Utils', () => {
     // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants
     // (allowed when dojos differ) collapse onto one id. When the server sends
     // explicit per-side ids (sideAId/sideBId/winnerId from pool-matches.csv),
-    // those are authoritative and must override the collapsed lookup ; without
+    // those are authoritative and must override the collapsed lookup; without
     // this the league matrix renders the same-name head-to-head inverted.
     it('overrides name-collapsed ids with server sideAId/sideBId/winnerId', () => {
-      // Both "Tanaka Kenji" ; name-keyed map holds only the last-added id.
+      // Both "Tanaka Kenji"; name-keyed map holds only the last-added id.
       const playerMap = { 'Tanaka Kenji': { id: 'uuid-mumeishi', name: 'Tanaka Kenji', dojo: 'Mumeishi' } };
       const match = {
         sideA: 'Tanaka Kenji', sideB: 'Tanaka Kenji', winner: 'Tanaka Kenji',
@@ -207,7 +207,7 @@ describe('API Utils', () => {
     // Bracket matches carry scoreA/scoreB strings (no ipponsA/B arrays). The
     // backend formatScore() emits "MK (H1)" when ippons coexist with an
     // outstanding hansoku, so normalizeMatch must strip the suffix + leading
-    // space before splitting ; otherwise score.ippons leaks " ", "(", "H",
+    // space before splitting; otherwise score.ippons leaks " ", "(", "H",
     // "1", ")" tokens. score.ippons seeds the admin scoring modal's slot
     // editor when the modal opens on a bracket match.
     it('strips hansoku "(HN)" suffix from bracket scoreA/scoreB when building score.ippons', () => {
@@ -306,7 +306,7 @@ describe('API Utils', () => {
     });
 
     // mp-jvzy: two same-name participants (different dojos) collapse onto one
-    // NAME key ; last-added wins. An additional id key per participant keeps
+    // NAME key; last-added wins. An additional id key per participant keeps
     // each one's correct dojo/number, so normalizeMatch can resolve each side
     // by the server's authoritative id and never show the wrong dojo.
     it('keys by participant id so same-name players keep distinct dojo/number', () => {
@@ -539,7 +539,7 @@ describe('API Utils', () => {
     // (override-rank, override-winner, reset-overrides) return `c.Status`
     // with no body. The JS client used to call `return res.json()` on
     // success, which per the Fetch spec rejects with SyntaxError on an
-    // empty body ; surfacing to the user as alert("Failed: Unexpected
+    // empty body; surfacing to the user as alert("Failed: Unexpected
     // end of JSON input") right after a *successful* save. The fix is
     // `return true;`, verified here by mocking a response with no .json
     // method (any call to it would throw, which the test would see).
@@ -653,7 +653,7 @@ describe('API Utils', () => {
       });
     });
 
-    // T190–T193 (US13 ; FR-050a / FR-050d / FR-050e): Swiss endpoint
+    // T190–T193 (US13; FR-050a / FR-050d / FR-050e): Swiss endpoint
     // wrappers. The generate-round call carries auth and returns the
     // new round payload; the 409 / round_incomplete contract carries
     // structured fields (code, round) that the helper must propagate
@@ -717,7 +717,7 @@ describe('API Utils', () => {
         });
         const r = await API.swissStandings('c1');
         expect(r).toEqual(sample);
-        // No password header on the public endpoint ; pin the call
+        // No password header on the public endpoint; pin the call
         // shape so a refactor doesn't accidentally make it admin-only.
         expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/swiss/standings');
       });
@@ -732,7 +732,7 @@ describe('API Utils', () => {
       });
     });
 
-    // POST /api/tournament ; bootstrap. In file mode the call is
+    // POST /api/tournament; bootstrap. In file mode the call is
     // unauthenticated (the AuthMiddleware uninitialized branch lets
     // it through). In locked mode the server requires the env-var
     // password and the SPA passes it via the new optional second
@@ -780,12 +780,12 @@ describe('API Utils', () => {
       });
     });
 
-    // GET /api/auth-config ; public endpoint reporting the active
+    // GET /api/auth-config; public endpoint reporting the active
     // auth mode (file vs locked). The SPA reads it on App() mount to
     // decide whether to show the "Forgot password?" link in AuthModal
     // and whether the /reset page renders a form vs an
     // operator-disabled message. Failing-open (default to file +
-    // reset-enabled) on transport errors is intentional ; never let a
+    // reset-enabled) on transport errors is intentional; never let a
     // transient 5xx hide the recovery path from operators who need it.
     describe('fetchAuthConfig', () => {
       it('returns the parsed config on success', async () => {
@@ -813,10 +813,10 @@ describe('API Utils', () => {
       });
     });
 
-    // POST /api/tournament/reset ; the unauth'd password-recovery
+    // POST /api/tournament/reset; the unauth'd password-recovery
     // endpoint. The client must:
     //   - send the new password in a JSON body
-    //   - return true on a 204 success (no res.json() ; same empty-body
+    //   - return true on a 204 success (no res.json(); same empty-body
     //     pattern as overridePoolRank above)
     //   - throw an Error whose .status is the HTTP status, so the
     //     ResetPasswordForm can branch on 404 ("disabled by operator")
@@ -855,7 +855,7 @@ describe('API Utils', () => {
       });
 
       it('does not call res.json() on the success path', async () => {
-        // Empty 204 body ; any call to .json() would throw
+        // Empty 204 body; any call to .json() would throw
         // SyntaxError per the Fetch spec. Mirrors the
         // overridePoolRank regression coverage above.
         global.fetch = vi.fn().mockResolvedValue({
@@ -1135,12 +1135,12 @@ describe('API Utils', () => {
         expect(capturedBody.players[0].metadata).toEqual(['3 Dan', 'registered']);
         expect(capturedBody.players[0].danGrade).toBeUndefined();
         expect(capturedBody.players[1].metadata).toEqual(['2 Dan']);
-        // Carol has no grade and no extra slots ; metadata must not appear at all
+        // Carol has no grade and no extra slots; metadata must not appear at all
         expect(capturedBody.players[2].metadata).toBeUndefined();
         expect(capturedBody.players[2].danGrade).toBeUndefined();
         // Dave has no grade but has extra slot: ["", "registered"]
         expect(capturedBody.players[3].metadata).toEqual(['', 'registered']);
-        // Eve has no danGrade key ; metadata must be passed through unchanged
+        // Eve has no danGrade key; metadata must be passed through unchanged
         expect(capturedBody.players[4].metadata).toEqual(['1 Dan']);
         expect(capturedBody.players[4].danGrade).toBeUndefined();
       });

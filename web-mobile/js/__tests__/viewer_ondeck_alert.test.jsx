@@ -5,7 +5,7 @@ import { isFollowedMatchOnDeck, MyMatchAlertBanner } from '../viewer.jsx';
 import { fireNotification } from '../app.jsx';
 
 // ---------------------------------------------------------------------------
-// isFollowedMatchOnDeck : predicate truth table
+// isFollowedMatchOnDeck: predicate truth table
 // ---------------------------------------------------------------------------
 
 describe('isFollowedMatchOnDeck', () => {
@@ -51,7 +51,7 @@ describe('isFollowedMatchOnDeck', () => {
 });
 
 // ---------------------------------------------------------------------------
-// fireNotification : gating tests
+// fireNotification: gating tests
 // ---------------------------------------------------------------------------
 
 describe('fireNotification', () => {
@@ -150,7 +150,7 @@ describe('fireNotification', () => {
 });
 
 // ---------------------------------------------------------------------------
-// MyMatchAlertBanner : component rendering tests
+// MyMatchAlertBanner: component rendering tests
 // ---------------------------------------------------------------------------
 
 // Helper: recursively search a React element tree for all elements matching a predicate.
@@ -252,7 +252,7 @@ describe('MyMatchAlertBanner', () => {
 });
 
 // ---------------------------------------------------------------------------
-// document.title : verify title flash on transition
+// document.title: verify title flash on transition
 // Tests use a simplified driver that calls the alert hook's effect logic
 // directly (since the React mock is non-reactive, we call the effect
 // manually and inspect document.title).

@@ -8,7 +8,7 @@ import { Term, renderTooltipBody } from '../glossary.jsx';
 //   - renderTooltipBody: the pure substring-split helper that replaces
 //     cross-referenced IDs inside a tooltip with nested <Term> spans.
 //   - GlossaryPage: the /glossary viewer (covered via UI smoke tests in
-//     viewer.test.jsx, not here : the component is mostly markup).
+//     viewer.test.jsx, not here: the component is mostly markup).
 //
 // The React global in vitest.setup.js stubs hooks to vi.fn() (identity
 // useMemo, no-op useEffect, [val, vi.fn()] useState), so we exercise
@@ -36,7 +36,7 @@ describe('GLOSSARY constant', () => {
   });
 
   it('has at least 22 entries', () => {
-    // Slice U1 ships 23 entries (11 + 7 + 5 : see glossary.md). The
+    // Slice U1 ships 23 entries (11 + 7 + 5: see glossary.md). The
     // count guard exists so a future deletion that drops below the
     // agreed floor fails loudly.
     expect(Object.keys(GLOSSARY).length).toBeGreaterThanOrEqual(22);
@@ -83,7 +83,7 @@ describe('lookupTerm', () => {
 
 describe('Term component', () => {
   // The React mock returns [initial, vi.fn()] from useState, so when we
-  // call Term as a function we get the *initial* render : open=false.
+  // call Term as a function we get the *initial* render: open=false.
   // That's exactly what we want for shape tests; for the toggle behaviour
   // we exercise the onClick handler directly.
 
@@ -104,7 +104,7 @@ describe('Term component', () => {
     const tip = findTooltip(childArray);
     expect(tip).toBeTruthy();
     expect(tip.props.id).toBe(tree.props['aria-describedby']);
-    // Initial state: tooltip is rendered but visibility is CSS-driven :
+    // Initial state: tooltip is rendered but visibility is CSS-driven:
     // class is 'tw-tooltip' (not 'tw-tooltip--open') so screen readers
     // can associate via aria-describedby even when not visible.
     expect(tip.props.className).toBe('tw-tooltip');
@@ -183,7 +183,7 @@ describe('renderTooltipBody (cross-reference splitting)', () => {
   });
 
   it('splits a tooltip around a single cross-reference', () => {
-    // encho's tooltip mentions "ippon-shobu" : verify the helper
+    // encho's tooltip mentions "ippon-shobu": verify the helper
     // produces three tokens: prefix string, nested Term, suffix string.
     const text = 'Scoring in Encho follows ippon-shobu rules.';
     const tokens = renderTooltipBody(text, ['ippon-shobu']);
@@ -213,7 +213,7 @@ describe('renderTooltipBody (cross-reference splitting)', () => {
   it('longest match wins (compound term over its prefix)', () => {
     // When both "ippon" and "ippon-shobu" are in seeAlso AND the text
     // contains "ippon-shobu", we should get ONE nested Term for the
-    // compound : not "ippon" + "-shobu" + "ippon".
+    // compound: not "ippon" + "-shobu" + "ippon".
     const text = 'See ippon-shobu for the rule.';
     const tokens = renderTooltipBody(text, ['ippon', 'ippon-shobu']);
     const termTokens = tokens.filter((t) => t && t.type === Term);
@@ -234,7 +234,7 @@ describe('renderTooltipBody (cross-reference splitting)', () => {
 
   it('word-boundary match prevents false positives inside larger words', () => {
     // None of our IDs collide with English words today, but pin the
-    // principle so a future addition (e.g. "do" : already excluded but
+    // principle so a future addition (e.g. "do": already excluded but
     // illustrative) doesn't break tooltips that legitimately use the
     // word in English context.
     const text = 'The dancer did not perform.'; // contains "dan" as a substring

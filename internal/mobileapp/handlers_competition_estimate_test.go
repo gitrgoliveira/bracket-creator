@@ -115,7 +115,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/competitions/main-auth-estimate/schedule/estimate", nil)
-		// No X-Admin-Password , only main-password auth is needed (enforced
+		// No X-Admin-Password, only main-password auth is needed (enforced
 		// by AuthMiddleware in production, not by the handler itself).
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code,

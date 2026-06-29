@@ -4,7 +4,7 @@ import { buildDisplayModel, computeMetaTops, roundLabel } from '../bracket.jsx';
 // mp-13y: roundLabel renders abbreviated "R{N}" where N is the bracket size
 // (2^(fromEnd+1)) for generic early rounds. total = number of rounds (log2 size);
 // roundIdx is 0-based from the first round, so fromEnd = total-1-roundIdx.
-describe('roundLabel ; abbreviated R{N} for early rounds', () => {
+describe('roundLabel; abbreviated R{N} for early rounds', () => {
   it('names the terminal rounds and R16', () => {
     expect(roundLabel(3, 4)).toBe('Final');         // fromEnd 0
     expect(roundLabel(2, 4)).toBe('Semifinals');    // fromEnd 1
@@ -20,7 +20,7 @@ describe('roundLabel ; abbreviated R{N} for early rounds', () => {
 
 // mp-7f2w: the engine tags bracket matches with effective-round metadata
 // (displayRound / hidden / feeders) so the viewer renders the same
-// effective-round columns as the Excel Tree sheet ; structural byes skip a
+// effective-round columns as the Excel Tree sheet; structural byes skip a
 // column instead of showing empty cards. buildDisplayModel turns the persisted
 // balanced rounds into those columns + a feeder graph, and falls back to the
 // legacy balanced-rounds shape when no metadata is present.
@@ -64,7 +64,7 @@ describe('buildDisplayModel', () => {
     const model = buildDisplayModel(fivePlayerRounds());
     expect(model.feedersById['m-r3-0']).toEqual(['m-r1-0', 'm-r2-1']); // final ← Alice/Bob, Carol SF
     expect(model.feedersById['m-r2-1']).toEqual(['bye-m-r2-1-0', 'm-r1-3']); // Carol SF ← bye slot + Dave/Eve
-    expect(model.feedersById['m-r1-0']).toEqual(['bye-m-r1-0-0', 'bye-m-r1-0-1']); // Alice/Bob seeded in ; both sides are byes
+    expect(model.feedersById['m-r1-0']).toEqual(['bye-m-r1-0-0', 'bye-m-r1-0-1']); // Alice/Bob seeded in; both sides are byes
     expect(model.feedersById['bye-m-r1-0-0']).toEqual([]); // bye slot is a leaf
     expect(model.feedersById['m-r1-3']).toEqual([]); // Dave/Eve seeded in
   });
@@ -149,7 +149,7 @@ describe('computeMetaTops', () => {
       const mean = fs.reduce((s, fid) => s + anchor(fid), 0) / fs.length;
       expect(anchor(childId)).toBeCloseTo(mean, 5);
     }
-    // Sanity: the case under test really is asymmetric ; Carol's SF mixes a bye
+    // Sanity: the case under test really is asymmetric; Carol's SF mixes a bye
     // (centre-anchored) with a match feeder (seam-anchored, larger offset).
     expect(offsets['bye-m-r2-1-0']).not.toBe(offsets['m-r1-3']);
   });

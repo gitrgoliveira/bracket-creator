@@ -156,7 +156,7 @@ func (s *Store) GetFolder() string {
 // competition uniqueness-check + save sequence so two concurrent
 // renames of DIFFERENT competitions to the SAME new name can't both
 // pass the check (each seeing the other still has its old name) and
-// both land ,leaving two competitions with the same effective Name.
+// both land, leaving two competitions with the same effective Name.
 //
 // The mutex is finer-grained than s.mu (which covers all store state)
 // and coarser than getCompLock(id) (which covers a single competition).
@@ -173,14 +173,14 @@ func (s *Store) GetFolder() string {
 // outer operation.
 //
 // IMPORTANT: s.compRenameMu is a sync.Mutex (non-recursive). fn MUST
-// NOT recursively call WithCompetitionRenameLock ,that would deadlock
+// NOT recursively call WithCompetitionRenameLock, that would deadlock
 // on the second acquire. Same advisory as the Update*Changed family:
 // transforms / closures running under a store mutex should perform
 // only the load + check + save work for the resource they're locking,
 // not invoke other lock-acquiring Store methods for the SAME lock.
 // Calls into methods that acquire OTHER locks (per-comp via
 // SaveCompetitionChanged / LoadCompetition for different IDs) are
-// fine ,those locks are independent.
+// fine, those locks are independent.
 func (s *Store) WithCompetitionRenameLock(fn func() error) error {
 	s.compRenameMu.Lock()
 	defer s.compRenameMu.Unlock()
@@ -194,7 +194,7 @@ func (s *Store) WithCompetitionRenameLock(fn func() error) error {
 // commits (TOCTOU).
 //
 // Lock ordering: courtCheckMu is acquired BEFORE any per-comp lock.
-// fn MUST NOT recursively call WithCourtExclusivityLock ,non-reentrant.
+// fn MUST NOT recursively call WithCourtExclusivityLock, non-reentrant.
 func (s *Store) WithCourtExclusivityLock(fn func() error) error {
 	s.courtCheckMu.Lock()
 	defer s.courtCheckMu.Unlock()
@@ -219,8 +219,8 @@ func (s *Store) getFileCache(compID, filename string) *fileCache {
 // lock prevents in-process writers from racing with parse.
 //
 // parse receives the on-disk path and must return the value to cache (an empty
-// container for "file does not exist", or nil when that's the intended sentinel
-// ,see LoadCompetition; nil values do not cache-hit and will be re-parsed on
+// container for "file does not exist", or nil when that's the intended sentinel,
+// see LoadCompetition; nil values do not cache-hit and will be re-parsed on
 // each call).
 func (s *Store) loadCached(compID, filename string, parse func(path string) (any, error)) (any, error) {
 	if err := ValidateCompetitionID(compID); err != nil {

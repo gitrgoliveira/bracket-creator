@@ -4,7 +4,7 @@
 // Sharing model: esbuild compiles each .jsx to dist/.js individually (no bundle);
 // the server rewrites `/dist/X.jsx` → the compiled `X.js`, so ES `import "./X.jsx"`
 // specifiers resolve in the browser. viewer.js is the SOLE viewer entry script in
-// index.html and imports this module : do NOT give it its own <script type="module">
+// index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
@@ -19,7 +19,7 @@ import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './v
 const { useState } = React;
 const EmptyState = window.EmptyState;
 
-// isPoolDaihyosenID : duplicated from viewer.jsx (that file also uses it in
+// isPoolDaihyosenID: duplicated from viewer.jsx (that file also uses it in
 // ViewerCompetition which stays there; this copy serves PoolsViewer here).
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
@@ -75,7 +75,7 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   // Re-fetch whenever the round counter advances (SSE-driven) so the
   // standings table reflects the latest cumulative state. Also depend
   // on poolMatches length so a fresh round's matches landing triggers
-  // a refresh : the round may have completed even when swissCurrentRound
+  // a refresh: the round may have completed even when swissCurrentRound
   // didn't move (final round).
   React.useEffect(() => {
     let cancelled = false;
@@ -195,7 +195,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
 
   const isHighlighted = (p) => isPlayerWatched(p, highlightPlayers);
 
-  // Stable participant key. A name is NOT unique within a competition :
+  // Stable participant key. A name is NOT unique within a competition:
   // two participants from different dojos may share one (the duplicate
   // check only rejects same-name AND same-dojo), so name-only indexing
   // collides and can show the wrong cell. Prefer the participant UUID,
@@ -243,11 +243,11 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
 
   // Label including the dojo when present so two same-name participants are
   // distinguishable. Used for BOTH the hover `title` AND the cell/header
-  // `aria-label` : screen readers don't reliably announce `title`, so the
+  // `aria-label`: screen readers don't reliably announce `title`, so the
   // accessible name must carry the disambiguating dojo itself.
   const playerLabel = (p) => (p && p.dojo ? `${p.name} (${p.dojo})` : (p && p.name) || "");
-  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} : ${result}`;
-  const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)} : ${result}`;
+  const cellLabel = (rowPlayer, colPlayer, result) => `Match: ${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)}: ${result}`;
+  const cellTitle = (rowPlayer, colPlayer, result) => `${playerLabel(rowPlayer)} vs ${playerLabel(colPlayer)}: ${result}`;
 
   return (
     <div className="league-matrix-wrap">
@@ -306,7 +306,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 // Fall back to name for legacy data without a winner id.
                 const wId = winnerId(m);
                 // When both sides share a name and there is no winner id, the
-                // winner NAME is ambiguous : do NOT mark either row as winner
+                // winner NAME is ambiguous: do NOT mark either row as winner
                 // (that would light up BOTH cells green for the one match). The
                 // id branch is the authoritative resolver; the name fallback is
                 // only safe for distinct-name matchups. (Source path now sends
@@ -331,7 +331,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   resultLabel = "Draw";
                 } else if (rowWon) {
                   // Show the row player's ippon letters (M/K/D/T/H); the green
-                  // cell colour signals the win. No "W" fallback : W is not an
+                  // cell colour signals the win. No "W" fallback: W is not an
                   // ippon. A win with no recorded ippons (walkover/hantei)
                   // shows an empty green cell.
                   cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
@@ -377,7 +377,7 @@ function rankOrdinal(rank) {
 
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides and the formatted score string (via formatIpponsScore when completed).
-// sideB = Shiro (left), sideA = Aka (right) : matches PoolMatchRow convention.
+// sideB = Shiro (left), sideA = Aka (right): matches PoolMatchRow convention.
 export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
   // withNumber prepends the assigned competitor number (e.g. "K1") when present.
   const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
@@ -398,7 +398,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
-            not a centre dot : matchStateCell shows "vs" for the live matchup,
+            not a centre dot: matchStateCell shows "vs" for the live matchup,
             a score when completed, "–" when scheduled. */}
         {window.matchStateCell(m, m.ipponsB, m.ipponsA)}
       </span>
@@ -426,7 +426,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
     return all.length > 0 && all.every(m => m.status === "completed");
   })();
   // Winner is the top-ranked player from the (single) league standings.
-  // pools[0] is the only pool for league formats : see internal/engine.
+  // pools[0] is the only pool for league formats: see internal/engine.
   const leagueWinner = (isLeague && allMatchesComplete && pools[0] && standings)
     ? (standings[pools[0].poolName] || [])[0]
     : null;
@@ -444,13 +444,13 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
 
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
         // Rank is the backend's authoritative PlayerStanding.rank (single source of
-        // truth : it already folds in tiebreakers and manual rank overrides; see
+        // truth: it already folds in tiebreakers and manual rank overrides; see
         // engine/scoring.go). We do NOT re-derive it as index+1 here (DRY), falling
         // back to index+1 only if a legacy payload omitted the field.
         // Used to look up each draw-position row's rank without resorting the table
         // (mp-938b: table is draw-order, not rank-order).
         // Key = player.id when available; falls back to "name||dojo" composite so that
-        // duplicate names across different dojos don't collide : mirrors the lookup below.
+        // duplicate names across different dojos don't collide: mirrors the lookup below.
         const rankByPlayerKey = new Map();
         if (poolStandings) {
           poolStandings.forEach((s, i) => {
@@ -492,7 +492,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               </div>
             </div>
 
-            {/* Standings table : rows in draw position order, rank looked up by player key (id or name||dojo) */}
+            {/* Standings table: rows in draw position order, rank looked up by player key (id or name||dojo) */}
             <table className="pool__table">
               <thead>
                 {isTeam ? (
@@ -523,7 +523,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           intentional and explicit:
                           - League: the table is ordered by rank, so "#" shows the
                             authoritative standing rank (s.rank). No separate rank
-                            badge : rank is shown exactly once here.
+                            badge: rank is shown exactly once here.
                           - Pools: the table is in DRAW order (operators read it as a
                             fight-order chart), so "#" is the draw position and the
                             rank is surfaced separately by the badge next to the name. */}
@@ -540,7 +540,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                               DRAW order (non-league pools), where rank ≠ the "#"
                               draw-position column. League standings are rank-sorted,
                               so "#" already equals the rank and a badge would just
-                              duplicate it : suppress it there. */}
+                              duplicate it: suppress it there. */}
                           {!isLeague && poolHasResults && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
@@ -569,7 +569,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               </tbody>
             </table>
 
-            {/* Numbered match list : shown for both individual and team pools */}
+            {/* Numbered match list: shown for both individual and team pools */}
             {matches.length > 0 && (
               <>
                 <div className="pool-match-section-label">Matches</div>
@@ -604,7 +604,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               </>
             )}
 
-            {/* Round-robin matrix : optional grid below the match list (individual only) */}
+            {/* Round-robin matrix: optional grid below the match list (individual only) */}
             {matches.length > 0 && !isTeam && (
               <div style={{ marginTop: 4 }}>
                 <LeagueMatrix pool={pool} matches={matches} tweaks={tweaks} onMatchClick={onMatchClick} highlightPlayers={highlightPlayers} />

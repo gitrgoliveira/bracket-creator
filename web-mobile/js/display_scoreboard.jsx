@@ -37,12 +37,16 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // uncluttered; the colour alone conveys the degraded state to venue staff.
 function LinkDot({ linkState }) {
     if (linkState === 'connected') return null;
-    // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626)
-    const bg = linkState === 'local' ? 'var(--warn, #b45309)' : 'var(--danger, #dc2626)';
-    const label = linkState === 'local' ? 'Operator broadcast (server offline)' : 'No data feed';
+    const isStale = linkState === 'stale';
+    // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626).
+    // Per DESIGN.md principle 2, the two degraded states are distinguished by
+    // TREATMENT, not hue alone (so the meaning survives projector glare and
+    // colour-blindness): 'stale' carries a dark ring, 'local' is a plain dot.
+    const bg = isStale ? 'var(--danger, #dc2626)' : 'var(--warn, #b45309)';
+    const label = isStale ? 'No data feed' : 'Operator broadcast (server offline)';
     return (
         <span data-testid="display-link-dot" data-link-state={linkState} role="status" aria-label={label}
-            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: bg, display: 'inline-block', flexShrink: 0 }} />
+            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1, #111827)' : 'none' }} />
     );
 }
 

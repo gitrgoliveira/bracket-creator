@@ -394,6 +394,11 @@ function App() {
   // read the current value without closing over a stale copy from the effect
   // that has [mode] as its only dep. See the sync effect below.
   const sseConnectedRef = useR(sseConnected);
+  // mp-9ukk Phase 2: holds the latest competitions so the snapshot provider
+  // can be registered ONCE (keyed on [mode]) and read current data through the
+  // ref, instead of re-registering on every tournament update (which would
+  // churn the provider and open a transient unregistered window).
+  const compsRef = useR(null);
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -695,28 +700,31 @@ function App() {
     }));
   }, [sseConnected, mode]);
 
+  // Keep compsRef in sync with the latest competitions so the snapshot
+  // provider (registered once below) always answers with current data.
+  useE(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
+
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //
-  // When the app is in admin or viewer mode (i.e. NOT display mode) and
-  // has tournament data loaded, register a snapshot provider so the bridge
-  // can auto-reply to display-tab snapshot-req messages.
+  // When the app is in admin or viewer mode (i.e. NOT display mode) register a
+  // snapshot provider so the bridge can auto-reply to display-tab snapshot-req
+  // messages. It is registered ONCE per mode and reads the live competitions
+  // through compsRef, so a tournament update never transiently unregisters it
+  // (which could drop a snapshot-req landing during a re-register window).
   //
-  // The provider returns only the competitions for the requested court so
-  // the payload is bounded (one court's slice rather than all courts).
-  // When no court match is found it returns null and the bridge stays silent.
+  // The provider returns only the competitions for the requested court so the
+  // payload is bounded (one court's slice rather than all courts). When there
+  // is no data yet, or no court match, it returns null and the bridge stays
+  // silent.
   useE(() => {
     if (mode === 'display') {
       // Display tabs do not answer snapshot requests.
       setSnapshotProvider(null);
       return;
     }
-    if (!tournament || !tournament.competitions) {
-      setSnapshotProvider(null);
-      return;
-    }
-    const comps = tournament.competitions;
     setSnapshotProvider((court) => {
-      if (!court) return null;
+      const comps = compsRef.current;
+      if (!court || !comps) return null;
       const slice = comps.filter(c => {
         // A competition belongs to a court when ANY of its pool or bracket
         // matches are assigned to that court. Quick check: if the comp
@@ -733,7 +741,7 @@ function App() {
       return slice.length > 0 ? slice : null;
     });
     return () => setSnapshotProvider(null);
-  }, [mode, tournament]);
+  }, [mode]);
 
   // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
   // view) the SSE handler skips its per-event aggregate refetch: the console

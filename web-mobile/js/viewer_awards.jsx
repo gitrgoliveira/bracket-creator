@@ -7,12 +7,12 @@ import { competitionKindLabel } from './viewer_utils.jsx';
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const EmptyState = window.EmptyState;
 
-// deriveAwards returns up to four placements for the closing ceremony.
+// deriveAwards returns the closing-ceremony placements.
 // Kendo convention (no thirdPlaceMatch): 1st, 2nd, and two joint 3rds
 // (semi-final losers, no bronze match).
-// Naginata/other convention (thirdPlaceMatch present): 1st, 2nd, 3rd, 4th
-// when the bronze match is decided; falls back to pending SF-losers when the
-// bronze match is not yet decided.
+// Naginata convention (thirdPlaceMatch present): 1st, 2nd, 3rd only. There is
+// NO 4th-place award; the bronze match decides which beaten semi-finalist takes
+// the single 3rd place, and the loser (4th) is not part of the ceremony.
 // Returns [] when no podium data exists yet.
 // `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
@@ -54,33 +54,27 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
         return r ? { place, ...r } : null;
       };
 
-      // Naginata / explicit bronze match path: 1st, 2nd, 3rd, 4th.
+      // Naginata / explicit bronze match path: only 1st, 2nd, 3rd get awards
+      // (Naginata convention: there is NO 4th-place award; the bronze match
+      // exists solely to decide which beaten semi-finalist takes the single
+      // 3rd place. The loser is 4th but is not part of the closing ceremony).
       const bronze = bracket.thirdPlaceMatch;
       if (bronze) {
         if (bronze.winner) {
-          // Decided bronze: clear 3rd and 4th.
-          const bronzeWinner = bronze.winner;
-          const bronzeLoser = toName(bronze.winner) === toName(bronze.sideA) ? bronze.sideB : bronze.sideA;
+          // Decided bronze: the bronze winner is the sole 3rd place.
           return [
             slot(1, champion),
             slot(2, runnerUp),
-            slot(3, bronzeWinner),
-            slot(4, bronzeLoser),
+            slot(3, bronze.winner),
           ].filter(Boolean);
         }
-        // Undecided bronze: show the two SF losers as pending joint 3rds
-        // (same visual as kendo until the bronze is played).
-        const thirds = sfRound
-          .map((m) => {
-            if (!m.winner) return null;
-            return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
-          })
-          .filter(Boolean);
+        // Undecided bronze (unusual once the final is decided, since the
+        // bronze is normally played first): the single 3rd place is not yet
+        // determined, so only 1st and 2nd are shown until the bronze decides
+        // it. Naginata never awards joint 3rds.
         return [
           slot(1, champion),
           slot(2, runnerUp),
-          slot(3, thirds[0]),
-          slot(3, thirds[1]),
         ].filter(Boolean);
       }
 
@@ -180,7 +174,6 @@ const PLACE_STYLE = {
   1: { icon: "🏆", label: "1st Place", accent: "var(--gold, #d4af37)" },
   2: { icon: "🥈", label: "2nd Place", accent: "var(--silver, #c0c0c0)" },
   3: { icon: "🥉", label: "3rd Place", accent: "var(--bronze, #cd7f32)" },
-  4: { icon: null,  label: "4th Place", accent: "var(--line)" },
 };
 
 export function AwardsView({ c, bracket, standings, pools, players }) {
@@ -300,7 +293,6 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
   const champion = awards.find(a => a.place === 1) || null;
   const second = awards.find(a => a.place === 2) || null;
   const thirds = awards.filter(a => a.place === 3);
-  const fourth = awards.find(a => a.place === 4) || null;
 
   // Shared header (title + place count + fullscreen toggle): identical for the
   // league and champion-hero layouts.
@@ -432,23 +424,6 @@ export function AwardsView({ c, bracket, standings, pools, players }) {
               )}
             </div>
           ))}
-        </div>
-      )}
-
-      {/* 4th place: flat fill card, no medal icon (naginata/bronze-match comps only) */}
-      {fourth && (
-        <div className="awards-row awards-row--center">
-          <div
-            className="podium-step podium-step--4 place--eq"
-            data-testid={`awards-place-4-${awards.indexOf(fourth)}`}
-            style={isFs ? { fontSize: 16, padding: "16px 20px" } : null}
-          >
-            <div className="place" style={{ fontSize: isFs ? 14 : 11 }}>{PLACE_STYLE[4].label}</div>
-            <div className="name" style={{ fontSize: isFs ? 20 : 14 }}>{fourth.name}</div>
-            {fourth.dojo && (
-              <div className="dojo" style={{ fontSize: isFs ? 13 : 11 }}>{fourth.dojo}</div>
-            )}
-          </div>
         </div>
       )}
 

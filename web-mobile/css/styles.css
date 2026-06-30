@@ -3151,14 +3151,6 @@ button.pool-match-row {
   order: 3;
 }
 
-/* 4th place: flat fill, no gradient, no medal icon. Naginata / bronze-match comps only. */
-.podium-step--4 {
-  background: var(--surface);
-  border-color: var(--line);
-  min-height: 90px;
-  order: 4;
-}
-
 .podium-step .place {
   font-size: 28px;
   font-weight: 700;

@@ -189,7 +189,8 @@ describe('deriveAwards (standings-based)', () => {
 
 describe('deriveAwards (thirdPlaceMatch / bronze match)', () => {
   // Naginata / competitions with an explicit bronze match use bracket.thirdPlaceMatch.
-  // When decided: 1st/2nd/3rd/4th. When undecided: pending joint-3rds (same as kendo).
+  // Naginata awards ONLY 1st/2nd/3rd: the bronze decides the single 3rd place and
+  // the loser (4th) is not part of the ceremony. When undecided: only 1st/2nd.
   // When absent: unchanged kendo path (1/2/3/3).
 
   const mkBracket = (finalWinner, sf1Winner, sf2Winner, bronze) => ({
@@ -205,18 +206,18 @@ describe('deriveAwards (thirdPlaceMatch / bronze match)', () => {
     ...(bronze !== undefined ? { thirdPlaceMatch: bronze } : {}),
   });
 
-  it('produces 1st/2nd/3rd/4th when bronze match is decided', () => {
+  it('produces only 1st/2nd/3rd when bronze match is decided (no 4th award)', () => {
     const bracket = mkBracket('Alice', 'Alice', 'Carol', {
       sideA: 'Bob',
       sideB: 'Dan',
       winner: 'Bob',
     });
     const awards = deriveAwards(bracket, null, null, new Map());
-    expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 4]);
-    expect(awards.map((a) => a.name)).toEqual(['Alice', 'Carol', 'Bob', 'Dan']);
+    expect(awards.map((a) => a.place)).toEqual([1, 2, 3]);
+    expect(awards.map((a) => a.name)).toEqual(['Alice', 'Carol', 'Bob']);
   });
 
-  it('uses the bronze loser as 4th place', () => {
+  it('awards the bronze winner 3rd and gives the loser no award', () => {
     const bracket = mkBracket('Alice', 'Alice', 'Carol', {
       sideA: 'Bob',
       sideB: 'Dan',
@@ -224,18 +225,19 @@ describe('deriveAwards (thirdPlaceMatch / bronze match)', () => {
     });
     const awards = deriveAwards(bracket, null, null, new Map());
     expect(awards.find((a) => a.place === 3)?.name).toBe('Dan');
-    expect(awards.find((a) => a.place === 4)?.name).toBe('Bob');
+    expect(awards.filter((a) => a.place === 4)).toHaveLength(0);
+    // The bronze loser (Bob, 4th) is not in the ceremony.
+    expect(awards.some((a) => a.name === 'Bob')).toBe(false);
   });
 
-  it('falls back to pending joint-3rds when bronze match is undecided', () => {
+  it('shows only 1st/2nd when the bronze match is undecided (no joint 3rds)', () => {
     const bracket = mkBracket('Alice', 'Alice', 'Carol', {
       sideA: 'Bob',
       sideB: 'Dan',
       winner: null, // not yet played
     });
     const awards = deriveAwards(bracket, null, null, new Map());
-    expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 3]);
-    expect(awards.filter((a) => a.place === 3).map((a) => a.name).sort()).toEqual(['Bob', 'Dan']);
+    expect(awards.map((a) => a.place)).toEqual([1, 2]);
   });
 
   it('preserves kendo joint-3rd convention when thirdPlaceMatch is absent', () => {
@@ -255,6 +257,6 @@ describe('deriveAwards (thirdPlaceMatch / bronze match)', () => {
     const m = playerMap(['Alice', 'Aoyama'], ['Carol', 'Chiba'], ['Bob', 'Bunkyo'], ['Dan', 'Denenchofu']);
     const awards = deriveAwards(bracket, null, null, m);
     expect(awards.find((a) => a.place === 3)).toEqual({ place: 3, name: 'Bob', dojo: 'Bunkyo' });
-    expect(awards.find((a) => a.place === 4)).toEqual({ place: 4, name: 'Dan', dojo: 'Denenchofu' });
+    expect(awards.filter((a) => a.place === 4)).toHaveLength(0);
   });
 });

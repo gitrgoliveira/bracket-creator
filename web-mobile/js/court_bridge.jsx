@@ -73,6 +73,19 @@ export function deriveLinkState({ sseConnected, lastBroadcastAt, now, freshnessM
 }
 
 // -----------------------------------------------------------------------
+// resolveCompId: read a competition's id regardless of shape.
+//
+// competitions[] entries carry their id at different depths depending on the
+// source: top-level `id` for the viewer aggregate, nested under `config` for
+// the detail endpoint (and a legacy capital-`Id` arm is tolerated). Returns ''
+// for a null/primitive entry or one with no id, so callers can `if (!id)`-skip.
+// -----------------------------------------------------------------------
+export function resolveCompId(c) {
+    if (!c || typeof c !== 'object') return '';
+    return c.id || (c.config && (c.config.id || c.config.Id)) || '';
+}
+
+// -----------------------------------------------------------------------
 // applyPatchToTree: tree-level adapter.
 //
 // Takes the full in-memory `tournament` (with `tournament.competitions[]`)
@@ -92,12 +105,9 @@ export function applyPatchToTree(tournament, msg) {
     if (!competitions || competitions.length === 0) return tournament;
 
     const compId = msg.compId;
-    const idx = competitions.findIndex(c => {
-        // competitions[] entries can have id at different depths depending
-        // on whether they come from the viewer aggregate or the detail endpoint.
-        return c.id === compId
-            || (c.config && (c.config.id === compId || c.config.Id === compId));
-    });
+    const idx = compId
+        ? competitions.findIndex(c => resolveCompId(c) === compId)
+        : -1;
     if (idx === -1) return tournament;
 
     const prevComp = competitions[idx];
@@ -123,6 +133,53 @@ export function applyPatchToTree(tournament, msg) {
     const nextCompetitions = competitions.slice();
     nextCompetitions[idx] = nextComp;
     return { ...tournament, competitions: nextCompetitions };
+}
+
+// -----------------------------------------------------------------------
+// mergeSnapshotIntoTree: fold an operator-tab court snapshot into the
+// display's in-memory tournament. Pure (and exported) so the merge policy
+// is unit-testable apart from the React effect that drives it.
+//
+//   prev          : current tournament (null/undefined before the first load)
+//   incomingComps : the snapshot payload (expected: array of competitions)
+//   connected     : whether the SSE feed is currently up
+//
+// Policy:
+//   - non-array payload          -> prev unchanged
+//   - no prev (cold start)       -> bootstrap a minimal tournament wrapper.
+//                                   UNCONDITIONAL by design: an outage AT LOAD
+//                                   must not be starved of the snapshot even
+//                                   when `connected` is still its optimistic
+//                                   mount default.
+//   - prev present AND connected -> prev unchanged: the server feed is
+//                                   authoritative, so a late snapshot is dropped
+//                                   rather than allowed to overwrite server data.
+//   - prev present AND offline   -> replace existing competitions by id, append
+//                                   any new ones (the operator tab is the court
+//                                   authority during an outage; the reconnect
+//                                   full-refetch later restores server truth).
+//
+// Null/primitive elements and elements with no resolvable id are skipped.
+// -----------------------------------------------------------------------
+export function mergeSnapshotIntoTree(prev, incomingComps, { connected } = {}) {
+    if (!Array.isArray(incomingComps)) return prev;
+    if (!prev) {
+        return { name: '', courts: [], competitions: incomingComps };
+    }
+    if (connected) return prev;
+    const existing = prev.competitions || [];
+    const merged = existing.slice();
+    for (const comp of incomingComps) {
+        const id = resolveCompId(comp);
+        if (!id) continue;
+        const idx = merged.findIndex(c => resolveCompId(c) === id);
+        if (idx === -1) {
+            merged.push(comp);
+        } else {
+            merged[idx] = comp;
+        }
+    }
+    return { ...prev, competitions: merged };
 }
 
 // -----------------------------------------------------------------------

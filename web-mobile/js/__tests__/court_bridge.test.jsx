@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     deriveLinkState,
     applyPatchToTree,
+    mergeSnapshotIntoTree,
+    resolveCompId,
     freshnessMs,
     getLastBroadcastAt,
     setSnapshotProvider,
@@ -184,6 +186,110 @@ describe('applyPatchToTree', () => {
         expect(next).toBe(t);
         expect(errSpy).toHaveBeenCalledTimes(1);
         errSpy.mockRestore();
+    });
+
+    it('does not match an id-less competition when compId is empty', () => {
+        const t = { competitions: [{ poolMatches: [{ id: 'm1' }], bracket: { rounds: [] } }] };
+        // An id-less comp resolves to '' but an empty compId must not target it.
+        expect(applyPatchToTree(t, { type: 'patch', compId: '', payload: { result: { id: 'm1' } } })).toBe(t);
+    });
+});
+
+// -------------------------------------------------------------------------
+// 2b. resolveCompId: shape-tolerant competition id reader
+// -------------------------------------------------------------------------
+describe('resolveCompId', () => {
+    it('reads the top-level id when present', () => {
+        expect(resolveCompId({ id: 'top', config: { id: 'nested' } })).toBe('top');
+    });
+    it('falls back to config.id when top-level id is absent', () => {
+        expect(resolveCompId({ config: { id: 'nested' } })).toBe('nested');
+    });
+    it('falls back to the legacy config.Id arm', () => {
+        expect(resolveCompId({ config: { Id: 'legacy' } })).toBe('legacy');
+    });
+    it('returns empty string for null, primitives, and id-less objects', () => {
+        expect(resolveCompId(null)).toBe('');
+        expect(resolveCompId(undefined)).toBe('');
+        expect(resolveCompId('x')).toBe('');
+        expect(resolveCompId(42)).toBe('');
+        expect(resolveCompId({})).toBe('');
+        expect(resolveCompId({ config: {} })).toBe('');
+    });
+});
+
+// -------------------------------------------------------------------------
+// 2c. mergeSnapshotIntoTree: snapshot fold policy (bootstrap / drop / merge)
+// -------------------------------------------------------------------------
+describe('mergeSnapshotIntoTree', () => {
+    it('returns prev unchanged when the payload is not an array', () => {
+        const prev = { name: 'T', competitions: [] };
+        expect(mergeSnapshotIntoTree(prev, null, { connected: false })).toBe(prev);
+        expect(mergeSnapshotIntoTree(prev, { not: 'array' }, { connected: false })).toBe(prev);
+        expect(mergeSnapshotIntoTree(prev, undefined, { connected: false })).toBe(prev);
+    });
+
+    it('bootstraps a minimal tournament when prev is null (cold start)', () => {
+        const comps = [{ id: 'c1' }, { id: 'c2' }];
+        const out = mergeSnapshotIntoTree(null, comps, { connected: false });
+        expect(out).toEqual({ name: '', courts: [], competitions: comps });
+        expect(out.competitions).toBe(comps);
+    });
+
+    it('bootstraps even when connected (an outage at load must not be starved)', () => {
+        const comps = [{ id: 'c1' }];
+        const out = mergeSnapshotIntoTree(null, comps, { connected: true });
+        expect(out.competitions).toBe(comps);
+    });
+
+    it('drops the snapshot (returns prev) when prev exists and SSE is connected', () => {
+        const prev = { name: 'T', competitions: [{ id: 'c1', tag: 'server' }] };
+        const out = mergeSnapshotIntoTree(prev, [{ id: 'c1', tag: 'operator' }], { connected: true });
+        expect(out).toBe(prev);
+        expect(out.competitions[0].tag).toBe('server');
+    });
+
+    it('replaces an existing competition by id when offline', () => {
+        const prev = { name: 'T', courts: ['A'], competitions: [{ id: 'c1', tag: 'server' }, { id: 'c2', tag: 'server' }] };
+        const out = mergeSnapshotIntoTree(prev, [{ id: 'c1', tag: 'operator' }], { connected: false });
+        expect(out).not.toBe(prev);
+        expect(out.name).toBe('T');           // surrounding fields preserved
+        expect(out.courts).toEqual(['A']);
+        expect(out.competitions.find(c => c.id === 'c1').tag).toBe('operator'); // replaced
+        expect(out.competitions.find(c => c.id === 'c2').tag).toBe('server');   // untouched
+    });
+
+    it('appends a competition not already present when offline', () => {
+        const prev = { competitions: [{ id: 'c1' }] };
+        const out = mergeSnapshotIntoTree(prev, [{ id: 'c2', tag: 'new' }], { connected: false });
+        expect(out.competitions.map(c => c.id)).toEqual(['c1', 'c2']);
+    });
+
+    it('matches existing competitions by config.id (detail-endpoint shape)', () => {
+        const prev = { competitions: [{ config: { id: 'c1' }, tag: 'server' }] };
+        const out = mergeSnapshotIntoTree(prev, [{ config: { id: 'c1' }, tag: 'operator' }], { connected: false });
+        expect(out.competitions).toHaveLength(1);
+        expect(out.competitions[0].tag).toBe('operator');
+    });
+
+    it('skips null, primitive, and id-less elements in the payload', () => {
+        const prev = { competitions: [{ id: 'c1', tag: 'server' }] };
+        const out = mergeSnapshotIntoTree(prev, [null, 'x', {}, { config: {} }, { id: 'c2', tag: 'ok' }], { connected: false });
+        expect(out.competitions.map(c => c.id || 'none')).toEqual(['c1', 'c2']);
+        expect(out.competitions.find(c => c.id === 'c1').tag).toBe('server');
+    });
+
+    it('treats a missing prev.competitions as an empty list when offline', () => {
+        const prev = { name: 'T' };
+        const out = mergeSnapshotIntoTree(prev, [{ id: 'c1' }], { connected: false });
+        expect(out.competitions.map(c => c.id)).toEqual(['c1']);
+    });
+
+    it('defaults connected to falsey when the options object is omitted', () => {
+        const prev = { competitions: [{ id: 'c1', tag: 'server' }] };
+        const out = mergeSnapshotIntoTree(prev, [{ id: 'c1', tag: 'operator' }]);
+        // No options → connected is undefined (falsey) → offline merge runs.
+        expect(out.competitions[0].tag).toBe('operator');
     });
 });
 

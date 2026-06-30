@@ -4,7 +4,7 @@
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
-import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
+import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -641,40 +641,11 @@ function App() {
         // tournament.name/courts for the header and tournament.competitions
         // for match rendering.
         setTournament(prev => {
+          // Pure merge policy lives in court_bridge.mergeSnapshotIntoTree (so it
+          // is unit-testable apart from this effect). The try/catch is a backstop
+          // so a future malformed snapshot can never crash the display board.
           try {
-            if (!Array.isArray(msg.payload)) return prev;
-            const incomingComps = msg.payload;
-            if (!prev) {
-              // No server data yet: bootstrap entirely from the snapshot. This
-              // path is unconditional (even if sseConnected is still its
-              // optimistic mount default) so a cold start during an outage is
-              // never starved of the operator snapshot.
-              return { name: '', courts: [], competitions: incomingComps };
-            }
-            // Server data already loaded AND the SSE feed is up: the server is
-            // authoritative, so drop a late-arriving snapshot rather than let it
-            // overwrite the loaded server competitions with the operator tab's copy.
-            if (sseConnectedRef.current) return prev;
-            // Offline: merge the operator snapshot into the existing tournament.
-            // Existing competitions ARE replaced by the operator snapshot (the
-            // operator tab is the court authority during an outage). The
-            // reconnect full-refetch restores server truth.
-            const existing = prev.competitions || [];
-            const merged = existing.slice();
-            for (const comp of incomingComps) {
-              if (!comp || typeof comp !== 'object') continue;
-              const id = comp.id || (comp.config && (comp.config.id || comp.config.Id));
-              if (!id) continue;
-              const idx = merged.findIndex(c =>
-                c.id === id || (c.config && (c.config.id === id || c.config.Id === id))
-              );
-              if (idx === -1) {
-                merged.push(comp);
-              } else {
-                merged[idx] = comp;
-              }
-            }
-            return { ...prev, competitions: merged };
+            return mergeSnapshotIntoTree(prev, msg.payload, { connected: sseConnectedRef.current });
           } catch (e) {
             console.error('court_bridge: snapshot merge failed:', e);
             return prev;

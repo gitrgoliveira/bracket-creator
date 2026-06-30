@@ -31,11 +31,10 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // keep the existing dark surface (no mockup for those).
 
 // LinkDot: 3-state connection indicator (mp-9ukk Phase 2).
-// 'connected' → green dot (server reachable); 'local' → amber dot (operator
-// broadcast fresh, server down); 'stale' → red dot (no feed). A small
-// static circle with no label keeps the board uncluttered; the colour
-// alone conveys the state to venue staff. Hidden when linkState is
-// 'connected' so a server-fresh board shows nothing.
+// 'connected' renders NOTHING (a healthy, server-fresh board shows no dot);
+// 'local' → amber dot (operator broadcast fresh, server down); 'stale' → red
+// dot (no feed). A small static circle with no label keeps the board
+// uncluttered; the colour alone conveys the degraded state to venue staff.
 function LinkDot({ linkState }) {
     if (linkState === 'connected') return null;
     // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626)
@@ -487,11 +486,12 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
 // These are mutually exclusive: completed > 0 AND no running/scheduled →
 // "completed"; otherwise zero matches at all → "nothing".
 //
-// Reconnect indicator (T063 / FR-011 scenario 4): the `connected` prop
-// (defaults to true) is wired from app.jsx which owns the SSE
-// EventSource. When it flips false we render a small amber pill so the
-// venue knows the screen has gone stale; the rest of the layout stays
-// put so reconnect doesn't flash the layout.
+// Link indicator (mp-9ukk): the `linkState` prop ('connected' | 'local' |
+// 'stale'), wired from app.jsx which owns both the SSE EventSource and the
+// court broadcast recency, drives the discreet LinkDot in the header. The dot
+// is hidden when connected, amber when court-local (server down but the
+// operator broadcast is fresh), and red when stale. The rest of the layout
+// stays put so a state change doesn't reflow the board.
 function TvDisplay({ court, tournament, competitions, withZekkenName, linkState = 'connected' }) {
     const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
     const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);

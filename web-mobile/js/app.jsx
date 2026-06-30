@@ -606,12 +606,16 @@ function App() {
 
     const unsub = bridge.onMessage((msg) => {
       if (msg.type === 'patch') {
-        if (msg.court && msg.court !== court) return;
+        // Strict court match: a message with no court (unscoped) or a
+        // different court is dropped, never applied to this court's board.
+        if (msg.court !== court) return;
         setTournament(prev => applyPatchToTree(prev, msg));
         return;
       }
       if (msg.type === 'snapshot' && msg.payload) {
-        if (msg.court && msg.court !== court) return;
+        // Strict court match: a message with no court (unscoped) or a
+        // different court is dropped, never applied to this court's board.
+        if (msg.court !== court) return;
         // Bootstrap or fill gap from the operator tab's court snapshot.
         // We build a minimal tournament wrapper: the display only reads
         // tournament.name/courts for the header and tournament.competitions

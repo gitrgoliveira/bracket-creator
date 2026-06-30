@@ -1065,6 +1065,13 @@ const API = {
         const _broadcastPatch = (fields) => {
             const { rev: _r, revSession: _rs, ...rest } = fields || {};
             const court = (match && match.court) || '';
+            // Do not emit an unscoped (court-less) broadcast: a display can only
+            // safely apply a patch it can attribute to its court, and the display
+            // guard drops court-less messages anyway. In production every
+            // recordScore caller passes the match (so court is set); the
+            // court-less case is test-only (match=null), where no broadcast is
+            // expected.
+            if (!court) return;
             _bridge.publish('patch', court, compID, {
                 result: {
                     id: matchID,

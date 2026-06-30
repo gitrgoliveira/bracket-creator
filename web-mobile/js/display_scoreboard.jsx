@@ -37,17 +37,22 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // uncluttered; the two degraded states are told apart by treatment (the ring),
 // not hue alone, and each carries an aria-label for assistive tech.
 function LinkDot({ linkState }) {
-    if (linkState === 'connected') return null;
+    const connected = linkState === 'connected';
     const isStale = linkState === 'stale';
     // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626).
     // Per DESIGN.md principle 2, the two degraded states are distinguished by
     // TREATMENT, not hue alone (so the meaning survives projector glare and
     // colour-blindness): 'stale' carries a dark ring, 'local' is a plain dot.
+    // When connected we keep the element but make it invisible (visibility
+    // hidden, aria-hidden) so the header reserves the dot's space and the
+    // subtitle does not shift horizontally as the state toggles.
     const bg = isStale ? 'var(--danger, #dc2626)' : 'var(--warn, #b45309)';
     const label = isStale ? 'No data feed' : 'Operator broadcast (server offline)';
     return (
-        <span data-testid="display-link-dot" data-link-state={linkState} role="status" aria-label={label}
-            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1, #111827)' : 'none' }} />
+        <span data-testid="display-link-dot" data-link-state={linkState}
+            role={connected ? undefined : 'status'} aria-label={connected ? undefined : label}
+            aria-hidden={connected ? 'true' : undefined}
+            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: connected ? 'transparent' : bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1, #111827)' : 'none', visibility: connected ? 'hidden' : 'visible' }} />
     );
 }
 

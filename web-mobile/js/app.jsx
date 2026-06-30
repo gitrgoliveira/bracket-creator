@@ -733,7 +733,7 @@ function App() {
         if (c.poolMatches && c.poolMatches.some(m => m.court === court)) return true;
         if (c.bracket && Array.isArray(c.bracket.rounds)) {
           for (const round of c.bracket.rounds) {
-            if (round.some(m => m.court === court)) return true;
+            if (Array.isArray(round) && round.some(m => m.court === court)) return true;
           }
         }
         return false;

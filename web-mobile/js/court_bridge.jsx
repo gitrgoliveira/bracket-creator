@@ -172,19 +172,30 @@ export function _resetModuleStateForTests() {
 // -----------------------------------------------------------------------
 // openBridge: create a BroadcastChannel handle.
 //
-// Returns a no-op object when BroadcastChannel is unavailable so all callers
-// work without guards.
+// Returns a no-op object when BroadcastChannel is unavailable OR when
+// constructing it throws (e.g. a SecurityError in a sandboxed/blocked
+// context), so all callers work without guards. This must not throw: the
+// module-level `bridge` singleton is created at import time, so a throw here
+// would crash the whole app instead of degrading to the SSE-only path.
 // -----------------------------------------------------------------------
+const _noopBridge = {
+    publish: () => {},
+    onMessage: () => () => {},
+    close: () => {},
+};
+
 export function openBridge() {
     if (typeof BroadcastChannel === 'undefined') {
-        return {
-            publish: () => {},
-            onMessage: () => () => {},
-            close: () => {},
-        };
+        return _noopBridge;
     }
 
-    const channel = new BroadcastChannel(CHANNEL_NAME);
+    let channel;
+    try {
+        channel = new BroadcastChannel(CHANNEL_NAME);
+    } catch (err) {
+        console.error('court_bridge: BroadcastChannel unavailable, degrading to SSE-only:', err);
+        return _noopBridge;
+    }
     const handlers = new Set();
 
     channel.onmessage = (evt) => {

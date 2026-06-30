@@ -286,6 +286,26 @@ export function diffAnnouncementSnapshot(seenRef, list) {
   return additions;
 }
 
+// parseCourtFromSearch: read the normalized display court from the URL query
+// string ('?court=A' → 'A', 'all' → 'ALL', default 'A'). Used by the display
+// consumer so the bridge re-scopes when the court param changes (mp-9ukk).
+function parseCourtFromSearch() {
+  const s = typeof window !== 'undefined' ? (window.location.search || '') : '';
+  let raw = 'A';
+  if (s.length >= 2) {
+    const trimmed = s.startsWith('?') ? s.slice(1) : s;
+    for (const pair of trimmed.split('&')) {
+      if (!pair) continue;
+      const eq = pair.indexOf('=');
+      if (eq !== -1 && decodeURIComponent(pair.slice(0, eq)) === 'court') {
+        raw = decodeURIComponent(pair.slice(eq + 1));
+        break;
+      }
+    }
+  }
+  return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
+}
+
 function App() {
   const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
@@ -390,6 +410,10 @@ function App() {
   // Derived from sseConnected + the bridge's last-broadcast recency in a tick.
   // The boolean sseConnected is kept for LobbyDisplay (unchanged scope).
   const [linkState, setLinkState] = useS('connected');
+  // mp-9ukk Phase 2: the display court parsed from ?court=. Tracked as state
+  // (updated on popstate) so the display consumer effect re-runs and re-scopes
+  // the bridge when the court changes without a full reload.
+  const [displayCourt, setDisplayCourtParam] = useS(() => parseCourtFromSearch());
   // Ref kept in sync with sseConnected so the 5 s display-mode ticker can
   // read the current value without closing over a stale copy from the effect
   // that has [mode] as its only dep. See the sync effect below.
@@ -504,6 +528,9 @@ function App() {
         if (route.admin) setAdminView(route.admin);
       } else if (route.mode === "display") {
         setMode("display");
+        // Re-read the court so an in-place back/forward to a different
+        // ?court= re-scopes the bridge (the display effect depends on it).
+        setDisplayCourtParam(parseCourtFromSearch());
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
@@ -583,22 +610,10 @@ function App() {
   useE(() => {
     if (mode !== 'display') return;
 
-    // Read the court from the URL query string. DisplayRoute also reads
-    // it via useQuery: we replicate the parse here to scope the snapshot-req.
-    const rawCourt = (() => {
-      const s = typeof window !== 'undefined' ? (window.location.search || '') : '';
-      if (s.length < 2) return 'A';
-      const trimmed = s.startsWith('?') ? s.slice(1) : s;
-      for (const pair of trimmed.split('&')) {
-        if (!pair) continue;
-        const eq = pair.indexOf('=');
-        if (eq !== -1 && decodeURIComponent(pair.slice(0, eq)) === 'court') {
-          return decodeURIComponent(pair.slice(eq + 1));
-        }
-      }
-      return 'A';
-    })();
-    const court = rawCourt.toLowerCase() === 'all' ? 'ALL' : rawCourt.toUpperCase();
+    // The display court is tracked as state (parseCourtFromSearch, updated on
+    // popstate) and is a dependency of this effect, so the bridge re-scopes
+    // when ?court= changes without a full reload.
+    const court = displayCourt;
 
     // Scope the inbound recency clock to this display court so a patch for
     // a different court does not falsely advance the local dot to 'local'.
@@ -677,11 +692,12 @@ function App() {
       setDisplayCourt(null);
       clearInterval(ticker);
     };
-    // mode is in deps so the effect re-runs if the user navigates away from
-    // display mode (unlikely but possible via popstate). sseConnected is NOT
-    // in deps deliberately: re-opening the bridge on every SSE flip would
-    // drop all in-flight snapshot replies.
-  }, [mode]);
+    // mode + displayCourt are in deps so the effect re-runs (re-scoping the
+    // bridge: snapshot-req, recency clock, and the inbound court guard) when
+    // the user leaves display mode or switches ?court= in place. sseConnected
+    // is NOT in deps deliberately: re-opening the bridge on every SSE flip
+    // would drop all in-flight snapshot replies.
+  }, [mode, displayCourt]);
 
   // mp-9ukk Phase 2: ref sync + linkState re-derivation on every sseConnected
   // or mode change. sseConnectedRef is updated first (before the mode guard)
@@ -1179,6 +1195,37 @@ function App() {
     return <window.LoadingSpinner text="Loading..." />;
   }
 
+  // T060: /display family: public, read-only TV / lobby / overlay
+  // surfaces. Short-circuit BEFORE the CreateTournament null-check and
+  // before viewer/admin so no auth prompt is shown, no admin chrome leaks
+  // in, and a public TV never falls through to the admin create-tournament
+  // form during an outage. The DisplayRoute owns its own query-param
+  // routing (court=, overlay=, position=). `connected` is the SSE-status
+  // boolean from T063 (for LobbyDisplay). `linkState` is the 3-state dot
+  // value for TvDisplay (mp-9ukk Phase 2): 'connected' | 'local' | 'stale'.
+  if (mode === "display") {
+    const DisplayRoute = window.DisplayRoute;
+    if (!DisplayRoute) {
+      // Defensive: display.js bundle is part of the standard build, so
+      // this should never fire in production. Render a minimal message
+      // rather than a blank screen if it does.
+      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
+    }
+    // tournament is null when the initial fetch failed (outage). Pass a safe
+    // empty wrapper so the board renders its own loading/empty state instead
+    // of the admin create form; the snapshot bootstrap may still populate it
+    // from an operator tab, and load() replaces it on reconnect.
+    const displayTournament = tournament || { name: '', competitions: [] };
+    return (
+      <DisplayRoute
+        tournament={displayTournament}
+        competitions={displayTournament.competitions || []}
+        connected={sseConnected}
+        linkState={linkState}
+      />
+    );
+  }
+
   if (tournament === null) {
     return (
       <CreateTournament
@@ -1189,32 +1236,6 @@ function App() {
           setMode("admin");
           setPassword(p);
         }}
-      />
-    );
-  }
-
-  // T060: /display family: public, read-only TV / lobby / overlay
-  // surfaces. Short-circuit before viewer/admin so no auth prompt is
-  // shown, no admin chrome leaks in, and the DisplayRoute owns its
-  // own query-param routing (court=, overlay=, position=). The
-  // tournament prop carries .competitions already (load() merges
-  // them), and `connected` is the SSE-status boolean from T063 (for
-  // LobbyDisplay). `linkState` is the 3-state dot value for TvDisplay
-  // (mp-9ukk Phase 2): 'connected' | 'local' | 'stale'.
-  if (mode === "display") {
-    const DisplayRoute = window.DisplayRoute;
-    if (!DisplayRoute) {
-      // Defensive: display.js bundle is part of the standard build, so
-      // this should never fire in production. Render a minimal message
-      // rather than a blank screen if it does.
-      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
-    }
-    return (
-      <DisplayRoute
-        tournament={tournament}
-        competitions={tournament.competitions || []}
-        connected={sseConnected}
-        linkState={linkState}
       />
     );
   }

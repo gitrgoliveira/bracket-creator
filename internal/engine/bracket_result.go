@@ -24,6 +24,10 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		DecisionReason:  bm.DecisionReason,
 		Encho:           bm.Encho,
 		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-		SubResults:      bm.SubResults,
+		// FlagsA/FlagsB carry the engi referee-flag counts so a rollback
+		// replay of a naginata flag-scored bracket match restores them too.
+		FlagsA:     bm.FlagsA,
+		FlagsB:     bm.FlagsB,
+		SubResults: bm.SubResults,
 	}
 }

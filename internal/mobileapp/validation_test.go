@@ -1312,3 +1312,37 @@ func TestScoreRequestValidate_RevNonNegative(t *testing.T) {
 		assert.Equal(t, "rev", verr.Field)
 	})
 }
+
+// TestScoreRequestValidate_FlagsNonNegative verifies the HTTP-layer guard
+// rejects negative engi referee-flag counts on the field that carries them.
+// Zero (a running/partial save) and valid positive counts pass; the {1,3,5}
+// completed-match total is enforced by the engine, not here.
+func TestScoreRequestValidate_FlagsNonNegative(t *testing.T) {
+	t.Run("zero flags pass (running/partial)", func(t *testing.T) {
+		assert.NoError(t, (&ScoreRequest{FlagsA: 0, FlagsB: 0}).Validate())
+	})
+	t.Run("valid positive flags pass", func(t *testing.T) {
+		assert.NoError(t, (&ScoreRequest{FlagsA: 3, FlagsB: 2}).Validate())
+	})
+	t.Run("negative flagsA rejected", func(t *testing.T) {
+		err := (&ScoreRequest{FlagsA: -1}).Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "flagsA", verr.Field)
+	})
+	t.Run("negative flagsB rejected", func(t *testing.T) {
+		err := (&ScoreRequest{FlagsB: -1}).Validate()
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "flagsB", verr.Field)
+	})
+	t.Run("negative flagsA rejected in bulk validator", func(t *testing.T) {
+		err := validateBulkScoreLengths(&state.MatchResult{FlagsA: -1})
+		require.Error(t, err)
+		var verr *ValidationError
+		require.Truef(t, errors.As(err, &verr), "want *ValidationError, got %T", err)
+		assert.Equal(t, "flagsA", verr.Field)
+	})
+}

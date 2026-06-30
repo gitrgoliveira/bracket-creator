@@ -570,6 +570,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// Engi competitions decide bouts by referee flag counts. A manual
+		// winner override sets Winner without FlagsA/FlagsB, leaving a
+		// completed engi match with a 0-0 flag total that violates the
+		// {1,3,5} invariant. Reject it (mirrors the quick-score / decision
+		// guards) so flag scoring stays the only engi result path.
+		if comp, loadErr := store.LoadCompetition(id); loadErr == nil && comp != nil && comp.Engi {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "override-winner is not supported for engi competitions; use flag scoring instead"})
+			return
+		}
+
 		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

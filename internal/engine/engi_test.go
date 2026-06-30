@@ -54,12 +54,9 @@ func TestEngiWinnerSide(t *testing.T) {
 	assert.Equal(t, "B", engiWinnerSide(0, 1))
 }
 
-func TestEngiStandingPoints_WinsThenFlags(t *testing.T) {
-	// More wins always beats fewer wins regardless of flags.
-	assert.Greater(t, engiStandingPoints(2, 0), engiStandingPoints(1, 5))
-	// Equal wins: more flags wins.
-	assert.Greater(t, engiStandingPoints(1, 5), engiStandingPoints(1, 3))
-}
+// The wins-then-flags ranking is exercised end-to-end by
+// TestComputeEngiStandings_PoolWinsThenFlags and
+// TestComputeEngiStandings_FlagTiebreak.
 
 // --- Helpers ---------------------------------------------------------------
 

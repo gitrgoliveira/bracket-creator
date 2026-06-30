@@ -50,8 +50,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
 
   const total = flagsA + flagsB;
   const isValidTotal = VALID_TOTALS.has(total);
+  // winnerSide drives the per-side winner highlight below. A valid total is
+  // always odd ({1,3,5}), so it already implies a strict winner; canSubmit
+  // needs only isValidTotal, not a separate non-null check.
   const winnerSide = deriveWinner(flagsA, flagsB);
-  const canSubmit = isValidTotal && winnerSide !== null && !submitting;
+  const canSubmit = isValidTotal && !submitting;
 
   // Pair names: member1 = sideA.name (or sideA string), member2 = sideA.displayName.
   // Both sides of an engi match are pairs (one entry each).

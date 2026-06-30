@@ -94,7 +94,7 @@ func (e *Engine) checkConcurrentIneligibility(compID, matchID, loserName string)
 		return nil
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
@@ -328,7 +328,7 @@ func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) 
 		return sideA, sideB
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return sideA, sideB
 	}
@@ -592,7 +592,7 @@ func (e *Engine) restoreCompetitorEligibility(compID, priorLoser, matchID string
 		return nil, err
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -626,7 +626,7 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 		return nil, err
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +715,7 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 		return nil, err
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}

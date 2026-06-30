@@ -626,6 +626,36 @@ func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
 	})
 }
 
+// TestOverrideWinner_EngiGuard verifies the override-winner endpoint rejects
+// engi competitions with 400: a manual winner override sets Winner without
+// FlagsA/FlagsB, which would leave a completed engi match with a 0-0 flag
+// total that violates the {1,3,5} invariant. Flag scoring is the only engi
+// result path. Mirrors TestDecisionHandler_EngiGuard.
+func TestOverrideWinner_EngiGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "engi-override"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true}))
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "P1", SideB: "P2"}}},
+	}))
+
+	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/b1/override-winner", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "override-winner on engi comp must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "engi")
+
+	// The bracket winner must remain unset (the guard returns before the engine).
+	stored, err := store.LoadBracket(cid)
+	require.NoError(t, err)
+	assert.Empty(t, stored.Rounds[0][0].Winner, "engi override must not set a winner")
+}
+
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

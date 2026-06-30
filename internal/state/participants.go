@@ -362,7 +362,7 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, error) {
 	if comp == nil {
 		return false, nil
 	}
-	return comp.WithZekkenName || comp.Engi, nil
+	return comp.EffectiveWithZekkenName(), nil
 }
 
 // participantPairKey is the (normalizedName, normalizedDojo) identity key used

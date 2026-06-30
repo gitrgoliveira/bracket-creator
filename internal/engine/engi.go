@@ -48,17 +48,6 @@ func engiWinnerSide(flagsA, flagsB int) string {
 	return "B"
 }
 
-// engiStandingPoints packs Wins then Flags into a single descending sort key so
-// the existing Points-based ordering works unchanged:
-//   - primary:   Wins (more is better)
-//   - secondary: accumulated own-side Flags (more is better)
-//
-// The 1e6 multiplier dwarfs any realistic flag total (max 5 per bout) so Flags
-// never bleeds into the Wins ordering.
-func engiStandingPoints(wins, flags int) int {
-	return wins*1_000_000 + flags
-}
-
 // recordEngiMatchResult records a completed engi bout (POOL or BRACKET), keyed
 // by competition + match id and the two flag counts. It is the engi twin of the
 // kendo record path and does NOT route through writeMatchResult /
@@ -285,16 +274,20 @@ func (e *Engine) computeEngiStandings(loader engiStandingsLoader, compID string)
 
 		sorted := make([]state.PlayerStanding, 0, len(playerStandings))
 		for _, s := range playerStandings {
-			s.Points = engiStandingPoints(s.Wins, s.Flags)
 			s.ScoreSummary = fmt.Sprintf("W:%d Flags:%d", s.Wins, s.Flags)
 			sorted = append(sorted, *s)
 		}
 
-		// Stable sort: descending Points (Wins then Flags), then by name so the
-		// order is deterministic for fully-tied competitors.
+		// Stable sort: more Wins first, then more accumulated own-side Flags,
+		// then by name so the order is deterministic for fully-tied
+		// competitors. Points is left at its zero value: engi has no points
+		// metric, so an honest 0 reaches the wire rather than a packed sort key.
 		sort.SliceStable(sorted, func(i, j int) bool {
-			if sorted[i].Points != sorted[j].Points {
-				return sorted[i].Points > sorted[j].Points
+			if sorted[i].Wins != sorted[j].Wins {
+				return sorted[i].Wins > sorted[j].Wins
+			}
+			if sorted[i].Flags != sorted[j].Flags {
+				return sorted[i].Flags > sorted[j].Flags
 			}
 			return sorted[i].Player.Name < sorted[j].Player.Name
 		})

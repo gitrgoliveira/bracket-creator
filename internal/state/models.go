@@ -407,6 +407,14 @@ type Competition struct {
 	Players []domain.Player `yaml:"-" json:"players"`
 }
 
+// EffectiveWithZekkenName reports whether the participant CSV reader/writer
+// must use the 4-column [id, Name, DisplayName, Dojo] layout. Engi (kata-pair)
+// competitions always carry a second member name in the DisplayName column, so
+// they force the zekken layout regardless of the explicit WithZekkenName flag.
+func (c *Competition) EffectiveWithZekkenName() bool {
+	return c.WithZekkenName || c.Engi
+}
+
 // ApplyCompetitionDefaults fills zero-valued per-phase durations from the
 // legacy MatchDuration field. Idempotent; safe to call repeatedly.
 //

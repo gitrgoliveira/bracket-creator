@@ -289,20 +289,17 @@ export function diffAnnouncementSnapshot(seenRef, list) {
 // parseCourtFromSearch: read the normalized display court from the URL query
 // string ('?court=A' → 'A', 'all' → 'ALL', default 'A'). Used by the display
 // consumer so the bridge re-scopes when the court param changes (mp-9ukk).
+//
+// Delegates the query-string parse to the shared AppRouter.parseSearch (the one
+// canonical implementation in router.jsx) rather than re-rolling the loop.
+// router.js is script-tagged before app.js in index.html, so window.AppRouter
+// is always present by the time the App renders; the {} fallback only guards a
+// non-browser/never-rendered context and degrades to the default court.
 function parseCourtFromSearch() {
   const s = typeof window !== 'undefined' ? (window.location.search || '') : '';
-  let raw = 'A';
-  if (s.length >= 2) {
-    const trimmed = s.startsWith('?') ? s.slice(1) : s;
-    for (const pair of trimmed.split('&')) {
-      if (!pair) continue;
-      const eq = pair.indexOf('=');
-      if (eq !== -1 && decodeURIComponent(pair.slice(0, eq)) === 'court') {
-        raw = decodeURIComponent(pair.slice(eq + 1));
-        break;
-      }
-    }
-  }
+  const router = (typeof window !== 'undefined' && window.AppRouter) || null;
+  const query = router && router.parseSearch ? router.parseSearch(s) : {};
+  const raw = query.court || 'A';
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 

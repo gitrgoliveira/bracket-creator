@@ -140,8 +140,8 @@ function getCurrentUrl() {
 
 const Link = _Link || ((props) => React.createElement('a', props, props.children));
 
-export { Router, Route, route, Link, useQuery, getCurrentUrl };
+export { Router, Route, route, Link, useQuery, getCurrentUrl, parseSearch };
 
 if (typeof window !== 'undefined') {
-    window.AppRouter = { Router, Route, route, Link, useQuery, getCurrentUrl };
+    window.AppRouter = { Router, Route, route, Link, useQuery, getCurrentUrl, parseSearch };
 }

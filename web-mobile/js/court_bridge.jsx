@@ -163,15 +163,19 @@ export function applyPatchToTree(tournament, msg) {
 // -----------------------------------------------------------------------
 export function mergeSnapshotIntoTree(prev, incomingComps, { connected } = {}) {
     if (!Array.isArray(incomingComps)) return prev;
+    // Keep only well-formed competitions (a resolvable id) up front, so BOTH the
+    // cold-start and the offline-merge paths are protected: a malformed or rogue
+    // same-origin snapshot can never inject null/primitive/id-less values into
+    // tournament.competitions.
+    const valid = incomingComps.filter(c => resolveCompId(c));
     if (!prev) {
-        return { name: '', courts: [], competitions: incomingComps };
+        return { name: '', courts: [], competitions: valid };
     }
     if (connected) return prev;
     const existing = prev.competitions || [];
     const merged = existing.slice();
-    for (const comp of incomingComps) {
+    for (const comp of valid) {
         const id = resolveCompId(comp);
-        if (!id) continue;
         const idx = merged.findIndex(c => resolveCompId(c) === id);
         if (idx === -1) {
             merged.push(comp);
@@ -291,7 +295,9 @@ export function openBridge() {
         if (msg.type === 'snapshot-req' && _snapshotProvider) {
             const court = msg.court || '';
             // One try/catch covers both the provider call and postMessage: either
-            // failing just logs and continues (the requester re-requests on its tick).
+            // failing just logs and continues. A dropped reply is recovered the
+            // next time the display publishes snapshot-req (on its effect mount or
+            // a court change); there is no periodic re-request.
             try {
                 const slice = _snapshotProvider(court);
                 if (slice && slice.length > 0) {

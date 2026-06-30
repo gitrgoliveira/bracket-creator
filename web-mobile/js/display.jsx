@@ -48,12 +48,15 @@ function DisplayRoute({ tournament, competitions, connected = true, linkState = 
         const s = window.location.search || '';
         const out = {};
         if (s.length < 2) return out;
+        // decodeURIComponent throws on malformed percent-encoding; fall back to
+        // the raw substring so a crafted ?court= cannot crash the display board.
+        const dec = (v) => { try { return decodeURIComponent(v); } catch (_e) { return v; } };
         const trimmed = s.startsWith('?') ? s.slice(1) : s;
         for (const pair of trimmed.split('&')) {
             if (!pair) continue;
             const eq = pair.indexOf('=');
-            if (eq === -1) out[decodeURIComponent(pair)] = '';
-            else out[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
+            if (eq === -1) out[dec(pair)] = '';
+            else out[dec(pair.slice(0, eq))] = dec(pair.slice(eq + 1));
         }
         return out;
     })();

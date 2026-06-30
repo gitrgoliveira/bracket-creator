@@ -44,4 +44,18 @@ describe('parseSearch', () => {
     it('skips empty segments from doubled separators', () => {
         expect(parseSearch('?court=A&&overlay=1')).toEqual({ court: 'A', overlay: '1' });
     });
+
+    it('does not throw on malformed percent-encoding; falls back to the raw substring', () => {
+        // A stray '%' makes decodeURIComponent throw; parseSearch is on the
+        // public surface and runs at state init, so it must never propagate that.
+        let out;
+        expect(() => { out = parseSearch('?court=%E0%A4%A'); }).not.toThrow();
+        expect(out.court).toBe('%E0%A4%A');
+        // A valid pair alongside a malformed one still parses.
+        expect(parseSearch('?court=A&bad=%')).toEqual({ court: 'A', bad: '%' });
+        // A malformed key is tolerated too.
+        let out2;
+        expect(() => { out2 = parseSearch('?%=x'); }).not.toThrow();
+        expect(out2['%']).toBe('x');
+    });
 });

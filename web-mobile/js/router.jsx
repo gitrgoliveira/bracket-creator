@@ -91,6 +91,18 @@ function route(url, replace = false) {
     return false;
 }
 
+// decodeURIComponent throws on malformed percent-encoding (e.g. a stray "%").
+// parseSearch is on the public surface (ES export + window.AppRouter) and is
+// called during state init (useQuery, app.jsx's parseCourtFromSearch), so it
+// must never throw on a crafted/truncated URL: fall back to the raw substring.
+function safeDecode(s) {
+    try {
+        return decodeURIComponent(s);
+    } catch (_e) {
+        return s;
+    }
+}
+
 // Pure parse of a search string into a plain object. Extracted so the
 // useQuery hook below stays trivial and so the parser can be unit-tested
 // without a DOM.
@@ -102,10 +114,10 @@ function parseSearch(search) {
         if (!pair) continue;
         const eq = pair.indexOf('=');
         if (eq === -1) {
-            params[decodeURIComponent(pair)] = '';
+            params[safeDecode(pair)] = '';
         } else {
-            const k = decodeURIComponent(pair.slice(0, eq));
-            const v = decodeURIComponent(pair.slice(eq + 1));
+            const k = safeDecode(pair.slice(0, eq));
+            const v = safeDecode(pair.slice(eq + 1));
             params[k] = v;
         }
     }

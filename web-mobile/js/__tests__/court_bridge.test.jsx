@@ -233,13 +233,17 @@ describe('mergeSnapshotIntoTree', () => {
         const comps = [{ id: 'c1' }, { id: 'c2' }];
         const out = mergeSnapshotIntoTree(null, comps, { connected: false });
         expect(out).toEqual({ name: '', courts: [], competitions: comps });
-        expect(out.competitions).toBe(comps);
     });
 
     it('bootstraps even when connected (an outage at load must not be starved)', () => {
         const comps = [{ id: 'c1' }];
         const out = mergeSnapshotIntoTree(null, comps, { connected: true });
-        expect(out.competitions).toBe(comps);
+        expect(out.competitions.map(c => c.id)).toEqual(['c1']);
+    });
+
+    it('filters null/primitive/id-less elements out of the cold-start bootstrap too', () => {
+        const out = mergeSnapshotIntoTree(null, [null, 'x', {}, { config: {} }, { id: 'c1' }], { connected: false });
+        expect(out.competitions).toEqual([{ id: 'c1' }]);
     });
 
     it('drops the snapshot (returns prev) when prev exists and SSE is connected', () => {

@@ -196,9 +196,12 @@ flowchart LR
 This local hub needs no internet, no secure context, and no extra software, and it works in
 every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes
 above rather than replacing them: the operator's writes are still queued locally and synced to
-the server once the link returns, so the authoritative record stays correct. The one limit: it
-is per machine and per court, so reloading the display tab during an outage leaves it blank until
-the server is reachable again.
+the server once the link returns, so the authoritative record stays correct. It is per machine
+and per court. Reloading the **display** tab during an outage is fine: it cold-starts from the
+operator tab's snapshot over the same channel, as long as an operator tab is still open on that
+machine to answer (it only stays blank if none is). The genuine gap is reloading the **operator**
+tab itself mid-outage, since it holds the court's working data while offline and would have
+nothing to fetch from the down server.
 
 ## 4. Persistence model
 

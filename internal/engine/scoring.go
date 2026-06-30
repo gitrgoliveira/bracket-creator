@@ -1056,10 +1056,16 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		// Skip empty/placeholder losers (bye matches resolve with one side blank).
 		if loser != "" && !strings.HasPrefix(loser, "Winner of") {
 			bronze := bracket.ThirdPlaceMatch
-			switch {
-			case bronze.SideA == "":
+			// Assign by semifinal POSITION, not first-empty-slot. The round
+			// feeding the final always has exactly two matches (mIdx 0 and 1),
+			// so each maps to a fixed bronze side. This mirrors the final's
+			// positional advancement above and is re-score safe: correcting a
+			// semifinal overwrites the correct bronze slot in place. A
+			// fill-first-empty scheme would leave a stale loser pinned once
+			// both slots are populated and a semifinal is later re-scored.
+			if mIdx%2 == 0 {
 				bronze.SideA = loser
-			case bronze.SideB == "" && bronze.SideA != loser:
+			} else {
 				bronze.SideB = loser
 			}
 		}
@@ -1140,7 +1146,8 @@ func (e *Engine) patchScheduleCourt(compId, matchId, newCourt string) error {
 		return err
 	}
 	for i := range entries {
-		// Pool entries: MatchRef == matchId; bracket entries: MatchRef == "R{n}-M{matchId}".
+		// Pool + bronze entries: MatchRef == matchId; round bracket entries:
+		// MatchRef == "R{n}-M{matchId}".
 		if entries[i].MatchRef == matchId || strings.HasSuffix(entries[i].MatchRef, "-M"+matchId) {
 			entries[i].Court = newCourt
 		}

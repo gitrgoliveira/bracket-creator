@@ -115,16 +115,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// Kiken/fusenpai/fusensho decisions make no sense in that paradigm
 		// (there are no ippons to forfeit). Reject explicitly so the client
 		// gets a clear error instead of a silent no-op (Finding 9).
-		{
-			comp, loadErr := store.LoadCompetition(id)
-			if loadErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": loadErr.Error()})
-				return
-			}
-			if comp != nil && comp.Engi {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support kiken/fusenpai decisions; use flag scoring instead"})
-				return
-			}
+		comp, loadErr := store.LoadCompetition(id)
+		if loadErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErr.Error()})
+			return
+		}
+		if comp != nil && comp.Engi {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support kiken/fusenpai decisions; use flag scoring instead"})
+			return
 		}
 
 		// T104/CHK029: enforce MaxEnchoPeriods cap on the encho block.

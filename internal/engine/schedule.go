@@ -388,8 +388,12 @@ func (e *Engine) GenerateSchedule(compID string) error {
 					court = "A"
 				}
 				entries = append(entries, state.ScheduleEntry{
-					MatchType:   "bracket",
-					MatchRef:    "M" + bm.ID,
+					MatchType: "bracket",
+					// Bronze is not in a numbered round, so it can't use the
+					// "R{n}-M{id}" round-match ref. Use the bare match id so
+					// patchScheduleCourt's exact-match clause keeps the
+					// schedule court in sync when the bronze court changes.
+					MatchRef:    bm.ID,
 					Court:       court,
 					ScheduledAt: bm.ScheduledAt,
 					Status:      string(bm.Status),

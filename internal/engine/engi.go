@@ -28,15 +28,15 @@ import (
 // engiValidTotal reports whether a flag pair is a valid engi result. Valid
 // totals are {1, 3, 5}: odd (so there is always a strict majority and never a
 // draw) and at most 5 (the hard cap, there are never more than 5 referees on an
-// official panel). An equal split (flagsA == flagsB) can only occur on an even
-// total and is rejected by the oddness check, but it is asserted explicitly so
-// the winner derivation below is total.
+// official panel). The oddness of the total is what guarantees a strict winner:
+// an equal split can only sum to an even number, so a {1, 3, 5} total already
+// implies flagsA != flagsB and the winner derivation below is total.
 func engiValidTotal(flagsA, flagsB int) bool {
 	if flagsA < 0 || flagsB < 0 {
 		return false
 	}
 	t := flagsA + flagsB
-	return (t == 1 || t == 3 || t == 5) && flagsA != flagsB
+	return t == 1 || t == 3 || t == 5
 }
 
 // engiWinnerSide returns "A" or "B" for the side with more flags. Callers MUST

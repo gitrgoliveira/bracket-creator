@@ -254,11 +254,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// engi slice through the SAME tx so the write stays inside the caller's
 	// single per-comp lock acquire. Engi has no eligibility concept, so the
 	// status return is nil.
-	engiComp, engiLoadErr := tx.LoadCompetition(compID)
-	if engiLoadErr != nil {
-		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, engiLoadErr)
+	comp, loadErr := tx.LoadCompetition(compID)
+	if loadErr != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
-	if engiComp != nil && engiComp.Engi {
+	if comp != nil && comp.Engi {
 		_, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
 		return nil, recErr
 	}
@@ -502,42 +502,14 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 	bracket, err := tx.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:              bm.ID,
-						SideA:           bm.SideA,
-						SideB:           bm.SideB,
-						Winner:          bm.Winner,
-						Status:          bm.Status,
-						Decision:        bm.Decision,
-						DecisionBy:      bm.DecisionBy,
-						DecisionReason:  bm.DecisionReason,
-						Encho:           bm.Encho,
-						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-						// Include the persisted sub-results so a rollback replay
-						// restores the full team-bout state. LoadBracket deep-copies,
-						// so this slice is safe to hand back without aliasing cache.
-						SubResults: bm.SubResults,
-					}, nil
+			for i := range round {
+				if round[i].ID == matchID {
+					return bracketMatchAsResult(&round[i]), nil
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			bm := bracket.ThirdPlaceMatch
-			return &state.MatchResult{
-				ID:              bm.ID,
-				SideA:           bm.SideA,
-				SideB:           bm.SideB,
-				Winner:          bm.Winner,
-				Status:          bm.Status,
-				Decision:        bm.Decision,
-				DecisionBy:      bm.DecisionBy,
-				DecisionReason:  bm.DecisionReason,
-				Encho:           bm.Encho,
-				DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-				SubResults:      bm.SubResults,
-			}, nil
+			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
 		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)

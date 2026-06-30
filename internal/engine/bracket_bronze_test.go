@@ -177,11 +177,81 @@ func TestBronze_ScheduleIncludesBronze(t *testing.T) {
 
 	found := false
 	for _, s := range schedule {
-		if s.MatchRef == "Mm-bronze" {
+		if s.MatchRef == "m-bronze" {
 			found = true
 		}
 	}
-	assert.True(t, found, "schedule should include the bronze match (MatchRef Mm-bronze)")
+	assert.True(t, found, "schedule should include the bronze match (MatchRef m-bronze)")
+}
+
+// TestBronze_RescoredSemifinalUpdatesBronzeSlot verifies that re-scoring a
+// semifinal AFTER both bronze slots are populated overwrites the correct slot
+// in place, rather than leaving the original loser stale. Regression for the
+// fill-first-empty bug fixed by positional assignment in propagateBracketWinner.
+func TestBronze_RescoredSemifinalUpdatesBronzeSlot(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bronze-rescore"
+
+	createBronzeTestCompetition(t, store, compID, true)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2)
+
+	// Score both semifinals: SF0 SideA wins (SideB loses → bronze SideA),
+	// SF1 SideB wins (SideA loses → bronze SideB).
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{
+		Winner: sf[0].SideA, Status: state.MatchStatusCompleted,
+	}))
+	require.NoError(t, eng.RecordMatchResult(compID, sf[1].ID, &state.MatchResult{
+		Winner: sf[1].SideB, Status: state.MatchStatusCompleted,
+	}))
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Equal(t, sf[0].SideB, bracket.ThirdPlaceMatch.SideA)
+
+	// Re-score SF0 with the OPPOSITE winner. The new loser is sf[0].SideA and
+	// it must replace the now-stale sf[0].SideB in bronze SideA.
+	require.NoError(t, eng.RecordMatchResult(compID, sf[0].ID, &state.MatchResult{
+		Winner: sf[0].SideB, Status: state.MatchStatusCompleted,
+	}))
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, sf[0].SideA, bracket.ThirdPlaceMatch.SideA,
+		"re-scored SF0 must overwrite bronze SideA with the new loser, not leave the stale one")
+	assert.Equal(t, sf[1].SideA, bracket.ThirdPlaceMatch.SideB,
+		"SF1's bronze slot must be untouched by the SF0 re-score")
+}
+
+// TestBronze_CourtChangeSyncsSchedule verifies that changing the bronze match's
+// court via UpdateMatchCourt keeps the schedule CSV entry in sync. Regression
+// for patchScheduleCourt not matching the bronze MatchRef.
+func TestBronze_CourtChangeSyncsSchedule(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bronze-court"
+
+	createBronzeTestCompetition(t, store, compID, true)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, "m-bronze", "B"))
+
+	schedule, err := store.LoadSchedule(compID)
+	require.NoError(t, err)
+	found := false
+	for _, s := range schedule {
+		if s.MatchRef == "m-bronze" {
+			found = true
+			assert.Equal(t, "B", s.Court, "bronze schedule entry court must follow the bracket court change")
+		}
+	}
+	assert.True(t, found, "schedule should include the bronze match entry")
 }
 
 // TestBronze_RoundTripPersistsThirdPlaceMatch verifies the bronze field survives

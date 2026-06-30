@@ -505,42 +505,14 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 	bracket, err := e.store.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:              bm.ID,
-						SideA:           bm.SideA,
-						SideB:           bm.SideB,
-						Winner:          bm.Winner,
-						Status:          bm.Status,
-						Decision:        bm.Decision,
-						DecisionBy:      bm.DecisionBy,
-						DecisionReason:  bm.DecisionReason,
-						Encho:           bm.Encho,
-						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-						// Include the persisted sub-results so a rollback replay
-						// restores the full team-bout state. LoadBracket deep-copies,
-						// so this slice is safe to hand back without aliasing cache.
-						SubResults: bm.SubResults,
-					}, nil
+			for i := range round {
+				if round[i].ID == matchID {
+					return bracketMatchAsResult(&round[i]), nil
 				}
 			}
 		}
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
-			bm := bracket.ThirdPlaceMatch
-			return &state.MatchResult{
-				ID:              bm.ID,
-				SideA:           bm.SideA,
-				SideB:           bm.SideB,
-				Winner:          bm.Winner,
-				Status:          bm.Status,
-				Decision:        bm.Decision,
-				DecisionBy:      bm.DecisionBy,
-				DecisionReason:  bm.DecisionReason,
-				Encho:           bm.Encho,
-				DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-				SubResults:      bm.SubResults,
-			}, nil
+			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
 		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)

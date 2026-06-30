@@ -8,6 +8,7 @@ import {
     setDisplayCourt,
     openBridge,
     _tabId,
+    _resetModuleStateForTests,
 } from '../court_bridge.jsx';
 
 // court_bridge.jsx: mp-9ukk Phase 2 unit tests.
@@ -227,8 +228,9 @@ describe('openBridge', () => {
         origBC = global.BroadcastChannel;
         global.BroadcastChannel = MockBroadcastChannel;
         MockBroadcastChannel.reset();
-        // Clear snapshot provider between tests
-        setSnapshotProvider(null);
+        // Reset all module-level state (lastBroadcastAt, displayCourt,
+        // snapshotProvider) so tests do not depend on execution order.
+        _resetModuleStateForTests();
     });
 
     afterEach(() => {
@@ -327,32 +329,51 @@ describe('openBridge', () => {
         b.close();
     });
 
-    it('auto-responds to snapshot-req with a snapshot when a provider is registered', () => {
+    it('auto-responds to snapshot-req from a different origin with a snapshot for the right court', () => {
+        // The self-echo guard drops messages whose origin === _tabId, so a
+        // same-module publish() never reaches the responder. Inject the
+        // snapshot-req from a spoofed different origin to bypass that guard
+        // and actually exercise the auto-reply path.
         const competitions = [{ id: 'comp-A', poolMatches: [] }];
         setSnapshotProvider((court) => court === 'A' ? competitions : null);
 
-        const operatorBridge = openBridge(); // has snapshot provider
-        const displayBridge = openBridge();  // will send snapshot-req
+        openBridge(); // activate the onmessage responder
 
-        // The operator bridge auto-responds; displayBridge.onMessage would capture it.
-        // BUT since both bridges share _tabId (same module), the reply from
-        // operatorBridge will be dropped by displayBridge due to self-echo.
-        // This test verifies the provider lookup logic: we listen on operatorBridge
-        // itself to confirm it received the snapshot-req event and called provider.
-        const reqsReceived = [];
-        operatorBridge.onMessage(msg => reqsReceived.push(msg));
+        MockBroadcastChannel._lastSent = null;
 
-        displayBridge.publish('snapshot-req', 'A', '', null);
+        // Inject a snapshot-req from a different tab for court 'A'.
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot-req', origin: 'other-tab-id',
+            court: 'A', compId: '', payload: null,
+        });
 
-        // operatorBridge received the snapshot-req (different instance,
-        // but same _tabId → DROPPED by self-echo. So this test verifies only
-        // that the inter-instance routing works when origins differ.
-        // Since our mock shares _tabId between sender and receiver, we verify
-        // the no-echo path instead: reqsReceived.length === 0 (self-echo dropped).
-        expect(reqsReceived).toHaveLength(0);
+        // The responder should have called postMessage with a snapshot reply.
+        const sent = MockBroadcastChannel._lastSent;
+        expect(sent).not.toBeNull();
+        expect(sent.type).toBe('snapshot');
+        expect(sent.court).toBe('A');
+        expect(sent.compId).toBe('');
+        expect(sent.origin).toBe(_tabId);
+        expect(sent.payload).toBe(competitions);
+    });
 
-        operatorBridge.close();
-        displayBridge.close();
+    it('does not reply to a snapshot-req when the provider has no data for the requested court', () => {
+        // Provider only has data for court 'A'; request for court 'B' should
+        // produce no reply (last-sent stays null).
+        const competitions = [{ id: 'comp-A', poolMatches: [] }];
+        setSnapshotProvider((court) => court === 'A' ? competitions : null);
+
+        openBridge();
+
+        MockBroadcastChannel._lastSent = null;
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot-req', origin: 'other-tab-id',
+            court: 'B', compId: '', payload: null,
+        });
+
+        // No data for court B: the responder must not call postMessage.
+        expect(MockBroadcastChannel._lastSent).toBeNull();
     });
 
     it('getLastBroadcastAt returns null before any publish and updates after', () => {
@@ -404,9 +425,8 @@ describe('setDisplayCourt inbound recency scoping', () => {
         origBC = global.BroadcastChannel;
         global.BroadcastChannel = MockBroadcastChannel;
         MockBroadcastChannel.reset();
-        setSnapshotProvider(null);
-        // Reset display court to null before each test.
-        setDisplayCourt(null);
+        // Reset all module-level state so tests do not depend on execution order.
+        _resetModuleStateForTests();
     });
 
     afterEach(() => {

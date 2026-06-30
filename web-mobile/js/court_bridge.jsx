@@ -160,6 +160,15 @@ export function setSnapshotProvider(fn) {
     _snapshotProvider = typeof fn === 'function' ? fn : null;
 }
 
+// Testing only: reset all module-level state so test suites that assert on
+// _lastBroadcastAt, _displayCourt, or _snapshotProvider do not depend on
+// test-execution order. Call in beforeEach of any suite that touches these.
+export function _resetModuleStateForTests() {
+    _lastBroadcastAt = null;
+    _displayCourt = null;
+    _snapshotProvider = null;
+}
+
 // -----------------------------------------------------------------------
 // openBridge: create a BroadcastChannel handle.
 //
@@ -196,24 +205,30 @@ export function openBridge() {
         // the requested court, reply with the court's competitions slice.
         if (msg.type === 'snapshot-req' && _snapshotProvider) {
             const court = msg.court || '';
-            const slice = _snapshotProvider(court);
-            if (slice && slice.length > 0) {
-                // Reply with one snapshot message per competition in the slice
-                // so the display can apply each one individually. We also send
-                // an aggregate snapshot (compId empty, payload = full slice) so
-                // the display can bootstrap its whole court view in one message.
-                channel.postMessage({
-                    v: 1,
-                    type: 'snapshot',
-                    origin: _tabId,
-                    court,
-                    compId: '',
-                    payload: slice,
-                });
-                _lastBroadcastAt = Date.now();
+            try {
+                const slice = _snapshotProvider(court);
+                if (slice && slice.length > 0) {
+                    // Reply with one aggregate snapshot (compId empty, payload = the
+                    // court's competitions slice) so the display bootstraps its whole
+                    // court view in one message.
+                    try {
+                        channel.postMessage({
+                            v: 1,
+                            type: 'snapshot',
+                            origin: _tabId,
+                            court,
+                            compId: '',
+                            payload: slice,
+                        });
+                        _lastBroadcastAt = Date.now();
+                    } catch (postErr) {
+                        console.error('court_bridge: snapshot postMessage failed:', postErr);
+                    }
+                }
+            } catch (providerErr) {
+                console.error('court_bridge: _snapshotProvider threw:', providerErr);
             }
-            // No return: also deliver the snapshot-req to registered handlers
-            // in case the caller wants to observe it.
+            return; // snapshot-req is fully handled here; do not forward to subscriber handlers
         }
 
         for (const h of handlers) {
@@ -228,17 +243,21 @@ export function openBridge() {
         //   compId : competition id (may be '' for snapshot-req)
         //   payload: message body
         publish(type, court, compId, payload) {
-            if (type === 'patch' || type === 'snapshot') {
-                _lastBroadcastAt = Date.now();
+            try {
+                channel.postMessage({
+                    v: 1,
+                    type,
+                    origin: _tabId,
+                    court: court || '',
+                    compId: compId || '',
+                    payload: payload || null,
+                });
+                if (type === 'patch' || type === 'snapshot') {
+                    _lastBroadcastAt = Date.now();
+                }
+            } catch (err) {
+                console.error('court_bridge: postMessage failed:', err);
             }
-            channel.postMessage({
-                v: 1,
-                type,
-                origin: _tabId,
-                court: court || '',
-                compId: compId || '',
-                payload: payload || null,
-            });
         },
 
         // onMessage: register an inbound message handler.

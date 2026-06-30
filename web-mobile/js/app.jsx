@@ -606,16 +606,18 @@ function App() {
 
     const unsub = bridge.onMessage((msg) => {
       if (msg.type === 'patch') {
+        if (msg.court && msg.court !== court) return;
         setTournament(prev => applyPatchToTree(prev, msg));
         return;
       }
       if (msg.type === 'snapshot' && msg.payload) {
+        if (msg.court && msg.court !== court) return;
         // Bootstrap or fill gap from the operator tab's court snapshot.
         // We build a minimal tournament wrapper: the display only reads
         // tournament.name/courts for the header and tournament.competitions
         // for match rendering.
         setTournament(prev => {
-          if (!msg.payload || !Array.isArray(msg.payload)) return prev;
+          if (!Array.isArray(msg.payload)) return prev;
           const incomingComps = msg.payload;
           if (!prev) {
             // No server data yet: bootstrap entirely from the snapshot.
@@ -672,10 +674,14 @@ function App() {
     // drop all in-flight snapshot replies.
   }, [mode]);
 
-  // mp-9ukk Phase 2: linkState re-derivation on every sseConnected change.
-  // This catches the moment SSE reconnects (sseConnected flips true) so the
-  // dot goes green immediately without waiting for the 5 s ticker.
+  // mp-9ukk Phase 2: ref sync + linkState re-derivation on every sseConnected
+  // or mode change. sseConnectedRef is updated first (before the mode guard)
+  // so the ref stays in sync in all modes, not just display mode. The
+  // linkState derivation then fires only in display mode: this catches the
+  // moment SSE reconnects (sseConnected flips true) so the dot goes green
+  // immediately without waiting for the 5 s ticker.
   useE(() => {
+    sseConnectedRef.current = sseConnected;
     if (mode !== 'display') return;
     setLinkState(deriveLinkState({
       sseConnected,
@@ -684,10 +690,6 @@ function App() {
       freshnessMs,
     }));
   }, [sseConnected, mode]);
-
-  // Keep sseConnectedRef in sync with sseConnected so the display-mode 5 s
-  // ticker can read the current value without the interval closure going stale.
-  useE(() => { sseConnectedRef.current = sseConnected; }, [sseConnected]);
 
   // mp-9ukk Phase 2: operator-tab snapshot provider.
   //
@@ -717,7 +719,7 @@ function App() {
         // exposes a courts[] array use it; otherwise scan poolMatches.
         if (c.courts && Array.isArray(c.courts) && c.courts.includes(court)) return true;
         if (c.poolMatches && c.poolMatches.some(m => m.court === court)) return true;
-        if (c.bracket && c.bracket.rounds) {
+        if (c.bracket && Array.isArray(c.bracket.rounds)) {
           for (const round of c.bracket.rounds) {
             if (round.some(m => m.court === court)) return true;
           }

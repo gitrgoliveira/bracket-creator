@@ -598,7 +598,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // and we MUST send "" or omit the key so the operator can't accidentally
       // poison the slot with a stale value (see TestReplaceDoesNotInherit…).
       const payload = { name, dojo, danGrade: danGrade || undefined };
-      if ((c.withZekkenName || c.engi) && zekken) payload.displayName = zekken;
+      if (withZekken && zekken) payload.displayName = zekken;
       await window.API.addParticipant(c.id, payload, password, admin);
       if (!mountedRef.current) return;
       setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); setShowAddForm(false);
@@ -636,7 +636,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // ALWAYS send "": otherwise stale "A. SMITH" from the replaced slot
       // would carry over and corrupt the 3-column CSV row.
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
-      const payload = { name, dojo, displayName: (c.withZekkenName || c.engi) ? zekken : "", source: targetSource };
+      const payload = { name, dojo, displayName: withZekken ? zekken : "", source: targetSource };
       if (metadata !== undefined) payload.metadata = metadata;
       const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password, admin);
       if (!mountedRef.current) return;
@@ -668,7 +668,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const apply = async () => {
     let np, added, updatedCount;
     try {
-      const withZekken = c.withZekkenName || c.engi;
       const parsed = window.parseParticipantLines(lines, withZekken);
 
       // Reject rows missing a required column before sending. Catches a
@@ -809,6 +808,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const isSetup = !c.status || c.status === "setup";
   const isDrawReady = c.status === "draw-ready";
   const isStarted = !isSetup && !isDrawReady;
+  const withZekken = c.withZekkenName || c.engi;
 
   return (
     <>
@@ -950,7 +950,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Name 1 *" : "Name *"}</div>
                     <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1" : "Full name"} />
                   </div>
-                  {(c.withZekkenName || c.engi) && (
+                  {withZekken && (
                     <div>
                       <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Name 2 *" : "Zekken"}</div>
                       <input className="input" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder={c.engi ? "Member 2" : "Auto if blank"} />
@@ -982,7 +982,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="field__label">Name *</div>
                     <input className="input" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
                   </div>
-                  {(c.withZekkenName || c.engi) && (
+                  {withZekken && (
                     <div>
                       <div className="field__label">{c.engi ? "Name 2" : "Zekken"}</div>
                       <input className="input" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder={c.engi ? "Member 2" : "Auto-derived if blank"} />
@@ -1097,7 +1097,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       {/* draw-ready lock: edit is setup-only; editing participants requires discarding the draw first */}
                       {isSetup && (
-                        <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken((c.withZekkenName || c.engi) ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput
@@ -1209,8 +1209,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
-            const withZekkenPreview = c.withZekkenName || c.engi;
-            const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekkenPreview);
+            const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
             const cols = c.engi ? ["Name 1", "Name 2", "Dojo", "Dan"] : c.withZekkenName ? ["Name", "Zekken", "Dojo", "Dan"] : ["Name", "Dojo", "Dan"];
             return (
               <div style={{ marginTop: 8, overflowX: "auto" }}>
@@ -1219,7 +1218,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   <tbody>{preview.map((p, i) => (
                     <tr key={i}>
                       <td className={!p.name ? "cell--missing" : ""}>{p.name || "-"}</td>
-                      {withZekkenPreview && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "-"}</td>}
+                      {withZekken && <td className={!p.displayName ? "cell--missing" : ""}>{p.displayName || "-"}</td>}
                       <td className={!p.dojo ? "cell--missing" : ""}>{p.dojo || "-"}</td>
                       <td>{p.danGrade || "-"}</td>
                     </tr>

@@ -9,7 +9,7 @@
 // shared tie-break logic. The kendo functions are BRANCHED AROUND at single
 // dispatch seams (RecordMatchResultWithIneligibility(+Tx) and computeStandings)
 // that delegate here; they are never edited internally. The only shared seam is
-// the additive persistence DTO fields (MatchResult/SubMatchResult.FlagsA/FlagsB,
+// the additive persistence DTO fields (MatchResult.FlagsA/FlagsB,
 // PlayerStanding.Flags, Competition.Engi).
 //
 // Reusing the PURE helper propagateBracketWinner is allowed: it only advances a
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -73,7 +74,10 @@ func engiStandingPoints(wins, flags int) int {
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
 func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB int) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, engiStorePool{e}, engiStoreBracket{e})
+	return e.recordEngiMatch(compID, matchID, flagsA, flagsB,
+		e.withPoolMatch,
+		e.store.UpdateBracket,
+	)
 }
 
 // recordEngiMatchResultTx is the transaction-aware twin. It writes through the
@@ -81,49 +85,23 @@ func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB in
 // runs inside the caller's single per-comp lock acquire (calling e.store
 // directly from inside a held tx would deadlock the non-reentrant mutex).
 func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID string, flagsA, flagsB int) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, engiTxPool{e, tx}, engiTxBracket{tx})
-}
-
-// engiPoolUpdater abstracts the pool-match update primitive so the shared engi
-// record core runs against either e.store (non-tx) or a StoreTx (tx).
-type engiPoolUpdater interface {
-	update(compID, matchID string, mutate func(*state.MatchResult)) error
-}
-
-// engiBracketUpdater abstracts the bracket update primitive likewise.
-type engiBracketUpdater interface {
-	update(compID string, mutate func(*state.Bracket) error) error
-}
-
-type engiStorePool struct{ e *Engine }
-
-func (p engiStorePool) update(compID, matchID string, mutate func(*state.MatchResult)) error {
-	return p.e.withPoolMatch(compID, matchID, mutate)
-}
-
-type engiTxPool struct {
-	e  *Engine
-	tx state.StoreTx
-}
-
-func (p engiTxPool) update(compID, matchID string, mutate func(*state.MatchResult)) error {
-	return p.e.withPoolMatchTx(p.tx, compID, matchID, mutate)
-}
-
-type engiStoreBracket struct{ e *Engine }
-
-func (b engiStoreBracket) update(compID string, mutate func(*state.Bracket) error) error {
-	return b.e.store.UpdateBracket(compID, mutate)
-}
-
-type engiTxBracket struct{ tx state.StoreTx }
-
-func (b engiTxBracket) update(compID string, mutate func(*state.Bracket) error) error {
-	return b.tx.UpdateBracket(compID, mutate)
+	return e.recordEngiMatch(compID, matchID, flagsA, flagsB,
+		func(cID, mID string, mutate func(*state.MatchResult)) error {
+			return e.withPoolMatchTx(tx, cID, mID, mutate)
+		},
+		tx.UpdateBracket,
+	)
 }
 
 // recordEngiMatch is the shared record core for both the tx and non-tx paths.
-func (e *Engine) recordEngiMatch(compID, matchID string, flagsA, flagsB int, pool engiPoolUpdater, bracket engiBracketUpdater) (*state.MatchResult, error) {
+// poolUpdate and bracketUpdate abstract the persistence layer so the same logic
+// runs against either e.store (non-tx) or a StoreTx (tx).
+func (e *Engine) recordEngiMatch(
+	compID, matchID string,
+	flagsA, flagsB int,
+	poolUpdate func(compID, matchID string, mutate func(*state.MatchResult)) error,
+	bracketUpdate func(compID string, mutate func(*state.Bracket) error) error,
+) (*state.MatchResult, error) {
 	if !engiValidTotal(flagsA, flagsB) {
 		return nil, validationErrorf(
 			"engi: flag total %d+%d=%d is invalid; total must be in {1,3,5} with flagsA != flagsB",
@@ -134,7 +112,7 @@ func (e *Engine) recordEngiMatch(compID, matchID string, flagsA, flagsB int, poo
 
 	// Try the pool stage first.
 	var out *state.MatchResult
-	err := pool.update(compID, matchID, func(r *state.MatchResult) {
+	err := poolUpdate(compID, matchID, func(r *state.MatchResult) {
 		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide)
 		cp := *r
 		out = &cp
@@ -148,7 +126,7 @@ func (e *Engine) recordEngiMatch(compID, matchID string, flagsA, flagsB int, poo
 
 	// Fall through to the bracket stage (rounds + bronze).
 	var result *state.MatchResult
-	updateErr := bracket.update(compID, func(b *state.Bracket) error {
+	updateErr := bracketUpdate(compID, func(b *state.Bracket) error {
 		for rIdx, round := range b.Rounds {
 			for mIdx := range round {
 				if b.Rounds[rIdx][mIdx].ID != matchID {
@@ -218,6 +196,14 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	}
 }
 
+// engiStandingsLoader is the minimal read surface computeEngiStandings
+// requires. It is narrower than poolStandingsLoader (which also mandates
+// LoadCompetition); both *state.Store and state.StoreTx satisfy it.
+type engiStandingsLoader interface {
+	LoadPools(compID string) ([]helper.Pool, error)
+	LoadPoolMatches(compID string) ([]state.MatchResult, error)
+}
+
 // computeEngiStandings is the engi standings core, fully independent of the
 // kendo computeStandingsFrom. It ranks each pool by (1) total Wins, then
 // (2) total accumulated OWN-SIDE flags across every completed bout (the winner
@@ -228,7 +214,7 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 // computeStandings sits above the pool/league split: a league competition
 // stores all its bouts as pool matches under its single league pool, so the
 // same per-pool aggregation applies.
-func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string) (map[string][]state.PlayerStanding, error) {
+func (e *Engine) computeEngiStandings(loader engiStandingsLoader, compID string) (map[string][]state.PlayerStanding, error) {
 	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return nil, err

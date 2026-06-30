@@ -558,10 +558,6 @@ type SubMatchResult struct {
 	Decision        string         `json:"decision"`
 	DecidedByHantei bool           `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
-	// FlagsA / FlagsB are the referee flag counts per side for engi (kata
-	// demonstration) bouts. Storage only; kendo scoring never reads them.
-	FlagsA int `json:"flagsA,omitempty"`
-	FlagsB int `json:"flagsB,omitempty"`
 }
 
 type MatchResult struct {

@@ -251,7 +251,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// engi slice through the SAME tx so the write stays inside the caller's
 	// single per-comp lock acquire. Engi has no eligibility concept, so the
 	// status return is nil.
-	if comp, loadErr := tx.LoadCompetition(compID); loadErr == nil && comp != nil && comp.Engi {
+	engiComp, engiLoadErr := tx.LoadCompetition(compID)
+	if engiLoadErr != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, engiLoadErr)
+	}
+	if engiComp != nil && engiComp.Engi {
 		_, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB)
 		return nil, recErr
 	}
@@ -527,6 +531,22 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			bm := bracket.ThirdPlaceMatch
+			return &state.MatchResult{
+				ID:              bm.ID,
+				SideA:           bm.SideA,
+				SideB:           bm.SideB,
+				Winner:          bm.Winner,
+				Status:          bm.Status,
+				Decision:        bm.Decision,
+				DecisionBy:      bm.DecisionBy,
+				DecisionReason:  bm.DecisionReason,
+				Encho:           bm.Encho,
+				DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+				SubResults:      bm.SubResults,
+			}, nil
+		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -549,6 +569,9 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 					return bm.SideA, bm.SideB, nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
 		}
 	}
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
@@ -661,6 +684,20 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+		}
 	}
 
 	return nil
@@ -713,6 +750,9 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Court, nil
+		}
 	}
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -746,6 +786,9 @@ func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) 
 					return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
 				}
 			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != skipMatchID && bm.Status == state.MatchStatusRunning && bm.Court == court {
+			return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
 		}
 	}
 	return nil, nil
@@ -860,6 +903,11 @@ func (e *Engine) hasDownstreamMatchStartedTx(tx state.StoreTx, compID string, pl
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
+			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
+				return true, nil
+			}
+		}
 	}
 	return false, nil
 }
@@ -919,6 +967,11 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 			if name := matchedSide(bm.SideA, bm.SideB); name != "" {
 				return name, bm.ID, nil
 			}
+		}
+	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && isStarted(bm.Status) {
+		if name := matchedSide(bm.SideA, bm.SideB); name != "" {
+			return name, bm.ID, nil
 		}
 	}
 	return "", "", nil

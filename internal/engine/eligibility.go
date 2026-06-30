@@ -237,6 +237,9 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Court, nil
+		}
 	}
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -296,6 +299,20 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 						PlayerID: idB,
 						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 					}
+				}
+			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 				}
 			}
 		}
@@ -507,6 +524,22 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			bm := bracket.ThirdPlaceMatch
+			return &state.MatchResult{
+				ID:              bm.ID,
+				SideA:           bm.SideA,
+				SideB:           bm.SideB,
+				Winner:          bm.Winner,
+				Status:          bm.Status,
+				Decision:        bm.Decision,
+				DecisionBy:      bm.DecisionBy,
+				DecisionReason:  bm.DecisionReason,
+				Encho:           bm.Encho,
+				DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+				SubResults:      bm.SubResults,
+			}, nil
+		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -556,6 +589,11 @@ func (e *Engine) hasDownstreamMatchStarted(compID string, playerNames []string, 
 				if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
 					return true, nil
 				}
+			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
+			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
+				return true, nil
 			}
 		}
 	}
@@ -637,6 +675,9 @@ func (e *Engine) lookupMatchSides(compID, matchID string) (string, string, error
 					return bm.SideA, bm.SideB, nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
 		}
 	}
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)

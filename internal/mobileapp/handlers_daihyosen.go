@@ -357,6 +357,23 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 			}
 		}
 	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+		return &state.MatchResult{
+			ID:              bm.ID,
+			SideA:           bm.SideA,
+			SideB:           bm.SideB,
+			Winner:          bm.Winner,
+			Status:          bm.Status,
+			Court:           bm.Court,
+			ScheduledAt:     bm.ScheduledAt,
+			Decision:        bm.Decision,
+			DecisionBy:      bm.DecisionBy,
+			DecisionReason:  bm.DecisionReason,
+			Encho:           bm.Encho,
+			DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+			SubResults:      bm.SubResults,
+		}, true, nil
+	}
 	return nil, false, nil
 }
 

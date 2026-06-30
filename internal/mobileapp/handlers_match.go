@@ -680,6 +680,12 @@ func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			mr := bracketMatchToResult(bracket.ThirdPlaceMatch)
+			if isMatchFinalized(mr) {
+				return errResultFinalized
+			}
+		}
 	}
 	return nil
 }
@@ -727,6 +733,9 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 					return round[i].Status
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Status
 		}
 	}
 	return ""

@@ -66,8 +66,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
   const akaDN     = displayOf(m.sideB);
   const akaDojo   = dojoOf(m.sideB);
 
-  const clampA = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
-  const clampB = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
+  const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -113,7 +112,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsA(clampA(flagsA - 1))}
+              onClick={() => setFlagsA(clamp(flagsA - 1))}
               disabled={flagsA <= 0}
               aria-label="Shiro minus one flag"
               data-testid="engi-shiro-dec"
@@ -122,7 +121,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsA(clampA(flagsA + 1))}
+              onClick={() => setFlagsA(clamp(flagsA + 1))}
               disabled={flagsA >= MAX_FLAGS}
               aria-label="Shiro plus one flag"
               data-testid="engi-shiro-inc"
@@ -145,7 +144,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsB(clampB(flagsB - 1))}
+              onClick={() => setFlagsB(clamp(flagsB - 1))}
               disabled={flagsB <= 0}
               aria-label="Aka minus one flag"
               data-testid="engi-aka-dec"
@@ -154,7 +153,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsB(clampB(flagsB + 1))}
+              onClick={() => setFlagsB(clamp(flagsB + 1))}
               disabled={flagsB >= MAX_FLAGS}
               aria-label="Aka plus one flag"
               data-testid="engi-aka-inc"
@@ -202,7 +201,3 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
 }
 
 export { MAX_FLAGS, VALID_TOTALS, deriveWinner };
-
-if (typeof window !== "undefined") {
-  window.EngiScoreEditorModal = EngiScoreEditorModal;
-}

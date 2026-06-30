@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -349,4 +352,208 @@ func TestEngi_PairParticipantRoundTrip(t *testing.T) {
 	assert.Equal(t, "Yamada Taro", loaded[0].Name, "member 1 → Name")
 	assert.Equal(t, "Suzuki Hanako", loaded[0].DisplayName, "member 2 → DisplayName")
 	assert.Equal(t, "Tokyo Dojo", loaded[0].Dojo, "shared dojo")
+}
+
+// --- Regression: Finding 2 - LoadCompetition errors must propagate ----------
+
+// corruptCompetitionConfig writes invalid YAML front-matter into the
+// competition's config.md, forcing LoadCompetition to return a parse error.
+// The competition directory must already exist (e.g. via SaveCompetition).
+// The mtime change from WriteFile ensures the store's mtime-based cache
+// bypasses any in-memory hit and re-parses from disk on the next call.
+func corruptCompetitionConfig(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	path := filepath.Join(store.GetFolder(), "competitions", compID, "config.md")
+	require.NoError(t, os.WriteFile(path, []byte("---\n: : :\n---\n"), 0o600))
+}
+
+// TestRecordMatchResultWithIneligibility_LoadCompetitionErrorPropagates pins
+// Finding 2: when LoadCompetition returns a parse error, the non-tx path must
+// propagate the error rather than silently falling through to kendo scoring.
+// Before the fix, the single-if guard swallowed the error (loadErr == nil check
+// was the gate, so a non-nil error caused it to skip the engi path and invoke
+// the kendo path instead of returning an error).
+func TestRecordMatchResultWithIneligibility_LoadCompetitionErrorPropagates(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-load-err"
+
+	// Seed a minimal competition so the directory exists, then corrupt the config.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Engi Load Error",
+		Kind:   "individual",
+		Format: state.CompFormatPlayoffs,
+		Status: "setup",
+	}))
+	corruptCompetitionConfig(t, store, compID)
+
+	// Any call through the engi dispatch seam must return the load error, not
+	// proceed with kendo scoring.
+	result := &state.MatchResult{
+		SideA:  "Alice",
+		SideB:  "Bob",
+		Winner: "Alice",
+		Status: state.MatchStatusCompleted,
+	}
+	_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", result)
+	require.Error(t, err, "LoadCompetition error must propagate")
+	assert.Contains(t, err.Error(), fmt.Sprintf("load competition %s", compID),
+		"error message must identify the failing competition")
+}
+
+// TestRecordMatchResultWithIneligibilityTx_LoadCompetitionErrorPropagates is
+// the tx-aware twin of the above regression test (Finding 2, tx path).
+// Before the fix, the same single-if guard in RecordMatchResultWithIneligibilityTx
+// swallowed LoadCompetition errors.
+func TestRecordMatchResultWithIneligibilityTx_LoadCompetitionErrorPropagates(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-load-err-tx"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Engi Load Error Tx",
+		Kind:   "individual",
+		Format: state.CompFormatPlayoffs,
+		Status: "setup",
+	}))
+	// SavePoolMatches so the tx has something to open.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+	corruptCompetitionConfig(t, store, compID)
+
+	result := &state.MatchResult{
+		SideA:  "Alice",
+		SideB:  "Bob",
+		Winner: "Alice",
+		Status: state.MatchStatusCompleted,
+	}
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, txErr = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-0", result)
+		return nil
+	})
+	require.Error(t, txErr, "LoadCompetition error must propagate (tx path)")
+	assert.Contains(t, txErr.Error(), fmt.Sprintf("load competition %s", compID),
+		"tx error message must identify the failing competition")
+}
+
+// --- Regression: Findings 4/5/6 - Bronze match reachable via engi dispatch ---
+
+// TestRecordEngiMatchResult_BronzeMatchReachable pins Finding 4/5/6 (engi
+// variant): "m-bronze" must be reachable through RecordEngiMatchResult after
+// both semifinals are scored. Before the ThirdPlaceMatch fix, the bracket-stage
+// iteration in recordEngiMatch only scanned Rounds and never found "m-bronze",
+// returning notFoundError.
+func TestRecordEngiMatchResult_BronzeMatchReachable(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-bronze"
+
+	// Engi + Naginata so the bronze match is generated.
+	comp := &state.Competition{
+		ID:       compID,
+		Name:     "Engi Bronze",
+		Kind:     "individual",
+		Format:   state.CompFormatPlayoffs,
+		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		Courts:    []string{"A"},
+		StartTime: "09:00",
+		Status:    "setup",
+		Engi:      true,
+		Naginata:  true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch, "engi+naginata must generate a bronze match")
+
+	// Score both semifinals via engi (flag counts) so losers populate bronze.
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+	require.Len(t, sf, 2)
+
+	_, err = eng.RecordEngiMatchResult(compID, sf[0].ID, 3, 2)
+	require.NoError(t, err, "SF0 engi score must succeed")
+	_, err = eng.RecordEngiMatchResult(compID, sf[1].ID, 3, 2)
+	require.NoError(t, err, "SF1 engi score must succeed")
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.True(t, bracketMatchPlayable(bracket.ThirdPlaceMatch),
+		"bronze must be playable after both SFs decided")
+
+	// Score the bronze match; this exercises the ThirdPlaceMatch branch that was
+	// missing before the fix.
+	bronzeRes, err := eng.RecordEngiMatchResult(compID, "m-bronze", 5, 0)
+	require.NoError(t, err, "m-bronze must be scoreable via RecordEngiMatchResult")
+	require.NotNil(t, bronzeRes)
+	assert.Equal(t, state.MatchStatusCompleted, bronzeRes.Status, "bronze status must be completed")
+	assert.NotEmpty(t, bronzeRes.Winner, "bronze result must have a winner")
+	assert.Equal(t, 5, bronzeRes.FlagsA, "FlagsA must be stored")
+	assert.Equal(t, 0, bronzeRes.FlagsB, "FlagsB must be stored")
+
+	// Verify persistence in bracket.json.
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch)
+	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status,
+		"bronze ThirdPlaceMatch.Status must persist as completed")
+	assert.NotEmpty(t, bracket.ThirdPlaceMatch.Winner, "bronze winner must persist")
+	assert.Equal(t, 5, bracket.ThirdPlaceMatch.FlagsA, "bronze FlagsA must persist")
+	assert.Equal(t, 0, bracket.ThirdPlaceMatch.FlagsB, "bronze FlagsB must persist")
+}
+
+// TestRecordMatchResultWithIneligibility_EngiBronzeDispatch verifies that the
+// engi dispatch seam in RecordMatchResultWithIneligibility correctly routes
+// "m-bronze" scoring to the engi path (not kendo scoring). This exercises the
+// ThirdPlaceMatch fix in both recordEngiMatch AND the scoring.go dispatch
+// (Finding 2 error path is not triggered here; comp.Engi == true so engi wins).
+func TestRecordMatchResultWithIneligibility_EngiBronzeDispatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-bronze-dispatch"
+
+	comp := &state.Competition{
+		ID:       compID,
+		Name:     "Engi Bronze Dispatch",
+		Kind:     "individual",
+		Format:   state.CompFormatPlayoffs,
+		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		Courts:    []string{"A"},
+		StartTime: "09:00",
+		Status:    "setup",
+		Engi:      true,
+		Naginata:  true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	sfIdx := len(bracket.Rounds) - 2
+	sf := bracket.Rounds[sfIdx]
+
+	// Score both SFs to populate bronze sides.
+	_, err = eng.RecordMatchResultWithIneligibility(compID, sf[0].ID, &state.MatchResult{
+		FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err, "SF0 via RecordMatchResultWithIneligibility must succeed")
+	_, err = eng.RecordMatchResultWithIneligibility(compID, sf[1].ID, &state.MatchResult{
+		FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err, "SF1 via RecordMatchResultWithIneligibility must succeed")
+
+	// Score bronze via the engi dispatch seam.
+	status, err := eng.RecordMatchResultWithIneligibility(compID, "m-bronze", &state.MatchResult{
+		FlagsA: 1, FlagsB: 0, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err, "m-bronze via RecordMatchResultWithIneligibility (engi) must succeed")
+	assert.Nil(t, status, "engi has no eligibility concept, status must be nil")
+
+	bracket, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch)
+	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status)
+	assert.NotEmpty(t, bracket.ThirdPlaceMatch.Winner)
 }

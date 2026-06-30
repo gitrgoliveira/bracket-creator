@@ -317,7 +317,11 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 	// Engi dispatch seam: a flag-scored competition records via the engi slice
 	// (pool or bracket, decided internally) and skips the kendo ippon path
 	// entirely. Engi has no eligibility concept, so the status return is nil.
-	if comp, loadErr := e.store.LoadCompetition(compId); loadErr == nil && comp != nil && comp.Engi {
+	comp, loadErr := e.store.LoadCompetition(compId)
+	if loadErr != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibility: load competition %s: %w", compId, loadErr)
+	}
+	if comp != nil && comp.Engi {
 		_, recErr := e.RecordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB)
 		return nil, recErr
 	}

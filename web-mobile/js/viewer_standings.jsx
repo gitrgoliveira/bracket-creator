@@ -378,10 +378,15 @@ function rankOrdinal(rank) {
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right): matches PoolMatchRow convention.
-export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
+// isEngi: when true, each side is an engi pair — render member1 (name) over
+// member2 (displayName) stacked, matching the engi score editor layout.
+export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }) => {
   // withNumber prepends the assigned competitor number (e.g. "K1") when present.
   const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
   const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
+  // Engi pair: member2 lives in displayName.
+  const aDN = isEngi && typeof m.sideA === "object" ? (m.sideA.displayName || "") : "";
+  const bDN = isEngi && typeof m.sideB === "object" ? (m.sideB.displayName || "") : "";
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
@@ -395,6 +400,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
         <span className="pool-match-numbered-row__name">{bName || "-"}</span>
+        {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
@@ -405,6 +411,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
         <span className="pool-match-numbered-row__name">{aName || "-"}</span>
+        {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>
   );
@@ -552,6 +559,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             </span>
                           ) : null}
                         </div>
+                        {/* Engi pair: member2 (displayName) stacked below member1. */}
+                        {isEngi && p.displayName ? <div className="pool__player-name">{p.displayName}</div> : null}
                         {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>
                       {s ? (
@@ -602,13 +611,14 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         />
                       );
                     } else {
-                      // Individual: ippon notation score
+                      // Individual (including engi): ippon notation score
                       const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
                           m={m}
                           num={idx + 1}
+                          isEngi={isEngi}
                           onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
                         />
                       );

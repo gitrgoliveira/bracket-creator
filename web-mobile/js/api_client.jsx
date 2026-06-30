@@ -1154,10 +1154,19 @@ const API = {
             // A stale running write is signalled by HTTP 200 {stale:true}
             // (the server's rev-guard no-ops it). Do not broadcast it: pushing
             // a superseded running score to the display would overwrite the
-            // authoritative newer state already there. Return as-is; the
-            // fire-and-forget autosave caller ignores the value.
-            // mp-9ukk: broadcast only confirmed, non-stale responses so the
-            // display tab gets authoritative data when the SSE link is slow/down.
+            // newer state already there. Return as-is; the fire-and-forget
+            // autosave caller ignores the value.
+            // mp-9ukk: echo the operator's patch to the court display
+            // peer-to-peer so the board keeps updating when the SSE link is
+            // slow or down. This is an OPTIMISTIC overlay, not the
+            // authoritative source: the request payload already carries the
+            // display-critical fields (id, side ids, winner, scores, status)
+            // in the same envelope every other broadcast path uses, and the
+            // fully server-normalized state arrives via SSE (or the reconnect
+            // full refetch), which replaces the overlay. Broadcasting the
+            // request payload (not the server `data`) keeps one consistent
+            // shape across the confirmed and offline paths. Skip a rejected
+            // stale write above so a superseded score is never pushed.
             if (data && data.stale) return data;
             _broadcastPatch(payload);
             return data;

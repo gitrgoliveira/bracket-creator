@@ -166,7 +166,10 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 	if comp == nil {
 		return nil, nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi competitions force the zekken layout (two-column participant CSV)
+	// so participants must be parsed with WithZekkenName even when the comp
+	// flag is not set via user input; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +596,8 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err != nil || comp == nil {
 		return err
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
 	if err != nil {
 		return err
 	}
@@ -788,7 +792,8 @@ func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, 
 	if err != nil || comp == nil {
 		return sideA, sideB
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
 	if err != nil {
 		return sideA, sideB
 	}
@@ -820,7 +825,8 @@ func (e *Engine) checkConcurrentIneligibilityTx(tx state.StoreTx, compID, matchI
 		}
 		return nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
 	if err != nil {
 		log.Printf("engine: checkConcurrentIneligibilityTx LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
@@ -979,7 +985,8 @@ func (e *Engine) restoreCompetitorEligibilityTx(tx state.StoreTx, compID, priorL
 	if comp == nil {
 		return nil, nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName || comp.Engi)
 	if err != nil {
 		return nil, err
 	}

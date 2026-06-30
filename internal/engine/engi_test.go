@@ -97,7 +97,7 @@ func TestRecordEngiMatchResult_PoolFlagMajority(t *testing.T) {
 	require.NotEmpty(t, matches)
 	first := matches[0]
 
-	res, err := eng.RecordEngiMatchResult(compID, first.ID, 3, 2, "")
+	res, err := eng.recordEngiMatchResult(compID, first.ID, 3, 2, "")
 	require.NoError(t, err)
 	require.NotNil(t, res)
 	assert.Equal(t, first.SideA, res.Winner, "3-2 → SideA wins")
@@ -130,7 +130,7 @@ func TestRecordEngiMatchResult_InvalidRejected(t *testing.T) {
 	first := matches[0]
 
 	for _, bad := range [][2]int{{0, 0}, {2, 0}, {1, 1}, {4, 2}, {7, 0}} {
-		_, err := eng.RecordEngiMatchResult(compID, first.ID, bad[0], bad[1], "")
+		_, err := eng.recordEngiMatchResult(compID, first.ID, bad[0], bad[1], "")
 		assert.Errorf(t, err, "expected %d-%d to be rejected", bad[0], bad[1])
 	}
 }
@@ -157,7 +157,7 @@ func TestRecordEngiMatchResult_BracketAdvances(t *testing.T) {
 	require.Len(t, sf, 2)
 
 	// SF0: 3-2 → SideA advances.
-	res, err := eng.RecordEngiMatchResult(compID, sf[0].ID, 3, 2, "")
+	res, err := eng.recordEngiMatchResult(compID, sf[0].ID, 3, 2, "")
 	require.NoError(t, err)
 	assert.Equal(t, sf[0].SideA, res.Winner)
 
@@ -202,7 +202,7 @@ func TestComputeEngiStandings_PoolWinsThenFlags(t *testing.T) {
 		default:
 			fa, fb = 0, 5
 		}
-		_, err := eng.RecordEngiMatchResult(compID, m.ID, fa, fb, "")
+		_, err := eng.recordEngiMatchResult(compID, m.ID, fa, fb, "")
 		require.NoError(t, err)
 	}
 
@@ -268,7 +268,7 @@ func TestComputeEngiStandings_FlagTiebreak(t *testing.T) {
 		default:
 			fa, fb = 3, 0
 		}
-		_, err := eng.RecordEngiMatchResult(compID, m.ID, fa, fb, "")
+		_, err := eng.recordEngiMatchResult(compID, m.ID, fa, fb, "")
 		require.NoError(t, err)
 	}
 
@@ -473,9 +473,9 @@ func TestRecordEngiMatchResult_BronzeMatchReachable(t *testing.T) {
 	sf := bracket.Rounds[sfIdx]
 	require.Len(t, sf, 2)
 
-	_, err = eng.RecordEngiMatchResult(compID, sf[0].ID, 3, 2, "")
+	_, err = eng.recordEngiMatchResult(compID, sf[0].ID, 3, 2, "")
 	require.NoError(t, err, "SF0 engi score must succeed")
-	_, err = eng.RecordEngiMatchResult(compID, sf[1].ID, 3, 2, "")
+	_, err = eng.recordEngiMatchResult(compID, sf[1].ID, 3, 2, "")
 	require.NoError(t, err, "SF1 engi score must succeed")
 
 	bracket, err = store.LoadBracket(compID)
@@ -485,7 +485,7 @@ func TestRecordEngiMatchResult_BronzeMatchReachable(t *testing.T) {
 
 	// Score the bronze match; this exercises the ThirdPlaceMatch branch that was
 	// missing before the fix.
-	bronzeRes, err := eng.RecordEngiMatchResult(compID, "m-bronze", 5, 0, "")
+	bronzeRes, err := eng.recordEngiMatchResult(compID, "m-bronze", 5, 0, "")
 	require.NoError(t, err, "m-bronze must be scoreable via RecordEngiMatchResult")
 	require.NotNil(t, bronzeRes)
 	assert.Equal(t, state.MatchStatusCompleted, bronzeRes.Status, "bronze status must be completed")

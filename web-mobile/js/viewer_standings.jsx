@@ -611,7 +611,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         />
                       );
                     } else {
-                      // Individual (including engi): ippon notation score
+                      // Individual or engi: delegates name/pair rendering to PoolNumberedMatchRow (isEngi passed through for name stacking)
                       const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow

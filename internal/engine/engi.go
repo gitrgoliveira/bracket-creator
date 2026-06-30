@@ -59,7 +59,7 @@ func engiStandingPoints(wins, flags int) int {
 	return wins*1_000_000 + flags
 }
 
-// RecordEngiMatchResult records a completed engi bout (POOL or BRACKET), keyed
+// recordEngiMatchResult records a completed engi bout (POOL or BRACKET), keyed
 // by competition + match id and the two flag counts. It is the engi twin of the
 // kendo record path and does NOT route through writeMatchResult /
 // recordBracketMatchResult. Validation ({1,3,5}, no draw) lives here.
@@ -77,7 +77,7 @@ func engiStandingPoints(wins, flags int) int {
 // so the audit trail is preserved for engi competitions.
 //
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
-func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
+func (e *Engine) recordEngiMatchResult(compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
 	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, correctionReason,
 		e.withPoolMatch,
 		e.store.UpdateBracket,

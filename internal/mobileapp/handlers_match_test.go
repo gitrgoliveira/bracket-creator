@@ -1545,6 +1545,37 @@ func TestAnnotateBracketQueuePositions_EmptyScheduledAt(t *testing.T) {
 	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "no-time = 2nd (sinks to end)")
 }
 
+// TestAnnotateBracketQueuePositions_ThirdPlaceMatch is a Finding 7 regression
+// test: the bronze Naginata match is a sibling of Rounds (bracket.ThirdPlaceMatch)
+// and must receive a queue position so operators see it in the schedule feed.
+func TestAnnotateBracketQueuePositions_ThirdPlaceMatch(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-sf1", Court: "A", Status: state.MatchStatusCompleted},
+				{ID: "m-sf2", Court: "A", Status: state.MatchStatusCompleted},
+			},
+			{
+				{ID: "m-final", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			Court:  "A",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	// Final and bronze are both scheduled on court A; sentinel round 999 pushes
+	// bronze after the final.
+	assert.Equal(t, 1, b.Rounds[1][0].QueuePosition, "final must be 1st scheduled")
+	assert.Equal(t, 2, b.ThirdPlaceMatch.QueuePosition, "bronze must be 2nd scheduled (sentinel round 999)")
+	// Completed semis get no queue position.
+	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "completed sf1 must have position 0")
+	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "completed sf2 must have position 0")
+}
+
 // setupSelfRunScoreRouter creates a minimal gin router with just the score
 // endpoint, wired to a fresh store that has a self-run tournament and one
 // pool match pre-seeded.

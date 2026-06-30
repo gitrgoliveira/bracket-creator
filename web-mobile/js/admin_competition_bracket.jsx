@@ -311,29 +311,17 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const isReady = hasBothSides(bm);
               const isHighlighted = selected?.matchId === bm.id;
               return (
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 16 }} data-testid="bracket-bronze-match">
                   <div className="bracket-bronze-label">
                     3rd Place Match
                   </div>
-                  <div
-                    className={`bracket-match-card${isHighlighted ? " bracket-match-card--selected" : ""}${!isReady ? " bracket-match-card--pending" : ""}`}
-                    style={{ cursor: isReady ? "pointer" : "default", maxWidth: 280 }}
-                    onClick={() => { if (isReady) select(bm, -1, 0); }}
-                    data-testid="bracket-bronze-match"
-                  >
-                    <div className="bracket-match-card__side">
-                      <span className="bracket-match-card__name">{bm.sideA ? (typeof bm.sideA === "object" ? bm.sideA.name : bm.sideA) : "TBD"}</span>
-                    </div>
-                    <div className="bracket-match-card__vs">vs</div>
-                    <div className="bracket-match-card__side">
-                      <span className="bracket-match-card__name">{bm.sideB ? (typeof bm.sideB === "object" ? bm.sideB.name : bm.sideB) : "TBD"}</span>
-                    </div>
-                    {bm.winner && (
-                      <div className="bracket-match-card__result" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
-                        Winner: {typeof bm.winner === "object" ? bm.winner.name : bm.winner}
-                      </div>
-                    )}
-                  </div>
+                  <window.MatchCard
+                    match={bm}
+                    variant={tweaks.cardVariant}
+                    showDojo={tweaks.showDojo}
+                    highlighted={isHighlighted}
+                    onClick={isReady ? () => select(bm, -1, 0) : undefined}
+                  />
                 </div>
               );
             })()}

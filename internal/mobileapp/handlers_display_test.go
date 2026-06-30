@@ -634,3 +634,139 @@ func TestCourtMatches_UnknownCourtAndNoTournament(t *testing.T) {
 	assert.Equal(t, "court_not_found", resp404.Error)
 	assert.Equal(t, "Z", resp404.Court)
 }
+
+// TestCourtCurrent_ThirdPlaceMatchShownAsCurrent is a Finding 1 regression
+// test: when the Naginata bronze match (bracket.ThirdPlaceMatch, ID="m-bronze")
+// is Running on a court, GET /court/:court/current must return "current" status
+// for that court, not "idle". Previously the Rounds loop skipped ThirdPlaceMatch.
+func TestCourtCurrent_ThirdPlaceMatchShownAsCurrent(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       "nagi",
+		Name:     "Naginata",
+		Status:   state.CompStatusPlayoffs,
+		Courts:   []string{"A"},
+		Naginata: true,
+	}))
+	// All regular rounds completed; only the bronze match is running.
+	require.NoError(t, store.SaveBracket("nagi", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-sf1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Court: "A", Winner: "Alice"}},
+			{{ID: "m-final", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusRunning, Court: "A", ScoreA: "M"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			SideA:  "Bob",
+			SideB:  "Dave",
+			Status: state.MatchStatusRunning,
+			Court:  "A",
+			ScoreA: "K",
+			ScoreB: "",
+		},
+	}))
+
+	// Court A has two running matches (final + bronze). The handler returns
+	// the first one it finds. Regardless of which is returned, status must
+	// not be "idle" and the response must decode cleanly.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), "body=%q", w.Body.String())
+	assert.NotEqual(t, "idle", resp.Status,
+		"a running ThirdPlaceMatch on court A must not report idle")
+}
+
+// TestCourtCurrent_ThirdPlaceMatchOnlyOnCourt is a Finding 1 regression test
+// where ONLY the ThirdPlaceMatch is running and the Rounds loop finds nothing.
+// The court must still appear as "current" rather than "idle".
+func TestCourtCurrent_ThirdPlaceMatchOnlyOnCourt(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Password: "", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       "nagi2",
+		Name:     "Naginata2",
+		Status:   state.CompStatusPlayoffs,
+		Courts:   []string{"A"},
+		Naginata: true,
+	}))
+	require.NoError(t, store.SaveBracket("nagi2", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-final", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Court: "A", Winner: "Alice"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			SideA:  "Carol",
+			SideB:  "Dave",
+			Status: state.MatchStatusRunning,
+			Court:  "A",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%q", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), "body=%q", w.Body.String())
+	assert.Equal(t, "current", resp.Status,
+		"court with only ThirdPlaceMatch running must return 'current', not 'idle'")
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Carol", resp.SideA.Name)
+	assert.Equal(t, "Dave", resp.SideB.Name)
+}
+
+// TestMatchesPresentOnCourt_ThirdPlaceMatch is a Finding 4 regression test:
+// matchesPresentOnCourt must return true when only ThirdPlaceMatch has real
+// sides on the court, so a bronze-only court is not excluded from the court feed.
+func TestMatchesPresentOnCourt_ThirdPlaceMatch(t *testing.T) {
+	// No pool matches; only a ThirdPlaceMatch on court A with real sides.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			// Final completed, not on court A.
+			{{ID: "m-final", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Court: "B"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:    "m-bronze",
+			SideA: "Carol",
+			SideB: "Dave",
+			Court: "A",
+		},
+	}
+	got := matchesPresentOnCourt(nil, bracket, "A")
+	assert.True(t, got, "matchesPresentOnCourt must return true when ThirdPlaceMatch has real sides on court A")
+
+	// Court B (the final) must still be detected.
+	gotB := matchesPresentOnCourt(nil, bracket, "B")
+	assert.True(t, gotB, "court B (final match) must still be detected")
+
+	// Court C (no match at all) must return false.
+	gotC := matchesPresentOnCourt(nil, bracket, "C")
+	assert.False(t, gotC, "court C with no match must return false")
+
+	// Placeholder sides (winner-of strings) must NOT count.
+	bracketPlaceholder := &state.Bracket{
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:    "m-bronze",
+			SideA: "Winner of r2-m1",
+			SideB: "Winner of r2-m2",
+			Court: "A",
+		},
+	}
+	gotPlaceholder := matchesPresentOnCourt(nil, bracketPlaceholder, "A")
+	assert.False(t, gotPlaceholder,
+		"ThirdPlaceMatch with placeholder sides must not count as a real match on court")
+}

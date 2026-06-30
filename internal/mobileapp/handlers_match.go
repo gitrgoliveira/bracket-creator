@@ -69,6 +69,12 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
 		}
 	}
+	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds; add it with a
+	// sentinel round (999) so it sorts after all real rounds on its court (Finding 7).
+	if b.ThirdPlaceMatch != nil {
+		byCourt[b.ThirdPlaceMatch.Court] = append(byCourt[b.ThirdPlaceMatch.Court],
+			entry{m: b.ThirdPlaceMatch, round: 999, position: 0})
+	}
 
 	statusOrder := func(s state.MatchStatus) int {
 		switch s {

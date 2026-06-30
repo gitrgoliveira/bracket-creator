@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
     deriveLinkState,
     applyPatchToTree,
@@ -162,6 +162,28 @@ describe('applyPatchToTree', () => {
         // propagate that identity and also return the original tournament.
         const next = applyPatchToTree(t, msg);
         expect(next).toBe(t);
+    });
+
+    it('treats a patch with no payload as a no-op (returns original reference)', () => {
+        const t = makeTournament();
+        expect(applyPatchToTree(t, { type: 'patch', compId: 'comp-A', payload: null })).toBe(t);
+        expect(applyPatchToTree(t, { type: 'patch', compId: 'comp-A' })).toBe(t);
+    });
+
+    it('does not throw on a malformed payload and leaves the tree unchanged', () => {
+        // The absorb path logs via console.error; re-install our own spy so the
+        // setup's unexpected-error guard does not fail on this intentional log.
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const t = makeTournament();
+        // results:[null] would make the underlying applyPatch dereference null.id;
+        // applyPatchToTree must absorb it (it runs inside a React state updater,
+        // outside any handler try/catch) and return the tree unchanged.
+        const msg = { type: 'patch', compId: 'comp-A', payload: { results: [null] } };
+        let next;
+        expect(() => { next = applyPatchToTree(t, msg); }).not.toThrow();
+        expect(next).toBe(t);
+        expect(errSpy).toHaveBeenCalledTimes(1);
+        errSpy.mockRestore();
     });
 });
 
@@ -511,5 +533,38 @@ describe('setDisplayCourt inbound recency scoping', () => {
         const after = getLastBroadcastAt();
         expect(typeof after).toBe('number');
         expect(after).toBeGreaterThanOrEqual(t0);
+    });
+
+    it('resets _lastBroadcastAt when the display court actually changes', () => {
+        setDisplayCourt('A');
+        openBridge();
+
+        // Court A becomes fresh.
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'patch', origin: 'other-tab-id',
+            court: 'A', compId: 'comp-A', payload: { result: { id: 'm1' } },
+        });
+        expect(typeof getLastBroadcastAt()).toBe('number');
+
+        // Switching to a new court must clear the recency clock so the new
+        // court's dot starts 'stale' until its own operator broadcasts.
+        setDisplayCourt('B');
+        expect(getLastBroadcastAt()).toBeNull();
+    });
+
+    it('does not reset _lastBroadcastAt when setDisplayCourt is called with the same court', () => {
+        setDisplayCourt('A');
+        openBridge();
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'patch', origin: 'other-tab-id',
+            court: 'A', compId: 'comp-A', payload: { result: { id: 'm1' } },
+        });
+        const before = getLastBroadcastAt();
+        expect(typeof before).toBe('number');
+
+        // Re-asserting the same court is a no-op for the recency clock.
+        setDisplayCourt('A');
+        expect(getLastBroadcastAt()).toBe(before);
     });
 });

@@ -85,7 +85,9 @@ export function deriveLinkState({ sseConnected, lastBroadcastAt, now, freshnessM
 // Returns the original `tournament` reference when nothing matched.
 // -----------------------------------------------------------------------
 export function applyPatchToTree(tournament, msg) {
-    if (!tournament || !msg || msg.type !== 'patch') return tournament;
+    // A patch with no payload is a no-op: bail before the findIndex scan and
+    // before _applyPatch can dereference a missing payload.
+    if (!tournament || !msg || msg.type !== 'patch' || !msg.payload) return tournament;
     const competitions = tournament.competitions;
     if (!competitions || competitions.length === 0) return tournament;
 
@@ -105,7 +107,17 @@ export function applyPatchToTree(tournament, msg) {
         type: 'match_updated',
         data: msg.payload,
     };
-    const nextComp = _applyPatch(prevComp, syntheticEvent);
+    // A malformed payload (e.g. results:[null]) can make _applyPatch throw.
+    // This runs inside a React state updater (deferred, outside any handler
+    // try/catch), so a throw here would crash the display board into the error
+    // boundary. Absorb it: a bad patch leaves the tree unchanged.
+    let nextComp;
+    try {
+        nextComp = _applyPatch(prevComp, syntheticEvent);
+    } catch (err) {
+        console.error('court_bridge: applyPatch failed for a malformed payload:', err);
+        return tournament;
+    }
     if (nextComp === prevComp) return tournament;
 
     const nextCompetitions = competitions.slice();
@@ -133,7 +145,12 @@ let _lastBroadcastAt = null;
 let _displayCourt = null;
 
 export function setDisplayCourt(c) {
-    _displayCourt = c || null;
+    const next = c || null;
+    // Reset the recency clock when the court actually changes so the dot does
+    // not inherit the previous court's freshness: after a ?court= switch the
+    // new court starts 'stale' until its own operator broadcasts.
+    if (_displayCourt !== next) _lastBroadcastAt = null;
+    _displayCourt = next;
 }
 
 // getLastBroadcastAt: read the module-level recency timestamp.
@@ -216,28 +233,26 @@ export function openBridge() {
         // the requested court, reply with the court's competitions slice.
         if (msg.type === 'snapshot-req' && _snapshotProvider) {
             const court = msg.court || '';
+            // One try/catch covers both the provider call and postMessage: either
+            // failing just logs and continues (the requester re-requests on its tick).
             try {
                 const slice = _snapshotProvider(court);
                 if (slice && slice.length > 0) {
                     // Reply with one aggregate snapshot (compId empty, payload = the
                     // court's competitions slice) so the display bootstraps its whole
                     // court view in one message.
-                    try {
-                        channel.postMessage({
-                            v: 1,
-                            type: 'snapshot',
-                            origin: _tabId,
-                            court,
-                            compId: '',
-                            payload: slice,
-                        });
-                        _lastBroadcastAt = Date.now();
-                    } catch (postErr) {
-                        console.error('court_bridge: snapshot postMessage failed:', postErr);
-                    }
+                    channel.postMessage({
+                        v: 1,
+                        type: 'snapshot',
+                        origin: _tabId,
+                        court,
+                        compId: '',
+                        payload: slice,
+                    });
+                    _lastBroadcastAt = Date.now();
                 }
-            } catch (providerErr) {
-                console.error('court_bridge: _snapshotProvider threw:', providerErr);
+            } catch (err) {
+                console.error('court_bridge: snapshot-req responder failed:', err);
             }
             return; // snapshot-req is fully handled here; do not forward to subscriber handlers
         }
@@ -245,6 +260,12 @@ export function openBridge() {
         for (const h of handlers) {
             try { h(msg); } catch (err) { console.error('court_bridge handler error:', err); }
         }
+    };
+
+    // Surface structured-clone deserialization failures (otherwise the browser
+    // swallows them silently) so a bad cross-tab message is visible in DevTools.
+    channel.onmessageerror = (evt) => {
+        console.error('court_bridge: message deserialization error:', evt);
     };
 
     const bridge = {

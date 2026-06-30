@@ -413,7 +413,7 @@ function App() {
   // mp-9ukk Phase 2: the display court parsed from ?court=. Tracked as state
   // (updated on popstate) so the display consumer effect re-runs and re-scopes
   // the bridge when the court changes without a full reload.
-  const [displayCourt, setDisplayCourtParam] = useS(() => parseCourtFromSearch());
+  const [displayCourt, setDisplayCourtState] = useS(() => parseCourtFromSearch());
   // Ref kept in sync with sseConnected so the 5 s display-mode ticker can
   // read the current value without closing over a stale copy from the effect
   // that has [mode] as its only dep. See the sync effect below.
@@ -530,7 +530,7 @@ function App() {
         setMode("display");
         // Re-read the court so an in-place back/forward to a different
         // ?court= re-scopes the bridge (the display effect depends on it).
-        setDisplayCourtParam(parseCourtFromSearch());
+        setDisplayCourtState(parseCourtFromSearch());
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
@@ -641,31 +641,44 @@ function App() {
         // tournament.name/courts for the header and tournament.competitions
         // for match rendering.
         setTournament(prev => {
-          if (!Array.isArray(msg.payload)) return prev;
-          const incomingComps = msg.payload;
-          if (!prev) {
-            // No server data yet: bootstrap entirely from the snapshot.
-            return { name: '', courts: [], competitions: incomingComps };
-          }
-          // Server data is already loaded: merge the operator snapshot into
-          // the existing tournament. Existing competitions ARE replaced by the
-          // operator snapshot (the operator tab is the court authority during
-          // an outage). The reconnect full-refetch restores server truth.
-          const existing = prev.competitions || [];
-          const merged = existing.slice();
-          for (const comp of incomingComps) {
-            const id = comp.id || (comp.config && (comp.config.id || comp.config.Id));
-            if (!id) continue;
-            const idx = merged.findIndex(c =>
-              c.id === id || (c.config && (c.config.id === id || c.config.Id === id))
-            );
-            if (idx === -1) {
-              merged.push(comp);
-            } else {
-              merged[idx] = comp;
+          try {
+            if (!Array.isArray(msg.payload)) return prev;
+            const incomingComps = msg.payload;
+            if (!prev) {
+              // No server data yet: bootstrap entirely from the snapshot. This
+              // path is unconditional (even if sseConnected is still its
+              // optimistic mount default) so a cold start during an outage is
+              // never starved of the operator snapshot.
+              return { name: '', courts: [], competitions: incomingComps };
             }
+            // Server data already loaded AND the SSE feed is up: the server is
+            // authoritative, so drop a late-arriving snapshot rather than let it
+            // overwrite the loaded server competitions with the operator tab's copy.
+            if (sseConnectedRef.current) return prev;
+            // Offline: merge the operator snapshot into the existing tournament.
+            // Existing competitions ARE replaced by the operator snapshot (the
+            // operator tab is the court authority during an outage). The
+            // reconnect full-refetch restores server truth.
+            const existing = prev.competitions || [];
+            const merged = existing.slice();
+            for (const comp of incomingComps) {
+              if (!comp || typeof comp !== 'object') continue;
+              const id = comp.id || (comp.config && (comp.config.id || comp.config.Id));
+              if (!id) continue;
+              const idx = merged.findIndex(c =>
+                c.id === id || (c.config && (c.config.id === id || c.config.Id === id))
+              );
+              if (idx === -1) {
+                merged.push(comp);
+              } else {
+                merged[idx] = comp;
+              }
+            }
+            return { ...prev, competitions: merged };
+          } catch (e) {
+            console.error('court_bridge: snapshot merge failed:', e);
+            return prev;
           }
-          return { ...prev, competitions: merged };
         });
       }
     });

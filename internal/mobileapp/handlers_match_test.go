@@ -656,6 +656,34 @@ func TestOverrideWinner_EngiGuard(t *testing.T) {
 	assert.Empty(t, stored.Rounds[0][0].Winner, "engi override must not set a winner")
 }
 
+// TestOverrideWinner_FailsClosedOnLoadError verifies the engi guard on the
+// override-winner endpoint fails CLOSED: when LoadCompetition faults we can't
+// tell whether the comp is engi, so the override is rejected with 500 rather
+// than slipping through into the inconsistent flag-less state the guard exists
+// to prevent. Mirrors the quick-score / daihyosen / decision guards.
+func TestOverrideWinner_FailsClosedOnLoadError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "override-fail-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	realStore, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
+
+	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+	req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+}
+
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

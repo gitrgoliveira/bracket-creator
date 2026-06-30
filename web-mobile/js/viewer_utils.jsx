@@ -100,6 +100,29 @@ export function compMatches(c) {
     compEngi: !!c.engi,
   })));
 
+  // Bronze (3rd-place) playoff: a sibling of bracket.rounds (naginata only),
+  // so the rounds loop above does not cover it. Surface it as a first-class
+  // bracket match so it appears in the shiaijo court queue / find-my-matches /
+  // schedule alongside the final (the two are conventionally run on the same
+  // shiaijo). roundIndex sits one past the final so groupQueueMatches gives it
+  // its own "3rd Place" group rather than folding it into the final's.
+  const bronze = !isPreviewBracket && c.bracket && c.bracket.thirdPlaceMatch;
+  if (bronze) {
+    out.push({
+      ...bronze,
+      phase: "bracket",
+      round: "3rd Place",
+      phaseName: "3rd Place",
+      roundIndex: rounds.length,
+      compId: c.id,
+      compName: c.name,
+      compFormat: c.format,
+      compKind: c.kind,
+      teamSize: c.teamSize,
+      compEngi: !!c.engi,
+    });
+  }
+
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
   // to each pool match so the eyebrow and queue rows can show "Match N of M"
   // (AC2). Matches are ordered by their natural sort within the pool group;

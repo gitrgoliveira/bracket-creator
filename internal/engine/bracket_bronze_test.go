@@ -48,6 +48,13 @@ func TestBronze_GeneratedForNaginataWithSemifinal(t *testing.T) {
 	assert.Equal(t, state.MatchStatusScheduled, bracket.ThirdPlaceMatch.Status)
 	assert.Empty(t, bracket.ThirdPlaceMatch.SideA, "sides start empty (filled from SF losers)")
 	assert.Empty(t, bracket.ThirdPlaceMatch.SideB)
+
+	// The bronze defaults to the final's court so it shows up in that
+	// shiaijo's queue (final + 3rd-place are conventionally on the same court).
+	finalRound := bracket.Rounds[len(bracket.Rounds)-1]
+	require.Len(t, finalRound, 1, "last round is the single final match")
+	assert.Equal(t, finalRound[0].Court, bracket.ThirdPlaceMatch.Court,
+		"bronze court must default to the final's court")
 }
 
 // TestBronze_AbsentForKendo verifies a kendo (non-naginata) bracket has no

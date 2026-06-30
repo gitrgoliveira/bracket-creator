@@ -262,10 +262,20 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// two semifinal losers by propagateBracketWinner. DisplayRound -1 is a
 	// sentinel telling renderers to label this "3rd Place".
 	if comp.Naginata && len(bracket.Rounds) >= 2 {
+		// Default the bronze to the FINAL's court: the final and the 3rd-place
+		// playoff are conventionally run on the same shiaijo, so the bronze
+		// shows up in that court's queue out of the box. The final is the sole
+		// match in the last round. Operators can still reassign it via
+		// UpdateMatchCourt like any other bracket match.
+		finalCourt := ""
+		if last := bracket.Rounds[len(bracket.Rounds)-1]; len(last) > 0 {
+			finalCourt = last[0].Court
+		}
 		bracket.ThirdPlaceMatch = &state.BracketMatch{
 			ID:           "m-bronze",
 			Status:       state.MatchStatusScheduled,
 			DisplayRound: -1,
+			Court:        finalCourt,
 		}
 	}
 

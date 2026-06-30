@@ -92,16 +92,12 @@ describe('submit guard predicate', () => {
 
 // ── pure-logic: payload shape ─────────────────────────────────────────────────
 // Verify the payload shape the component would build mirrors the wire contract.
+// Finding 8: winner is NOT included — the backend re-derives it from flags.
 
 describe('engi payload shape', () => {
-  const buildPayload = (match, flagsA, flagsB) => {
-    const winner = deriveWinner(flagsA, flagsB);
-    return {
-      flagsA,
-      flagsB,
-      winner: winner === 'a' ? match.sideA : match.sideB,
-      status: 'completed',
-    };
+  // Mirrors the component's handleSubmit payload exactly.
+  const buildPayload = (_match, flagsA, flagsB) => {
+    return { flagsA, flagsB, status: 'completed' };
   };
 
   const match = {
@@ -109,25 +105,42 @@ describe('engi payload shape', () => {
     sideB: { id: 'p2', name: 'Suzuki Hana', displayName: 'Suzuki Mei', dojo: 'Shinsei' },
   };
 
-  it('includes flagsA, flagsB, winner, status: "completed"', () => {
+  it('includes flagsA, flagsB, and status: "completed" — no winner field', () => {
     const payload = buildPayload(match, 3, 0);
-    expect(payload).toMatchObject({ flagsA: 3, flagsB: 0, status: 'completed' });
-    expect(payload.winner).toBeTruthy();
+    expect(payload).toEqual({ flagsA: 3, flagsB: 0, status: 'completed' });
+    expect(Object.prototype.hasOwnProperty.call(payload, 'winner')).toBe(false);
   });
 
-  it('sets winner to sideA when Shiro has more flags', () => {
+  it('does not include a winner field when Shiro has more flags', () => {
     const payload = buildPayload(match, 2, 1);
-    expect(payload.winner).toEqual(match.sideA);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'winner')).toBe(false);
+    expect(payload.flagsA).toBe(2);
+    expect(payload.flagsB).toBe(1);
   });
 
-  it('sets winner to sideB when Aka has more flags', () => {
+  it('does not include a winner field when Aka has more flags', () => {
     const payload = buildPayload(match, 0, 1);
-    expect(payload.winner).toEqual(match.sideB);
+    expect(Object.prototype.hasOwnProperty.call(payload, 'winner')).toBe(false);
+    expect(payload.flagsA).toBe(0);
+    expect(payload.flagsB).toBe(1);
   });
 
-  it('carries flagsA and flagsB through regardless of winner', () => {
+  it('carries flagsA and flagsB through regardless of winner side', () => {
     const payload = buildPayload(match, 4, 1);
     expect(payload.flagsA).toBe(4);
     expect(payload.flagsB).toBe(1);
+  });
+
+  it('source file handleSubmit does not reference winner in payload literal', () => {
+    // Structural regression guard: ensure the source no longer builds a
+    // `winner` key in the payload (finding 8). If it reappears, this test fails.
+    const { readFileSync } = require('fs');
+    const { resolve } = require('path');
+    const src = readFileSync(resolve(__dirname, '..', 'admin_scoring_engi.jsx'), 'utf8');
+    // The handleSubmit block should only send { flagsA, flagsB, status }.
+    // Verify no `winner` appears in the payload object literal inside handleSubmit.
+    const handleSubmitBlock = src.match(/const handleSubmit = async[^}]+\{[^}]+\}/s)?.[0] || src;
+    expect(handleSubmitBlock).not.toMatch(/const winner\s*=/);
+    expect(handleSubmitBlock).not.toMatch(/payload\s*=\s*\{[^}]*winner/);
   });
 });

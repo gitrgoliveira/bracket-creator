@@ -72,8 +72,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
     if (!canSubmit) return;
     setSubmitting(true);
     setErr("");
-    const winner = winnerSide === "a" ? m.sideA : m.sideB;
-    const payload = { flagsA, flagsB, winner, status: "completed" };
+    const payload = { flagsA, flagsB, status: "completed" };
     try {
       await onSubmit(payload);
     } catch (e) {

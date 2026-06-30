@@ -1106,6 +1106,17 @@ a:hover {
   min-width: max-content;
 }
 
+/* Label above the 3rd-place (bronze) match card in bracket views. */
+.bracket-bronze-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+  padding-left: 4px;
+}
+
 .bc-tree {
   display: flex;
   gap: 56px;

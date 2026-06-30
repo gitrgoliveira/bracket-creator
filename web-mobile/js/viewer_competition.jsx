@@ -326,7 +326,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                     const bm = derivedBracket.thirdPlaceMatch;
                     return (
                       <div style={{ marginTop: 16 }} data-testid="viewer-bronze-section">
-                        <div className="bracket-bronze-label" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--ink-3)", marginBottom: 6, paddingLeft: 4 }}>
+                        <div className="bracket-bronze-label">
                           3rd Place
                         </div>
                         <window.MatchCard

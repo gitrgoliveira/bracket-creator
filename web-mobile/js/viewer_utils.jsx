@@ -71,7 +71,7 @@ export function compMatches(c) {
   rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize, compEngi: isDH ? false : !!c.engi });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -96,7 +96,8 @@ export function compMatches(c) {
     compName: c.name,
     compFormat: c.format,
     compKind: c.kind,
-    teamSize: c.teamSize
+    teamSize: c.teamSize,
+    compEngi: !!c.engi,
   })));
 
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)

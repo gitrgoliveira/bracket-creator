@@ -267,6 +267,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     compFormat: selectedMatch.compFormat || c.format || "",
     compKind: selectedMatch.compKind || c.kind || "",
     teamSize: selectedMatch.teamSize ?? c.teamSize ?? 0,
+    compEngi: !!(selectedMatch.compEngi ?? c.engi),
     phase: selectedMatch.phase || "bracket",
     round: selectedMatch.round || selectedMeta.roundName,
     matchNumber: selectedMatch.matchNumber || selectedMeta.matchNum || 0,
@@ -311,7 +312,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const isHighlighted = selected?.matchId === bm.id;
               return (
                 <div style={{ marginTop: 16 }}>
-                  <div className="bracket-bronze-label" style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--ink-3)", marginBottom: 6, paddingLeft: 4 }}>
+                  <div className="bracket-bronze-label">
                     3rd Place Match
                   </div>
                   <div

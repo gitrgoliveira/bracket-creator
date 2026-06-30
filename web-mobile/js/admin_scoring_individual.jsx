@@ -97,7 +97,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // Fetched from the competition config alongside maxEnchoPeriods.
   const [isNaginata, setIsNaginata] = useStateA(false);
   // Engi competitions use flag-count scoring; dispatched to EngiScoreEditorModal.
-  const [isEngi, setIsEngi] = useStateA(false);
+  // Derived synchronously from m.compEngi (stamped at enrichment time by
+  // compMatches / enrichPoolMatchWithComp / scoringMatch): eliminates the
+  // async-fetch flash where the kendo editor briefly shows before switching
+  // to the engi editor once the competition-config fetch lands.
+  const isEngi = !!m.compEngi;
   // T093–T098: decision (kiken/fusenpai) prompt state. promptKind is
   // "" | "kiken-voluntary" | "kiken-injury" | "fusenpai"; when non-empty the inline prompt replaces the
   // bottom controls. After the POST /decision succeeds, withdrawnPlayer holds
@@ -143,7 +147,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       if (!cancelled) {
         setMaxEnchoPeriods(d?.config?.maxEnchoPeriods || 0);
         setIsNaginata(!!d?.config?.naginata);
-        setIsEngi(!!d?.config?.engi);
       }
     }).catch(() => {});
     return () => { cancelled = true; };
@@ -499,11 +502,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }, []); // listener registered once; reads fresh state via kbRef
 
   // Engi competition: delegate to the flag-count editor. This check runs after
-  // all hooks so React's rules-of-hooks are satisfied. isEngi starts false and
-  // flips to true once the async competition-config fetch lands. On the first
-  // render (isEngi still false) this renders the individual editor briefly; the
-  // fetch is fast (same detail endpoint used for isNaginata) so the flash is
-  // imperceptible. The team check is skipped for engi (engi is never a team).
+  // all hooks so React's rules-of-hooks are satisfied. isEngi is derived
+  // synchronously from m.compEngi (stamped at enrichment time), so the engi
+  // editor is shown from the first render with no kendo-editor flash.
+  // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
     return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} canClose={canClose} />;
   }

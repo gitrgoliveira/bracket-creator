@@ -408,6 +408,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// Engi competitions use flag-based scoring, not ippon tallies.
+		// Quick-score builds an ippon-style result, which bypasses the
+		// engi dispatch and would corrupt standings for flag-scored bouts.
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if comp != nil && comp.Engi {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for engi competitions"})
+			return
+		}
+
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the
 		// engine can stamp WinnerID even when both sides share a name,

@@ -72,9 +72,13 @@ func engiStandingPoints(wins, flags int) int {
 // propagateBracketWinner to advance the decided winner (no advancement out of
 // bronze).
 //
+// correctionReason is the operator-supplied audit note when overwriting a
+// previously completed match. It mirrors the kendo path's CorrectionReason
+// so the audit trail is preserved for engi competitions.
+//
 // Returns the persisted MatchResult so the handler can echo / broadcast it.
-func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB int) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB,
+func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
+	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, correctionReason,
 		e.withPoolMatch,
 		e.store.UpdateBracket,
 	)
@@ -84,8 +88,8 @@ func (e *Engine) RecordEngiMatchResult(compID, matchID string, flagsA, flagsB in
 // supplied StoreTx so the engi dispatch from RecordMatchResultWithIneligibilityTx
 // runs inside the caller's single per-comp lock acquire (calling e.store
 // directly from inside a held tx would deadlock the non-reentrant mutex).
-func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID string, flagsA, flagsB int) (*state.MatchResult, error) {
-	return e.recordEngiMatch(compID, matchID, flagsA, flagsB,
+func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID string, flagsA, flagsB int, correctionReason string) (*state.MatchResult, error) {
+	return e.recordEngiMatch(compID, matchID, flagsA, flagsB, correctionReason,
 		func(cID, mID string, mutate func(*state.MatchResult)) error {
 			return e.withPoolMatchTx(tx, cID, mID, mutate)
 		},
@@ -99,6 +103,7 @@ func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID strin
 func (e *Engine) recordEngiMatch(
 	compID, matchID string,
 	flagsA, flagsB int,
+	correctionReason string,
 	poolUpdate func(compID, matchID string, mutate func(*state.MatchResult)) error,
 	bracketUpdate func(compID string, mutate func(*state.Bracket) error) error,
 ) (*state.MatchResult, error) {
@@ -113,7 +118,7 @@ func (e *Engine) recordEngiMatch(
 	// Try the pool stage first.
 	var out *state.MatchResult
 	err := poolUpdate(compID, matchID, func(r *state.MatchResult) {
-		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide)
+		applyEngiToMatchResult(r, flagsA, flagsB, winnerSide, correctionReason)
 		cp := *r
 		out = &cp
 	})
@@ -136,7 +141,7 @@ func (e *Engine) recordEngiMatch(
 				if !bracketMatchPlayable(bm) {
 					return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
 				}
-				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide)
+				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				return nil
 			}
@@ -146,7 +151,7 @@ func (e *Engine) recordEngiMatch(
 			if !bracketMatchPlayable(bm) {
 				return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", matchID)
 			}
-			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide)
+			result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 			// No propagation out of bronze.
 			return nil
 		}
@@ -159,7 +164,9 @@ func (e *Engine) recordEngiMatch(
 }
 
 // applyEngiToMatchResult writes a flag-decided result into a pool MatchResult.
-func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide string) {
+// correctionReason is the operator audit note for overwrites; it is persisted
+// only when non-empty, mirroring the kendo path's CorrectionReason semantics.
+func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide, correctionReason string) {
 	if winnerSide == "A" {
 		r.Winner = r.SideA
 	} else {
@@ -169,11 +176,15 @@ func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide
 	r.FlagsA = flagsA
 	r.FlagsB = flagsB
 	r.Status = state.MatchStatusCompleted
+	if correctionReason != "" {
+		r.CorrectionReason = correctionReason
+	}
 }
 
 // applyEngiToBracketMatch writes a flag-decided result into a BracketMatch and
 // returns the equivalent MatchResult for the caller to echo / broadcast.
-func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerSide string) *state.MatchResult {
+// correctionReason is persisted on the bracket match when non-empty.
+func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerSide, correctionReason string) *state.MatchResult {
 	if winnerSide == "A" {
 		bm.Winner = bm.SideA
 	} else {
@@ -182,17 +193,21 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	bm.FlagsA = flagsA
 	bm.FlagsB = flagsB
 	bm.Status = state.MatchStatusCompleted
+	if correctionReason != "" {
+		bm.CorrectionReason = correctionReason
+	}
 	return &state.MatchResult{
-		ID:          bm.ID,
-		SideA:       bm.SideA,
-		SideB:       bm.SideB,
-		Winner:      bm.Winner,
-		WinnerSide:  winnerSide,
-		FlagsA:      flagsA,
-		FlagsB:      flagsB,
-		Status:      state.MatchStatusCompleted,
-		Court:       bm.Court,
-		ScheduledAt: bm.ScheduledAt,
+		ID:               bm.ID,
+		SideA:            bm.SideA,
+		SideB:            bm.SideB,
+		Winner:           bm.Winner,
+		WinnerSide:       winnerSide,
+		FlagsA:           flagsA,
+		FlagsB:           flagsB,
+		Status:           state.MatchStatusCompleted,
+		Court:            bm.Court,
+		ScheduledAt:      bm.ScheduledAt,
+		CorrectionReason: correctionReason,
 	}
 }
 

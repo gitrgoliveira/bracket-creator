@@ -103,6 +103,12 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 				}
 			}
 		}
+		// The bronze (3rd-place) playoff lives outside Rounds; resolve it
+		// here so UpdateMatchCourt / UpdateMatchTime work on "m-bronze".
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+			mutate(bracket.ThirdPlaceMatch)
+			return nil
+		}
 		return errMatchNotFound
 	})
 }
@@ -322,7 +328,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibility: load competition %s: %w", compId, loadErr)
 	}
 	if comp != nil && comp.Engi {
-		_, recErr := e.RecordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB)
+		_, recErr := e.RecordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB, result.CorrectionReason)
 		return nil, recErr
 	}
 
@@ -1190,6 +1196,18 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					return nil
 				}
 			}
+		}
+		// The bronze (3rd-place) playoff lives outside Rounds; handle it
+		// here. Bronze has no downstream match, so no propagation is needed.
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+			bm := bracket.ThirdPlaceMatch
+			if !bracketMatchPlayable(bm) {
+				return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+			}
+			bm.Winner = winnerName
+			bm.IsOverridden = true
+			bm.Status = state.MatchStatusCompleted
+			return nil
 		}
 		return notFoundErrorf("bracket match %s not found", matchId)
 	})

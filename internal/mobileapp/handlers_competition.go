@@ -978,6 +978,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// the field is read-only via the same Status gate.
 				current.SwissRounds = comp.SwissRounds
 				current.Naginata = comp.Naginata
+				// Engi (flag-scoring paradigm) is only settable before the
+				// competition starts. Flipping it mid-tournament switches the
+				// scoring paradigm and corrupts recorded results. Reject a
+				// change rather than silently ignoring it.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				if started && comp.Engi != current.Engi {
+					validationErr = fmt.Errorf("engi can only be changed before the competition starts")
+					return nil, nil
+				}
 				current.Engi = comp.Engi
 				current.CheckInEnabled = comp.CheckInEnabled
 				// League tie-breaker config (Phase 3b) is only settable pre-start.
@@ -989,7 +998,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// state already returned early above; the PUT validator enforces
 				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
 				// the finalize endpoint, never here.
-				started := current.Status != state.CompStatusSetup && current.Status != ""
 				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
 					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
 					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")

@@ -138,6 +138,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
+    compEngi: isSupplementary ? false : !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
     // Rep-bout dropdown inputs (empty/false for non-supplementary matches).

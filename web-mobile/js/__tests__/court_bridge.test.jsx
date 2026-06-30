@@ -173,18 +173,20 @@ describe('applyPatchToTree', () => {
     });
 
     it('does not throw on a malformed payload and leaves the tree unchanged', () => {
-        // The absorb path logs via console.error; re-install our own spy so the
-        // setup's unexpected-error guard does not fail on this intentional log.
+        // Spy so any intentional error log here is captured, not flagged by the
+        // setup's unexpected-error guard.
         const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const t = makeTournament();
-        // results:[null] would make the underlying applyPatch dereference null.id;
-        // applyPatchToTree must absorb it (it runs inside a React state updater,
-        // outside any handler try/catch) and return the tree unchanged.
+        // results:[null] is now handled at the SOURCE: patch.jsx applyPatch skips
+        // null/id-less entries before building its Map, so it no longer throws
+        // and applyPatchToTree's try/catch backstop is not even exercised. Either
+        // way the contract holds: no throw, tree unchanged. (The try/catch in
+        // applyPatchToTree stays as defense-in-depth for any future throw path.)
         const msg = { type: 'patch', compId: 'comp-A', payload: { results: [null] } };
         let next;
         expect(() => { next = applyPatchToTree(t, msg); }).not.toThrow();
         expect(next).toBe(t);
-        expect(errSpy).toHaveBeenCalledTimes(1);
+        expect(errSpy).not.toHaveBeenCalled();
         errSpy.mockRestore();
     });
 

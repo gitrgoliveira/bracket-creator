@@ -126,10 +126,16 @@ class BracketCreator < Formula
     Dir["web-mobile/js/*.js"].each { |js| cp js, dist }
 
     # 3. Stamp version info directly (get_build_info.sh needs git, absent here).
+    #    Mirror its own fallback convention: "unknown" when there is no real
+    #    commit to report, rather than a synthetic string that looks like one.
     vdir = buildpath/"internal/cmd/version"
     (vdir/"version.txt").write version.to_s
-    (vdir/"commit.txt").write "homebrew-#{version}"
-    (vdir/"build_date.txt").write Time.now.utc.strftime("%Y-%m-%d %H:%M:%S %z")
+    (vdir/"commit.txt").write ENV.fetch("GIT_COMMIT", "unknown")
+    # Honor SOURCE_DATE_EPOCH (respected by Homebrew's reproducible-build
+    # tooling) so rebuilds of the same version/revision are byte-identical;
+    # fall back to wall-clock time otherwise.
+    build_time = ENV.key?("SOURCE_DATE_EPOCH") ? Time.at(ENV["SOURCE_DATE_EPOCH"].to_i).utc : Time.now.utc
+    (vdir/"build_date.txt").write build_time.strftime("%Y-%m-%d %H:%M:%S %z")
 
     # 4. Build. CGO off + trimpath match the release build; -buildvcs=false
     #    because there is no .git in the tarball (Go 1.26 default would probe it).

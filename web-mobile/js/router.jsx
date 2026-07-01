@@ -91,21 +91,43 @@ function route(url, replace = false) {
     return false;
 }
 
+// decodeURIComponent throws on malformed percent-encoding (e.g. a stray "%").
+// parseSearch is on the public surface (ES export + window.AppRouter) and is
+// called during state init (useQuery, app.jsx's parseCourtFromSearch), so it
+// must never throw on a crafted/truncated URL: fall back to the raw substring.
+function safeDecode(s) {
+    try {
+        return decodeURIComponent(s);
+    } catch (_e) {
+        return s;
+    }
+}
+
 // Pure parse of a search string into a plain object. Extracted so the
 // useQuery hook below stays trivial and so the parser can be unit-tested
 // without a DOM.
 function parseSearch(search) {
-    const params = {};
-    if (!search || search.length < 2) return params;
+    // Null-prototype: query-string keys are attacker-controlled (URL params),
+    // so a key literally named "__proto__" must not silently no-op against the
+    // special accessor on Object.prototype (matches the Object.create(null)
+    // pattern used elsewhere for user-controlled keys, e.g. viewer_utils.jsx,
+    // admin_participants.jsx).
+    const params = Object.create(null);
+    // parseSearch is on the public surface (see the module-level comment above
+    // safeDecode: "must never throw"). A non-string truthy input (e.g. an
+    // object passed by mistake by some future/external caller) would pass the
+    // old `!search` check yet lack .startsWith/.slice, throwing downstream;
+    // guard on the actual type so the invariant holds for any caller input.
+    if (typeof search !== 'string' || search.length < 2) return params;
     const trimmed = search.startsWith('?') ? search.slice(1) : search;
     for (const pair of trimmed.split('&')) {
         if (!pair) continue;
         const eq = pair.indexOf('=');
         if (eq === -1) {
-            params[decodeURIComponent(pair)] = '';
+            params[safeDecode(pair)] = '';
         } else {
-            const k = decodeURIComponent(pair.slice(0, eq));
-            const v = decodeURIComponent(pair.slice(eq + 1));
+            const k = safeDecode(pair.slice(0, eq));
+            const v = safeDecode(pair.slice(eq + 1));
             params[k] = v;
         }
     }
@@ -140,8 +162,8 @@ function getCurrentUrl() {
 
 const Link = _Link || ((props) => React.createElement('a', props, props.children));
 
-export { Router, Route, route, Link, useQuery, getCurrentUrl };
+export { Router, Route, route, Link, useQuery, getCurrentUrl, parseSearch };
 
 if (typeof window !== 'undefined') {
-    window.AppRouter = { Router, Route, route, Link, useQuery, getCurrentUrl };
+    window.AppRouter = { Router, Route, route, Link, useQuery, getCurrentUrl, parseSearch };
 }

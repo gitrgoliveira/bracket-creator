@@ -37,6 +37,18 @@ describe('applyPatch', () => {
     expect(next).toBe(prev);
   });
 
+  it('does not throw on null / id-less entries in results and ignores them', () => {
+    const prev = makeState();
+    // A malformed event (e.g. results:[null]) must not crash the Map build;
+    // the bad entries are skipped and a valid sibling result still applies.
+    let next;
+    expect(() => {
+      next = applyPatch(prev, { data: { results: [null, "x", {}, { winner: "X" }, { id: "p1", status: "completed", winner: "X" }] } });
+    }).not.toThrow();
+    expect(next.poolMatches.find(m => m.id === "p1").status).toBe("completed");
+    expect(next.poolMatches.find(m => m.id === "p2").status).toBe("scheduled");
+  });
+
   it('applies a single result to the matching poolMatch', () => {
     const prev = makeState();
     const next = applyPatch(prev, { data: { result: { id: "p1", winner: "Alice", status: "completed" } } });

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -358,11 +359,12 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 				}
 			}
 
-			// G2: no player has two matches closer than two slots apart. Recompute
-			// the slot duration exactly as generatePools did (load + apply
-			// defaults). A correct schedule keeps every player's matches at least
-			// two slots (2*perMatch) apart; a lunch skip only widens the gap, so
-			// the >= check stays correct across the lunch boundary.
+			// G2: no player appears in two adjacent slots. Wall-clock minute gaps
+			// cannot detect this across a lunch/ceremony boundary (a skip inflates
+			// the gap of an adjacent pair), so map each ScheduledAt back to its
+			// slot INDEX by replaying the same cursor loop assignLeagueSlotTimes
+			// uses (parseCeremonyParams + skipCeremonyBlocks + perMatch steps),
+			// then assert no player has two matches in consecutive slot indices.
 			loadedComp, err := store.LoadCompetition(compID)
 			require.NoError(t, err)
 			tournament, err := store.LoadTournament()
@@ -372,18 +374,27 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			perMatch := perMatchElapsedMinutes(loadedComp, tournament, false)
 			require.Positive(t, perMatch)
 
+			dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(loadedComp, tournament)
+			timeToSlot := make(map[string]int)
+			cursor := dayStart.Add(time.Duration(openingMin) * time.Minute)
+			for k := 0; k < len(matches)*3+2; k++ { // generous bound: idle slots at most ~1 per match
+				cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+				timeToSlot[cursor.Format(scheduleClockLayout)] = k
+				cursor = cursor.Add(time.Duration(perMatch) * time.Minute)
+			}
+
 			byPlayer := make(map[string][]int)
 			for _, m := range matches {
-				at := parseClockHHMM(m.ScheduledAt)
-				startMin := at.Hour()*60 + at.Minute()
-				byPlayer[m.SideA] = append(byPlayer[m.SideA], startMin)
-				byPlayer[m.SideB] = append(byPlayer[m.SideB], startMin)
+				s, ok := timeToSlot[m.ScheduledAt]
+				require.Truef(t, ok, "match time %s not found in replayed slot grid", m.ScheduledAt)
+				byPlayer[m.SideA] = append(byPlayer[m.SideA], s)
+				byPlayer[m.SideB] = append(byPlayer[m.SideB], s)
 			}
-			for player, mins := range byPlayer {
-				sort.Ints(mins)
-				for i := 1; i < len(mins); i++ {
-					assert.GreaterOrEqualf(t, mins[i]-mins[i-1], 2*perMatch,
-						"G2 violation: player %q has back-to-back matches %d minutes apart", player, mins[i]-mins[i-1])
+			for player, slotIdxs := range byPlayer {
+				sort.Ints(slotIdxs)
+				for i := 1; i < len(slotIdxs); i++ {
+					assert.Greaterf(t, slotIdxs[i]-slotIdxs[i-1], 1,
+						"G2 violation: player %q in adjacent slots %d and %d", player, slotIdxs[i-1], slotIdxs[i])
 				}
 			}
 		})

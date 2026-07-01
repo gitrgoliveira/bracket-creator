@@ -64,7 +64,9 @@ func names(n int) []string {
 // TestLeagueAllocation_EdgeCases pins how a league (single pool spanning the
 // whole roster) allocates its matches to courts across a range of roster/court
 // shapes. The core rules under test (engine/pools.go + engine/league_schedule.go):
-//   - a league spreads its matches across ALL assigned courts (no court idle),
+//   - a league spreads its matches across ALL assigned courts (every court
+//     carries at least one match; individual time slots may still leave a court
+//     idle when the rest-aware scheduler inserts a rest band),
 //   - a single-court league keeps everything on that one court,
 //   - every generated match gets a court when courts are configured,
 //   - within a single time slot (matches sharing a ScheduledAt) the courts are
@@ -101,7 +103,7 @@ func TestLeagueAllocation_EdgeCases(t *testing.T) {
 			"4 players with 2 courts (== floor(N/2)) must be accepted")
 	})
 
-	t.Run("multi-court league uses every assigned court (no court idle)", func(t *testing.T) {
+	t.Run("multi-court league: every assigned court carries at least one match", func(t *testing.T) {
 		matches := startLeague(t, "lg-3court", 0, []string{"A", "B", "C"}, names(6))
 		require.Len(t, matches, 15)
 		used := map[string]int{}

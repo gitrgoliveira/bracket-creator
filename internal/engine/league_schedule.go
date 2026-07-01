@@ -33,8 +33,8 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 	}
 	numCourts := len(courts)
 
-	// sentinel: a player not yet scheduled has lastSlot = math.MinInt/2 so
-	// (lastSlot[x] == slot-1) is false for any non-negative slot.
+	// sentinel: a player not yet scheduled reports an arbitrary large negative
+	// lastSlot so (lastSlot[x] == slot-1) is false for any non-negative slot.
 	const absent = -(1 << 30)
 	lastSlot := make(map[string]int)
 	getLastSlot := func(player string) int {

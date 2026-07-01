@@ -112,8 +112,10 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		if len(comp.Courts) > 0 {
 			poolCourts = []string{comp.Courts[courtAssign[pi]]}
 			// When there is only one pool (league format) and multiple
-			// courts, spread that pool's matches round-robin across all
-			// competition courts so no court sits idle.
+			// courts, seed each match with a court so none is left blank.
+			// For League this is provisional: the rest-aware scheduler
+			// below reassigns courts per slot. It matters for the
+			// non-league else branch's round-position spread.
 			if len(pools) == 1 && len(comp.Courts) > 1 {
 				poolCourts = comp.Courts
 			}

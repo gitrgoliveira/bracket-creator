@@ -6,26 +6,12 @@ The following sections describe each method.
 
 ## Homebrew
 
-The Homebrew formula lives in the project repository and builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+```bash
+brew tap gitrgoliveira/tap
+brew install bracket-creator
+```
 
-=== "Direct install"
-
-    ```bash
-    brew install https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/main/Formula/bracket-creator.rb
-    ```
-
-    To update later, run the same command again.
-
-=== "Named tap"
-
-    Add the repository as a tap so `brew upgrade` tracks it:
-
-    ```bash
-    brew tap gitrgoliveira/kendo https://github.com/gitrgoliveira/bracket-creator
-    brew install gitrgoliveira/kendo/bracket-creator
-    ```
-
-    The tap is named `kendo` rather than `bracket-creator` because the latter would resolve to a separate, unmaintained `homebrew-bracket-creator` repository.
+Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 

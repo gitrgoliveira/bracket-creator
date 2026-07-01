@@ -361,20 +361,12 @@ Homebrew, the pre-compiled binaries on the [release page](https://github.com/git
 <details>
   <summary><h3>homebrew</h3></summary>
 
-The formula lives at [`Formula/bracket-creator.rb`](Formula/bracket-creator.rb) in this repository and builds from source (it needs a C toolchain, the Xcode Command Line Tools on macOS or `build-essential` on Linux, plus network access for Go module downloads). Install it directly:
-
 ```bash
-brew install https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/main/Formula/bracket-creator.rb
+brew tap gitrgoliveira/tap
+brew install bracket-creator
 ```
 
-To update later, re-run that command. If you would rather have `brew upgrade` track it, add this repository as a named tap first:
-
-```bash
-brew tap gitrgoliveira/kendo https://github.com/gitrgoliveira/bracket-creator
-brew install gitrgoliveira/kendo/bracket-creator
-```
-
-(The tap is named `kendo` rather than `bracket-creator` because the latter would resolve to a separate, unmaintained `homebrew-bracket-creator` repository.)
+Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 

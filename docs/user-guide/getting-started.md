@@ -37,6 +37,8 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
     go install github.com/gitrgoliveira/bracket-creator@latest
     ```
 
+    This builds the CLI commands only. The embedded web assets are not committed to the module, so the `serve` and `mobile-app` web interface will not render from a `go install` build. Use Homebrew or a release binary if you need the web UI.
+
 === "Released tar file"
 
     Download the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) and extract them to your desired location.

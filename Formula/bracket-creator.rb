@@ -99,15 +99,23 @@ class BracketCreator < Formula
     resource("preact-compat").stage { vendor.install "compat.umd.js" }
     resource("preact-router").stage { vendor.install "preact-router.umd.js" }
 
+    # Only stage the fonts when the source tree lacks them (i.e. the stable
+    # tarball cut before commit b54b41c3). --HEAD and any future tag that
+    # already ships the fonts keep their own in-tree copies rather than being
+    # overwritten by the pinned bytes.
     anton = vendor/"fonts/anton"
-    anton.mkpath
-    resource("font-anton").stage         { anton.install "anton-latin.woff2" }
-    resource("font-anton-license").stage { anton.install "OFL.txt" }
+    unless (anton/"anton-latin.woff2").exist?
+      anton.mkpath
+      resource("font-anton").stage         { anton.install "anton-latin.woff2" }
+      resource("font-anton-license").stage { anton.install "OFL.txt" }
+    end
 
     archivo = vendor/"fonts/archivo"
-    archivo.mkpath
-    resource("font-archivo").stage         { archivo.install "archivo-latin.woff2" }
-    resource("font-archivo-license").stage { archivo.install "OFL.txt" }
+    unless (archivo/"archivo-latin.woff2").exist?
+      archivo.mkpath
+      resource("font-archivo").stage         { archivo.install "archivo-latin.woff2" }
+      resource("font-archivo-license").stage { archivo.install "OFL.txt" }
+    end
 
     # 2. Compile the JSX bundle with the native esbuild binary (mirrors the
     #    esbuild-jsx Make target: same loader/factory/fragment flags).
@@ -160,5 +168,33 @@ class BracketCreator < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/bracket-creator version")
     system bin/"bracket-creator", "--help"
+
+    # Regression guard for this formula's whole reason to exist: the embedded
+    # web assets (Preact runtime, compiled JSX bundle, generated glossary data,
+    # webfonts) must actually be present in the binary. Each was missing at some
+    # point during development and none of that is visible to a --help check, so
+    # boot the server and assert every asset tree resolves.
+    port = free_port
+    data = testpath/"tournament-data"
+    data.mkpath
+    pid = fork do
+      exec({ "PORT" => port.to_s, "TOURNAMENT_DATA_DIR" => data.to_s },
+           bin/"bracket-creator", "mobile-app")
+    end
+    begin
+      %w[
+        /dist/app.js
+        /dist/glossary_data.js
+        /vendor/preact.min.js
+        /vendor/fonts/anton/anton-latin.woff2
+      ].each do |path|
+        system "curl", "--fail", "--silent", "--show-error",
+               "--retry-connrefused", "--retry", "20", "--retry-delay", "1",
+               "http://127.0.0.1:#{port}#{path}"
+      end
+    ensure
+      Process.kill("TERM", pid)
+      Process.wait(pid)
+    end
   end
 end

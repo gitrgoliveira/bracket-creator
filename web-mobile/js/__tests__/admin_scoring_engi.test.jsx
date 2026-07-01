@@ -140,11 +140,12 @@ describe('engi payload shape', () => {
     // Structural regression guard: ensure the source no longer builds a
     // `winner` key in the payload (finding 8). If it reappears, this test fails.
     const src = readFileSync(resolve(__dirname, '..', 'admin_scoring_engi.jsx'), 'utf8');
-    // Both submit call sites (handleSubmit's direct save, and the
-    // ReasonPrompt-gated correction save) pass an object literal straight to
-    // doSubmit(...): scope the check to those literals, not the whole file,
-    // so the guard stays meaningful if the source is restructured again.
-    const payloadLiterals = [...src.matchAll(/doSubmit\((\{[^}]*\})\)/g)].map(m => m[1]);
+    // The engi wire payload is built as an object literal containing `flagsA`
+    // (buildPayload(), plus the inline ReasonPrompt correction save). Scope the
+    // check to those literals, not the whole file, so the guard stays
+    // meaningful if the source is restructured again (e.g. doSubmit switched
+    // from taking a payload to taking a submit closure).
+    const payloadLiterals = [...src.matchAll(/\{[^{}]*\bflagsA\b[^{}]*\}/g)].map(m => m[0]);
     expect(payloadLiterals.length).toBeGreaterThan(0);
     for (const literal of payloadLiterals) {
       expect(literal).not.toMatch(/winner/);

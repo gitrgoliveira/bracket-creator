@@ -49,7 +49,7 @@ function PipRow({ count, side }) {
 // EngiShortcutHint: quiet keyboard-shortcut reminder, matching the kendo
 // editor's ScoringShortcutHint style. aria-hidden (the same actions are
 // reachable via the on-screen counters and Save button).
-function EngiShortcutHint() {
+function EngiShortcutHint({ hasNav = false }) {
   const kbd = {
     fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
     border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
@@ -66,6 +66,7 @@ function EngiShortcutHint() {
       <kbd style={kbd}>⇧A</kbd><kbd style={kbd}>⇧S</kbd><span>remove</span>
       <span aria-hidden="true">·</span>
       <kbd style={kbd}>Enter</kbd><span>save</span>
+      {hasNav && <><span aria-hidden="true">·</span><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>prev/next</span></>}
       <span aria-hidden="true">·</span>
       <kbd style={kbd}>Esc</kbd><span>close</span>
     </div>
@@ -82,7 +83,7 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "modal", canClose = true }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true }) {
   const m = match;
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
@@ -103,10 +104,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
   const mountedRef = useRefE(true);
   useEffectE(() => () => { mountedRef.current = false; }, []);
   const [pendingWrite, setPendingWrite] = useStateE(false);
-  // Holds the last submitted payload so the banner's "Retry now" can re-invoke
-  // it. Null after a re-open hydration (the queue still auto-retries, but the
-  // payload can't be recovered from the serialized queue, so Retry hides).
-  const pendingPayloadRef = useRefE(null);
+  // Holds the last submit closure so the banner's "Retry now" can re-invoke it
+  // (a closure, not a bare payload, so a queued Finish+Next retries the same
+  // advance path). Null after a re-open hydration (the queue still auto-retries,
+  // but the closure can't be recovered from the serialized queue, so Retry hides).
+  const pendingFnRef = useRefE(null);
   const [writeFailed, setWriteFailed] = useStateE(null); // { reason } | null
 
   const total = flagsA + flagsB;
@@ -141,14 +143,16 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
 
   const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
 
-  const doSubmit = async (payload) => {
+  // doSubmit takes a submit CLOSURE (like ScoreEditorModal) so the caller picks
+  // onSubmit vs onSubmitAndNext; F5 retry re-invokes the same closure.
+  const doSubmit = async (fn) => {
     setSubmitting(true);
     setErr("");
     // Clear any prior pending/failed state when the operator explicitly retries.
     if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
     let res;
     try {
-      res = await onSubmit(payload);
+      res = await fn();
     } catch (e) {
       if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
       return;
@@ -156,13 +160,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
     // F5: a terminal write that was only queued (offline / transient) resolves
     // { queued: true } instead of throwing. Do NOT close as if saved: re-enable
     // the controls, enter pending-write mode with the sticky banner, and
-    // remember the payload so "Retry now" can re-invoke it. On a clean success
+    // remember the closure so "Retry now" can re-invoke it. On a clean success
     // the parent closes the modal, so we intentionally leave `submitting` set
     // (matches the prior behaviour and avoids a post-unmount state update).
     if (res && res.queued && mountedRef.current) {
       setSubmitting(false);
       setPendingWrite(true);
-      pendingPayloadRef.current = payload;
+      pendingFnRef.current = fn;
     }
     return res;
   };
@@ -192,7 +196,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
         : false;
       if (status === "synced" && !stillPending) {
         setPendingWrite(false);
-        pendingPayloadRef.current = null;
+        pendingFnRef.current = null;
       }
     });
     return unsub;
@@ -213,17 +217,22 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
     return unsub;
   }, [m.compId, m.id]);
 
+  // buildPayload assembles the wire patch. correctionReason persists in state
+  // once confirmed via ReasonPrompt, so a retry after a failed first attempt
+  // (operator clicks "Save correction" again without reopening the prompt) must
+  // still carry it: otherwise the retry silently drops the audit reason.
+  const buildPayload = () => ({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
   const handleSubmit = () => {
     if (!canSubmit) return;
     if (isComplete && !correctionReason) {
       setShowCorrectionPrompt(true);
       return;
     }
-    // correctionReason persists in state once confirmed via ReasonPrompt, so
-    // a retry after a failed first attempt (operator clicks "Save correction"
-    // again without reopening the prompt) must still carry it: otherwise the
-    // retry silently drops the audit reason the operator already gave.
-    doSubmit({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
+    const payload = buildPayload();
+    // A correction (completed match) saves the current match only: never
+    // auto-advance / start-next, even when onSubmitAndNext is wired.
+    if (onSubmitAndNext && !isComplete) doSubmit(() => onSubmitAndNext(payload));
+    else doSubmit(() => onSubmit(payload));
   };
 
   // Keyboard flag entry (impeccable critique P2: Engi had none, so an operator
@@ -235,7 +244,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
   // Registered once; reads fresh state via kbRef so the listener never goes
   // stale. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit, onPrev, onNext };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -245,6 +254,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
       if (s.showCorrectionPrompt) return;
       // Never hijack typing in a text field (e.g. the reason note).
       if (window.isTextEntry && window.isTextEntry(ev.target)) return;
+
+      // ←/→ move between queued matches (parity with the kendo editor).
+      if (ev.key === "ArrowLeft" && s.onPrev) { ev.preventDefault(); s.onPrev(); return; }
+      if (ev.key === "ArrowRight" && s.onNext) { ev.preventDefault(); s.onNext(); return; }
 
       if (ev.key === "Enter") {
         // Let a focused button/link/input handle its own Enter (e.g. Cancel).
@@ -391,7 +404,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             onConfirm={(r) => {
               setCorrectionReason(r);
               setShowCorrectionPrompt(false);
-              doSubmit({ flagsA, flagsB, status: "completed", correctionReason: r });
+              // A correction saves the current match only (never advance).
+              doSubmit(() => onSubmit({ flagsA, flagsB, status: "completed", correctionReason: r }));
             }}
             onCancel={() => setShowCorrectionPrompt(false)}
           />
@@ -402,8 +416,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
         {writeFailed && (
           <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
             <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
-            {pendingPayloadRef.current && (
-              <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingPayloadRef.current)}>Retry</button>
+            {pendingFnRef.current && (
+              <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry</button>
             )}
           </div>
         )}
@@ -413,8 +427,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
             <span>Not saved yet: will keep retrying until it lands.</span>
-            {pendingPayloadRef.current && (
-              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingPayloadRef.current)}>Retry now</button>
+            {pendingFnRef.current && (
+              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}
           </div>
         )}
@@ -423,24 +437,32 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
         {!(isComplete && showCorrectionPrompt) && (
-          <div className="score-nav__actions" style={{ justifyContent: "flex-end" }}>
-            {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              data-testid="engi-submit"
-              style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
-            >
-              {submitting ? "Saving…" : isComplete ? "Save correction" : "Save result"}
-            </button>
+          <div className="score-nav">
+            {prevMatch ? (
+              <button type="button" className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={(prevMatch.sideA?.name || "") + " vs " + (prevMatch.sideB?.name || "")}>← Prev</button>
+            ) : <span />}
+            <div className="score-nav__actions">
+              {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                data-testid="engi-submit"
+                style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
+              >
+                {submitting ? "Saving…" : isComplete ? "Save correction" : (onSubmitAndNext ? "Finish + Start Next →" : "Save result")}
+              </button>
+            </div>
+            {nextMatch ? (
+              <button type="button" className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={(nextMatch.sideA?.name || "") + " vs " + (nextMatch.sideB?.name || "")}>Next →</button>
+            ) : <span />}
           </div>
         )}
         {/* Quiet keyboard-shortcut reminder (parity with the kendo editor's
             ScoringShortcutHint). Hidden during the reason prompt, when keys
             are disabled. */}
-        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint />}
+        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint hasNav={!!(prevMatch || nextMatch)} />}
       </div>
     </>
   );

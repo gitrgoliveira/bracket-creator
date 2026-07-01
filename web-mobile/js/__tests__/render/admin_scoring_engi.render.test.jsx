@@ -110,6 +110,49 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
   });
 });
 
+describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', () => {
+  it('routes a fresh finish through onSubmitAndNext and labels the button accordingly', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} />);
+
+    const submit = screen.getByTestId('engi-submit');
+    expect(submit.textContent).toContain('Finish + Start Next');
+    fireEvent.click(submit);
+    await waitFor(() => expect(onSubmitAndNext).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('a correction saves the current match only (onSubmit), never onSubmitAndNext', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'completed', flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} />);
+
+    const submit = screen.getByTestId('engi-submit');
+    expect(submit.textContent).toContain('Save correction');
+    fireEvent.click(submit); // opens ReasonPrompt
+    fireEvent.click(screen.getByText('Confirm'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' }));
+    expect(onSubmitAndNext).not.toHaveBeenCalled();
+  });
+
+  it('renders Prev/Next when adjacent matches are supplied and wires them', () => {
+    const onPrev = vi.fn();
+    const onNext = vi.fn();
+    render(<EngiScoreEditorModal
+      match={makeMatch()}
+      onClose={() => {}} onSubmit={() => {}}
+      prevMatch={{ sideA: { name: 'X' }, sideB: { name: 'Y' } }}
+      nextMatch={{ sideA: { name: 'Z' }, sideB: { name: 'W' } }}
+      onPrev={onPrev} onNext={onNext}
+    />);
+    fireEvent.click(screen.getByText('← Prev'));
+    expect(onPrev).toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Next →'));
+    expect(onNext).toHaveBeenCalled();
+  });
+});
+
 describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2)', () => {
   it('a/s add a flag to Aka/Shiro, Shift+A/S remove, Enter saves', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);

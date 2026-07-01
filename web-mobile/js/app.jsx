@@ -291,14 +291,14 @@ export function diffAnnouncementSnapshot(seenRef, list) {
 // consumer so the bridge re-scopes when the court param changes (mp-9ukk).
 //
 // Delegates the query-string parse to the shared AppRouter.parseSearch (the one
-// canonical implementation in router.jsx) rather than re-rolling the loop.
+// canonical implementation in router.jsx) rather than re-rolling the loop, via
+// the module-level AppRouter binding (same pattern as AppRouter.route() below).
 // router.js is script-tagged before app.js in index.html, so window.AppRouter
-// is always present by the time the App renders; the {} fallback only guards a
+// is always set by the time this module evaluates; the fallback only guards a
 // non-browser/never-rendered context and degrades to the default court.
 function parseCourtFromSearch() {
   const s = typeof window !== 'undefined' ? (window.location.search || '') : '';
-  const router = (typeof window !== 'undefined' && window.AppRouter) || null;
-  const query = router && router.parseSearch ? router.parseSearch(s) : {};
+  const query = AppRouter && AppRouter.parseSearch ? AppRouter.parseSearch(s) : {};
   const raw = query.court || 'A';
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
@@ -614,7 +614,19 @@ function App() {
 
     // Scope the inbound recency clock to this display court so a patch for
     // a different court does not falsely advance the local dot to 'local'.
+    // setDisplayCourt resets the recency clock when the court actually changed.
     setDisplayCourt(court);
+
+    // Re-derive linkState immediately (rather than waiting up to 5 s for the
+    // ticker below) so switching ?court= does not keep showing the PREVIOUS
+    // court's dot state. This reads the recency clock setDisplayCourt just
+    // reset above, so a fresh court starts from its own (blank) state.
+    setLinkState(deriveLinkState({
+      sseConnected: sseConnectedRef.current,
+      lastBroadcastAt: getLastBroadcastAt(),
+      now: Date.now(),
+      freshnessMs,
+    }));
 
     // Use the module-level singleton (shared with api_client's publisher in
     // the same tab) so only one BroadcastChannel is opened per tab.

@@ -117,10 +117,13 @@ export function applyPatchToTree(tournament, msg) {
         type: 'match_updated',
         data: msg.payload,
     };
-    // A malformed payload (e.g. results:[null]) can make _applyPatch throw.
-    // This runs inside a React state updater (deferred, outside any handler
-    // try/catch), so a throw here would crash the display board into the error
-    // boundary. Absorb it: a bad patch leaves the tree unchanged.
+    // patch.jsx's applyPatch filters null/id-less result entries before
+    // building its lookup Map, so a payload like results:[null] no longer
+    // throws. This try/catch is kept as defense-in-depth: it runs inside a
+    // React state updater (deferred, outside any handler try/catch) fed by
+    // arbitrary same-origin BroadcastChannel messages, so any future throw
+    // path in _applyPatch is still absorbed rather than crashing the display
+    // board into the error boundary.
     let nextComp;
     try {
         nextComp = _applyPatch(prevComp, syntheticEvent);
@@ -290,34 +293,40 @@ export function openBridge() {
             _lastBroadcastAt = Date.now();
         }
 
-        // Automatic snapshot-req responder: if this tab has a provider for
-        // the requested court, reply with the court's competitions slice.
-        if (msg.type === 'snapshot-req' && _snapshotProvider) {
-            const court = msg.court || '';
-            // One try/catch covers both the provider call and postMessage: either
-            // failing just logs and continues. A dropped reply is recovered the
-            // next time the display publishes snapshot-req (on its effect mount or
-            // a court change); there is no periodic re-request.
-            try {
-                const slice = _snapshotProvider(court);
-                if (slice && slice.length > 0) {
-                    // Reply with one aggregate snapshot (compId empty, payload = the
-                    // court's competitions slice) so the display bootstraps its whole
-                    // court view in one message.
-                    channel.postMessage({
-                        v: 1,
-                        type: 'snapshot',
-                        origin: _tabId,
-                        court,
-                        compId: '',
-                        payload: slice,
-                    });
-                    _lastBroadcastAt = Date.now();
+        // snapshot-req is always fully handled here (never forwarded to
+        // subscriber handlers below), whether or not this tab happens to have
+        // a provider registered: an unanswered snapshot-req has no meaning to
+        // any current subscriber (they only act on 'patch'/'snapshot'), so
+        // there is nothing to gain by passing it through.
+        if (msg.type === 'snapshot-req') {
+            if (_snapshotProvider) {
+                const court = msg.court || '';
+                // One try/catch covers both the provider call and postMessage:
+                // either failing just logs and continues. A dropped reply is
+                // recovered the next time the display publishes snapshot-req
+                // (on its effect mount or a court change); there is no
+                // periodic re-request.
+                try {
+                    const slice = _snapshotProvider(court);
+                    if (slice && slice.length > 0) {
+                        // Reply with one aggregate snapshot (compId empty, payload
+                        // = the court's competitions slice) so the display
+                        // bootstraps its whole court view in one message.
+                        channel.postMessage({
+                            v: 1,
+                            type: 'snapshot',
+                            origin: _tabId,
+                            court,
+                            compId: '',
+                            payload: slice,
+                        });
+                        _lastBroadcastAt = Date.now();
+                    }
+                } catch (err) {
+                    console.error('court_bridge: snapshot-req responder failed:', err);
                 }
-            } catch (err) {
-                console.error('court_bridge: snapshot-req responder failed:', err);
             }
-            return; // snapshot-req is fully handled here; do not forward to subscriber handlers
+            return;
         }
 
         for (const h of handlers) {

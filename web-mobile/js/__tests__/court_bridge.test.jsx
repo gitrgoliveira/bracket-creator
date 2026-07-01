@@ -510,6 +510,31 @@ describe('openBridge', () => {
         expect(MockBroadcastChannel._lastSent).toBeNull();
     });
 
+    it('never forwards snapshot-req to onMessage subscribers, with or without a provider', () => {
+        // snapshot-req is always fully handled inside the channel.onmessage
+        // responder; no subscriber (app.jsx only acts on 'patch'/'snapshot')
+        // should ever see it, whether or not a provider happens to be
+        // registered for the requesting court.
+        setSnapshotProvider(null); // no provider registered
+        const b = openBridge();
+        const received = [];
+        b.onMessage(msg => received.push(msg));
+
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot-req', origin: 'other-tab-id',
+            court: 'A', compId: '', payload: null,
+        });
+        expect(received).toHaveLength(0);
+
+        // Same assertion with a provider registered (and a court it can answer).
+        setSnapshotProvider((court) => (court === 'A' ? [{ id: 'comp-A', poolMatches: [] }] : null));
+        MockBroadcastChannel.injectFrom('bc-court-hub-v1', {
+            v: 1, type: 'snapshot-req', origin: 'other-tab-id',
+            court: 'A', compId: '', payload: null,
+        });
+        expect(received).toHaveLength(0);
+    });
+
     it('getLastBroadcastAt returns null before any publish and updates after', () => {
         // Note: getLastBroadcastAt is module-level state. Other tests that call
         // openBridge().publish() will have already set it, so we only verify

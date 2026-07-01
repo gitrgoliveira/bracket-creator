@@ -114,7 +114,7 @@ bracket-creator create-pools --help
 bracket-creator create-playoffs --help
 ```
 
-Example to build the tool from source:
+Example to build the tool from source (needs Go, plus Node.js and `curl`, since `make go/build` runs `npx esbuild` and fetches the vendored frontend runtime):
 ```bash
 make go/build
 ```
@@ -352,20 +352,24 @@ To be able to print the tree, you will need to reset the width and height in the
 These files are generated to be uploaded to Google Drive (or similar), so all shiai-jo tables are in sync during the tournament, working from the same file.
 
 
-## Install - WIP
+## Install
 
-Please use the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) or build from sratch with `make go/build`
-The instructions below do not work yet.
+Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI. `go install` builds the full binary, but the embedded web assets (the Preact runtime and compiled JS bundle) are not part of the Go module, so the `serve`/`mobile-app` web UIs render blank; use Homebrew or a release binary if you need them. The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: the commands shown there are placeholders for the intended experience and do not work yet, because those package repositories are not published.
 
-*You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).*
+*You can install via Homebrew, download a pre-compiled binary, use Docker, or compile from source.*
 
-*Below you can find the steps for each of them.*
 <details>
-  <summary><h3>homebrew tap</h3></summary>
+  <summary><h3>homebrew</h3></summary>
 
 ```bash
-brew install gitrgoliveira/tap/bracket-creator
+brew tap gitrgoliveira/tap
+brew trust gitrgoliveira/tap
+brew install bracket-creator
 ```
+
+`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 
 </details>
 
@@ -389,7 +393,7 @@ name=Gemfury gitrgoliveira repository
 baseurl=https://yum.fury.io/gitrgoliveira/
 enabled=1
 gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
-sudo yum install goreleaser
+sudo yum install bracket-creator
 ```
 
 </details>
@@ -405,6 +409,8 @@ Download the .deb, .rpm or .apk packages from the [release page](https://github.
 ```bash
 go install github.com/gitrgoliveira/bracket-creator@latest
 ```
+
+This builds the full binary, including the `serve` and `mobile-app` subcommands. However, the embedded web assets are not part of the Go module, so those web UIs render blank from a `go install` build. The Excel-generating CLI commands (`create-pools`, `create-playoffs`, ...) work normally. Use Homebrew or a release binary if you need the web UI.
 
 </details>
 

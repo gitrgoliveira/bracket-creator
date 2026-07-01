@@ -1,8 +1,20 @@
 # Install
 
-You can install the pre-compiled binary, use Go, build from source, or use Docker.
+You can install with Homebrew, download a pre-compiled binary, use Go, build from source, or use Docker.
 
 The following sections describe each method.
+
+## Homebrew
+
+```bash
+brew tap gitrgoliveira/tap
+brew trust gitrgoliveira/tap
+brew install bracket-creator
+```
+
+`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 
 ## Pre-compiled binaries
 
@@ -11,6 +23,8 @@ The following sections describe each method.
     ```bash
     go install github.com/gitrgoliveira/bracket-creator@latest
     ```
+
+    Note that `go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Homebrew or a release binary if you need the web UI.
 
 === "Released tar file"
 
@@ -32,6 +46,8 @@ If you prefer to compile from source, `bracket-creator` is written in [Go](https
 
 Prerequisites:
 - [Go 1.26.4+](https://golang.org/doc/install)
+- [Node.js](https://nodejs.org/) (`make go/build` runs `npx esbuild` to compile the web assets)
+- `curl` (used to fetch the vendored frontend runtime)
 
 ```bash
 git clone https://github.com/gitrgoliveira/bracket-creator.git

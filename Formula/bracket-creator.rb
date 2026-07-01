@@ -78,6 +78,11 @@ class BracketCreator < Formula
            "--jsx-factory=React.createElement",
            "--jsx-fragment=React.Fragment"
 
+    # esbuild only transforms *.jsx. Hand-authored/generated plain-.js modules
+    # (e.g. glossary_data.js) are imported at runtime by the compiled bundles
+    # via sibling paths that resolve to /dist/, so they must sit in dist/ too.
+    Dir["web-mobile/js/*.js"].each { |js| cp js, dist }
+
     # 3. Stamp version info directly (get_build_info.sh needs git, absent here).
     vdir = buildpath/"internal/cmd/version"
     (vdir/"version.txt").write version.to_s

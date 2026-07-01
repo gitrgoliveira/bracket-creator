@@ -6,7 +6,7 @@ The following sections describe each method.
 
 ## Homebrew
 
-The Homebrew formula lives in the project repository and builds from source, so it needs the Xcode Command Line Tools and network access for Go module downloads.
+The Homebrew formula lives in the project repository and builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 === "Direct install"
 

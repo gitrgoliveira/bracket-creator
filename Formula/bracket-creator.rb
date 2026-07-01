@@ -137,7 +137,9 @@ class BracketCreator < Formula
     #    Mirror its own fallback convention: "unknown" when there is no real
     #    commit to report, rather than a synthetic string that looks like one.
     vdir = buildpath/"internal/cmd/version"
-    (vdir/"version.txt").write version.to_s
+    # `git describe --tags` (used by make go/build) embeds the "v" prefix, so
+    # match it rather than Homebrew's stripped version (0.16.3 -> v0.16.3).
+    (vdir/"version.txt").write "v#{version}"
     (vdir/"commit.txt").write ENV.fetch("GIT_COMMIT", "unknown")
     # Honor SOURCE_DATE_EPOCH (respected by Homebrew's reproducible-build
     # tooling) so rebuilds of the same version/revision are byte-identical;

@@ -114,7 +114,7 @@ bracket-creator create-pools --help
 bracket-creator create-playoffs --help
 ```
 
-Example to build the tool from source:
+Example to build the tool from source (needs Go, plus Node.js and `curl`, since `make go/build` runs `npx esbuild` and fetches the vendored frontend runtime):
 ```bash
 make go/build
 ```

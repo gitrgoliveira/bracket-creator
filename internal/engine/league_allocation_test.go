@@ -55,7 +55,7 @@ func tryStartLeague(t *testing.T, compID string, courts []string, players []stri
 
 func names(n int) []string {
 	out := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out[i] = fmt.Sprintf("P%d", i+1)
 	}
 	return out
@@ -63,13 +63,17 @@ func names(n int) []string {
 
 // TestLeagueAllocation_EdgeCases pins how a league (single pool spanning the
 // whole roster) allocates its matches to courts across a range of roster/court
-// shapes. The core rules under test (engine/pools.go):
-//   - a league spreads its matches across ALL assigned courts (no court idle),
+// shapes. The core rules under test (engine/pools.go + engine/league_schedule.go):
+//   - a league spreads its matches across ALL assigned courts (every court
+//     carries at least one match; individual time slots may still leave a court
+//     idle when the rest-aware scheduler inserts a rest band),
 //   - a single-court league keeps everything on that one court,
 //   - every generated match gets a court when courts are configured,
-//   - the round-robin court assignment never co-locates two matches of the SAME
-//     round on the same court while another court is free (so same-round matches,
-//     which always have distinct participants, can run in parallel).
+//   - within a single time slot (matches sharing a ScheduledAt) the courts are
+//     distinct and no player is double-booked (G1), so the parallel matches in a
+//     slot can run safely. Note: matches of the same round-robin Round are
+//     deliberately NOT forced into one slot, the rest-aware scheduler spreads a
+//     player's fights out (mp-sjaz), which is what prevents back-to-back play.
 func TestLeagueAllocation_EdgeCases(t *testing.T) {
 	t.Run("single court keeps every match on that court", func(t *testing.T) {
 		matches := startLeague(t, "lg-1court", 0, []string{"A"}, names(5))
@@ -99,7 +103,7 @@ func TestLeagueAllocation_EdgeCases(t *testing.T) {
 			"4 players with 2 courts (== floor(N/2)) must be accepted")
 	})
 
-	t.Run("multi-court league uses every assigned court (no court idle)", func(t *testing.T) {
+	t.Run("multi-court league: every assigned court carries at least one match", func(t *testing.T) {
 		matches := startLeague(t, "lg-3court", 0, []string{"A", "B", "C"}, names(6))
 		require.Len(t, matches, 15)
 		used := map[string]int{}
@@ -130,12 +134,10 @@ func TestLeagueAllocation_EdgeCases(t *testing.T) {
 		assert.Len(t, used, 2, "team league must use both courts")
 	})
 
-	t.Run("same-round matches are never stacked on one court while another is free", func(t *testing.T) {
-		// For every roster/court combo, within a single round the matches are
-		// assigned to DISTINCT courts up to the court count. Same-round matches
-		// always have distinct participants, so distinct-court placement lets them
-		// run in parallel safely. When a round has more matches than courts, the
-		// surplus reuses courts (sequential), which is expected.
+	t.Run("matches sharing a time slot use distinct courts and distinct players", func(t *testing.T) {
+		// Within a single time slot (all matches at the same ScheduledAt), the
+		// rest-aware scheduler places at most one match per court and never the
+		// same player twice, so the parallel matches in that slot run safely (G1).
 		cases := []struct {
 			players, courts int
 		}{
@@ -145,24 +147,23 @@ func TestLeagueAllocation_EdgeCases(t *testing.T) {
 			courtLabels := []string{"A", "B", "C", "D"}[:tc.courts]
 			id := fmt.Sprintf("lg-round-%dp-%dc", tc.players, tc.courts)
 			matches := startLeague(t, id, 0, courtLabels, names(tc.players))
-			byRound := map[int][]string{} // round -> courts used (in order)
+			bySlot := map[string][]state.MatchResult{} // ScheduledAt -> matches in that slot
 			for _, m := range matches {
-				byRound[m.Round] = append(byRound[m.Round], m.Court)
+				bySlot[m.ScheduledAt] = append(bySlot[m.ScheduledAt], m)
 			}
-			for round, used := range byRound {
-				// The first min(len(used), courts) matches of a round must be on
-				// distinct courts (a round-robin cycle), so no court is double-booked
-				// within a round before every court has one match.
-				limit := tc.courts
-				if len(used) < limit {
-					limit = len(used)
-				}
-				seen := map[string]bool{}
-				for i := 0; i < limit; i++ {
-					assert.Falsef(t, seen[used[i]],
-						"%s round %d: court %q reused within the first %d matches of the round (would idle another court)",
-						id, round, used[i], limit)
-					seen[used[i]] = true
+			for slotTime, group := range bySlot {
+				courtSeen := map[string]bool{}
+				playerSeen := map[string]bool{}
+				for _, m := range group {
+					assert.Falsef(t, courtSeen[m.Court],
+						"%s slot %s: court %q used by two matches at once", id, slotTime, m.Court)
+					courtSeen[m.Court] = true
+					assert.Falsef(t, playerSeen[m.SideA],
+						"%s slot %s: player %q double-booked (G1)", id, slotTime, m.SideA)
+					assert.Falsef(t, playerSeen[m.SideB],
+						"%s slot %s: player %q double-booked (G1)", id, slotTime, m.SideB)
+					playerSeen[m.SideA] = true
+					playerSeen[m.SideB] = true
 				}
 			}
 		}

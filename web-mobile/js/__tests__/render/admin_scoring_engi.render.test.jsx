@@ -110,6 +110,29 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
   });
 });
 
+describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () => {
+  it('shows the pending-write banner (not a silent close) when a save is only queued, and Retry re-submits', async () => {
+    // onSubmit resolves { queued: true } instead of throwing: the terminal
+    // write was durably queued (offline / transient) but not confirmed. The
+    // editor must NOT behave as if saved; it shows a sticky banner and lets
+    // the operator retry.
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={onSubmit} />);
+
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    // Pending banner is shown and the commit control is still available (modal
+    // stayed open, not closed-as-saved).
+    await waitFor(() => expect(screen.getByText(/will keep retrying until it lands/i)).toBeTruthy());
+    expect(screen.queryByTestId('engi-submit')).not.toBeNull();
+
+    // Retry now re-invokes the same payload.
+    fireEvent.click(screen.getByText('Retry now'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed' });
+  });
+});
+
 describe('EngiScoreEditorModal correction footer (impeccable critique P1)', () => {
   it('hides the footer commit row while the reason prompt is open, then restores it on cancel', () => {
     const completedMatch = makeMatch({ status: 'completed', flagsA: 3, flagsB: 0 });

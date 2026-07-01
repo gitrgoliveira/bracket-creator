@@ -18,7 +18,7 @@
 // the kendo editor's PRE-MATCH pill, keyboard scoring shortcuts, and
 // SyncStatusPill: those concepts don't apply here.
 
-const { useState: useStateE } = React;
+const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import { ReasonPrompt, CORRECTION_PRESETS } from './admin_scoring_shared.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -70,6 +70,19 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
   const [correctionReason, setCorrectionReason] = useStateE("");
   const [showCorrectionPrompt, setShowCorrectionPrompt] = useStateE(false);
 
+  // F5 offline safety net (mirrors ScoreEditorModal): when a terminal write is
+  // only queued (offline / transient failure) or permanently rejected, show a
+  // sticky banner instead of silently closing as if saved. A dropped venue
+  // Wi-Fi must never lose an engi result.
+  const mountedRef = useRefE(true);
+  useEffectE(() => () => { mountedRef.current = false; }, []);
+  const [pendingWrite, setPendingWrite] = useStateE(false);
+  // Holds the last submitted payload so the banner's "Retry now" can re-invoke
+  // it. Null after a re-open hydration (the queue still auto-retries, but the
+  // payload can't be recovered from the serialized queue, so Retry hides).
+  const pendingPayloadRef = useRefE(null);
+  const [writeFailed, setWriteFailed] = useStateE(null); // { reason } | null
+
   const total = flagsA + flagsB;
   const isValidTotal = VALID_TOTALS.has(total);
   // winnerSide drives the per-side winner highlight below. A valid total is
@@ -105,13 +118,74 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
   const doSubmit = async (payload) => {
     setSubmitting(true);
     setErr("");
+    // Clear any prior pending/failed state when the operator explicitly retries.
+    if (mountedRef.current) { setPendingWrite(false); setWriteFailed(null); }
+    let res;
     try {
-      await onSubmit(payload);
+      res = await onSubmit(payload);
     } catch (e) {
-      setErr(e?.message || "Save failed");
-      setSubmitting(false);
+      if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
+      return;
     }
+    // F5: a terminal write that was only queued (offline / transient) resolves
+    // { queued: true } instead of throwing. Do NOT close as if saved: re-enable
+    // the controls, enter pending-write mode with the sticky banner, and
+    // remember the payload so "Retry now" can re-invoke it. On a clean success
+    // the parent closes the modal, so we intentionally leave `submitting` set
+    // (matches the prior behaviour and avoids a post-unmount state update).
+    if (res && res.queued && mountedRef.current) {
+      setSubmitting(false);
+      setPendingWrite(true);
+      pendingPayloadRef.current = payload;
+    }
+    return res;
   };
+
+  // F5 (re-open hydration): if a terminal write for THIS match is still queued
+  // (operator finished offline, closed the editor, reopened before the queue
+  // drained), surface the pending banner on mount. The payload can't be
+  // recovered from the serialized queue, so "Retry now" stays hidden; the
+  // queue keeps auto-retrying meanwhile.
+  useEffectE(() => {
+    if (!m.compId || !m.id) return;
+    if (window.API && typeof window.API.hasPendingTerminalWrite === "function"
+        && window.API.hasPendingTerminalWrite(m.compId, m.id)) {
+      setPendingWrite(true);
+    }
+  }, [m.compId, m.id]);
+
+  // F5: auto-clear the pending banner once the queue drains for this match.
+  // Guards the window globals so the modal never throws on mount in tests.
+  useEffectE(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeSyncStatus !== "function") return;
+    const unsub = window.subscribeSyncStatus((status) => {
+      if (!mountedRef.current) return;
+      const stillPending = (window.API && typeof window.API.hasPendingTerminalWrite === "function")
+        ? window.API.hasPendingTerminalWrite(m.compId, m.id)
+        : false;
+      if (status === "synced" && !stillPending) {
+        setPendingWrite(false);
+        pendingPayloadRef.current = null;
+      }
+    });
+    return unsub;
+  }, [m.compId, m.id]);
+
+  // F5: surface a PERMANENT terminal-write failure (non-retryable 4xx on a
+  // queued retry) as an explicit "not saved" state, else the write is silently
+  // dropped and the pending banner clears to look saved.
+  useEffectE(() => {
+    if (!m.compId || !m.id) return;
+    if (typeof window.subscribeTerminalWriteFailed !== "function") return;
+    const unsub = window.subscribeTerminalWriteFailed((info) => {
+      if (!mountedRef.current) return;
+      if (!info || info.compID !== m.compId || info.matchID !== m.id) return;
+      setWriteFailed({ reason: info.reason || `save rejected (${info.status || "error"})` });
+      setPendingWrite(false);
+    });
+    return unsub;
+  }, [m.compId, m.id]);
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -253,6 +327,28 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             }}
             onCancel={() => setShowCorrectionPrompt(false)}
           />
+        )}
+        {/* F5: PERMANENT-failure banner: a queued terminal write was rejected
+            (non-retryable) and dropped, so it never saved. Takes precedence
+            over the pending banner. Mirrors ScoreEditorModal. */}
+        {writeFailed && (
+          <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive">
+            <span>Not saved: {writeFailed.reason}. Re-enter the result and submit again.</span>
+            {pendingPayloadRef.current && (
+              <button type="button" className="btn btn--sm" disabled={submitting} onClick={() => doSubmit(pendingPayloadRef.current)}>Retry</button>
+            )}
+          </div>
+        )}
+        {/* F5: pending-write banner: a terminal submit was only queued (offline
+            / transient). The write is durable in localStorage and auto-retries;
+            the operator may still retry manually while we hold the payload. */}
+        {pendingWrite && !writeFailed && (
+          <div className="pending-write-banner" role="status" aria-live="polite">
+            <span>Not saved yet: will keep retrying until it lands.</span>
+            {pendingPayloadRef.current && (
+              <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingPayloadRef.current)}>Retry now</button>
+            )}
+          </div>
         )}
         {/* While the correction prompt is open it owns the only Cancel/commit
             row: hide the footer's own actions so the operator never sees two

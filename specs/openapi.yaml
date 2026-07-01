@@ -1836,6 +1836,10 @@ paths:
                           type: string
                         error:
                           type: string
+                          description: >
+                            Human-readable failure reason. Not a stable machine-readable
+                            code; callers needing to branch on error class should use the
+                            single-result PUT /score endpoint instead.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:

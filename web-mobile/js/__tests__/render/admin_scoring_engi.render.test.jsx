@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, fireEvent, screen } from '@testing-library/react';
+import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
 
@@ -78,5 +78,34 @@ describe('EngiScoreEditorModal orientation', () => {
     expect(screen.getByTestId('engi-side-shiro').className).toContain('engi-side--winner');
     expect(screen.getByTestId('engi-side-aka').className).not.toContain('engi-side--winner');
     expect(screen.getByTestId('engi-total').textContent).toContain('Shiro wins');
+  });
+});
+
+describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () => {
+  it('carries correctionReason on a retry after a failed first submit', async () => {
+    // First attempt (with the ReasonPrompt-supplied reason) fails; the
+    // operator clicks "Save correction" again without reopening the prompt.
+    // correctionReason must still be on the retry payload: handleSubmit's
+    // fallback branch used to build a bare {flagsA, flagsB, status} literal
+    // that silently dropped it once correctionReason was already in state.
+    const onSubmit = vi.fn()
+      .mockRejectedValueOnce(new Error('network error'))
+      .mockResolvedValueOnce(undefined);
+    const completedMatch = makeMatch({ status: 'completed', flagsA: 3, flagsB: 0 });
+    render(<EngiScoreEditorModal match={completedMatch} onClose={() => {}} onSubmit={onSubmit} />);
+
+    // First click on a completed match opens the ReasonPrompt, not a submit.
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Confirm'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenNthCalledWith(1, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
+
+    // Retry: correctionReason is already set in state, so this click skips
+    // the ReasonPrompt gate and goes straight to doSubmit.
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
   });
 });

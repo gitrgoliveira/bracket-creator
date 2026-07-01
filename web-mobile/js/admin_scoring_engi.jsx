@@ -119,7 +119,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
       setShowCorrectionPrompt(true);
       return;
     }
-    doSubmit({ flagsA, flagsB, status: "completed" });
+    // correctionReason persists in state once confirmed via ReasonPrompt, so
+    // a retry after a failed first attempt (operator clicks "Save correction"
+    // again without reopening the prompt) must still carry it: otherwise the
+    // retry silently drops the audit reason the operator already gave.
+    doSubmit({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
   };
 
   // Outline styling: danger when total is non-zero but invalid.

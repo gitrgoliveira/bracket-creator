@@ -653,7 +653,9 @@ func TestCourtCurrent_ThirdPlaceMatchShownAsCurrent(t *testing.T) {
 		Courts:   []string{"A"},
 		Naginata: true,
 	}))
-	// All regular rounds completed; only the bronze match is running.
+	// Semifinal completed; the final AND the bronze match are both running on
+	// court A (see the assertion below: the handler returns whichever it
+	// finds first, and either is an acceptable "current" match).
 	require.NoError(t, store.SaveBracket("nagi", &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "m-sf1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Court: "A", Winner: "Alice"}},

@@ -868,6 +868,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               )}
             </div>
           )}
+          {/* While the correction prompt is open it owns the only Cancel/commit
+              row: hide the footer's own nav+actions so the operator never sees
+              two Cancels and two commit buttons at the highest-stakes moment
+              (amending a recorded result). Mirrored in EngiScoreEditorModal. */}
+          {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting} title={prevMatch.sideA?.name + " vs " + prevMatch.sideB?.name}>← Prev</button>
@@ -903,6 +908,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting} title={nextMatch.sideA?.name + " vs " + nextMatch.sideB?.name}>Next →</button>
             ) : <span />}
           </div>
+          )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
           <ScoringShortcutHint />
         </div>

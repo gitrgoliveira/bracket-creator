@@ -324,8 +324,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
                     const bm = derivedBracket.thirdPlaceMatch;
+                    // Header identifies the lone bronze card; the card omits a
+                    // redundant per-card "3RD" badge and the extra top gap
+                    // detaches it from the bracket above.
                     return (
-                      <div className="bracket-bronze-section" style={{ marginTop: 16 }} data-testid="viewer-bronze-section">
+                      <div className="bracket-bronze-section" style={{ marginTop: 28 }} data-testid="viewer-bronze-section">
                         <div className="bracket-bronze-label">
                           3rd Place
                         </div>
@@ -335,7 +338,6 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          label="3RD"
                           onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize })}
                         />
                       </div>

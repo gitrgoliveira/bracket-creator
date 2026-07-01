@@ -4306,7 +4306,19 @@ button.pool-match-row {
   display: inline-block;
 }
 
+/* Filled pips carry the side's own colour (DESIGN.md §2: distinguish by
+   treatment, redundantly with hue). Aka pips are red, Shiro pips are navy,
+   so the primary "how many flags" glyph agrees with the side's tinted cell
+   instead of both reading navy. Falls back to --accent for an unscoped pip. */
 .engi-pip--filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.engi-pips--aka .engi-pip--filled {
+  background: var(--red);
+  border-color: var(--red);
+}
+.engi-pips--shiro .engi-pip--filled {
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -4317,9 +4329,11 @@ button.pool-match-row {
   gap: 8px;
 }
 
+/* 36px base honours DESIGN.md §6's shared-surface floor for laptop-mouse
+   operators; the coarse-pointer rule bumps this to 44px for tablets. */
 .engi-counter__btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;

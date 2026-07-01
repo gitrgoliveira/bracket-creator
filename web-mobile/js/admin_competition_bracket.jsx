@@ -310,8 +310,13 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const bm = bracket.thirdPlaceMatch;
               const isReady = hasBothSides(bm);
               const isHighlighted = selected?.matchId === bm.id;
+              // The "3rd Place Match" section header identifies the lone bronze
+              // card, so the card omits a per-card meta badge (no redundant
+              // "3RD" repeating the header). The extra top gap + hairline
+              // detaches it from the semifinal column so it can't be misread
+              // as a 4th semifinal.
               return (
-                <div className="bracket-bronze-section" style={{ marginTop: 16 }} data-testid="bracket-bronze-match">
+                <div className="bracket-bronze-section" style={{ marginTop: 28 }} data-testid="bracket-bronze-match">
                   <div className="bracket-bronze-label">
                     3rd Place Match
                   </div>
@@ -320,7 +325,6 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlighted={isHighlighted}
-                    label="3RD"
                     onClick={isReady ? () => select(bm, -1, 0) : undefined}
                   />
                 </div>

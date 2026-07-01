@@ -109,3 +109,26 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
     expect(onSubmit).toHaveBeenNthCalledWith(2, { flagsA: 3, flagsB: 0, status: 'completed', correctionReason: 'Scoring error' });
   });
 });
+
+describe('EngiScoreEditorModal correction footer (impeccable critique P1)', () => {
+  it('hides the footer commit row while the reason prompt is open, then restores it on cancel', () => {
+    const completedMatch = makeMatch({ status: 'completed', flagsA: 3, flagsB: 0 });
+    render(<EngiScoreEditorModal match={completedMatch} onClose={() => {}} onSubmit={() => {}} />);
+
+    // Footer's Save-correction button present before the prompt opens.
+    expect(screen.queryByTestId('engi-submit')).not.toBeNull();
+
+    // Opening the reason prompt must collapse the footer so the operator sees
+    // exactly one Cancel and one commit (the prompt's), never two of each at
+    // the highest-stakes moment (amending a recorded result).
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    expect(screen.queryByTestId('engi-submit')).toBeNull();
+    expect(screen.getByText('Confirm')).toBeTruthy();
+    // Exactly one Cancel visible (the prompt's), not the footer's too.
+    expect(screen.getAllByText('Cancel')).toHaveLength(1);
+
+    // Cancelling the prompt restores the footer commit row.
+    fireEvent.click(screen.getByText('Confirm').closest('form').querySelector('button[type="button"]'));
+    expect(screen.queryByTestId('engi-submit')).not.toBeNull();
+  });
+});

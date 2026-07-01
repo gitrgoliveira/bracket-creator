@@ -1346,6 +1346,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               onCancel={() => setShowCorrectionPrompt(false)}
             />
           )}
+          {/* While the correction prompt is open it owns the only Cancel/commit
+              row: hide the footer's own nav+actions so the operator never sees
+              two Cancels and two commit buttons at the highest-stakes moment
+              (amending a recorded result). Mirrored in Score/EngiScoreEditorModal. */}
+          {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={onPrev} disabled={submitting}>← Prev</button>
@@ -1379,6 +1384,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <button className="btn btn--sm score-nav__next" onClick={onNext} disabled={submitting}>Next →</button>
             ) : <span />}
           </div>
+          )}
           {/* Quiet, always-present keyboard-shortcut reminder. */}
           <ScoringShortcutHint />
         </div>

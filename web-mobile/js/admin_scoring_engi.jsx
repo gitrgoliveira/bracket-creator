@@ -254,19 +254,25 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             onCancel={() => setShowCorrectionPrompt(false)}
           />
         )}
-        <div className="score-nav__actions" style={{ marginLeft: "auto" }}>
-          {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            data-testid="engi-submit"
-            style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
-          >
-            {submitting ? "Saving…" : isComplete ? "Save correction" : "Save result"}
-          </button>
-        </div>
+        {/* While the correction prompt is open it owns the only Cancel/commit
+            row: hide the footer's own actions so the operator never sees two
+            Cancels and two commit buttons at the highest-stakes moment
+            (amending a recorded result). Mirrors ScoreEditorModal. */}
+        {!(isComplete && showCorrectionPrompt) && (
+          <div className="score-nav__actions" style={{ marginLeft: "auto" }}>
+            {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSubmit}
+              disabled={!canSubmit}
+              data-testid="engi-submit"
+              style={invalidOutline ? { outline: "2px solid var(--danger)" } : null}
+            >
+              {submitting ? "Saving…" : isComplete ? "Save correction" : "Save result"}
+            </button>
+          </div>
+        )}
       </div>
     </>
   );

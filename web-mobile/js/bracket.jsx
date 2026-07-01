@@ -201,7 +201,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD 
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, label }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum }) => {
   const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
   const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
   const running = match.status === "running";
@@ -235,10 +235,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       data-match-id={match.id}
       className={`bc-match bc-match--v${variant} ${running ? "bc-match--running" : ""} ${match.status === "completed" ? "bc-match--done" : ""} ${highlighted ? "bc-match--highlight" : ""} ${playerHighlight ? "bc-match--my-match" : ""}`}
       onClick={onClick}
-      aria-label={matchNum != null ? `Match ${matchNum}` : (label != null ? `${label} match` : `Match ${match.id}`)}
+      aria-label={matchNum != null ? `Match ${matchNum}` : `Match ${match.id}`}
     >
       <div className="bc-match-meta">
-        {label != null ? <span className="bc-match-num">{label}</span> : (matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null)}
+        {matchNum != null ? <span className="bc-match-num">M{matchNum}</span> : null}
         <span className="bc-court"><TermBC name="shiaijo">Shiaijo</TermBC> {match.court}</span>
         {match.scheduledAt ? <span className="bc-time">{match.scheduledAt}</span> : null}
         {running ? <span className="bc-running">● NOW</span> : null}

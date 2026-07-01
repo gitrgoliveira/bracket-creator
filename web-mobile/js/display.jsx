@@ -43,23 +43,20 @@ import {
 // hiding the layout on outage. app.jsx owns both values and feeds them down.
 function DisplayRoute({ tournament, competitions, connected = true, linkState = 'connected' }) {
     const useQuery = window.AppRouter?.useQuery;
-    const query = useQuery ? useQuery() : (() => {
-        if (typeof window === 'undefined') return {};
-        const s = window.location.search || '';
-        const out = {};
-        if (s.length < 2) return out;
-        // decodeURIComponent throws on malformed percent-encoding; fall back to
-        // the raw substring so a crafted ?court= cannot crash the display board.
-        const dec = (v) => { try { return decodeURIComponent(v); } catch (_e) { return v; } };
-        const trimmed = s.startsWith('?') ? s.slice(1) : s;
-        for (const pair of trimmed.split('&')) {
-            if (!pair) continue;
-            const eq = pair.indexOf('=');
-            if (eq === -1) out[dec(pair)] = '';
-            else out[dec(pair.slice(0, eq))] = dec(pair.slice(eq + 1));
-        }
-        return out;
-    })();
+    // Prefer the reactive useQuery hook (re-renders on popstate). If
+    // window.AppRouter hasn't been set yet (e.g. a component test that renders
+    // DisplayRoute without loading router.jsx as a script), fall back to a
+    // one-time parse via the SAME canonical AppRouter.parseSearch rather than a
+    // second hand-rolled copy of the query-string loop, which would otherwise
+    // drift from router.jsx's implementation over time. useQuery and
+    // parseSearch are set together on window.AppRouter (router.jsx), so if
+    // AppRouter is present at all, parseSearch is present too; only a fully
+    // absent AppRouter (or a non-browser context) degrades to {}.
+    const query = useQuery
+        ? useQuery()
+        : (typeof window !== 'undefined' && window.AppRouter?.parseSearch
+            ? window.AppRouter.parseSearch(window.location.search || '')
+            : {});
     const courtRaw = (query.court || 'A');
     const overlay = query.overlay === 'true' || query.overlay === '1';
     const position = query.position === 'top' ? 'top' : 'bottom';

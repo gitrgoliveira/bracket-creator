@@ -158,12 +158,9 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// assignment + per-court slot cursors used by the other single-pool
 		// paths. The runtime simultaneity gate (checkSimultaneousMatch)
 		// remains the defense-in-depth backstop at match start.
-		courtLabels := comp.Courts
-		if len(courtLabels) == 0 {
-			courtLabels = []string{""}
-		}
+		// scheduleLeagueSlots treats an empty court list as one unnamed court.
 		var slots []int
-		results, slots = scheduleLeagueSlots(results, len(players), courtLabels)
+		results, slots = scheduleLeagueSlots(results, comp.Courts)
 		results, _ = assignLeagueSlotTimes(results, slots, comp, tournament)
 	} else {
 		// For single-pool multi-court, distribute each round's matches across

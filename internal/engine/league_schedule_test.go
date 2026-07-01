@@ -100,11 +100,12 @@ func verifyG2(t *testing.T, ordered []state.MatchResult, slots []int) {
 		entries[i] = entry{s, i}
 	}
 	// Sort by slot asc, then by original index for determinism.
-	for i := 1; i < len(entries); i++ {
-		for j := i; j > 0 && entries[j].slot < entries[j-1].slot; j-- {
-			entries[j], entries[j-1] = entries[j-1], entries[j]
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].slot != entries[j].slot {
+			return entries[i].slot < entries[j].slot
 		}
-	}
+		return entries[i].idx < entries[j].idx
+	})
 
 	for _, e := range entries {
 		m := ordered[e.idx]
@@ -123,7 +124,7 @@ func verifyG2(t *testing.T, ordered []state.MatchResult, slots []int) {
 func TestScheduleLeagueSlots_CompletenessG1G2(t *testing.T) {
 	t.Parallel()
 
-	sizes := []int{5, 6, 7, 8, 10, 12, 16}
+	sizes := []int{2, 3, 5, 6, 7, 8, 10, 12, 16}
 	for _, n := range sizes {
 		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
 			t.Parallel()
@@ -131,7 +132,7 @@ func TestScheduleLeagueSlots_CompletenessG1G2(t *testing.T) {
 			courts := courtLabels(numCourts)
 			matches := buildLeagueMatches(n)
 
-			ordered, slots := scheduleLeagueSlots(matches, n, courts)
+			ordered, slots := scheduleLeagueSlots(matches, courts)
 
 			require.Len(t, slots, len(ordered), "slots and ordered must be same length")
 
@@ -149,7 +150,7 @@ func TestScheduleLeagueSlots_CompletenessG1G2(t *testing.T) {
 func TestScheduleLeagueSlots_WarningZone_StillG2(t *testing.T) {
 	t.Parallel()
 
-	sizes := []int{6, 8, 10, 12, 16}
+	sizes := []int{4, 6, 8, 10, 12, 16}
 	for _, n := range sizes {
 		t.Run(fmt.Sprintf("n=%d_courts=%d", n, n/2), func(t *testing.T) {
 			t.Parallel()
@@ -157,7 +158,7 @@ func TestScheduleLeagueSlots_WarningZone_StillG2(t *testing.T) {
 			courts := courtLabels(numCourts)
 			matches := buildLeagueMatches(n)
 
-			ordered, slots := scheduleLeagueSlots(matches, n, courts)
+			ordered, slots := scheduleLeagueSlots(matches, courts)
 
 			require.Len(t, slots, len(ordered), "slots and ordered must be same length")
 			verifyCompleteness(t, ordered, n)
@@ -175,13 +176,13 @@ func TestScheduleLeagueSlots_SingleCourt(t *testing.T) {
 	// With one court each slot holds one match, so ordering alone must space
 	// every player out: G1 is trivial and G2 (no back-to-back) still holds
 	// for all n via idle-slot insertion.
-	for _, n := range []int{4, 5, 6, 8} {
+	for _, n := range []int{3, 4, 5, 6, 8} {
 		t.Run(fmt.Sprintf("n=%d_singlecourt", n), func(t *testing.T) {
 			t.Parallel()
 			courts := []string{"A"}
 			matches := buildLeagueMatches(n)
 
-			ordered, slots := scheduleLeagueSlots(matches, n, courts)
+			ordered, slots := scheduleLeagueSlots(matches, courts)
 
 			require.Len(t, slots, len(ordered))
 			verifyCompleteness(t, ordered, n)
@@ -194,7 +195,7 @@ func TestScheduleLeagueSlots_SingleCourt(t *testing.T) {
 // --- Empty input ---
 
 func TestScheduleLeagueSlots_Empty(t *testing.T) {
-	ordered, slots := scheduleLeagueSlots(nil, 0, []string{"A"})
+	ordered, slots := scheduleLeagueSlots(nil, []string{"A"})
 	assert.Empty(t, ordered)
 	assert.Empty(t, slots)
 }
@@ -289,23 +290,32 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 
 	// Every case must satisfy G1 and G2: G2 is a hard invariant at any court
 	// count, so a 1-court league is included alongside the SuggestedMaxCourts
-	// cases. Court count only changes schedule length, not the guarantee.
+	// cases. Court count only changes schedule length, not the guarantee. The
+	// lunch case exercises the ceremony-block skip so a lunch break between two
+	// of a player's matches never reads as a false adjacency.
 	tests := []struct {
-		n      int
-		courts []string
+		n         int
+		courts    []string
+		startTime string
+		lunch     bool
 	}{
-		{n: 6, courts: courtLabels(SuggestedMaxCourts(6))},
-		{n: 8, courts: courtLabels(SuggestedMaxCourts(8))},
-		{n: 10, courts: courtLabels(SuggestedMaxCourts(10))},
-		{n: 6, courts: []string{"A"}}, // single court still gets G2 via idle slots
+		{n: 6, courts: courtLabels(SuggestedMaxCourts(6)), startTime: "09:00"},
+		{n: 8, courts: courtLabels(SuggestedMaxCourts(8)), startTime: "09:00"},
+		{n: 10, courts: courtLabels(SuggestedMaxCourts(10)), startTime: "09:00"},
+		{n: 6, courts: []string{"A"}, startTime: "09:00"},              // single court still gets G2 via idle slots
+		{n: 8, courts: []string{"A"}, startTime: "11:50", lunch: true}, // slots straddle the noon lunch block
 	}
 
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("n=%d_courts=%d", tt.n, len(tt.courts)), func(t *testing.T) {
+		t.Run(fmt.Sprintf("n=%d_courts=%d_lunch=%v", tt.n, len(tt.courts), tt.lunch), func(t *testing.T) {
 			t.Parallel()
 
 			eng, store, _ := setupTestEngine(t)
-			compID := fmt.Sprintf("league-g1g2-%d-%d", tt.n, len(tt.courts))
+			compID := fmt.Sprintf("league-g1g2-%d-%d-%v", tt.n, len(tt.courts), tt.lunch)
+
+			if tt.lunch {
+				require.NoError(t, store.SaveTournament(&state.Tournament{LunchBlock: "1h"}))
+			}
 
 			comp := &state.Competition{
 				ID:           compID,
@@ -317,12 +327,12 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 				PoolWinners:  1,
 				RoundRobin:   true,
 				Courts:       tt.courts,
-				StartTime:    "09:00",
+				StartTime:    tt.startTime,
 				Status:       "setup",
 			}
 			require.NoError(t, store.SaveCompetition(comp))
 
-			saveTestParticipants(t, store, compID, makeNames(tt.n))
+			saveTestParticipants(t, store, compID, names(tt.n))
 
 			require.NoError(t, eng.StartCompetition(compID))
 
@@ -348,10 +358,11 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 				}
 			}
 
-			// G2: no player has two matches exactly one slot apart. Recompute the
-			// slot duration exactly as generatePools did (load + apply defaults),
-			// so an idle slot between two matches reads as a 2-slot gap, not a
-			// false adjacency.
+			// G2: no player has two matches closer than two slots apart. Recompute
+			// the slot duration exactly as generatePools did (load + apply
+			// defaults). A correct schedule keeps every player's matches at least
+			// two slots (2*perMatch) apart; a lunch skip only widens the gap, so
+			// the >= check stays correct across the lunch boundary.
 			loadedComp, err := store.LoadCompetition(compID)
 			require.NoError(t, err)
 			tournament, err := store.LoadTournament()
@@ -371,19 +382,10 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			for player, mins := range byPlayer {
 				sort.Ints(mins)
 				for i := 1; i < len(mins); i++ {
-					assert.NotEqualf(t, perMatch, mins[i]-mins[i-1],
+					assert.GreaterOrEqualf(t, mins[i]-mins[i-1], 2*perMatch,
 						"G2 violation: player %q has back-to-back matches %d minutes apart", player, mins[i]-mins[i-1])
 				}
 			}
 		})
 	}
-}
-
-// makeNames returns n player names "P0".."P{n-1}".
-func makeNames(n int) []string {
-	names := make([]string, n)
-	for i := range n {
-		names[i] = fmt.Sprintf("P%d", i)
-	}
-	return names
 }

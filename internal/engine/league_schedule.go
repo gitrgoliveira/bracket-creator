@@ -11,8 +11,8 @@ import (
 // spreading every player's matches so they never fight two slots in a row.
 // Returns the input matches with Court set, plus a parallel slice giving the
 // slot index of each returned match (result[i] is in slot slots[i]). Players
-// are identified by SideA/SideB (names). numPlayers is the league size (n);
-// courts is the ordered court-label list (len>=1).
+// are identified by SideA/SideB (names). courts is the ordered court-label
+// list; an empty list is treated as a single unnamed court.
 //
 // Guarantees (see mp-sjaz):
 //   - G1 (no simultaneity): within any single slot, no player appears in two matches.
@@ -27,7 +27,7 @@ import (
 // i.e. more idle/rest time), never correctness. A full round-robin cannot pack
 // every player's matches non-adjacently into the minimum slot count, so idle
 // slots are the deliberate price of the rest guarantee.
-func scheduleLeagueSlots(matches []state.MatchResult, numPlayers int, courts []string) (ordered []state.MatchResult, slots []int) {
+func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered []state.MatchResult, slots []int) {
 	if len(courts) == 0 {
 		courts = []string{""}
 	}
@@ -36,7 +36,7 @@ func scheduleLeagueSlots(matches []state.MatchResult, numPlayers int, courts []s
 	// sentinel: a player not yet scheduled has lastSlot = math.MinInt/2 so
 	// (lastSlot[x] == slot-1) is false for any non-negative slot.
 	const absent = -(1 << 30)
-	lastSlot := make(map[string]int, numPlayers)
+	lastSlot := make(map[string]int)
 	getLastSlot := func(player string) int {
 		if v, ok := lastSlot[player]; ok {
 			return v
@@ -136,15 +136,7 @@ func assignLeagueSlotTimes(matches []state.MatchResult, slots []int, comp *state
 		return matches, time.Time{}
 	}
 
-	dayStart := parseClockHHMM(comp.StartTime)
-	openingMin := 0
-	lunchMin := 0
-	var lunchStart time.Time
-	if tournament != nil {
-		openingMin = parseDurationMinutes(tournament.OpeningBlock)
-		lunchMin = parseDurationMinutes(tournament.LunchBlock)
-		lunchStart = parseClockHHMM(defaultLunchStartClock)
-	}
+	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
 
 	if len(matches) == 0 {
 		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)

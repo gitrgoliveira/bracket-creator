@@ -23,7 +23,7 @@ The single binary bundles every subcommand, including `bracket-creator serve` (w
     go install github.com/gitrgoliveira/bracket-creator@latest
     ```
 
-    This builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Homebrew or a release binary if you need the web UI.
+    Note that `go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Homebrew or a release binary if you need the web UI.
 
 === "Released tar file"
 

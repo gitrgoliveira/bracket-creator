@@ -407,6 +407,18 @@ function App() {
   // Derived from sseConnected + the bridge's last-broadcast recency in a tick.
   // The boolean sseConnected is kept for LobbyDisplay (unchanged scope).
   const [linkState, setLinkState] = useS('connected');
+  // Shared by the display-consumer effect (on mount/court-change and its 5 s
+  // ticker) and the sseConnected-sync effect below, all of which re-derive
+  // linkState from the same shape. Stable identity (no deps): freshnessMs is
+  // a module import, getLastBroadcastAt/setLinkState never change.
+  const refreshLinkState = useC((connected) => {
+    setLinkState(deriveLinkState({
+      sseConnected: connected,
+      lastBroadcastAt: getLastBroadcastAt(),
+      now: Date.now(),
+      freshnessMs,
+    }));
+  }, []);
   // mp-9ukk Phase 2: the display court parsed from ?court=. Tracked as state
   // (updated on popstate) so the display consumer effect re-runs and re-scopes
   // the bridge when the court changes without a full reload.
@@ -621,12 +633,7 @@ function App() {
     // ticker below) so switching ?court= does not keep showing the PREVIOUS
     // court's dot state. This reads the recency clock setDisplayCourt just
     // reset above, so a fresh court starts from its own (blank) state.
-    setLinkState(deriveLinkState({
-      sseConnected: sseConnectedRef.current,
-      lastBroadcastAt: getLastBroadcastAt(),
-      now: Date.now(),
-      freshnessMs,
-    }));
+    refreshLinkState(sseConnectedRef.current);
 
     // Use the module-level singleton (shared with api_client's publisher in
     // the same tab) so only one BroadcastChannel is opened per tab.
@@ -670,12 +677,7 @@ function App() {
     // is intentionally left OUT of this effect's deps so re-opening the bridge
     // does not drop in-flight snapshot replies.
     const ticker = setInterval(() => {
-      setLinkState(deriveLinkState({
-        sseConnected: sseConnectedRef.current,
-        lastBroadcastAt: getLastBroadcastAt(),
-        now: Date.now(),
-        freshnessMs,
-      }));
+      refreshLinkState(sseConnectedRef.current);
     }, 5000);
 
     return () => {
@@ -701,12 +703,7 @@ function App() {
   useE(() => {
     sseConnectedRef.current = sseConnected;
     if (mode !== 'display') return;
-    setLinkState(deriveLinkState({
-      sseConnected,
-      lastBroadcastAt: getLastBroadcastAt(),
-      now: Date.now(),
-      freshnessMs,
-    }));
+    refreshLinkState(sseConnected);
   }, [sseConnected, mode]);
 
   // Keep compsRef in sync with the latest competitions so the snapshot

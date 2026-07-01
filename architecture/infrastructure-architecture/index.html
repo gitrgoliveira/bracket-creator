@@ -1,0 +1,1827 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://gitrgoliveira.github.io/bracket-creator/architecture/infrastructure-architecture/">
+      
+      
+        <link rel="prev" href="../network-architecture/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Infrastructure - bracket-creator</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Atkinson+Hyperlegible:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Atkinson Hyperlegible";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#infrastructure-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="bracket-creator" class="md-header__button md-logo" aria-label="bracket-creator" data-md-component="logo">
+      
+  <img src="../../assets/images/logo-crest-light.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            bracket-creator
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Infrastructure
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9 2c-1.05 0-2.05.16-3 .46 4.06 1.27 7 5.04 7 9.54s-2.94 8.27-7 9.54c.95.3 1.95.46 3 .46a10 10 0 0 0 10-10A10 10 0 0 0 9 2"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    gitrgoliveira/bracket-creator
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../user-guide/getting-started/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  User guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../dev-guide/code_of_conduct/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Developer guide
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="bracket-creator" class="md-nav__button md-logo" aria-label="bracket-creator" data-md-component="logo">
+      
+  <img src="../../assets/images/logo-crest-light.png" alt="logo">
+
+    </a>
+    bracket-creator
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/gitrgoliveira/bracket-creator" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    gitrgoliveira/bracket-creator
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/input-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Input format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/web-ui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/mobile-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mobile / live tournament app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/hosting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Host the live app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Commands
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Commands
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/create-pools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    create-pools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/create-playoffs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    create-playoffs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/serve/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    serve
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/mobile-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    mobile-app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/print/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    print
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/hash-password/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    hash-password
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/commands/version/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    version
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dev-guide/code_of_conduct/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Code of conduct
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../dev-guide/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../software-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Software
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network-architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-build-packaging-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build &amp; packaging pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-runtime-composition-container-proxy-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Runtime composition (container + proxy + disk)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-deployment-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Deployment options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Deployment options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cloud-topology-gcp-always-free-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud topology (GCP Always-Free example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#venue-connectivity-a-four-court-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Venue connectivity: a four-court event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the court scoreboard alive on the same machine (HDMI)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-persistence-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Persistence model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-capacity-scaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Capacity &amp; scaling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-configuration-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Configuration (environment variables)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-operational-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Operational properties
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-build-packaging-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build &amp; packaging pipeline
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-runtime-composition-container-proxy-disk" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Runtime composition (container + proxy + disk)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-deployment-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Deployment options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Deployment options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cloud-topology-gcp-always-free-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud topology (GCP Always-Free example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#venue-connectivity-a-four-court-event" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Venue connectivity: a four-court event
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keep the court scoreboard alive on the same machine (HDMI)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-persistence-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Persistence model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-capacity-scaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Capacity &amp; scaling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-configuration-environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Configuration (environment variables)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-operational-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Operational properties
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="infrastructure-architecture">Infrastructure architecture</h1>
+<p>How bracket-creator is built, packaged, deployed, and persisted. The whole product is a
+<strong>single self-contained Go binary</strong> (web assets embedded) running behind a TLS proxy, with
+tournament state on a plain disk; deployable from a laptop to a free-tier cloud VM.</p>
+<blockquote>
+<p>Related: <a href="../software-architecture/">Software architecture</a> · <a href="../network-architecture/">Network architecture</a></p>
+</blockquote>
+<h2 id="1-build-packaging-pipeline">1. Build &amp; packaging pipeline</h2>
+<pre class="mermaid"><code>flowchart LR
+    subgraph src["Source"]
+        go["Go packages (cmd/, internal/)"]
+        jsx["web-mobile/js/*.jsx (Preact)"]
+        web["web/ (Excel form)"]
+    end
+    subgraph build["make go/build"]
+        gen["go generate (glossary)"]
+        esbuild["esbuild → web-mobile/dist/*.js"]
+        embed["//go:embed web/* web-mobile/{index,css,dist,vendor}"]
+        gobuild["go build → bin/bracket-creator"]
+    end
+    img["Container image&lt;br/&gt;ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest&lt;br/&gt;(+ LibreOffice for PDF)"]
+
+    jsx --&gt; esbuild --&gt; embed
+    web --&gt; embed
+    gen --&gt; gobuild
+    embed --&gt; gobuild
+    go --&gt; gobuild
+    gobuild --&gt; img</code></pre>
+<ul>
+<li><code>dist/</code> and <code>vendor/</code> are build artifacts (gitignored except <code>keep</code> placeholders). esbuild
+  regenerates <code>dist/</code> on every build, then <code>go:embed</code> bakes the served assets into the binary.</li>
+<li>The published image adds LibreOffice so the <code>print</code> PDF exports work in a container.</li>
+<li><strong>One artifact, no runtime asset directory</strong>: the binary serves everything from its embedded FS.</li>
+</ul>
+<h2 id="2-runtime-composition-container-proxy-disk">2. Runtime composition (container + proxy + disk)</h2>
+<pre class="mermaid"><code>flowchart TB
+    subgraph hostbox["Host (VM or any Docker host)"]
+        subgraph caddyc["caddy:2-alpine"]
+            caddy["Caddy&lt;br/&gt;:80 / :443 · auto-HTTPS"]
+        end
+        subgraph appc["app container (uid 65534, non-root)"]
+            app["bracket-creator mobile-app :8080"]
+        end
+        vol[("./tournament-data → /tournament-data&lt;br/&gt;(host volume, owned by 65534)")]
+        cvol[("caddy_data / caddy_config&lt;br/&gt;(certs)")]
+    end
+    inet["Internet :443/:80"] --&gt; caddy
+    caddy --&gt;|reverse proxy| app
+    app --&gt; vol
+    caddy --&gt; cvol</code></pre>
+<ul>
+<li>App runs as <strong>non-root (uid 65534)</strong>; the data volume must be owned by that uid or the app
+  refuses to start. App port 8080 is <code>expose</code>d to the proxy only, never published to the host.</li>
+<li><code>restart: unless-stopped</code> (compose) / auto-restart (cloud) brings the app back after reboots.</li>
+</ul>
+<h2 id="3-deployment-options">3. Deployment options</h2>
+<pre class="mermaid"><code>flowchart TD
+    bin["bin/bracket-creator (single binary)"]
+    bin --&gt; bare["Bare: run directly&lt;br/&gt;PORT=8080 ./bracket-creator mobile-app&lt;br/&gt;(put any TLS proxy in front)"]
+    bin --&gt; compose["Docker Compose (deploy/docker/)&lt;br/&gt;app + Caddy, provider-agnostic"]
+    bin --&gt; gcp["GCP Always Free (deploy/gcp/)&lt;br/&gt;Terraform: e2-micro + Caddy"]
+    bin --&gt; oracle["Oracle Always Free (deploy/oracle/)&lt;br/&gt;Terraform: larger free tier (1000+ viewers)"]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>What it is</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Bare binary</strong></td>
+<td>run the binary, bring your own TLS proxy</td>
+<td>local / dev / custom hosts</td>
+</tr>
+<tr>
+<td><strong>Docker Compose</strong> (<code>deploy/docker/</code>)</td>
+<td><code>app</code> + <code>caddy</code> services, host volume for data</td>
+<td>self-managed VMs / on-prem</td>
+</tr>
+<tr>
+<td><strong>GCP Always Free</strong> (<code>deploy/gcp/</code>)</td>
+<td>Terraform; <code>e2-micro</code> + firewall + persistent disk + Caddy auto-HTTPS</td>
+<td>club / regional events (~≤50–300 viewers)</td>
+</tr>
+<tr>
+<td><strong>Oracle Always Free</strong> (<code>deploy/oracle/</code>)</td>
+<td>Terraform; larger free allowance</td>
+<td>large events (1000+ concurrent viewers)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="cloud-topology-gcp-always-free-example">Cloud topology (GCP Always-Free example)</h3>
+<pre class="mermaid"><code>flowchart TB
+    dns["DNS A record → instance IP"] --&gt; fw
+    subgraph gcpproj["GCP project (free regions only: us-west1/central1/east1)"]
+        fw["Firewall: allow 80, 443, 22"]
+        subgraph vm["e2-micro (shared vCPU, 1 GB RAM, 24/7 free)"]
+            caddy["Caddy :443 (Let's Encrypt)"]
+            app["app container :8080"]
+        end
+        pd[("30 GB boot disk (free-tier cap)&lt;br/&gt;OS + Docker + image + /opt/tournament-data")]
+    end
+    fw --&gt; caddy --&gt; app --&gt; pd</code></pre>
+<p>Terraform provisions the instance, network, and firewall, then installs Docker, prepares the
+data dir, writes the app + Caddy config, and starts the app. Reachable over HTTPS within minutes
+of <code>terraform apply</code>. <code>terraform destroy</code> removes everything (run it after the event).</p>
+<h3 id="venue-connectivity-a-four-court-event">Venue connectivity: a four-court event</h3>
+<p>The cloud and host setup is only half the picture. On the venue floor, every operator console,
+display screen, and spectator phone is a <strong>browser</strong> reaching that one app over the network.
+A typical four-court (shiaijo A–D) layout:</p>
+<pre class="mermaid"><code>flowchart TB
+    subgraph floor["Venue floor (4 courts)"]
+        subgraph cA["Court A"]
+            opA["Operator console&lt;br/&gt;tablet / laptop (admin)"]
+            dA["Display screen&lt;br/&gt;scoreboard / bracket"]
+        end
+        subgraph cB["Court B"]
+            opB["Operator console"]
+            dB["Display screen"]
+        end
+        subgraph cC["Court C"]
+            opC["Operator console"]
+            dC["Display screen"]
+        end
+        subgraph cD["Court D"]
+            opD["Operator console"]
+            dD["Display screen"]
+        end
+        spec["Spectator phones&lt;br/&gt;public viewer"]
+    end
+
+    net["Venue network&lt;br/&gt;router + Wi-Fi AP(s)&lt;br/&gt;wire operators where possible,&lt;br/&gt;dedicated AP for operators"]
+
+    opA &amp; opB &amp; opC &amp; opD --&gt; net
+    dA &amp; dB &amp; dC &amp; dD --&gt; net
+    spec --&gt; net
+
+    net --&gt; where{"Where does the app run?"}
+    where --&gt;|cloud| up["Internet uplink"] --&gt; cloud["Caddy + app (cloud VM)"]
+    where --&gt;|on-prem| local["Local host on the LAN&lt;br/&gt;no internet needed · runs mobile-app"]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Device</th>
+<th>What it runs</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Operator console (1 per court)</td>
+<td>admin scoring SPA</td>
+<td>tablet/desktop surface; authenticates with the tournament password; scores its own shiaijo</td>
+</tr>
+<tr>
+<td>Display screen (1 per court, optional)</td>
+<td>public display / scoreboard view</td>
+<td>a browser at a display URL; read-only, no auth. <strong>Preferred: drive it from the operator console's own machine</strong> via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (see <a href="#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi">Keep the court scoreboard alive on the same machine</a> below). A standalone smart-TV browser or separate mini-PC also works but loses that offline path</td>
+</tr>
+<tr>
+<td>Spectator phones</td>
+<td>public viewer (mobile-first)</td>
+<td>can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Per-client load.</strong> Every console, display, and phone holds <strong>one SSE stream</strong> plus its REST
+calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
+clients, comfortably within <code>SSE_MAX_CLIENTS</code>, but every live update fans out to all of them
+(see <a href="#5-capacity-scaling">Capacity &amp; scaling</a>).</p>
+<p><strong>Two venue patterns:</strong></p>
+<ul>
+<li><strong>Cloud-hosted</strong> (the cloud-hosted topology): venue devices reach the cloud app over the venue's internet
+  uplink; spectators can use cellular and skip venue Wi-Fi entirely. Needs a working uplink for
+  the operators and displays.</li>
+<li><strong>On-prem / local</strong>: run the single <code>mobile-app</code> binary on a laptop or mini-PC <strong>on the venue
+  LAN</strong>. Operators and displays hit it locally, so <strong>scoring keeps working with no internet at
+  all</strong>. Put a local TLS proxy in front for secure-context features, or serve plain HTTP on the LAN.</li>
+</ul>
+<p><strong>The network is the real fix.</strong> Client resilience (offline write queue, SSE resync, silence
+watchdog) keeps the app usable across blips. For a smooth event, <strong>wire the operator consoles</strong>
+where you can, put operators on a <strong>dedicated AP</strong> separate from spectator guest Wi-Fi, prefer
+the <strong>on-prem</strong> pattern when the venue's internet is unreliable, and <strong>drive each court's display
+from the operator's own machine over HDMI</strong> so the scoreboard keeps moving even when the network
+does not (next section).</p>
+<h3 id="keep-the-court-scoreboard-alive-on-the-same-machine-hdmi">Keep the court scoreboard alive on the same machine (HDMI)</h3>
+<p>Each court's display screen can be rendered two ways, and the choice decides whether the
+scoreboard freezes during a Wi-Fi outage:</p>
+<ul>
+<li><strong>Same machine as the operator console (recommended).</strong> Connect a TV or monitor to the
+  operator's laptop or mini-PC with an <strong>HDMI cable</strong>, extend the desktop, and open the court's
+  display URL in a second browser window on that same machine. The operator console and the
+  display board are then two tabs in the same browser on the same computer, so they share a
+  private same-origin channel: every score the operator records reaches the board <strong>directly,
+  on the machine, with no network hop</strong>. If the venue Wi-Fi drops mid-match, that court's
+  scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
+  open. The board shows a small amber dot while it is running on this local feed (see
+  <a href="../../user-guide/mobile-app/#scoreboards-and-court-displays">the scoreboard status dot</a>).</li>
+<li><strong>Separate device (a smart-TV browser, or the display on its own mini-PC).</strong> Simpler cabling,
+  but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
+  returns (the board then shows a red dot).</li>
+</ul>
+<pre class="mermaid"><code>flowchart LR
+    subgraph machine["One court machine (operator's laptop / mini-PC)"]
+        op["Operator console tab&lt;br/&gt;(admin scoring)"]
+        disp["Display board tab&lt;br/&gt;(scoreboard / bracket)"]
+        op -. same-origin channel&lt;br/&gt;(no network) .-&gt; disp
+    end
+    disp == HDMI cable ==&gt; tv["Court TV / monitor"]
+    op --&gt;|writes, queued + synced&lt;br/&gt;when the link returns| net["Venue network / app server"]</code></pre>
+<p>This local hub needs no internet, no secure context, and no extra software, and it works in
+every topology (cloud-hosted, on-prem, or bare-IP HTTP). It <strong>complements</strong> the network fixes
+above rather than replacing them: the operator's writes are still queued locally and synced to
+the server once the link returns, so the authoritative record stays correct. It is per machine
+and per court. Reloading the <strong>display</strong> tab during an outage is fine: it cold-starts from the
+operator tab's snapshot over the same channel, as long as an operator tab is still open on that
+machine to answer (it only stays blank if none is). The genuine gap is reloading the <strong>operator</strong>
+tab itself mid-outage, since it holds the court's working data while offline and would have
+nothing to fetch from the down server.</p>
+<h2 id="4-persistence-model">4. Persistence model</h2>
+<pre class="mermaid"><code>flowchart LR
+    app["mobile-app"] --&gt;|durable write| files
+    subgraph files["tournament-data/ (plain files on a persistent disk)"]
+        t["tournament.md (YAML front-matter)"]
+        c["competitions/&amp;lt;id&amp;gt;/config.md"]
+        p["competitions/&amp;lt;id&amp;gt;/participants.csv · seeds.csv"]
+        wal["WAL (crash recovery, replayed on startup)"]
+    end</code></pre>
+<ul>
+<li><strong>No database.</strong> State is human-readable Markdown + CSV on disk. Multi-file changes are made
+  durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.</li>
+<li>Backups are trivial: snapshot the disk or copy <code>tournament-data/</code> elsewhere.</li>
+<li><strong>Disk sizing is not about data volume.</strong> Tournament state is tiny (KB–MB). The cloud disks
+  (30 GB on GCP, 50 GB on Oracle) are the free-tier <strong>boot-disk</strong> allowances (they hold the OS,
+  Docker, and the app image, with <code>tournament-data/</code> alongside). The module uses the free
+  cap rather than provisioning a separate data disk.</li>
+</ul>
+<h2 id="5-capacity-scaling">5. Capacity &amp; scaling</h2>
+<p>Live updates fan out to every viewer, so <strong>egress is the limit</strong>, not CPU/RAM.</p>
+<pre class="mermaid"><code>flowchart LR
+    a["≤ ~50 viewers"] --&gt; g1["GCP free tier: comfortable"]
+    b["~100–300 viewers"] --&gt; g2["GCP free tier: watch egress (1 GB/mo)"]
+    c["1000+ viewers"] --&gt; o["Oracle deployment"]</code></pre>
+<p>Set a <strong>billing budget alert</strong> (for example, $1) on cloud deployments so you're warned if usage ever
+exceeds the free allowance. <code>SSE_MAX_CLIENTS</code> bounds fan-out cost (default 5000; ~4–10 KB
+resident per client).</p>
+<h2 id="6-configuration-environment-variables">6. Configuration (environment variables)</h2>
+<pre class="mermaid"><code>flowchart TB
+    env["env / flags"] --&gt; app["mobile-app startup"]</code></pre>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TOURNAMENT_DATA_DIR</code></td>
+<td><code>-f/--folder</code></td>
+<td><code>./tournament-data</code></td>
+<td>where state is stored</td>
+</tr>
+<tr>
+<td><code>PORT</code></td>
+<td><code>-p/--port</code></td>
+<td>8080</td>
+<td>listen port</td>
+</tr>
+<tr>
+<td><code>BIND_ADDRESS</code></td>
+<td><code>-b/--bind</code></td>
+<td>localhost</td>
+<td>listen address</td>
+</tr>
+<tr>
+<td><code>LOCK_PASSWORD</code></td>
+<td><code>--lock-password</code></td>
+<td>false</td>
+<td>enable locked (bcrypt) auth; disables reset endpoint</td>
+</tr>
+<tr>
+<td><code>TOURNAMENT_PASSWORD_HASH</code></td>
+<td>(none)</td>
+<td>(none)</td>
+<td>bcrypt hash for locked mode (root-owned, never in the image)</td>
+</tr>
+<tr>
+<td><code>SSE_MAX_CLIENTS</code></td>
+<td>(none)</td>
+<td>5000</td>
+<td>SSE subscriber cap</td>
+</tr>
+<tr>
+<td><code>ENABLE_TOURNAMENT_SCHEDULE</code></td>
+<td>(none)</td>
+<td>off</td>
+<td>feature flag for the schedule UI</td>
+</tr>
+</tbody>
+</table>
+<p>Generate the bcrypt hash with <code>bracket-creator hash-password</code>. In cloud deployments the secrets
+are written to a protected, root-owned file on the instance, never baked into the container image.</p>
+<h2 id="7-operational-properties">7. Operational properties</h2>
+<ul>
+<li><strong>Stateless app, stateful disk</strong>: the container can be recreated freely. Only the data volume
+  matters. Auto-restart + a persistent disk = self-healing after reboots.</li>
+<li><strong>Zero-dependency runtime</strong>: no DB, no cache, no message broker. Only the binary, a TLS proxy,
+  and a disk.</li>
+<li><strong>Graceful shutdown</strong> (30s): lets in-flight writes finish and SSE goroutines exit cleanly before
+  a container restart.</li>
+<li><strong>Teardown is one command</strong> (<code>terraform destroy</code>), so no stray paid resources linger.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.indexes", "navigation.sections", "navigation.instant", "navigation.tabs", "navigation.tabs.sticky", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js"></script>
+      
+        <script src="../../assets/javascripts/mermaid-init.js"></script>
+      
+    
+  </body>
+</html>

@@ -335,7 +335,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
-                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: -1, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize })}
+                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize })}
                         />
                       </div>
                     );

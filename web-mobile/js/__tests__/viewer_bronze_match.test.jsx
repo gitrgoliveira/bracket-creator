@@ -229,4 +229,41 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     const text = collectText(tree);
     expect(text).not.toContain('3rd Place');
   });
+
+  // mp-gy6g review fix: the bronze card's onClick used to stamp roundIndex:
+  // -1, but resolveRoundIndex (admin_helpers.jsx) treats any negative
+  // roundIndex as absent and falls back to 0, mis-grouping the bronze match
+  // into round 0 for round-indexed consumers (team lineup fetch, displays,
+  // queue grouping). It must match compMatches' convention of "one past the
+  // final" (rounds.length) instead.
+  it('stamps the bronze match roundIndex as rounds.length (one past the final), not -1', () => {
+    const bracket = mkBracket(true);
+    const tree = runtime.mount(ViewerCompetition, {
+      tournament: { competitions: [] },
+      competition: mkComp(),
+      pools: [],
+      poolMatches: [],
+      standings: [],
+      bracket,
+      onBack: () => {},
+      tweaks: {},
+      activeTab: 'bracket',
+      onTabChange: () => {},
+    });
+
+    // Find the raw MatchCard vnode for the bronze match (before the stub
+    // executes) so its onClick prop is available unmodified.
+    const cardVnode = findAll(tree, n => n && n.type === global.window.MatchCard)[0];
+    expect(cardVnode).toBeTruthy();
+    cardVnode.props.onClick();
+
+    // The click sets selectedMatch, which mounts MatchViewerModal with the
+    // clicked match as a prop. Find it by name (real import, not stubbed)
+    // and read the roundIndex without invoking the component.
+    const updated = runtime.currentTree();
+    const modalVnode = findAll(updated, n => n && typeof n.type === 'function' && n.type.name === 'MatchViewerModal')[0];
+    expect(modalVnode).toBeTruthy();
+    expect(modalVnode.props.match.roundIndex).toBe(bracket.rounds.length);
+    expect(modalVnode.props.match.roundIndex).not.toBe(-1);
+  });
 });

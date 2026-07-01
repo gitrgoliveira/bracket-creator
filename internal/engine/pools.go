@@ -139,28 +139,6 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// For single-pool multi-court, distribute each round's matches across
-	// courts so that simultaneous matches never share a participant.
-	// When a round has more matches than courts (e.g. 6 players / 2
-	// courts → 3 matches per round), the extra match is queued on the
-	// same court and runs sequentially; the runtime simultaneity gate
-	// (checkSimultaneousMatch) prevents double-booking at match start.
-	if len(pools) == 1 && len(comp.Courts) > 1 {
-		sort.SliceStable(results, func(i, j int) bool {
-			return results[i].Round < results[j].Round
-		})
-		roundStart := 0
-		currentRound := -1
-		for i := range results {
-			if results[i].Round != currentRound {
-				currentRound = results[i].Round
-				roundStart = 0
-			}
-			results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
-			roundStart++
-		}
-	}
-
 	// Per-court slot assignment (T150) + ceremony-block skipping
 	// (T151). Loads the tournament-level tuning (multiplier,
 	// opening / lunch blocks) so a missing tournament.md falls back
@@ -172,7 +150,45 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	}
 	state.ApplyTournamentDefaults(tournament)
 	state.ApplyCompetitionDefaults(comp)
-	results, _ = assignPoolMatchSlots(results, comp, tournament)
+
+	if comp.Format == state.CompFormatLeague {
+		// League scheduling (mp-sjaz): spread every player's matches so
+		// nobody fights two slots in a row, and keep all courts in a slot
+		// strictly time-aligned. This replaces the round-position court
+		// assignment + per-court slot cursors used by the other single-pool
+		// paths. The runtime simultaneity gate (checkSimultaneousMatch)
+		// remains the defense-in-depth backstop at match start.
+		courtLabels := comp.Courts
+		if len(courtLabels) == 0 {
+			courtLabels = []string{""}
+		}
+		var slots []int
+		results, slots = scheduleLeagueSlots(results, len(players), courtLabels)
+		results, _ = assignLeagueSlotTimes(results, slots, comp, tournament)
+	} else {
+		// For single-pool multi-court, distribute each round's matches across
+		// courts so that simultaneous matches never share a participant.
+		// When a round has more matches than courts (e.g. 6 players / 2
+		// courts → 3 matches per round), the extra match is queued on the
+		// same court and runs sequentially; the runtime simultaneity gate
+		// (checkSimultaneousMatch) prevents double-booking at match start.
+		if len(pools) == 1 && len(comp.Courts) > 1 {
+			sort.SliceStable(results, func(i, j int) bool {
+				return results[i].Round < results[j].Round
+			})
+			roundStart := 0
+			currentRound := -1
+			for i := range results {
+				if results[i].Round != currentRound {
+					currentRound = results[i].Round
+					roundStart = 0
+				}
+				results[i].Court = comp.Courts[roundStart%len(comp.Courts)]
+				roundStart++
+			}
+		}
+		results, _ = assignPoolMatchSlots(results, comp, tournament)
+	}
 
 	return e.store.SavePoolMatches(comp.ID, results)
 }

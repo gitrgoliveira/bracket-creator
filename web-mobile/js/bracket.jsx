@@ -133,6 +133,18 @@ function formatIpponsScore(ipponsA, ipponsB, score, decision, encho, decidedByHa
   return `${aStr || "·"}–${bStr || "·"}` + suffix;
 }
 
+// engiFlagScore: derive an engi match's flag-count score string from
+// FlagsA (sideA = Aka) / FlagsB (sideB = Shiro), in "Shiro–Aka" order to
+// match formatIpponsScore's convention. Engi is the ONLY competition type
+// where a completed match result is numeric; every other type (kendo,
+// naginata) shows ippon LETTERS via formatIpponsScore, never digits. Returns
+// null when the match carries no flag data (not an engi match), so callers
+// fall through to teamIVScore / formatIpponsScore.
+function engiFlagScore(m) {
+  if (!m || (m.flagsA == null && m.flagsB == null)) return null;
+  return `${m.flagsB || 0}–${m.flagsA || 0}`;
+}
+
 // teamIVScore: derive a team match's individual-victories aggregate ("shiroIV–akaIV")
 // from persisted subResults. Mirrors Go engine.ComputeTeamSummary: skip the daihyosen
 // sentinel (position < 0); award IV to whichever match-level side won each bout (winner
@@ -198,8 +210,14 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   const ipponsA = match.ipponsA || ipponsFromScore(match.scoreA);
   const ipponsB = match.ipponsB || ipponsFromScore(match.scoreB);
   const isDone = match.status === "completed";
-  const aScore = isDone ? (ipponsA.join("") || null) : null;
-  const bScore = isDone ? (ipponsB.join("") || null) : null;
+  // Engi is the ONLY competition type where a per-side score is numeric (a
+  // referee flag count); every other type shows the ippon letters joined
+  // above. A match carries flagsA/flagsB only when it was scored via the
+  // engi flag editor (see engiFlagScore in this file for the shared-cell
+  // equivalent).
+  const isEngiMatch = match.flagsA != null || match.flagsB != null;
+  const aScore = isDone ? (isEngiMatch ? String(match.flagsA || 0) : (ipponsA.join("") || null)) : null;
+  const bScore = isDone ? (isEngiMatch ? String(match.flagsB || 0) : (ipponsB.join("") || null)) : null;
 
   const aTBD = match.sideA && typeof match.sideA.id === "string" && match.sideA.id.startsWith("tbd-");
   const bTBD = match.sideB && typeof match.sideB.id === "string" && match.sideB.id.startsWith("tbd-");
@@ -787,12 +805,16 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
 }
 
 // matchScoreStr: unified score string for any completed match.
-// Tries teamIVScore first (team matches with subResults → "IV–IV"),
-// then falls back to formatIpponsScore. Callers pass pre-resolved ippons
-// arrays (which may be derived from scoreA/scoreB for bracket matches).
-// Returns "" when neither path produces a string (caller handles ": " fallback).
+// Tries engiFlagScore first (engi matches → numeric "Shiro–Aka" flag count,
+// the ONLY case with digits), then teamIVScore (team matches with
+// subResults → "IV–IV"), then falls back to formatIpponsScore (every other
+// competition type: ippon LETTERS, never numbers). Callers pass
+// pre-resolved ippons arrays (which may be derived from scoreA/scoreB for
+// bracket matches). Returns "" when no path produces a string (caller
+// handles the ": " fallback).
 function matchScoreStr(m, ipponsB, ipponsA) {
-  return teamIVScore(m)
+  return engiFlagScore(m)
+    || teamIVScore(m)
     || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
 }
 
@@ -815,10 +837,11 @@ window.roundLabel = roundLabel;
 window.buildDisplayModel = buildDisplayModel;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
+window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
 window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops };

@@ -70,6 +70,11 @@ function toBackendMatchResult(patch, match) {
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
     }
     if (winnerId) result.winnerId = winnerId;
+    // Engi (kata) matches score by referee flag count, not ippons: carry
+    // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
+    // submit payload). Omitted otherwise so non-engi payloads stay minimal.
+    if (patch.flagsA != null) result.flagsA = patch.flagsA;
+    if (patch.flagsB != null) result.flagsB = patch.flagsB;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }

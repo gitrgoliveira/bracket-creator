@@ -245,6 +245,31 @@ describe('match_scoreboard components', () => {
     expect(text).toContain('M'); expect(text).toContain('K');
   });
 
+  // Engi (flag-count scoring) is the ONLY competition type where the centre
+  // marks are a NUMBER; every other type renders ippon letters (tested above).
+  // flagsA=sideA=Aka, flagsB=sideB=Shiro (same convention as engiFlagScore).
+  it('IndividualScore renders the engi flag COUNT per side, not ippon letters', () => {
+    const tree = runtime.mount(IndividualScore, { match: { flagsA: 3, flagsB: 2, ipponsA: [], ipponsB: [] } });
+    const text = collectText(tree);
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-flags-b')).toBeTruthy();
+    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'sub-flags-a')).toBeTruthy();
+    expect(text).toContain('3'); expect(text).toContain('2');
+  });
+
+  it('IndividualScore marks the Aka slot as winner when flagsA > flagsB', () => {
+    const tree = runtime.mount(IndividualScore, { match: { flagsA: 4, flagsB: 1, ipponsA: [], ipponsB: [] } });
+    const akaSlots = findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && n.props.className.includes('msb-slots--aka'));
+    expect(akaSlots?.props?.className).toContain('msb-slots--win');
+  });
+
+  it('IndividualScore marks the Shiro slot as winner when flagsB > flagsA', () => {
+    const tree = runtime.mount(IndividualScore, { match: { flagsA: 0, flagsB: 5, ipponsA: [], ipponsB: [] } });
+    const shiroSlots = findInTree(tree, n =>
+      typeof n?.props?.className === 'string' && /\bmsb-slots\b/.test(n.props.className) && !n.props.className.includes('--aka'));
+    expect(shiroSlots?.props?.className).toContain('msb-slots--win');
+  });
+
   it('IndividualScore prepends the assigned competitor number (numberPrefix) when showNames is set', () => {
     // mp-13y: when a competition has a numberPrefix configured, the assigned
     // number (e.g. "K1") is set on match.sideA.number / match.sideB.number by

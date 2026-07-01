@@ -1,7 +1,10 @@
 // Engi-Kyogi (kata demonstration) score editor.
 // Engi matches are scored by flag count: each judge raises a flag for the side
 // they prefer. FIK rule: total flags must be ODD (1, 3, or 5) so no draw is
-// possible. flagsA = Shiro (left/white), flagsB = Aka (right/red).
+// possible. flagsA = sideA = Aka (right/red), flagsB = sideB = Shiro
+// (left/white): the same SideA=Aka/SideB=Shiro convention as every other
+// match display in the app (bracket.jsx PlayerLine, admin_pools.jsx,
+// admin_scoring_individual.jsx's "{sideB} vs {sideA}" dialog label).
 // The winner is the side with more flags.
 // Exported: EngiScoreEditorModal.
 // Loaded via admin_scoring_individual.jsx (NOT a separate script tag).
@@ -56,18 +59,19 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
   const winnerSide = deriveWinner(flagsA, flagsB);
   const canSubmit = isValidTotal && !submitting;
 
-  // Pair names: member1 = sideA.name (or sideA string), member2 = sideA.displayName.
+  // Pair names: member1 = side.name (or side string), member2 = side.displayName.
   // Both sides of an engi match are pairs (one entry each).
   const nameOf = (side) => side && typeof side === "object" ? side.name || "" : side || "";
   const displayOf = (side) => side && typeof side === "object" ? side.displayName || "" : "";
   const dojoOf = (side) => side && typeof side === "object" ? side.dojo || "" : "";
 
-  const shiroName = nameOf(m.sideA);
-  const shiroDN   = displayOf(m.sideA);
-  const shiroDojo = dojoOf(m.sideA);
-  const akaName   = nameOf(m.sideB);
-  const akaDN     = displayOf(m.sideB);
-  const akaDojo   = dojoOf(m.sideB);
+  // sideB = Shiro, sideA = Aka (see file header).
+  const shiroName = nameOf(m.sideB);
+  const shiroDN   = displayOf(m.sideB);
+  const shiroDojo = dojoOf(m.sideB);
+  const akaName   = nameOf(m.sideA);
+  const akaDN     = displayOf(m.sideA);
+  const akaDojo   = dojoOf(m.sideA);
 
   const clamp = (n) => Math.max(0, Math.min(MAX_FLAGS, n));
 
@@ -99,32 +103,32 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
         )}
       </div>
 
-      {/* Sides: Shiro (left) | Aka (right) */}
+      {/* Sides: Shiro (left, sideB) | Aka (right, sideA) */}
       <div className="engi-sides">
-        {/* Shiro / White / sideA */}
-        <div className={`engi-side engi-side--shiro${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-shiro">
+        {/* Shiro / White / sideB */}
+        <div className={`engi-side engi-side--shiro${winnerSide === "b" ? " engi-side--winner" : ""}`} data-testid="engi-side-shiro">
           <div className="engi-side__badge engi-side__badge--shiro">Shiro</div>
           <div className="engi-side__names">
             <div className="engi-side__name">{shiroName}</div>
             {shiroDN && <div className="engi-side__name">{shiroDN}</div>}
             {shiroDojo && <div className="engi-side__dojo">{shiroDojo}</div>}
           </div>
-          <PipRow count={flagsA} side="shiro" />
+          <PipRow count={flagsB} side="shiro" />
           <div className="engi-counter">
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsA(clamp(flagsA - 1))}
-              disabled={flagsA <= 0}
+              onClick={() => setFlagsB(clamp(flagsB - 1))}
+              disabled={flagsB <= 0}
               aria-label="Shiro minus one flag"
               data-testid="engi-shiro-dec"
             >−</button>
-            <span className="engi-counter__value" data-testid="engi-shiro-count">{flagsA}</span>
+            <span className="engi-counter__value" data-testid="engi-shiro-count">{flagsB}</span>
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsA(clamp(flagsA + 1))}
-              disabled={flagsA >= MAX_FLAGS}
+              onClick={() => setFlagsB(clamp(flagsB + 1))}
+              disabled={flagsB >= MAX_FLAGS}
               aria-label="Shiro plus one flag"
               data-testid="engi-shiro-inc"
             >+</button>
@@ -133,30 +137,30 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
 
         <div className="engi-divider" aria-hidden="true">vs</div>
 
-        {/* Aka / Red / sideB */}
-        <div className={`engi-side engi-side--aka${winnerSide === "b" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
+        {/* Aka / Red / sideA */}
+        <div className={`engi-side engi-side--aka${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
           <div className="engi-side__badge engi-side__badge--aka">Aka</div>
           <div className="engi-side__names">
             <div className="engi-side__name">{akaName}</div>
             {akaDN && <div className="engi-side__name">{akaDN}</div>}
             {akaDojo && <div className="engi-side__dojo">{akaDojo}</div>}
           </div>
-          <PipRow count={flagsB} side="aka" />
+          <PipRow count={flagsA} side="aka" />
           <div className="engi-counter">
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsB(clamp(flagsB - 1))}
-              disabled={flagsB <= 0}
+              onClick={() => setFlagsA(clamp(flagsA - 1))}
+              disabled={flagsA <= 0}
               aria-label="Aka minus one flag"
               data-testid="engi-aka-dec"
             >−</button>
-            <span className="engi-counter__value" data-testid="engi-aka-count">{flagsB}</span>
+            <span className="engi-counter__value" data-testid="engi-aka-count">{flagsA}</span>
             <button
               type="button"
               className="btn engi-counter__btn"
-              onClick={() => setFlagsB(clamp(flagsB + 1))}
-              disabled={flagsB >= MAX_FLAGS}
+              onClick={() => setFlagsA(clamp(flagsA + 1))}
+              disabled={flagsA >= MAX_FLAGS}
               aria-label="Aka plus one flag"
               data-testid="engi-aka-inc"
             >+</button>
@@ -173,8 +177,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, canClose = true
         {total === 0
           ? "Enter flags (total must be 1, 3, or 5)"
           : isValidTotal
-            ? `Total: ${total} — ${winnerSide === "a" ? "Shiro wins" : "Aka wins"}`
-            : `Total: ${total} — must be 1, 3, or 5 (odd)`}
+            ? `Total: ${total}, ${winnerSide === "a" ? "Aka wins" : "Shiro wins"}`
+            : `Total: ${total}, must be 1, 3, or 5 (odd)`}
       </div>
 
       {/* Error */}

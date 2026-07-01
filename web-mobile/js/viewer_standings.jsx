@@ -300,6 +300,13 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
+                // Engi (flag-count scoring) is the ONLY competition type
+                // where a matrix cell shows a NUMBER; every other type shows
+                // the row player's own ippon letters above. Engi never
+                // draws (odd flag totals), so this only ever feeds the
+                // win/loss branches below.
+                const isEngiCell = m.flagsA != null || m.flagsB != null;
+                const rowFlags = rowIsAka ? (m.flagsA || 0) : (m.flagsB || 0);
                 // Prefer the winner id: when two participants share a name,
                 // the winner name alone can't tell them apart (e.g. the
                 // head-to-head between two same-name/different-dojo players).
@@ -333,12 +340,14 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   // Show the row player's ippon letters (M/K/D/T/H); the green
                   // cell colour signals the win. No "W" fallback: W is not an
                   // ippon. A win with no recorded ippons (walkover/hantei)
-                  // shows an empty green cell.
-                  cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
+                  // shows an empty green cell. Engi shows its own flag count
+                  // (a number) instead: there are no ippon letters to show.
+                  cellContent = <span className="league-matrix__win">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Win";
                 } else {
-                  // The loser's own ippons (red), or empty when they scored none.
-                  cellContent = <span className="league-matrix__loss">{rowIppons.join("")}</span>;
+                  // The loser's own ippons (red), or empty when they scored
+                  // none. Engi shows its own flag count instead.
+                  cellContent = <span className="league-matrix__loss">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 

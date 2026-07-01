@@ -108,7 +108,12 @@ function safeDecode(s) {
 // without a DOM.
 function parseSearch(search) {
     const params = {};
-    if (!search || search.length < 2) return params;
+    // parseSearch is on the public surface (see the module-level comment above
+    // safeDecode: "must never throw"). A non-string truthy input (e.g. an
+    // object passed by mistake by some future/external caller) would pass the
+    // old `!search` check yet lack .startsWith/.slice, throwing downstream;
+    // guard on the actual type so the invariant holds for any caller input.
+    if (typeof search !== 'string' || search.length < 2) return params;
     const trimmed = search.startsWith('?') ? search.slice(1) : search;
     for (const pair of trimmed.split('&')) {
         if (!pair) continue;

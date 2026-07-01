@@ -58,4 +58,16 @@ describe('parseSearch', () => {
         expect(() => { out2 = parseSearch('?%=x'); }).not.toThrow();
         expect(out2['%']).toBe('x');
     });
+
+    it('does not throw on a non-string truthy input; returns an empty object', () => {
+        // parseSearch is on the public surface (ES export + window.AppRouter).
+        // A truthy non-string (object, number, boolean, array) passes the old
+        // `!search` falsy check but lacks .startsWith/.slice, which would throw
+        // downstream for any caller that passes the wrong shape.
+        for (const bad of [{}, 42, true, [], { court: 'A' }]) {
+            let out;
+            expect(() => { out = parseSearch(bad); }).not.toThrow();
+            expect(out).toEqual({});
+        }
+    });
 });

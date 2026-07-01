@@ -363,11 +363,10 @@ Homebrew, the pre-compiled binaries on the [release page](https://github.com/git
 
 ```bash
 brew tap gitrgoliveira/tap
-brew trust gitrgoliveira/tap   # newer Homebrew only: trust the third-party tap
 brew install bracket-creator
 ```
 
-Newer Homebrew refuses to load formulae from an untrusted third-party tap until you run `brew trust gitrgoliveira/tap` (older versions have no such command and can skip that line). Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+If `brew install` refuses to load the formula from an untrusted tap (newer Homebrew only), run `brew trust gitrgoliveira/tap` and try again. Older Homebrew has no such command and does not need it. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 

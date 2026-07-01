@@ -31,11 +31,13 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // keep the existing dark surface (no mockup for those).
 
 // LinkDot: 3-state connection indicator (mp-9ukk Phase 2).
-// 'connected' renders NOTHING (a healthy, server-fresh board shows no dot);
-// 'local' → amber dot (operator broadcast fresh, server down); 'stale' → red
-// dot WITH a dark ring (no feed). A small static circle keeps the board
-// uncluttered; the two degraded states are told apart by treatment (the ring),
-// not hue alone, and each carries an aria-label for assistive tech.
+// 'connected' renders an INVISIBLE span (visibility:hidden + transparent), not
+// nothing: it still reserves the dot's layout space so the header does not
+// reflow when the state changes, but a healthy, server-fresh board shows no
+// visible dot. 'local' → amber dot (operator broadcast fresh, server down);
+// 'stale' → red dot WITH a dark ring (no feed). A small static circle keeps
+// the board uncluttered; the two degraded states are told apart by treatment
+// (the ring), not hue alone, and each carries an aria-label for assistive tech.
 function LinkDot({ linkState }) {
     const connected = linkState === 'connected';
     const isStale = linkState === 'stale';

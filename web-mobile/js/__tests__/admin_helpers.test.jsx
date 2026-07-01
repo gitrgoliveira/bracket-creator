@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
+import { sideName, hasBothSides, hasPoolOriginPlaceholder, compMatchStats, bracketFullyComplete, normalizeDate, dmyToIso, isoToDmy, compareDmy, isValidDate, validateAndNormalizeDate, decideNumericUpdate, getScoreBtnClass, deriveTournamentDays, normalizeCourts, courtCount, resolveRoundIndex, DATE_ERR_INVALID_FORMAT, DATE_ERR_YEAR_RANGE, MIN_YEAR, MAX_YEAR, MAX_TEAM_SIZE, MAX_COURTS, MAX_RANK, MAX_TOURNAMENT_DURATION_DAYS } from '../admin_helpers.jsx';
 
 describe('sideName', () => {
   it('returns "" for null / undefined', () => {
@@ -211,6 +211,58 @@ describe('compMatchStats', () => {
   it('skips bye / unresolved sides (normalizeMatch placeholders)', () => {
     const c = { poolMatches: [realMatch("completed"), byeMatch] };
     expect(compMatchStats(c)).toEqual({ total: 1, done: 1, running: 0 });
+  });
+});
+
+describe('bracketFullyComplete', () => {
+  const realMatch = (status) => ({
+    sideA: { id: "a", name: "Alice" },
+    sideB: { id: "b", name: "Bob" },
+    status,
+  });
+
+  it('returns false when there is no bracket', () => {
+    expect(bracketFullyComplete(null)).toBe(false);
+    expect(bracketFullyComplete(undefined)).toBe(false);
+    expect(bracketFullyComplete({})).toBe(false);
+    expect(bracketFullyComplete({ rounds: [] })).toBe(false);
+  });
+
+  it('returns false while any real round match is not completed', () => {
+    const bracket = { rounds: [[realMatch("completed"), realMatch("running")]] };
+    expect(bracketFullyComplete(bracket)).toBe(false);
+  });
+
+  it('returns true once every real round match is completed (no bronze match)', () => {
+    const bracket = { rounds: [[realMatch("completed")], [realMatch("completed")]] };
+    expect(bracketFullyComplete(bracket)).toBe(true);
+  });
+
+  // mp-gy6g: thirdPlaceMatch is a SIBLING field of bracket.rounds, not a row
+  // inside it. compMatchStats never walks it (see its own tests above), so
+  // this predicate must check it explicitly or a naginata bracket would read
+  // "fully done" one match early.
+  it('stays false when every round match is done but the bronze match is not', () => {
+    const bracket = {
+      rounds: [[realMatch("completed")], [realMatch("completed")]],
+      thirdPlaceMatch: realMatch("running"),
+    };
+    expect(bracketFullyComplete(bracket)).toBe(false);
+  });
+
+  it('returns true once the bronze match is also completed', () => {
+    const bracket = {
+      rounds: [[realMatch("completed")], [realMatch("completed")]],
+      thirdPlaceMatch: realMatch("completed"),
+    };
+    expect(bracketFullyComplete(bracket)).toBe(true);
+  });
+
+  it('ignores byes / unresolved future-round placeholders', () => {
+    const byeMatch = { sideA: { id: "a", name: "Alice" }, sideB: { id: "", name: "" }, status: "scheduled" };
+    const feederPlaceholder = { sideA: "Winner of r0-m0", sideB: "Winner of r0-m1", status: "scheduled" };
+    const bracket = { rounds: [[realMatch("completed"), byeMatch], [feederPlaceholder]] };
+    expect(bracketFullyComplete(bracket)).toBe(true);
   });
 });
 

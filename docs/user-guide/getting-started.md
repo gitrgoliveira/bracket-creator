@@ -1,8 +1,33 @@
 # Install
 
-You can install the pre-compiled binary, use Go, build from source, or use Docker.
+You can install with Homebrew, download a pre-compiled binary, use Go, build from source, or use Docker.
 
 The following sections describe each method.
+
+## Homebrew
+
+The Homebrew formula lives in the project repository and builds from source, so it needs the Xcode Command Line Tools and network access for Go module downloads.
+
+=== "Direct install"
+
+    ```bash
+    brew install https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/main/Formula/bracket-creator.rb
+    ```
+
+    To update later, run the same command again.
+
+=== "Named tap"
+
+    Add the repository as a tap so `brew upgrade` tracks it:
+
+    ```bash
+    brew tap gitrgoliveira/kendo https://github.com/gitrgoliveira/bracket-creator
+    brew install gitrgoliveira/kendo/bracket-creator
+    ```
+
+    The tap is named `kendo` rather than `bracket-creator` because the latter would resolve to a separate, unmaintained `homebrew-bracket-creator` repository.
+
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 
 ## Pre-compiled binaries
 

@@ -1106,15 +1106,29 @@ a:hover {
   min-width: max-content;
 }
 
-/* Label above the 3rd-place (bronze) match card in bracket views. */
+/* Wrapper around the 3rd-place (bronze) match card in bracket views. Capped to
+   the same width as a bracket round column (.bc-round's min-width) so the
+   card reads as a peer of the tree's M1/M2/M3 cards instead of stretching
+   full-bleed across the canvas; the top border grounds it as its own
+   "consolation" zone below the elimination ladder rather than looking like a
+   stray row bolted onto the bottom. */
+.bracket-bronze-section {
+  width: 230px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* Label above the 3rd-place (bronze) match card. Typography matches
+   .bc-round-label (SEMIFINALS/FINAL) so it reads as a peer section header,
+   not a lighter caption glued to the card below it. */
 .bracket-bronze-label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   color: var(--ink-3);
-  margin-bottom: 6px;
-  padding-left: 4px;
+  margin-bottom: 14px;
+  padding-left: 2px;
 }
 
 .bc-tree {

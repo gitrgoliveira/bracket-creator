@@ -155,11 +155,16 @@ func (e *Engine) recordEngiMatch(
 // applyEngiToMatchResult writes a flag-decided result into a pool MatchResult.
 // correctionReason is the operator audit note for overwrites; it is persisted
 // only when non-empty, mirroring the kendo path's CorrectionReason semantics.
+// Also sets WinnerID from SideAID/SideBID (when present) so same-name
+// participants from different dojos remain distinguishable downstream (e.g.
+// computeEngiStandings), mirroring the non-engi scoring path.
 func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide, correctionReason string) {
 	if winnerSide == "A" {
 		r.Winner = r.SideA
+		r.WinnerID = r.SideAID
 	} else {
 		r.Winner = r.SideB
+		r.WinnerID = r.SideBID
 	}
 	r.WinnerSide = winnerSide
 	r.FlagsA = flagsA
@@ -198,6 +203,20 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 		ScheduledAt:      bm.ScheduledAt,
 		CorrectionReason: correctionReason,
 	}
+}
+
+// engiPlayerKey returns the stable key used to index playerStandings by
+// participant identity. Same-name participants from different dojos are
+// explicitly allowed (CheckDuplicateEntriesByNameDojo only rejects same-name
+// AND same-dojo), so keying by name alone silently merges distinct
+// competitors into one standings row. Prefers the participant UUID (id);
+// falls back to name for legacy data that predates SideAID/SideBID/player.ID
+// (empty for old CSVs, so behavior for that data is unchanged).
+func engiPlayerKey(id, name string) string {
+	if id != "" {
+		return "id:" + id
+	}
+	return "name:" + name
 }
 
 // engiStandingsLoader is the minimal read surface computeEngiStandings
@@ -241,7 +260,7 @@ func (e *Engine) computeEngiStandings(loader engiStandingsLoader, compID string)
 
 		playerStandings := make(map[string]*state.PlayerStanding)
 		for _, player := range p.Players {
-			playerStandings[player.Name] = &state.PlayerStanding{Player: player}
+			playerStandings[engiPlayerKey(player.ID, player.Name)] = &state.PlayerStanding{Player: player}
 		}
 
 		for _, m := range matches {
@@ -252,17 +271,22 @@ func (e *Engine) computeEngiStandings(loader engiStandingsLoader, compID string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := playerStandings[m.SideA]
-			sB := playerStandings[m.SideB]
+			sA := playerStandings[engiPlayerKey(m.SideAID, m.SideA)]
+			sB := playerStandings[engiPlayerKey(m.SideBID, m.SideB)]
 			if sA == nil || sB == nil {
 				continue
 			}
 			// Win/loss by flag majority. Engi has no draws (odd flag total).
-			switch m.Winner {
-			case m.SideA:
+			// Resolve the winning side by WinnerID when available (unambiguous
+			// even when both sides share a display name); fall back to the
+			// Winner name for legacy data recorded before WinnerID was set.
+			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
+			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			switch {
+			case winnerIsA:
 				sA.Wins++
 				sB.Losses++
-			case m.SideB:
+			case winnerIsB:
 				sB.Wins++
 				sA.Losses++
 			}

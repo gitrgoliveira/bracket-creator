@@ -311,7 +311,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const isReady = hasBothSides(bm);
               const isHighlighted = selected?.matchId === bm.id;
               return (
-                <div style={{ marginTop: 16 }} data-testid="bracket-bronze-match">
+                <div className="bracket-bronze-section" style={{ marginTop: 16 }} data-testid="bracket-bronze-match">
                   <div className="bracket-bronze-label">
                     3rd Place Match
                   </div>
@@ -320,6 +320,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                     variant={tweaks.cardVariant}
                     showDojo={tweaks.showDojo}
                     highlighted={isHighlighted}
+                    label="3RD"
                     onClick={isReady ? () => select(bm, -1, 0) : undefined}
                   />
                 </div>

@@ -290,6 +290,91 @@ func TestComputeEngiStandings_FlagTiebreak(t *testing.T) {
 	assert.Less(t, aliceRank, bobRank, "more flags ranks above on a wins tie")
 }
 
+// TestComputeEngiStandings_SameNameDifferentDojo pins that engi standings
+// distinguish same-name participants from different dojos (allowed by
+// CheckDuplicateEntriesByNameDojo, which only rejects same-name AND
+// same-dojo). Before the engiPlayerKey fix, computeEngiStandings keyed
+// playerStandings by Name alone: the two "Tanaka Kenji" entries merged into
+// one row, and their head-to-head bout misattributed the win by string-
+// comparing m.Winner to m.SideA/m.SideB (also same-named). Mirrors the kendo
+// regression coverage in TestStartCompetition_LeagueMatchesCarrySideIDs.
+func TestComputeEngiStandings_SameNameDifferentDojo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-samename"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	const (
+		idTokyo    = "11111111-1111-4111-8111-111111111111" // Tanaka Kenji, Tokyo
+		idOsaka    = "22222222-2222-4222-8222-222222222222" // Tanaka Kenji, Osaka
+		idSuzuki   = "33333333-3333-4333-8333-333333333333"
+		idWatanabe = "44444444-4444-4444-8444-444444444444"
+	)
+	players := []domain.Player{
+		{ID: idTokyo, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: idOsaka, Name: "Tanaka Kenji", Dojo: "Osaka"},
+		{ID: idSuzuki, Name: "Suzuki Hiro", Dojo: "Nagoya"},
+		{ID: idWatanabe, Name: "Watanabe Ryo", Dojo: "Kyoto"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 6, "4-player round robin -> 6 matches")
+
+	// Osaka Tanaka wins every bout she plays, including the Tanaka-vs-Tanaka
+	// derby; Tokyo Tanaka therefore loses all 3 of hers. The other bout
+	// (Suzuki vs Watanabe) is irrelevant to the assertions below.
+	for _, m := range matches {
+		var fa, fb int
+		switch {
+		case m.SideAID == idOsaka:
+			fa, fb = 5, 0
+		case m.SideBID == idOsaka:
+			fa, fb = 0, 5
+		case m.SideAID == idTokyo:
+			fa, fb = 0, 5
+		case m.SideBID == idTokyo:
+			fa, fb = 5, 0
+		default:
+			fa, fb = 3, 2
+		}
+		_, err := eng.recordEngiMatchResult(compID, m.ID, fa, fb, "")
+		require.NoError(t, err)
+	}
+
+	standings, err := eng.computeStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, 1)
+	var rows []state.PlayerStanding
+	for _, v := range standings {
+		rows = v
+	}
+	// Must be 4 distinct rows, not 3: a name-keyed merge would collapse the
+	// two "Tanaka Kenji" entries into one.
+	require.Len(t, rows, 4)
+
+	var tokyoRow, osakaRow *state.PlayerStanding
+	for i := range rows {
+		if rows[i].Player.Name != "Tanaka Kenji" {
+			continue
+		}
+		switch rows[i].Player.Dojo {
+		case "Tokyo":
+			tokyoRow = &rows[i]
+		case "Osaka":
+			osakaRow = &rows[i]
+		}
+	}
+	require.NotNil(t, tokyoRow, "Tokyo Tanaka must have her own standings row")
+	require.NotNil(t, osakaRow, "Osaka Tanaka must have her own standings row")
+
+	assert.Equal(t, 3, osakaRow.Wins, "Osaka Tanaka should have 3 wins")
+	assert.Equal(t, 0, osakaRow.Losses, "Osaka Tanaka should have 0 losses")
+	assert.Equal(t, 0, tokyoRow.Wins, "Tokyo Tanaka should have 0 wins")
+	assert.Equal(t, 3, tokyoRow.Losses, "Tokyo Tanaka should have 3 losses")
+}
+
 // --- Regression: kendo path unchanged --------------------------------------
 
 // TestEngiDispatch_DoesNotAffectKendo proves the engi seam is branched-around:

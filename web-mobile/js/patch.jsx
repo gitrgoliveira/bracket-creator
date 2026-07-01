@@ -340,7 +340,14 @@ function applyPatch(prev, event) {
     const resultsToApply = results || (result ? [result] : []);
     if (resultsToApply.length === 0) return prev;
 
-    const resultMap = new Map(resultsToApply.map(r => [r.id, r]));
+    // Skip null/primitive/id-less entries before building the lookup: a
+    // malformed event (e.g. results:[null], whether from a rogue same-origin
+    // BroadcastChannel patch or a bad server payload) would otherwise throw on
+    // r.id inside the Map constructor. Such entries can never match a real
+    // match id anyway, so dropping them is behaviour-preserving for valid input.
+    const resultMap = new Map(
+        resultsToApply.filter(r => r && r.id != null).map(r => [r.id, r]),
+    );
     const next = { ...prev };
     let changed = false;
     // Track whether any pool patch changed a match's scheduled state;

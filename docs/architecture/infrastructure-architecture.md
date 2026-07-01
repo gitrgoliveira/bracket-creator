@@ -140,7 +140,7 @@ flowchart TB
 | Device | What it runs | Notes |
 |---|---|---|
 | Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiaijo |
-| Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL (smart-TV browser, or a mini-PC/laptop driving a TV); read-only, no auth |
+| Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (see [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi) below). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
@@ -159,8 +159,49 @@ clients, comfortably within `SSE_MAX_CLIENTS`, but every live update fans out to
 
 **The network is the real fix.** Client resilience (offline write queue, SSE resync, silence
 watchdog) keeps the app usable across blips. For a smooth event, **wire the operator consoles**
-where you can, put operators on a **dedicated AP** separate from spectator guest Wi-Fi, and
-prefer the **on-prem** pattern when the venue's internet is unreliable.
+where you can, put operators on a **dedicated AP** separate from spectator guest Wi-Fi, prefer
+the **on-prem** pattern when the venue's internet is unreliable, and **drive each court's display
+from the operator's own machine over HDMI** so the scoreboard keeps moving even when the network
+does not (next section).
+
+### Keep the court scoreboard alive on the same machine (HDMI)
+
+Each court's display screen can be rendered two ways, and the choice decides whether the
+scoreboard freezes during a Wi-Fi outage:
+
+- **Same machine as the operator console (recommended).** Connect a TV or monitor to the
+  operator's laptop or mini-PC with an **HDMI cable**, extend the desktop, and open the court's
+  display URL in a second browser window on that same machine. The operator console and the
+  display board are then two tabs in the same browser on the same computer, so they share a
+  private same-origin channel: every score the operator records reaches the board **directly,
+  on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
+  scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
+  open. The board shows a small amber dot while it is running on this local feed (see
+  [the scoreboard status dot](../user-guide/mobile-app.md#scoreboards-and-court-displays)).
+- **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling,
+  but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
+  returns (the board then shows a red dot).
+
+```mermaid
+flowchart LR
+    subgraph machine["One court machine (operator's laptop / mini-PC)"]
+        op["Operator console tab<br/>(admin scoring)"]
+        disp["Display board tab<br/>(scoreboard / bracket)"]
+        op -. same-origin channel<br/>(no network) .-> disp
+    end
+    disp == HDMI cable ==> tv["Court TV / monitor"]
+    op -->|writes, queued + synced<br/>when the link returns| net["Venue network / app server"]
+```
+
+This local hub needs no internet, no secure context, and no extra software, and it works in
+every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes
+above rather than replacing them: the operator's writes are still queued locally and synced to
+the server once the link returns, so the authoritative record stays correct. It is per machine
+and per court. Reloading the **display** tab during an outage is fine: it cold-starts from the
+operator tab's snapshot over the same channel, as long as an operator tab is still open on that
+machine to answer (it only stays blank if none is). The genuine gap is reloading the **operator**
+tab itself mid-outage, since it holds the court's working data while offline and would have
+nothing to fetch from the down server.
 
 ## 4. Persistence model
 

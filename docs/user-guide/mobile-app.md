@@ -94,6 +94,8 @@ Each shiai-jo runs **one digital scoreboard** on a TV or projector: a court-scop
 
 ![Single-court scoreboard for Shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../screenshots/display-scoreboard.png)
 
+If the venue Wi-Fi drops, the court scoreboard keeps updating as long as the scoring tab for that court stays open on the same computer: the operator's entries reach the board directly. A small status dot appears in the top corner only when the connection is degraded. Amber means the board is being fed by the court's own scoring computer while the link to the server is down. Red means no updates are getting through, so the board may be out of date until the connection returns. When everything is healthy no dot is shown.
+
 ## Admin console
 
 Click **Admin** and enter the tournament password to access the admin console. How the password is stored is set by the [authentication mode](#admin-authentication) (file or locked); *who is allowed to act* is set by the [tournament mode](#tournament-mode-officiated-or-self-run).

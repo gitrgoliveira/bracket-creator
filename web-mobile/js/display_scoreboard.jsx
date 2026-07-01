@@ -30,7 +30,35 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // and a single "Next" line. Individual matches, empty states and the lobby
 // keep the existing dark surface (no mockup for those).
 
-function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
+// LinkDot: 3-state connection indicator (mp-9ukk Phase 2).
+// 'connected' renders an INVISIBLE span (visibility:hidden + transparent), not
+// nothing: it still reserves the dot's layout space so the header does not
+// reflow when the state changes, but a healthy, server-fresh board shows no
+// visible dot. 'local' → amber dot (operator broadcast fresh, server down);
+// 'stale' → red dot WITH a dark ring (no feed). A small static circle keeps
+// the board uncluttered; the two degraded states are told apart by treatment
+// (the ring), not hue alone, and each carries an aria-label for assistive tech.
+function LinkDot({ linkState }) {
+    const connected = linkState === 'connected';
+    const isStale = linkState === 'stale';
+    // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626).
+    // Per DESIGN.md principle 2, the two degraded states are distinguished by
+    // TREATMENT, not hue alone (so the meaning survives projector glare and
+    // colour-blindness): 'stale' carries a dark ring, 'local' is a plain dot.
+    // When connected we keep the element but make it invisible (visibility
+    // hidden, aria-hidden) so the header reserves the dot's space and the
+    // subtitle does not shift horizontally as the state toggles.
+    const bg = isStale ? 'var(--danger, #dc2626)' : 'var(--warn, #b45309)';
+    const label = isStale ? 'No data feed' : 'Operator broadcast (server offline)';
+    return (
+        <span data-testid="display-link-dot" data-link-state={linkState}
+            role={connected ? undefined : 'status'} aria-label={connected ? undefined : label}
+            aria-hidden={connected ? 'true' : undefined}
+            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: connected ? 'transparent' : bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1, #111827)' : 'none', visibility: connected ? 'hidden' : 'visible' }} />
+    );
+}
+
+function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
     const shiroTeam = sideLabel(promoted.match.sideB, zekken);
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
@@ -65,15 +93,11 @@ function TvWhiteBoard({ tournament, court, connected, promoted, isTeamMatch, sub
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
                     <span>{headerSubtitle}</span>
-                    {/* mp-13y #9: no "UP NEXT" badge: the promoted match is shown
+                    {/* mp-9ukk Phase 2: 3-state dot. Hidden when connected;
+                        amber when operator-broadcast is fresh; red when stale.
+                        mp-13y #9: no "UP NEXT" badge: the promoted match is shown
                         plainly (the NEXT line below still lists what follows). */}
-                    {!connected && (
-                        <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
-                            style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
-                            RECONNECTING
-                        </span>
-                    )}
+                    <LinkDot linkState={linkState} />
                 </div>
             </div>
 
@@ -295,7 +319,7 @@ function windowAroundCurrent(all, currentIdx, max) {
 // pool phase as completed → current → scheduled, so the current match sits
 // among its upcoming matches; windowAroundCurrent keeps it on screen when the
 // group overflows the visible cap (no animation). FIK §263.
-function TvIndividualBoard({ tournament, court, connected, promoted, queueMatches, zekken }) {
+function TvIndividualBoard({ tournament, court, linkState = 'connected', promoted, queueMatches, zekken }) {
     const all = gatherIndividualGroup(promoted, court);
     const currentIdx = all.findIndex(m => m.id === promoted.match.id || m.status === "running");
     // A league is one big round-robin table: showing its whole match list would
@@ -342,13 +366,9 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
                 </div>
                 <div style={{ display: "flex", gap: "1.5vw", alignItems: "center", fontSize: "2.2vh", color: "var(--ink-3)" }}>
                     <span>{promoted.competition?.name || ""}</span>
-                    {!connected && (
-                        <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
-                            style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                            <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
-                            RECONNECTING
-                        </span>
-                    )}
+                    {/* mp-9ukk Phase 2: 3-state dot. Hidden when connected;
+                        amber when operator-broadcast is fresh; red when stale. */}
+                    <LinkDot linkState={linkState} />
                 </div>
             </div>
 
@@ -478,12 +498,13 @@ function TvIndividualBoard({ tournament, court, connected, promoted, queueMatche
 // These are mutually exclusive: completed > 0 AND no running/scheduled →
 // "completed"; otherwise zero matches at all → "nothing".
 //
-// Reconnect indicator (T063 / FR-011 scenario 4): the `connected` prop
-// (defaults to true) is wired from app.jsx which owns the SSE
-// EventSource. When it flips false we render a small amber pill so the
-// venue knows the screen has gone stale; the rest of the layout stays
-// put so reconnect doesn't flash the layout.
-function TvDisplay({ court, tournament, competitions, withZekkenName, connected = true }) {
+// Link indicator (mp-9ukk): the `linkState` prop ('connected' | 'local' |
+// 'stale'), wired from app.jsx which owns both the SSE EventSource and the
+// court broadcast recency, drives the discreet LinkDot in the header. The dot
+// is hidden when connected, amber when court-local (server down but the
+// operator broadcast is fresh), and red when stale. The rest of the layout
+// stays put so a state change doesn't reflow the board.
+function TvDisplay({ court, tournament, competitions, withZekkenName, linkState = 'connected' }) {
     const running = useMD(() => findRunningOnCourt(competitions, court), [competitions, court]);
     const upcoming = useMD(() => findUpcomingOnCourt(competitions, court, running ? 2 : 3), [competitions, court, running]);
     const counts = useMD(() => countCourtMatches(competitions, court), [competitions, court]);
@@ -605,7 +626,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     if (promoted) {
         if (isTeamMatch) {
             return <TvWhiteBoard
-                tournament={tournament} court={court} connected={connected}
+                tournament={tournament} court={court} linkState={linkState}
                 promoted={promoted} isTeamMatch={isTeamMatch}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
                 showDH={showDH} queueMatches={queueMatches} zekken={zekken}
@@ -618,14 +639,14 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
         // the rep bout's ippon slots).
         if (supplementaryBout && isTeamComp) {
             return <TvWhiteBoard
-                tournament={tournament} court={court} connected={connected}
+                tournament={tournament} court={court} linkState={linkState}
                 promoted={promoted} isTeamMatch={false}
                 subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
                 showDH={false} queueMatches={queueMatches} zekken={zekken}
             />;
         }
         return <TvIndividualBoard
-            tournament={tournament} court={court} connected={connected}
+            tournament={tournament} court={court} linkState={linkState}
             promoted={promoted} queueMatches={queueMatches} zekken={zekken}
         />;
     }
@@ -659,13 +680,9 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
             {/* Court header + black rule */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #111", paddingBottom: "1.4vh", marginBottom: "2.4vh", fontSize: "2.6vh", fontWeight: 700, letterSpacing: "0.08em" }}>
                 <div>{tournament?.name ? tournament.name + " · " : ""}SHIAIJO {court}</div>
-                {!connected && (
-                    <span data-testid="display-reconnect" role="status" aria-label="Reconnecting"
-                        style={{ display: "inline-flex", alignItems: "center", gap: "0.6vw", background: "#fef3c7", color: "#b45309", padding: "0.4vh 1vw", borderRadius: "0.4vw", fontSize: "1.6vh", fontWeight: 700 }}>
-                        <span style={{ width: "1.2vh", height: "1.2vh", borderRadius: "50%", background: "#b45309", display: "inline-block" }} />
-                        RECONNECTING
-                    </span>
-                )}
+                {/* mp-9ukk Phase 2: 3-state dot on empty-state board. Hidden
+                    when connected; amber when operator-broadcast fresh; red stale. */}
+                <LinkDot linkState={linkState} />
             </div>
 
             {/* Centre block: anchored slightly above dead-centre */}
@@ -728,4 +745,4 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, connected 
     );
 }
 
-export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, emptyStateHeadline };
+export { TvDisplay, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, emptyStateHeadline, LinkDot };

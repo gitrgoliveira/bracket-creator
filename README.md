@@ -354,7 +354,7 @@ These files are generated to be uploaded to Google Drive (or similar), so all sh
 
 ## Install
 
-Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI. `go install` compiles the CLI commands but not the embedded web assets (the Preact runtime and compiled JS bundle are staged at package/build time, not committed to the module), so use Homebrew or a release binary if you need the `serve`/`mobile-app` interface. The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: the commands shown there are placeholders for the intended experience and do not work yet, because those package repositories are not published.
+Homebrew, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today and bundle the web/mobile UI. `go install` builds the full binary, but the embedded web assets (the Preact runtime and compiled JS bundle) are not part of the Go module, so the `serve`/`mobile-app` web UIs render blank; use Homebrew or a release binary if you need them. The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress: the commands shown there are placeholders for the intended experience and do not work yet, because those package repositories are not published.
 
 *You can install via Homebrew, download a pre-compiled binary, use Docker, or compile from source.*
 
@@ -417,7 +417,7 @@ Download the .deb, .rpm or .apk packages from the [release page](https://github.
 go install github.com/gitrgoliveira/bracket-creator@latest
 ```
 
-This builds the CLI commands (`create-pools`, `create-playoffs`, ...) only. The embedded web assets are not committed to the module, so the `serve` and `mobile-app` web UI will not render from a `go install` build. Use Homebrew or a release binary for those.
+This builds the full binary, including the `serve` and `mobile-app` subcommands. However, the embedded web assets are not part of the Go module, so those web UIs render blank from a `go install` build. The Excel-generating CLI commands (`create-pools`, `create-playoffs`, ...) work normally. Use Homebrew or a release binary if you need the web UI.
 
 </details>
 

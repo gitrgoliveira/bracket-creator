@@ -352,20 +352,31 @@ To be able to print the tree, you will need to reset the width and height in the
 These files are generated to be uploaded to Google Drive (or similar), so all shiai-jo tables are in sync during the tournament, working from the same file.
 
 
-## Install - WIP
+## Install
 
-Please use the pre-compiled binaries from the [release page](https://github.com/gitrgoliveira/bracket-creator/releases) or build from sratch with `make go/build`
-The instructions below do not work yet.
+Homebrew, `go install`, the pre-compiled binaries on the [release page](https://github.com/gitrgoliveira/bracket-creator/releases), and building from source (`make go/build`) all work today. The `apt`/`yum`/`deb`/`rpm`/`apk` sections below are still a work in progress and are not published yet.
 
-*You can install the pre-compiled binary (in several ways), use Docker or compile from source (when on OSS).*
+*You can install via Homebrew, download a pre-compiled binary, use Docker, or compile from source.*
 
-*Below you can find the steps for each of them.*
 <details>
-  <summary><h3>homebrew tap</h3></summary>
+  <summary><h3>homebrew</h3></summary>
+
+The formula lives at [`Formula/bracket-creator.rb`](Formula/bracket-creator.rb) in this repository and builds from source (it needs the Xcode Command Line Tools and network access for Go module downloads). Install it directly:
 
 ```bash
-brew install gitrgoliveira/tap/bracket-creator
+brew install https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/main/Formula/bracket-creator.rb
 ```
+
+To update later, re-run that command. If you would rather have `brew upgrade` track it, add this repository as a named tap first:
+
+```bash
+brew tap gitrgoliveira/kendo https://github.com/gitrgoliveira/bracket-creator
+brew install gitrgoliveira/kendo/bracket-creator
+```
+
+(The tap is named `kendo` rather than `bracket-creator` because the latter would resolve to a separate, unmaintained `homebrew-bracket-creator` repository.)
+
+The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (live-tournament app).
 
 </details>
 
@@ -389,7 +400,7 @@ name=Gemfury gitrgoliveira repository
 baseurl=https://yum.fury.io/gitrgoliveira/
 enabled=1
 gpgcheck=0' | sudo tee /etc/yum.repos.d/gitrgoliveira.repo
-sudo yum install goreleaser
+sudo yum install bracket-creator
 ```
 
 </details>

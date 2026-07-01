@@ -59,6 +59,19 @@ describe('parseSearch', () => {
         expect(out2['%']).toBe('x');
     });
 
+    it('stores a __proto__ key as an own property instead of hitting the Object.prototype accessor', () => {
+        // On a plain {} literal, params['__proto__'] = 'x' hits the special
+        // accessor on Object.prototype and no-ops for a string value, silently
+        // dropping the key. params must be Object.create(null) so the key is
+        // stored as a normal own property, and Object.prototype methods are
+        // absent (confirming the null prototype).
+        const out = parseSearch('?__proto__=malicious&court=A');
+        expect(out.__proto__).toBe('malicious');
+        expect(Object.getPrototypeOf(out)).toBeNull();
+        expect(out.court).toBe('A');
+        expect(Object.keys(out).sort()).toEqual(['__proto__', 'court']);
+    });
+
     it('does not throw on a non-string truthy input; returns an empty object', () => {
         // parseSearch is on the public surface (ES export + window.AppRouter).
         // A truthy non-string (object, number, boolean, array) passes the old

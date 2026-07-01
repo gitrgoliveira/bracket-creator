@@ -107,7 +107,12 @@ function safeDecode(s) {
 // useQuery hook below stays trivial and so the parser can be unit-tested
 // without a DOM.
 function parseSearch(search) {
-    const params = {};
+    // Null-prototype: query-string keys are attacker-controlled (URL params),
+    // so a key literally named "__proto__" must not silently no-op against the
+    // special accessor on Object.prototype (matches the Object.create(null)
+    // pattern used elsewhere for user-controlled keys, e.g. viewer_utils.jsx,
+    // admin_participants.jsx).
+    const params = Object.create(null);
     // parseSearch is on the public surface (see the module-level comment above
     // safeDecode: "must never throw"). A non-string truthy input (e.g. an
     // object passed by mistake by some future/external caller) would pass the

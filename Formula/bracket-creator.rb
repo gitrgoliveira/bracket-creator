@@ -195,8 +195,14 @@ class BracketCreator < Formula
                "http://127.0.0.1:#{port}#{path}"
       end
     ensure
-      Process.kill("TERM", pid)
-      Process.wait(pid)
+      # Tolerate the server having already exited: ESRCH (no such process) and
+      # ECHILD (already reaped) here would otherwise mask a real curl failure.
+      begin
+        Process.kill("TERM", pid)
+        Process.wait(pid)
+      rescue Errno::ESRCH, Errno::ECHILD
+        nil
+      end
     end
   end
 end

@@ -99,9 +99,15 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				players := currentMatchPlayers(store, comp)
 				ipponsA, hansokuA := parseScore(bm.ScoreA)
 				ipponsB, hansokuB := parseScore(bm.ScoreB)
+				// phaseFromMatchID(bm.ID) would return "m" for the bronze
+				// match's single-hyphen "m-bronze" ID: not meaningful. This
+				// branch already knows it's the bronze match, so pass a
+				// stable literal label instead of deriving one from the ID
+				// (matches the "3rd Place Match" label kachinuki_export.go
+				// uses for the same match).
 				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
 					bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
-					phaseFromMatchID(bm.ID), "", ""))
+					"3rd Place Match", "", ""))
 				return
 			}
 		}

@@ -3,7 +3,12 @@
 // Tests: deriveWinner, MAX_FLAGS, VALID_TOTALS, submit guard predicate.
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { MAX_FLAGS, VALID_TOTALS, deriveWinner } from '../admin_scoring_engi.jsx';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── pure-logic: deriveWinner ──────────────────────────────────────────────────
 
@@ -131,16 +136,18 @@ describe('engi payload shape', () => {
     expect(payload.flagsB).toBe(1);
   });
 
-  it('source file handleSubmit does not reference winner in payload literal', () => {
+  it('source file never builds a `winner` key in the submit payload', () => {
     // Structural regression guard: ensure the source no longer builds a
     // `winner` key in the payload (finding 8). If it reappears, this test fails.
-    const { readFileSync } = require('fs');
-    const { resolve } = require('path');
     const src = readFileSync(resolve(__dirname, '..', 'admin_scoring_engi.jsx'), 'utf8');
-    // The handleSubmit block should only send { flagsA, flagsB, status }.
-    // Verify no `winner` appears in the payload object literal inside handleSubmit.
-    const handleSubmitBlock = src.match(/const handleSubmit = async[^}]+\{[^}]+\}/s)?.[0] || src;
-    expect(handleSubmitBlock).not.toMatch(/const winner\s*=/);
-    expect(handleSubmitBlock).not.toMatch(/payload\s*=\s*\{[^}]*winner/);
+    // Both submit call sites (handleSubmit's direct save, and the
+    // ReasonPrompt-gated correction save) pass an object literal straight to
+    // doSubmit(...): scope the check to those literals, not the whole file,
+    // so the guard stays meaningful if the source is restructured again.
+    const payloadLiterals = [...src.matchAll(/doSubmit\((\{[^}]*\})\)/g)].map(m => m[1]);
+    expect(payloadLiterals.length).toBeGreaterThan(0);
+    for (const literal of payloadLiterals) {
+      expect(literal).not.toMatch(/winner/);
+    }
   });
 });

@@ -4185,7 +4185,11 @@ button.pool-match-row {
 }
 
 /* === Engi-Kyogi flag-count score editor === */
-.score-editor--engi .engi-sides {
+/* Unprefixed (not scoped to a wrapper class): EngiScoreEditorModal renders
+   its own .scoring-panel/.editor-modal chrome now (mirroring ScoreEditorModal),
+   so there is no .score-editor--engi wrapper to scope off. .engi-sides is
+   unique to this component; no collision risk from leaving it unscoped. */
+.engi-sides {
   display: flex;
   gap: 16px;
   align-items: flex-start;

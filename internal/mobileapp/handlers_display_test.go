@@ -727,6 +727,11 @@ func TestCourtCurrent_ThirdPlaceMatchOnlyOnCourt(t *testing.T) {
 	require.NotNil(t, resp.SideB)
 	assert.Equal(t, "Carol", resp.SideA.Name)
 	assert.Equal(t, "Dave", resp.SideB.Name)
+	// Copilot review (PR #326): phaseFromMatchID("m-bronze") strips everything
+	// after the last (only) hyphen and returns just "m", which is not a
+	// meaningful phase label for the OBS/vMix overlay. The handler must pass
+	// a stable literal instead of deriving one from the bronze match's ID.
+	assert.Equal(t, "3rd Place Match", resp.Phase)
 }
 
 // TestMatchesPresentOnCourt_ThirdPlaceMatch is a Finding 4 regression test:

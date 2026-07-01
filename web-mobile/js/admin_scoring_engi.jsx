@@ -46,6 +46,32 @@ function PipRow({ count, side }) {
   );
 }
 
+// EngiShortcutHint: quiet keyboard-shortcut reminder, matching the kendo
+// editor's ScoringShortcutHint style. aria-hidden (the same actions are
+// reachable via the on-screen counters and Save button).
+function EngiShortcutHint() {
+  const kbd = {
+    fontFamily: "var(--font-mono)", fontSize: 11, padding: "1px 5px",
+    border: "1px solid var(--line)", borderRadius: 4, background: "var(--surface)",
+    color: "var(--ink-3)", margin: "0 1px",
+  };
+  return (
+    <div
+      data-testid="engi-shortcut-hint"
+      aria-hidden="true"
+      style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)", textAlign: "center", display: "flex", gap: 4, justifyContent: "center", alignItems: "center", flexWrap: "wrap" }}
+    >
+      <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag</span>
+      <span aria-hidden="true">·</span>
+      <kbd style={kbd}>⇧A</kbd><kbd style={kbd}>⇧S</kbd><span>remove</span>
+      <span aria-hidden="true">·</span>
+      <kbd style={kbd}>Enter</kbd><span>save</span>
+      <span aria-hidden="true">·</span>
+      <kbd style={kbd}>Esc</kbd><span>close</span>
+    </div>
+  );
+}
+
 // Derive the winner side from flag counts. Returns "a" | "b" | null.
 function deriveWinner(flagsA, flagsB) {
   if (flagsA > flagsB) return "a";
@@ -200,6 +226,44 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
     doSubmit({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
   };
 
+  // Keyboard flag entry (impeccable critique P2: Engi had none, so an operator
+  // running an all-Engi court was tap-only while the kendo court beside it
+  // typed scores). Mnemonic mirrors the kendo editor's Shift-picks-Aka scheme:
+  //   a → Aka +1     Shift+a (A) → Aka −1
+  //   s → Shiro +1   Shift+s (S) → Shiro −1
+  //   Enter → save (same completed-match/correction gating as the button)
+  // Registered once; reads fresh state via kbRef so the listener never goes
+  // stale. Escape stays owned by useEscapeToClose above.
+  const kbRef = useRefE(null);
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit };
+  useEffectE(() => {
+    const onKeyDown = (ev) => {
+      const s = kbRef.current;
+      if (s.submitting) return;
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      // The correction reason prompt owns interaction while it's open.
+      if (s.showCorrectionPrompt) return;
+      // Never hijack typing in a text field (e.g. the reason note).
+      if (window.isTextEntry && window.isTextEntry(ev.target)) return;
+
+      if (ev.key === "Enter") {
+        // Let a focused button/link/input handle its own Enter (e.g. Cancel).
+        if (window.isInteractiveTarget && window.isInteractiveTarget(ev.target)) return;
+        if (s.canSubmit) { ev.preventDefault(); s.handleSubmit(); }
+        return;
+      }
+      switch (ev.key) {
+        case "a": ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA + 1)); break;
+        case "A": ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA - 1)); break;
+        case "s": ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB + 1)); break;
+        case "S": ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB - 1)); break;
+        default: break;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []); // registered once; reads fresh state via kbRef
+
   // Outline styling: danger when total is non-zero but invalid.
   const invalidOutline = total > 0 && !isValidTotal;
 
@@ -312,7 +376,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
         {err && <div className="score-editor__err" role="alert">{err}</div>}
       </div>
 
-      <div className="editor-modal__foot editor-modal__foot--nav">
+      {/* Column layout so the banners, the Cancel/Save row, and the keyboard
+          hint stack vertically (the shared .editor-modal__foot is a flex ROW
+          with space-between, which would otherwise put the hint beside the
+          actions). */}
+      <div className="editor-modal__foot editor-modal__foot--nav" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
         {/* Audit reason prompt: shown when correcting a completed match.
             Operator must confirm a reason before the patch is submitted. */}
         {isComplete && showCorrectionPrompt && (
@@ -355,7 +423,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
         {!(isComplete && showCorrectionPrompt) && (
-          <div className="score-nav__actions" style={{ marginLeft: "auto" }}>
+          <div className="score-nav__actions" style={{ justifyContent: "flex-end" }}>
             {canClose && <button type="button" className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
             <button
               type="button"
@@ -369,6 +437,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, variant = "moda
             </button>
           </div>
         )}
+        {/* Quiet keyboard-shortcut reminder (parity with the kendo editor's
+            ScoringShortcutHint). Hidden during the reason prompt, when keys
+            are disabled. */}
+        {!(isComplete && showCorrectionPrompt) && <EngiShortcutHint />}
       </div>
     </>
   );

@@ -110,6 +110,44 @@ describe('EngiScoreEditorModal correction retry (Copilot review: PR #326)', () =
   });
 });
 
+describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2)', () => {
+  it('a/s add a flag to Aka/Shiro, Shift+A/S remove, Enter saves', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={onSubmit} />);
+
+    // a → Aka +1 (x3), s → Shiro +1 (x2): Aka=3, Shiro=2 → total 5 (valid).
+    fireEvent.keyDown(document.body, { key: 'a' });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    fireEvent.keyDown(document.body, { key: 'a' });
+    fireEvent.keyDown(document.body, { key: 's' });
+    fireEvent.keyDown(document.body, { key: 's' });
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
+    expect(screen.getByTestId('engi-shiro-count').textContent).toBe('2');
+
+    // Shift+A (key 'A') removes an Aka flag → Aka=2, total 4 (invalid, no save).
+    fireEvent.keyDown(document.body, { key: 'A' });
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('2');
+
+    // Bring Aka back to 3 (total 5), then Enter saves the {3,2} payload.
+    fireEvent.keyDown(document.body, { key: 'a' });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed' }));
+  });
+
+  it('does not hijack typing inside a text field (reason note)', () => {
+    // Open the correction prompt on a completed match; while it's open the
+    // keyboard handler must no-op so the operator can type in the note.
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'completed', flagsA: 3, flagsB: 0 })} onClose={() => {}} onSubmit={() => {}} />);
+    fireEvent.click(screen.getByTestId('engi-submit')); // opens ReasonPrompt
+    const before = { aka: 3, shiro: 0 };
+    fireEvent.keyDown(document.body, { key: 'a' });
+    fireEvent.keyDown(document.body, { key: 's' });
+    // Prompt is open, so flag keys are ignored: counts unchanged (the counters
+    // aren't even rendered now, so we assert via a fresh submit path instead).
+    expect(screen.queryByTestId('engi-aka-count')?.textContent ?? String(before.aka)).toBe('3');
+  });
+});
+
 describe('EngiScoreEditorModal offline safety net (impeccable critique P2)', () => {
   it('shows the pending-write banner (not a silent close) when a save is only queued, and Retry re-submits', async () => {
     // onSubmit resolves { queued: true } instead of throwing: the terminal

@@ -4,6 +4,7 @@
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
+import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -285,6 +286,23 @@ export function diffAnnouncementSnapshot(seenRef, list) {
   return additions;
 }
 
+// parseCourtFromSearch: read the normalized display court from the URL query
+// string ('?court=A' → 'A', 'all' → 'ALL', default 'A'). Used by the display
+// consumer so the bridge re-scopes when the court param changes (mp-9ukk).
+//
+// Delegates the query-string parse to the shared AppRouter.parseSearch (the one
+// canonical implementation in router.jsx) rather than re-rolling the loop, via
+// the module-level AppRouter binding (same pattern as AppRouter.route() below).
+// router.js is script-tagged before app.js in index.html, so window.AppRouter
+// is always set by the time this module evaluates; the fallback only guards a
+// non-browser/never-rendered context and degrades to the default court.
+function parseCourtFromSearch() {
+  const s = typeof window !== 'undefined' ? (window.location.search || '') : '';
+  const query = AppRouter && AppRouter.parseSearch ? AppRouter.parseSearch(s) : {};
+  const raw = query.court || 'A';
+  return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
+}
+
 function App() {
   const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
@@ -384,6 +402,36 @@ function App() {
   // EventSource itself lives inside subscribeToEvents; the second
   // callback hands status events up here.
   const [sseConnected, setSseConnected] = useS(true);
+  // mp-9ukk Phase 2: 3-state link indicator for the TV board.
+  // 'connected' = SSE up; 'local' = operator broadcast fresh; 'stale' = no feed.
+  // Derived from sseConnected + the bridge's last-broadcast recency in a tick.
+  // The boolean sseConnected is kept for LobbyDisplay (unchanged scope).
+  const [linkState, setLinkState] = useS('connected');
+  // Shared by the display-consumer effect (on mount/court-change and its 5 s
+  // ticker) and the sseConnected-sync effect below, all of which re-derive
+  // linkState from the same shape. Stable identity (no deps): freshnessMs is
+  // a module import, getLastBroadcastAt/setLinkState never change.
+  const refreshLinkState = useC((connected) => {
+    setLinkState(deriveLinkState({
+      sseConnected: connected,
+      lastBroadcastAt: getLastBroadcastAt(),
+      now: Date.now(),
+      freshnessMs,
+    }));
+  }, []);
+  // mp-9ukk Phase 2: the display court parsed from ?court=. Tracked as state
+  // (updated on popstate) so the display consumer effect re-runs and re-scopes
+  // the bridge when the court changes without a full reload.
+  const [displayCourt, setDisplayCourtState] = useS(() => parseCourtFromSearch());
+  // Ref kept in sync with sseConnected so the 5 s display-mode ticker can
+  // read the current value without closing over a stale copy from the effect
+  // that has [mode] as its only dep. See the sync effect below.
+  const sseConnectedRef = useR(sseConnected);
+  // mp-9ukk Phase 2: holds the latest competitions so the snapshot provider
+  // can be registered ONCE (keyed on [mode]) and read current data through the
+  // ref, instead of re-registering on every tournament update (which would
+  // churn the provider and open a transient unregistered window).
+  const compsRef = useR(null);
   // Per-tab client ID, generated once on mount. Used as the originator
   // identifier on password-reset POSTs so the SSE broadcast can be
   // ignored in the originating tab. Without this, the tab that just
@@ -489,6 +537,9 @@ function App() {
         if (route.admin) setAdminView(route.admin);
       } else if (route.mode === "display") {
         setMode("display");
+        // Re-read the court so an in-place back/forward to a different
+        // ?court= re-scopes the bridge (the display effect depends on it).
+        setDisplayCourtState(parseCourtFromSearch());
       } else {
         setMode("viewer");
         setViewerCompId(route.viewerCompId || null);
@@ -541,6 +592,162 @@ function App() {
   };
 
   useE(() => { load(); }, []);
+
+  // mp-9ukk Phase 2: display-mode BroadcastChannel consumer.
+  //
+  // When mode === "display" this effect:
+  //   1. Opens a bridge and posts a snapshot-req for the display's court so
+  //      any open operator tab can reply with the competition data.
+  //   2. Subscribes to broadcast messages:
+  //      - 'patch'    : apply the match patch into the in-memory tournament
+  //                     tree via the tree-level adapter (applyPatchToTree).
+  //      - 'snapshot' : bootstrap tournament.competitions when the display
+  //                     loaded offline or before the server fetch resolved.
+  //   3. Runs a 5 s interval tick that re-derives linkState from sseConnected
+  //      + the bridge's last-broadcast recency.
+  //
+  // On reconnect the existing SSE match_updated handler fires maybeLoad()
+  // which wholesale replaces the in-memory tree with server truth: the
+  // optimistic broadcast overlay is discarded by construction.
+  //
+  // Snapshot fallback: the standard load() above already runs on mount
+  // and populates tournament. If the server is unreachable on first load,
+  // load() catches and sets tournament=null. The snapshot handler below
+  // bootstraps from the operator tab's reply instead, using the court
+  // slice of competitions. We set a synthetic tournament so the display
+  // can render.
+  useE(() => {
+    if (mode !== 'display') return;
+
+    // The display court is tracked as state (parseCourtFromSearch, updated on
+    // popstate) and is a dependency of this effect, so the bridge re-scopes
+    // when ?court= changes without a full reload.
+    const court = displayCourt;
+
+    // Scope the inbound recency clock to this display court so a patch for
+    // a different court does not falsely advance the local dot to 'local'.
+    // setDisplayCourt resets the recency clock when the court actually changed.
+    setDisplayCourt(court);
+
+    // Re-derive linkState immediately (rather than waiting up to 5 s for the
+    // ticker below) so switching ?court= does not keep showing the PREVIOUS
+    // court's dot state. This reads the recency clock setDisplayCourt just
+    // reset above, so a fresh court starts from its own (blank) state.
+    refreshLinkState(sseConnectedRef.current);
+
+    // Use the module-level singleton (shared with api_client's publisher in
+    // the same tab) so only one BroadcastChannel is opened per tab.
+    // Post snapshot-req so any open operator tab can reply with court data.
+    bridge.publish('snapshot-req', court, '', null);
+
+    const unsub = bridge.onMessage((msg) => {
+      if (msg.type === 'patch') {
+        // Strict court match: a message with no court (unscoped) or a
+        // different court is dropped, never applied to this court's board.
+        if (msg.court !== court) return;
+        setTournament(prev => applyPatchToTree(prev, msg));
+        return;
+      }
+      if (msg.type === 'snapshot' && msg.payload) {
+        // Strict court match: a message with no court (unscoped) or a
+        // different court is dropped, never applied to this court's board.
+        if (msg.court !== court) return;
+        // Bootstrap or fill gap from the operator tab's court snapshot.
+        // We build a minimal tournament wrapper: the display only reads
+        // tournament.name/courts for the header and tournament.competitions
+        // for match rendering.
+        setTournament(prev => {
+          // Pure merge policy lives in court_bridge.mergeSnapshotIntoTree (so it
+          // is unit-testable apart from this effect). The try/catch is a backstop
+          // so a future malformed snapshot can never crash the display board.
+          try {
+            return mergeSnapshotIntoTree(prev, msg.payload, { connected: sseConnectedRef.current });
+          } catch (e) {
+            console.error('court_bridge: snapshot merge failed:', e);
+            return prev;
+          }
+        });
+      }
+    });
+
+    // Tick: re-derive linkState every 5 s so the dot transitions promptly
+    // when the broadcast recency crosses the freshnessMs threshold.
+    // The ticker reads sseConnectedRef.current (a ref kept in sync by a
+    // dedicated effect) so the interval closure is never stale. sseConnected
+    // is intentionally left OUT of this effect's deps so re-opening the bridge
+    // does not drop in-flight snapshot replies.
+    const ticker = setInterval(() => {
+      refreshLinkState(sseConnectedRef.current);
+    }, 5000);
+
+    return () => {
+      unsub();
+      // Do NOT close the shared bridge here: it is shared with api_client's
+      // publisher in the same tab. Only unsubscribe the display listener.
+      setDisplayCourt(null);
+      clearInterval(ticker);
+    };
+    // mode + displayCourt are in deps so the effect re-runs (re-scoping the
+    // bridge: snapshot-req, recency clock, and the inbound court guard) when
+    // the user leaves display mode or switches ?court= in place. sseConnected
+    // is NOT in deps deliberately: re-opening the bridge on every SSE flip
+    // would drop all in-flight snapshot replies.
+  }, [mode, displayCourt]);
+
+  // mp-9ukk Phase 2: ref sync + linkState re-derivation on every sseConnected
+  // or mode change. sseConnectedRef is updated first (before the mode guard)
+  // so the ref stays in sync in all modes, not just display mode. The
+  // linkState derivation then fires only in display mode: this catches the
+  // moment SSE reconnects (sseConnected flips true) so the dot goes green
+  // immediately without waiting for the 5 s ticker.
+  useE(() => {
+    sseConnectedRef.current = sseConnected;
+    if (mode !== 'display') return;
+    refreshLinkState(sseConnected);
+  }, [sseConnected, mode]);
+
+  // Keep compsRef in sync with the latest competitions so the snapshot
+  // provider (registered once below) always answers with current data.
+  useE(() => { compsRef.current = (tournament && tournament.competitions) || null; }, [tournament]);
+
+  // mp-9ukk Phase 2: operator-tab snapshot provider.
+  //
+  // When the app is in admin or viewer mode (i.e. NOT display mode) register a
+  // snapshot provider so the bridge can auto-reply to display-tab snapshot-req
+  // messages. It is registered ONCE per mode and reads the live competitions
+  // through compsRef, so a tournament update never transiently unregisters it
+  // (which could drop a snapshot-req landing during a re-register window).
+  //
+  // The provider returns only the competitions for the requested court so the
+  // payload is bounded (one court's slice rather than all courts). When there
+  // is no data yet, or no court match, it returns null and the bridge stays
+  // silent.
+  useE(() => {
+    if (mode === 'display') {
+      // Display tabs do not answer snapshot requests.
+      setSnapshotProvider(null);
+      return;
+    }
+    setSnapshotProvider((court) => {
+      const comps = compsRef.current;
+      if (!court || !comps) return null;
+      const slice = comps.filter(c => {
+        // A competition belongs to a court when ANY of its pool or bracket
+        // matches are assigned to that court. Quick check: if the comp
+        // exposes a courts[] array use it; otherwise scan poolMatches.
+        if (c.courts && Array.isArray(c.courts) && c.courts.includes(court)) return true;
+        if (c.poolMatches && c.poolMatches.some(m => m.court === court)) return true;
+        if (c.bracket && Array.isArray(c.bracket.rounds)) {
+          for (const round of c.bracket.rounds) {
+            if (Array.isArray(round) && round.some(m => m.court === court)) return true;
+          }
+        }
+        return false;
+      });
+      return slice.length > 0 ? slice : null;
+    });
+    return () => setSnapshotProvider(null);
+  }, [mode]);
 
   // mp-9h1f: while the shiaijo operator console is active (admin mode + shiaijo
   // view) the SSE handler skips its per-event aggregate refetch: the console
@@ -978,6 +1185,37 @@ function App() {
     return <window.LoadingSpinner text="Loading..." />;
   }
 
+  // T060: /display family: public, read-only TV / lobby / overlay
+  // surfaces. Short-circuit BEFORE the CreateTournament null-check and
+  // before viewer/admin so no auth prompt is shown, no admin chrome leaks
+  // in, and a public TV never falls through to the admin create-tournament
+  // form during an outage. The DisplayRoute owns its own query-param
+  // routing (court=, overlay=, position=). `connected` is the SSE-status
+  // boolean from T063 (for LobbyDisplay). `linkState` is the 3-state dot
+  // value for TvDisplay (mp-9ukk Phase 2): 'connected' | 'local' | 'stale'.
+  if (mode === "display") {
+    const DisplayRoute = window.DisplayRoute;
+    if (!DisplayRoute) {
+      // Defensive: display.js bundle is part of the standard build, so
+      // this should never fire in production. Render a minimal message
+      // rather than a blank screen if it does.
+      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
+    }
+    // tournament is null when the initial fetch failed (outage). Pass a safe
+    // empty wrapper so the board renders its own loading/empty state instead
+    // of the admin create form; the snapshot bootstrap may still populate it
+    // from an operator tab, and load() replaces it on reconnect.
+    const displayTournament = tournament || { name: '', competitions: [] };
+    return (
+      <DisplayRoute
+        tournament={displayTournament}
+        competitions={displayTournament.competitions || []}
+        connected={sseConnected}
+        linkState={linkState}
+      />
+    );
+  }
+
   if (tournament === null) {
     return (
       <CreateTournament
@@ -988,29 +1226,6 @@ function App() {
           setMode("admin");
           setPassword(p);
         }}
-      />
-    );
-  }
-
-  // T060: /display family: public, read-only TV / lobby / overlay
-  // surfaces. Short-circuit before viewer/admin so no auth prompt is
-  // shown, no admin chrome leaks in, and the DisplayRoute owns its
-  // own query-param routing (court=, overlay=, position=). The
-  // tournament prop carries .competitions already (load() merges
-  // them), and `connected` is the SSE-status boolean from T063.
-  if (mode === "display") {
-    const DisplayRoute = window.DisplayRoute;
-    if (!DisplayRoute) {
-      // Defensive: display.js bundle is part of the standard build, so
-      // this should never fire in production. Render a minimal message
-      // rather than a blank screen if it does.
-      return <div className="loading" style={{ background: '#000', color: '#fff', padding: 40 }}>Display module not loaded.</div>;
-    }
-    return (
-      <DisplayRoute
-        tournament={tournament}
-        competitions={tournament.competitions || []}
-        connected={sseConnected}
       />
     );
   }

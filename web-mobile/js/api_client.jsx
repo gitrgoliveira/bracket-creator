@@ -31,6 +31,7 @@
 //   F5: Terminal writes (decision, completed score, lineup) durable via queue.
 
 import { normalizeCompetitionDetail, normalizePlayer, toBackendMatchResult, buildPlayerMetadata } from './api_serializers.jsx';
+import { bridge as _bridge } from './court_bridge.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -1051,6 +1052,36 @@ const API = {
             _recomputeSyncStatus();
         }
 
+        // mp-9ukk Phase 2: broadcast helper. Publishes a match patch on the
+        // court-local BroadcastChannel so the display tab can update without
+        // a server round-trip during offline periods.
+        //
+        // The envelope mirrors the SSE match_updated shape including sideAId and
+        // sideBId so the display tab's normalizeMatch can resolve participants by
+        // UUID rather than falling back to name-key lookup (which can mis-resolve
+        // same-name participants). winnerId is already in rest when present.
+        // rev/revSession are stripped so internal write-ordering metadata is not
+        // propagated to the display tab.
+        const _broadcastPatch = (fields) => {
+            const { rev: _r, revSession: _rs, ...rest } = fields || {};
+            const court = (match && match.court) || '';
+            // Do not emit an unscoped (court-less) broadcast: a display can only
+            // safely apply a patch it can attribute to its court, and the display
+            // guard drops court-less messages anyway. In production every
+            // recordScore caller passes the match (so court is set); the
+            // court-less case is test-only (match=null), where no broadcast is
+            // expected.
+            if (!court) return;
+            _bridge.publish('patch', court, compID, {
+                result: {
+                    id: matchID,
+                    ...(match && match.sideA && match.sideA.id ? { sideAId: match.sideA.id } : {}),
+                    ...(match && match.sideB && match.sideB.id ? { sideBId: match.sideB.id } : {}),
+                    ...rest,
+                },
+            });
+        };
+
         const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
         let res;
         try {
@@ -1073,6 +1104,9 @@ const API = {
                 // failures so they are not silently lost on a wifi gap.
                 if (isRunning) {
                     enqueueRunningWrite(compID, matchID, payload, password);
+                    // mp-9ukk: broadcast even on enqueue so the display tab gets
+                    // the optimistic overlay while the server is unreachable.
+                    _broadcastPatch(payload);
                     // Return a DISCRIMINATED { queued: true } result. The write was
                     // NOT confirmed by the server: only enqueued for async delivery
                     // via _flushQueue (last-write-wins). Fire-and-forget callers
@@ -1090,6 +1124,8 @@ const API = {
                     _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
                     payload, password, compID, matchID
                 );
+                // mp-9ukk: broadcast the terminal write for offline display update.
+                _broadcastPatch(payload);
                 return { queued: true };
             }
         } finally {
@@ -1116,8 +1152,23 @@ const API = {
                 _matchRevCounters.delete(_revKey(compID, matchID));
             }
             // A stale running write is signalled by HTTP 200 {stale:true}
-            // (the server's rev-guard no-ops it). Returned as-is; the
-            // fire-and-forget autosave caller ignores the value.
+            // (the server's rev-guard no-ops it). Do not broadcast it: pushing
+            // a superseded running score to the display would overwrite the
+            // newer state already there. Return as-is; the fire-and-forget
+            // autosave caller ignores the value.
+            // mp-9ukk: echo the operator's patch to the court display
+            // peer-to-peer so the board keeps updating when the SSE link is
+            // slow or down. This is an OPTIMISTIC overlay, not the
+            // authoritative source: the request payload already carries the
+            // display-critical fields (id, side ids, winner, scores, status)
+            // in the same envelope every other broadcast path uses, and the
+            // fully server-normalized state arrives via SSE (or the reconnect
+            // full refetch), which replaces the overlay. Broadcasting the
+            // request payload (not the server `data`) keeps one consistent
+            // shape across the confirmed and offline paths. Skip a rejected
+            // stale write above so a superseded score is never pushed.
+            if (data && data.stale) return data;
+            _broadcastPatch(payload);
             return data;
         }
         // A running write that failed with a RETRYABLE server error (5xx / 429)
@@ -1128,6 +1179,8 @@ const API = {
         // latest state.
         if (isRunning && (res.status >= 500 || res.status === 429)) {
             enqueueRunningWrite(compID, matchID, payload, password);
+            // mp-9ukk: broadcast the queued state for offline display update.
+            _broadcastPatch(payload);
             // Discriminated { queued: true }: not server-confirmed; see the
             // network-error branch above for the full caller contract.
             return { queued: true };
@@ -1139,6 +1192,8 @@ const API = {
                 _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
                 payload, password, compID, matchID
             );
+            // mp-9ukk: broadcast the queued terminal state for offline display.
+            _broadcastPatch(payload);
             return { queued: true };
         }
         // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor

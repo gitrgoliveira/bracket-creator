@@ -36,25 +36,27 @@ import {
 // position → "bottom". Both "true" and "1" toggle overlay mode so the
 // OBS muscle-memory ?overlay=1 form works alongside ?overlay=true.
 //
-// `connected` is forwarded so the per-court / lobby surfaces can show
-// the SSE reconnect indicator. app.jsx owns the EventSource lifecycle
-// and feeds the boolean down through the AppRouter props.
-function DisplayRoute({ tournament, competitions, connected = true }) {
+// `connected` (boolean) is forwarded to LobbyDisplay for the SSE reconnect
+// indicator. `linkState` (3-state: 'connected'|'local'|'stale') is forwarded
+// to TvDisplay (mp-9ukk Phase 2): the per-court board shows a small coloured
+// dot that distinguishes server-fresh vs operator-broadcast vs no feed, without
+// hiding the layout on outage. app.jsx owns both values and feeds them down.
+function DisplayRoute({ tournament, competitions, connected = true, linkState = 'connected' }) {
     const useQuery = window.AppRouter?.useQuery;
-    const query = useQuery ? useQuery() : (() => {
-        if (typeof window === 'undefined') return {};
-        const s = window.location.search || '';
-        const out = {};
-        if (s.length < 2) return out;
-        const trimmed = s.startsWith('?') ? s.slice(1) : s;
-        for (const pair of trimmed.split('&')) {
-            if (!pair) continue;
-            const eq = pair.indexOf('=');
-            if (eq === -1) out[decodeURIComponent(pair)] = '';
-            else out[decodeURIComponent(pair.slice(0, eq))] = decodeURIComponent(pair.slice(eq + 1));
-        }
-        return out;
-    })();
+    // Prefer the reactive useQuery hook (re-renders on popstate). If
+    // window.AppRouter hasn't been set yet (e.g. a component test that renders
+    // DisplayRoute without loading router.jsx as a script), fall back to a
+    // one-time parse via the SAME canonical AppRouter.parseSearch rather than a
+    // second hand-rolled copy of the query-string loop, which would otherwise
+    // drift from router.jsx's implementation over time. useQuery and
+    // parseSearch are set together on window.AppRouter (router.jsx), so if
+    // AppRouter is present at all, parseSearch is present too; only a fully
+    // absent AppRouter (or a non-browser context) degrades to {}.
+    const query = useQuery
+        ? useQuery()
+        : (typeof window !== 'undefined' && window.AppRouter?.parseSearch
+            ? window.AppRouter.parseSearch(window.location.search || '')
+            : {});
     const courtRaw = (query.court || 'A');
     const overlay = query.overlay === 'true' || query.overlay === '1';
     const position = query.position === 'top' ? 'top' : 'bottom';
@@ -68,7 +70,7 @@ function DisplayRoute({ tournament, competitions, connected = true }) {
     if (court === 'ALL') {
         return <LobbyDisplay tournament={tournament} competitions={competitions} connected={connected} />;
     }
-    return <TvDisplay court={court} tournament={tournament} competitions={competitions} connected={connected} />;
+    return <TvDisplay court={court} tournament={tournament} competitions={competitions} linkState={linkState} />;
 }
 
 export {

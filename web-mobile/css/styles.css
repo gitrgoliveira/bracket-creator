@@ -4198,14 +4198,34 @@ button.pool-match-row {
   align-items: center;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--line);
+  border: 2px solid var(--line);
   border-radius: var(--r);
   background: var(--surface);
 }
 
-.engi-side--winner {
+/* Aka/Shiro side treatment (DESIGN.md §4): a real tinted fill + coloured
+   frame per side, matching the kendo score card (.sb-side--aka/--shiro)
+   rather than relying on the small badge chip alone. A dense form card
+   needs real area, not a hairline. */
+.engi-side--aka {
+  border-color: var(--red);
+  background: var(--red-soft);
+}
+
+.engi-side--shiro {
   border-color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+}
+
+/* Winner: thicker frame + bold name, not a colour flood (a flood would fight
+   the side's own tint) — mirrors the bracket card's v1 winner treatment. */
+.engi-side--winner {
+  border-width: 3px;
+}
+.engi-side--winner .engi-side__name {
+  font-weight: 700;
 }
 
 .engi-side__badge {
@@ -4217,16 +4237,19 @@ button.pool-match-row {
   border-radius: 4px;
 }
 
+/* Framed white, never flat grey (DESIGN.md §4: "all Shiro badges are framed
+   white: never flat grey"). Aka is a solid red badge, matching every other
+   Aka badge in the app. */
 .engi-side__badge--shiro {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
 }
 
 .engi-side__badge--aka {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+  background: var(--red);
+  color: #fff;
+  border: 1px solid var(--red);
 }
 
 .engi-side__names {
@@ -7072,6 +7095,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     min-height: 44px;
   }
   .team-bouts-scroll .lineup-name__clear {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Touch-target floor for the Engi flag counters --------------------- *
+   .engi-counter__btn is the single most-tapped control in the Engi flow
+   (every flag increment) and had no coarse-pointer override at all: it sat
+   at a flat 32px on every device, including the tablets operators actually
+   score on. Bring it up to the same ≥44px floor as .ipt-btn. */
+@media (pointer: coarse) {
+  .engi-counter__btn {
     min-width: 44px;
     min-height: 44px;
   }

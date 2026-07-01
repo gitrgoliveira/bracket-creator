@@ -507,7 +507,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} canClose={canClose} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} variant={variant} canClose={canClose} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {

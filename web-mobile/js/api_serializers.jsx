@@ -75,6 +75,11 @@ function toBackendMatchResult(patch, match) {
     // submit payload). Omitted otherwise so non-engi payloads stay minimal.
     if (patch.flagsA != null) result.flagsA = patch.flagsA;
     if (patch.flagsB != null) result.flagsB = patch.flagsB;
+    // Audit reason captured by ReasonPrompt when correcting a completed
+    // match (admin_scoring_shared.jsx CORRECTION_PRESETS). Without this the
+    // operator's typed/selected reason never reached the wire and the audit
+    // trail silently stayed empty on every correction, kendo and team alike.
+    if (patch.correctionReason) result.correctionReason = patch.correctionReason;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }

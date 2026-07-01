@@ -77,6 +77,26 @@ describe('API Utils', () => {
       expect(result.flagsB).toBe(5);
     });
 
+    it('forwards correctionReason when present (audit trail regression)', () => {
+      // ReasonPrompt (admin_scoring_shared.jsx) captures the operator's reason
+      // and merges it into the patch as correctionReason. Without forwarding
+      // it here, the audit trail was silently empty on every correction.
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [],
+        correctionReason: 'Scoring error',
+      }, match);
+      expect(result.correctionReason).toBe('Scoring error');
+    });
+
+    it('omits correctionReason when absent or empty (fresh entries stay minimal)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.correctionReason).toBeUndefined();
+      const result2 = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [], correctionReason: '' }, match);
+      expect(result2.correctionReason).toBeUndefined();
+    });
+
     it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({

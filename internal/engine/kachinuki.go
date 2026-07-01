@@ -369,10 +369,9 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 			for rIdx := range bracket.Rounds {
 				for mIdx := range bracket.Rounds[rIdx] {
 					if bracket.Rounds[rIdx][mIdx].ID == matchID {
-						// BracketMatch carries no SubResults; the
-						// authoritative bout log lives on the parent
-						// MatchResult side of the world. For kachinuki
-						// finals we mirror Winner/Decision only.
+						// We mirror Winner/Decision/Status onto the BracketMatch
+						// on a finalized kachinuki match; the per-bout SubResults
+						// are persisted separately by the team scoring path.
 						bm := &bracket.Rounds[rIdx][mIdx]
 						if out.MatchEnded {
 							bm.Status = state.MatchStatusCompleted
@@ -387,6 +386,22 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 						return nil
 					}
 				}
+			}
+			// The Naginata 3rd-place (bronze) match is a sibling of
+			// bracket.Rounds, not an element of it, so the loop above never
+			// reaches it. Finalize it here, mirroring the Rounds finalize.
+			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+				if out.MatchEnded {
+					bm.Status = state.MatchStatusCompleted
+					bm.Decision = out.Decision
+					switch out.WinningSide {
+					case "A":
+						bm.Winner = bm.SideA
+					case "B":
+						bm.Winner = bm.SideB
+					}
+				}
+				return nil
 			}
 			return notFoundErrorf("bracket match %s not found", matchID)
 		}); err != nil {
@@ -430,9 +445,26 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 						Court:       bm.Court,
 						ScheduledAt: bm.ScheduledAt,
 						Decision:    bm.Decision,
+						SubResults:  bm.SubResults,
 					}, true, nil
 				}
 			}
+		}
+		// The Naginata 3rd-place (bronze) match is a sibling of
+		// bracket.Rounds, not an element of it; look it up here, projecting
+		// the same fields the Rounds branch returns.
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+			return &state.MatchResult{
+				ID:          bm.ID,
+				SideA:       bm.SideA,
+				SideB:       bm.SideB,
+				Winner:      bm.Winner,
+				Status:      bm.Status,
+				Court:       bm.Court,
+				ScheduledAt: bm.ScheduledAt,
+				Decision:    bm.Decision,
+				SubResults:  bm.SubResults,
+			}, true, nil
 		}
 	}
 	return nil, false, nil

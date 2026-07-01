@@ -322,6 +322,27 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                       setSelectedMatch({ ...m, phase: "bracket", round: label, phaseName: label, roundIndex: m.roundIndex ?? ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize });
                     }}
                   />
+                  {derivedBracket.thirdPlaceMatch && (() => {
+                    const bm = derivedBracket.thirdPlaceMatch;
+                    // Header identifies the lone bronze card; the card omits a
+                    // redundant per-card "3RD" badge and the extra top gap
+                    // detaches it from the bracket above.
+                    return (
+                      <div className="bracket-bronze-section" style={{ marginTop: 28 }} data-testid="viewer-bronze-section">
+                        <div className="bracket-bronze-label">
+                          3rd Place
+                        </div>
+                        <window.MatchCard
+                          match={bm}
+                          variant={tweaks.cardVariant ?? 1}
+                          showDojo={tweaks.showDojo ?? true}
+                          highlighted={currentMatch?.id === bm.id}
+                          highlightPlayers={highlightPlayers}
+                          onClick={() => setSelectedMatch({ ...bm, phase: "bracket", round: "3rd Place", phaseName: "3rd Place", roundIndex: derivedBracket.rounds.length, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize })}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -356,6 +377,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
 
   const isLeague = c.format === "league";
   const isTeam = c.kind === "team" || c.teamSize > 0;
+  const isEngi = !!(c && c.engi);
   const leaguePoolName = isLeague && pools && pools[0] ? pools[0].poolName : null;
   const leagueStandings = leaguePoolName && standings ? (standings[leaguePoolName] || []) : [];
   const allMatchesComplete = isLeague && (() => {
@@ -451,7 +473,9 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           </div>
           <table className="pool__table">
             <thead>
-              {isTeam ? (
+              {isEngi ? (
+                <tr><th>#</th><th>Pair</th><th className="num"><abbr title="Victories (bouts won)">V</abbr></th><th className="num"><abbr title="Total flags received">Flags</abbr></th></tr>
+              ) : isTeam ? (
                 <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">PW</th><th className="num">PL</th></tr>
               ) : (
                 <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
@@ -473,15 +497,25 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                           it. The rank badge only carries information when rows are
                           in draw order (non-league pools), where rank ≠ position. */}
                     </div>
+                    {isEngi && s.player?.displayName ? <div className="pool__player-name">{s.player.displayName}</div> : null}
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
                   </td>
-                  <td className="num">{s.wins || 0}</td>
-                  <td className="num">{s.losses || 0}</td>
-                  <td className="num">{s.draws || 0}</td>
-                  {isTeam && <td className="num">{s.individualWins || 0}</td>}
-                  {isTeam && <td className="num">{s.individualLosses || 0}</td>}
-                  <td className="num">{isTeam ? (s.pointsWon || 0) : (s.ipponsGiven || 0)}</td>
-                  <td className="num">{isTeam ? (s.pointsLost || 0) : (s.ipponsTaken || 0)}</td>
+                  {isEngi ? (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.flags || 0}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.losses || 0}</td>
+                      <td className="num">{s.draws || 0}</td>
+                      {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                      {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                      <td className="num">{isTeam ? (s.pointsWon || 0) : (s.ipponsGiven || 0)}</td>
+                      <td className="num">{isTeam ? (s.pointsLost || 0) : (s.ipponsTaken || 0)}</td>
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

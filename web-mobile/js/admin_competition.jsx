@@ -25,6 +25,7 @@ export {
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const isValidDate = window.isValidDate;
+const bracketFullyComplete = window.bracketFullyComplete;
 const StatusBadge = window.StatusBadge;
 const formatDate = window.formatDate;
 const AdminTopbar = window.AdminTopbar;
@@ -47,6 +48,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const [starting, setStarting] = useStateA(false);
   const [generating, setGenerating] = useStateA(false);
   const [discarding, setDiscarding] = useStateA(false);
+  const [completing, setCompleting] = useStateA(false);
   // localStatus lets AdminSettings report an invalidation immediately so the
   // page-header StatusBadge flips without waiting for the SSE refresh.
   // Cleared automatically when the prop status changes (SSE arrives).
@@ -138,6 +140,34 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
     }
   };
 
+  // completeCompetition: the only trigger for a bracket-based competition
+  // (playoffs, or mixed once its knockout is running) to reach status
+  // "completed". MaybeAutoCompletePools (internal/engine/competition.go) only
+  // auto-transitions the League format on its last pool match, so a fully
+  // scored bracket otherwise sits in "pools"/"playoffs" forever and the
+  // public viewer's Awards tab (gated on status === "completed") never
+  // becomes reachable. Only rendered (see canComplete below) once every real
+  // bracket match, including a naginata bronze/3rd-place match, is done.
+  const completeCompetition = async () => {
+    if (!(await window.confirmDialog({
+      message: `Mark "${c.name}" as completed? This finalizes the results and reveals the Awards podium on the public viewer. There is no "reopen" action from here.`,
+      confirmLabel: "Complete competition",
+      danger: true,
+    }))) return;
+    setCompleting(true);
+    try {
+      await window.API.completeCompetition(c.id, password);
+      if (!mountedRef.current) return;
+      onRefreshCompetition?.();
+      showToast(`${c.name} marked complete`);
+    } catch (e) {
+      console.error("Complete competition failed:", e);
+      if (mountedRef.current) showToast(e.message, "error");
+    } finally {
+      if (mountedRef.current) setCompleting(false);
+    }
+  };
+
   // NOTE: there is intentionally no "regenerate draw" action. The draw is
   // deterministic on its stored inputs (no RNG in helper seeding/pools/tree;
   // Swiss round 1 uses a comp-id-seeded shuffle), so regenerating without
@@ -185,7 +215,17 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // Block section/competition navigation while a draw mutation is in-flight:
   // the in-flight transition changes which sections are valid and discardDraw's
   // fallback uses the section captured at call time (see the side-nav below).
-  const navBusy = generating || starting || discarding;
+  const navBusy = generating || starting || discarding || completing;
+  // canComplete: show "Complete competition" only once the competition is
+  // actually running (not setup/draw-ready/completed/invalid) AND its
+  // bracket exists with every real match, including the naginata bronze
+  // match, done. See bracketFullyComplete (admin_helpers.jsx) for why this
+  // can't reuse compMatchStats' total/done counters. League and pure-pools
+  // formats never produce a `bracket`, so this is false for them without a
+  // format check: they already auto-complete server-side.
+  const canComplete = c.status !== "setup" && c.status !== "draw-ready" &&
+    c.status !== "completed" && c.status !== "invalid" &&
+    bracketFullyComplete(bracket);
   // Compute the other-competitions list once (used for both the render guard
   // and the map below).
   const otherComps = (t.competitions || []).filter((cc) => cc.id !== c.id);
@@ -286,6 +326,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                   </button>
                 </div>
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>Draw generated. Preview below, then start. To change it, discard and edit first.</div>
+              </div>
+            )}
+            {canComplete && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                <button type="button" className="btn btn--primary" onClick={completeCompetition} disabled={navBusy}>
+                  {completing && <span className="spinner" />}
+                  {completing ? "Completing…" : "Complete competition →"}
+                </button>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>All bracket matches are done. Completing reveals the Awards podium on the public viewer.</div>
               </div>
             )}
             {c.format === "league" && c.status !== "setup" && c.status !== "draw-ready" && (

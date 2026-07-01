@@ -341,6 +341,21 @@ type Competition struct {
 	// in addition to the standard M/K/D/T/H set. Default false = Kendo.
 	Naginata bool `yaml:"naginata,omitempty" json:"naginata"`
 
+	// Engi selects flag-scoring (Engi-kyogi / kata demonstration) mode for this
+	// competition. When true, bouts are decided by referee flag counts
+	// (FlagsA/FlagsB) instead of ippon waza letters, and standings rank by
+	// wins then accumulated own-side flags. Independent of the Naginata flag;
+	// engi has no ippons or Sune. Supports all formats (pools, league, knockout,
+	// mixed). Locked after draw like Naginata. Default false = ippon-scored.
+	//
+	// Engi competitors are PAIRS (two member names, one shared dojo). On the Go
+	// side a pair is a single competitor stored in the WithZekkenName column
+	// layout: Player.Name holds member 1, Player.DisplayName holds member 2,
+	// Player.Dojo holds the shared dojo. Engi competitions therefore carry
+	// WithZekkenName=true so the participant CSV reader/writer use the 4-column
+	// [id, Name, DisplayName, Dojo] form.
+	Engi bool `yaml:"engi,omitempty" json:"engi"`
+
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`
 
 	FightingSpiritAwards []FightingSpiritAward `yaml:"fighting_spirit_awards,omitempty" json:"fightingSpiritAwards,omitempty"`
@@ -390,6 +405,14 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+}
+
+// EffectiveWithZekkenName reports whether the participant CSV reader/writer
+// must use the 4-column [id, Name, DisplayName, Dojo] layout. Engi (kata-pair)
+// competitions always carry a second member name in the DisplayName column, so
+// they force the zekken layout regardless of the explicit WithZekkenName flag.
+func (c *Competition) EffectiveWithZekkenName() bool {
+	return c.WithZekkenName || c.Engi
 }
 
 // ApplyCompetitionDefaults fills zero-valued per-phase durations from the
@@ -644,6 +667,13 @@ type MatchResult struct {
 	// keep older pool-matches.csv files fully compatible. (mp-62vr)
 	RepPlayerA string `json:"repPlayerA,omitempty" yaml:"rep_player_a,omitempty"`
 	RepPlayerB string `json:"repPlayerB,omitempty" yaml:"rep_player_b,omitempty"`
+	// FlagsA / FlagsB are the referee flag counts per side for engi (kata
+	// demonstration) bouts. Storage only; kendo scoring never reads or writes
+	// them. For pool matches they survive a restart via append-only trailing CSV
+	// columns (rec index 22/23, after RepPlayerB at 20/21); older files with the
+	// columns absent load as 0. Bracket matches persist fine via bracket.json.
+	FlagsA int `json:"flagsA,omitempty" yaml:"flags_a,omitempty"`
+	FlagsB int `json:"flagsB,omitempty" yaml:"flags_b,omitempty"`
 	// Rev is a client-monotonic revision counter carried on "running"-status
 	// autosave writes. The server uses it (scoped to RevSession) to drop stale
 	// in-flight writes that arrive out of order after a reconnect flush
@@ -737,6 +767,11 @@ type PlayerStanding struct {
 	PointsWon        int           `json:"pointsWon,omitempty"`
 	PointsLost       int           `json:"pointsLost,omitempty"`
 	Tied             bool          `json:"tied,omitempty"`
+	// Flags is the total accumulated own-side referee flags for engi (kata
+	// demonstration) standings. A dedicated field, NOT an overload of
+	// IpponsGiven, so the wire stays self-describing (wins vs flags as distinct
+	// columns). Zero for non-engi competitions (omitempty drops it).
+	Flags int `json:"flags,omitempty"`
 }
 
 type BracketMatch struct {
@@ -776,6 +811,11 @@ type BracketMatch struct {
 	// matches, persisted in bracket.json for audit. Set when an operator
 	// overwrites a completed result (correction), omitted on first completion.
 	CorrectionReason string `json:"correctionReason,omitempty"`
+	// FlagsA / FlagsB mirror MatchResult.FlagsA/FlagsB for engi (kata
+	// demonstration) bracket bouts, persisted in bracket.json so the flag
+	// counts survive a restart. Zero for non-engi matches.
+	FlagsA int `json:"flagsA,omitempty"`
+	FlagsB int `json:"flagsB,omitempty"`
 	// Display metadata (mp-7f2w); additive, computed at generation time so the
 	// viewer can render the bracket with the SAME effective-round columns as the
 	// printed Excel Tree sheet (matches grouped by depth-from-root, structural
@@ -805,6 +845,16 @@ type Bracket struct {
 	// Tree sheet. A preview bracket is read-only: the actual knockout is
 	// played in the separate playoffs competition created from this source.
 	Preview bool `json:"preview,omitempty"`
+	// ThirdPlaceMatch is the optional 3rd-place (bronze) playoff match. It is a
+	// SIBLING field rather than a row in Rounds: Rounds is power-of-two,
+	// position-encoded (propagateBracketWinner advances winner i into
+	// Rounds[rIdx+1][i/2]), so splicing a bronze match into that geometry would
+	// corrupt advancement math. The pointer + omitempty keeps bracket.json
+	// backward-compatible: nil for every existing/kendo bracket. Generated only
+	// for naginata competitions with a real semifinal round (len(Rounds) >= 2);
+	// its ID is always "m-bronze", and its sides are filled from the two
+	// semifinal losers by propagateBracketWinner.
+	ThirdPlaceMatch *BracketMatch `json:"thirdPlaceMatch,omitempty"`
 }
 
 type Announcement struct {

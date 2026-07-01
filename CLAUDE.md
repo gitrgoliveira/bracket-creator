@@ -197,6 +197,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - `DanGrade` is optional; omit or leave empty.
 - `source` is the last column when present and must be one of: `manual`, `registered`, `transfer`. This is the registration provenance (admin-only). It is distinct from the competitor's "tag" (their assigned competitor number, which is the `Number`/`number` field, optionally prefixed via `numberPrefix`, e.g. "A1").
 - Seeds are stored separately in `seeds.csv` and merged at load time. Do **not** include seed ranks in `participants.csv`.
+- **Engi (kata-demonstration) pairs**: an engi competitor is a PAIR (two member names, one shared dojo) but is a SINGLE participant on the Go side. Engi competitions ALWAYS use the `withZekkenName=true` column layout: member 1 goes in `Name`, member 2 goes in the `Zekken/DisplayName` column, and the shared dojo goes in `Dojo`. So a paste row is `Name1, Name2, Dojo`. This is additive: the effective zekken flag is `WithZekkenName || Engi` (see `Store.withZekkenNameLocked` and `loadParticipantsNoLock`), so non-engi parsing is byte-identical. A pair is one row in standings and one side in a match; the two names are presentation only and never split the entity for scoring.
 - The Go parser lives in `internal/state/participants.go`; the JS parser in `web-mobile/js/data.jsx:parseParticipantLines`. Keep both in sync with this schema when changing column layout.
 
 ## Common Pitfalls

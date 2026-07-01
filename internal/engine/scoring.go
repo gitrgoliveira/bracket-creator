@@ -103,6 +103,12 @@ func (e *Engine) withBracketMatch(compId, matchId string, mutate func(*state.Bra
 				}
 			}
 		}
+		// The bronze (3rd-place) playoff lives outside Rounds; resolve it
+		// here so UpdateMatchCourt / UpdateMatchTime work on "m-bronze".
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+			mutate(bracket.ThirdPlaceMatch)
+			return nil
+		}
 		return errMatchNotFound
 	})
 }
@@ -313,6 +319,19 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 // T085/T092.
 func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchId
+
+	// Engi dispatch seam: a flag-scored competition records via the engi slice
+	// (pool or bracket, decided internally) and skips the kendo ippon path
+	// entirely. Engi has no eligibility concept, so the status return is nil.
+	comp, loadErr := e.store.LoadCompetition(compId)
+	if loadErr != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibility: load competition %s: %w", compId, loadErr)
+	}
+	if comp != nil && comp.Engi {
+		_, recErr := e.recordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		return nil, recErr
+	}
+
 	applyHansokuIppons(result)
 	deriveDaihyosenWinner(result)
 
@@ -501,6 +520,15 @@ type poolStandingsLoader interface {
 // computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
 // grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
+	// Engi dispatch seam: an engi (flag-scored) competition delegates to the
+	// engi standings slice; kendo computeStandingsFrom is left fully unchanged.
+	comp, err := e.store.LoadCompetition(compId)
+	if err != nil {
+		return nil, fmt.Errorf("computeStandings: load competition %s: %w", compId, err)
+	}
+	if comp != nil && comp.Engi {
+		return e.computeEngiStandings(e.store, compId)
+	}
 	return e.computeStandingsFrom(e.store, compId)
 }
 
@@ -934,11 +962,68 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 			}
 		}
 
+		// The bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, NOT in
+		// Rounds, so the round scan above never finds it. Resolve it here. There
+		// is no propagation out of bronze (it has no downstream match).
+		if !found && bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+			if err := applyBronzeMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
+				return err
+			}
+			found = true
+		}
+
 		if !found {
 			return notFoundErrorf("bracket match %s not found", matchId)
 		}
 		return nil
 	})
+}
+
+// applyBronzeMatchResult writes result into the bronze (3rd-place) playoff
+// match, mirroring the per-round bracket-match write in recordBracketMatchResult
+// but without any downstream propagation (the bronze match has no next round).
+// Shared by the non-tx and tx record paths so the two stay in lockstep.
+func applyBronzeMatchResult(bm *state.BracketMatch, result *state.MatchResult) error {
+	if !bracketMatchPlayable(bm) {
+		return validationErrorf("knockout match %s is not ready to score: a feeder pool or match has not finished", bm.ID)
+	}
+	if reconcileSides(result, bm.SideA, bm.SideB) {
+		return ErrMatchSideMismatch
+	}
+	deriveDaihyosenWinner(result)
+	status := result.Status
+	if status == "" {
+		status = state.MatchStatusCompleted
+	}
+	bm.Winner = result.Winner
+	bm.Status = status
+	bm.ScoreA = formatScore(result.IpponsA, result.HansokuA)
+	bm.ScoreB = formatScore(result.IpponsB, result.HansokuB)
+	bm.Decision = result.Decision
+	bm.DecisionBy = result.DecisionBy
+	bm.DecisionReason = result.DecisionReason
+	bm.Encho = result.Encho
+	if result.ResultSource != "" {
+		bm.ResultSource = result.ResultSource
+	}
+	if result.CorrectionReason != "" {
+		bm.CorrectionReason = result.CorrectionReason
+	}
+	if result.SubResults != nil {
+		bm.SubResults = result.SubResults
+	}
+	result.SubResults = bm.SubResults
+	if result.DecidedByHantei != nil {
+		bm.DecidedByHantei = *result.DecidedByHantei
+	}
+	result.DecidedByHantei = state.HanteiPtr(bm.DecidedByHantei)
+	if result.Court == "" {
+		result.Court = bm.Court
+	}
+	if result.ScheduledAt == "" {
+		result.ScheduledAt = bm.ScheduledAt
+	}
+	return nil
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {
@@ -953,6 +1038,37 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		nextM.SideA = m.Winner
 	} else {
 		nextM.SideB = m.Winner
+	}
+
+	// Feed the loser of a SEMIFINAL into the bronze (3rd-place) playoff match.
+	// The semifinal round index is len(Rounds)-2 (the round that feeds the
+	// final). This is a pure advancement step: it moves a name only, never
+	// computes a score, so it keeps propagateBracketWinner a pure helper.
+	// Guarded on ThirdPlaceMatch being present (naginata brackets only).
+	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
+		loser := ""
+		switch m.Winner {
+		case m.SideA:
+			loser = m.SideB
+		case m.SideB:
+			loser = m.SideA
+		}
+		// Skip empty/placeholder losers (bye matches resolve with one side blank).
+		if loser != "" && !strings.HasPrefix(loser, "Winner of") {
+			bronze := bracket.ThirdPlaceMatch
+			// Assign by semifinal POSITION, not first-empty-slot. The round
+			// feeding the final always has exactly two matches (mIdx 0 and 1),
+			// so each maps to a fixed bronze side. This mirrors the final's
+			// positional advancement above and is re-score safe: correcting a
+			// semifinal overwrites the correct bronze slot in place. A
+			// fill-first-empty scheme would leave a stale loser pinned once
+			// both slots are populated and a semifinal is later re-scored.
+			if mIdx%2 == 0 {
+				bronze.SideA = loser
+			} else {
+				bronze.SideB = loser
+			}
+		}
 	}
 
 	// Try to resolve the OTHER side if it's a "Winner of" placeholder
@@ -1030,7 +1146,8 @@ func (e *Engine) patchScheduleCourt(compId, matchId, newCourt string) error {
 		return err
 	}
 	for i := range entries {
-		// Pool entries: MatchRef == matchId; bracket entries: MatchRef == "R{n}-M{matchId}".
+		// Pool + bronze entries: MatchRef == matchId; round bracket entries:
+		// MatchRef == "R{n}-M{matchId}".
 		if entries[i].MatchRef == matchId || strings.HasSuffix(entries[i].MatchRef, "-M"+matchId) {
 			entries[i].Court = newCourt
 		}
@@ -1086,6 +1203,18 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					return nil
 				}
 			}
+		}
+		// The bronze (3rd-place) playoff lives outside Rounds; handle it
+		// here. Bronze has no downstream match, so no propagation is needed.
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
+			bm := bracket.ThirdPlaceMatch
+			if !bracketMatchPlayable(bm) {
+				return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
+			}
+			bm.Winner = winnerName
+			bm.IsOverridden = true
+			bm.Status = state.MatchStatusCompleted
+			return nil
 		}
 		return notFoundErrorf("bracket match %s not found", matchId)
 	})

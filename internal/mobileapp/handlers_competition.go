@@ -876,10 +876,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// Mutating output-affecting fields while draw-ready would
 				// leave config.md inconsistent with those artifacts when
 				// StartCompetition runs. Fields that do NOT reach the Excel
-				// generator (Name, Date, StartTime, CheckInEnabled, Naginata)
-				// stay editable in draw-ready and are applied below. NOTE:
+				// generator (Name, Date, StartTime, CheckInEnabled) stay
+				// editable in draw-ready and are applied below. NOTE:
 				// NumberPrefix and WithZekkenName DO reach the generator
-				// (player numbers / name columns) and are gated below. This
+				// (player numbers / name columns) and are gated below.
+				// Naginata and Engi are NOT editable in draw-ready either: the
+				// `started` guard below (current.Status != setup) treats
+				// draw-ready as started, so a change to them is rejected. This
 				// mirrors the participant/seed 409s in handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
 					// Compare the EFFECTIVE (about-to-be-applied) values
@@ -977,7 +980,25 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// gates StartCompetition on Status=setup). After start,
 				// the field is read-only via the same Status gate.
 				current.SwissRounds = comp.SwissRounds
+				// Naginata (3rd-place play-off) is only settable before the
+				// competition starts. Changing it after start would add or remove a
+				// bronze match while results are already in flight. Reject rather than
+				// silently ignoring it (Finding 8; mirrors the Engi guard below).
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				if started && comp.Naginata != current.Naginata {
+					validationErr = fmt.Errorf("naginata can only be changed before the competition starts")
+					return nil, nil
+				}
 				current.Naginata = comp.Naginata
+				// Engi (flag-scoring paradigm) is only settable before the
+				// competition starts. Flipping it mid-tournament switches the
+				// scoring paradigm and corrupts recorded results. Reject a
+				// change rather than silently ignoring it.
+				if started && comp.Engi != current.Engi {
+					validationErr = fmt.Errorf("engi can only be changed before the competition starts")
+					return nil, nil
+				}
+				current.Engi = comp.Engi
 				current.CheckInEnabled = comp.CheckInEnabled
 				// League tie-breaker config (Phase 3b) is only settable pre-start.
 				// Once the competition has started (status past setup) the
@@ -988,7 +1009,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// state already returned early above; the PUT validator enforces
 				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
 				// the finalize endpoint, never here.
-				started := current.Status != state.CompStatusSetup && current.Status != ""
 				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
 					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
 					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")

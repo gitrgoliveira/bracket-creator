@@ -85,6 +85,22 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 				out = append(out, detail)
 			}
 		}
+		// The bronze (3rd-place) match is a sibling of bracket.Rounds; render
+		// it with the same exhaustion-stub treatment as the Rounds matches.
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.Decision == string(domain.DecisionKachinukiExhaustion) {
+			stub := state.MatchResult{
+				ID:       bm.ID,
+				SideA:    bm.SideA,
+				SideB:    bm.SideB,
+				Winner:   bm.Winner,
+				Status:   bm.Status,
+				Decision: bm.Decision,
+			}
+			detail := buildKachinukiDetail(&stub, "3rd Place Match", positionByPlayer)
+			if len(detail.Bouts) > 0 {
+				out = append(out, detail)
+			}
+		}
 	}
 
 	return out, nil

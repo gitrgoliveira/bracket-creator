@@ -198,10 +198,23 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			updated    state.MatchResult
 			subOut     *state.SubMatchResult
 			notFound   bool
-			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility"
+			addErrCode string // "", "not_tied", "pool_match", "insufficient_eligibility", "engi_competition"
 			haveResult bool
 		)
 		txErr := store.WithTransaction(id, func(stx state.StoreTx) error {
+			// Engi competitions decide bouts by referee flag counts; a
+			// representative daihyosen bout has no meaning there. Reject with
+			// 400 (mirrors the quick-score / override / decision guards)
+			// rather than letting the tie-detection path fail with a 500.
+			comp, err := stx.LoadCompetition(id)
+			if err != nil {
+				return err
+			}
+			if comp != nil && comp.Engi {
+				addErrCode = "engi_competition"
+				return nil
+			}
+
 			match, found, err := findMatchForDaihyosenTx(stx, id, mid)
 			if err != nil {
 				return err
@@ -267,6 +280,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 		switch addErrCode {
+		case "engi_competition":
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engi competitions do not support daihyosen; use flag scoring instead"})
+			return
 		case "not_tied":
 			c.JSON(http.StatusBadRequest, gin.H{"error": "not_tied"})
 			return
@@ -333,31 +349,43 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 		return nil, false, nil
 	}
 	for _, round := range bracket.Rounds {
-		for _, bm := range round {
-			if bm.ID == matchID {
+		for i := range round {
+			if round[i].ID == matchID {
 				// Re-shape into MatchResult so we can drive the same
 				// scoring path as pool matches. SubResults must be copied
 				// so TeamSummary is computed from recorded sub-bouts and
 				// the daihyosen append doesn't overwrite existing data.
-				return &state.MatchResult{
-					ID:              bm.ID,
-					SideA:           bm.SideA,
-					SideB:           bm.SideB,
-					Winner:          bm.Winner,
-					Status:          bm.Status,
-					Court:           bm.Court,
-					ScheduledAt:     bm.ScheduledAt,
-					Decision:        bm.Decision,
-					DecisionBy:      bm.DecisionBy,
-					DecisionReason:  bm.DecisionReason,
-					Encho:           bm.Encho,
-					DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-					SubResults:      bm.SubResults,
-				}, true, nil
+				return daihyosenBracketResult(&round[i]), true, nil
 			}
 		}
 	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+		return daihyosenBracketResult(bm), true, nil
+	}
 	return nil, false, nil
+}
+
+// daihyosenBracketResult projects a stored BracketMatch into the MatchResult
+// shape the daihyosen scoring path consumes. It carries Court / ScheduledAt
+// (the daihyosen append re-runs the score path, which needs the slot) on top
+// of the fields the engine's bracketMatchAsResult projects, so it deliberately
+// does NOT reuse that engine helper.
+func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
+	return &state.MatchResult{
+		ID:              bm.ID,
+		SideA:           bm.SideA,
+		SideB:           bm.SideB,
+		Winner:          bm.Winner,
+		Status:          bm.Status,
+		Court:           bm.Court,
+		ScheduledAt:     bm.ScheduledAt,
+		Decision:        bm.Decision,
+		DecisionBy:      bm.DecisionBy,
+		DecisionReason:  bm.DecisionReason,
+		Encho:           bm.Encho,
+		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
+		SubResults:      bm.SubResults,
+	}
 }
 
 // countEligibleForSides counts, for each named side, how many roster

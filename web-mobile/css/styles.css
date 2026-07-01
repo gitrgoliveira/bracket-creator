@@ -1106,6 +1106,31 @@ a:hover {
   min-width: max-content;
 }
 
+/* Wrapper around the 3rd-place (bronze) match card in bracket views. Capped to
+   the same width as a bracket round column (.bc-round's min-width) so the
+   card reads as a peer of the tree's M1/M2/M3 cards instead of stretching
+   full-bleed across the canvas; the top border grounds it as its own
+   "consolation" zone below the elimination ladder rather than looking like a
+   stray row bolted onto the bottom. */
+.bracket-bronze-section {
+  width: 230px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* Label above the 3rd-place (bronze) match card. Typography matches
+   .bc-round-label (SEMIFINALS/FINAL) so it reads as a peer section header,
+   not a lighter caption glued to the card below it. */
+.bracket-bronze-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  margin-bottom: 14px;
+  padding-left: 2px;
+}
+
 .bc-tree {
   display: flex;
   gap: 56px;
@@ -4173,6 +4198,194 @@ button.pool-match-row {
   gap: 12px;
 }
 
+/* === Engi-Kyogi flag-count score editor === */
+/* Unprefixed (not scoped to a wrapper class): EngiScoreEditorModal renders
+   its own .scoring-panel/.editor-modal chrome now (mirroring ScoreEditorModal),
+   so there is no .score-editor--engi wrapper to scope off. .engi-sides is
+   unique to this component; no collision risk from leaving it unscoped. */
+.engi-sides {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.engi-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  /* Unified side treatment: a neutral hairline card with a thick coloured TOP
+     BAR, identical to the kendo score card (.sb-side, "Proposal C"). Both
+     editors now teach one Shiro/Aka language (tinted fill + 45° hatch + a
+     coloured top bar), so an operator moving between a kendo and an Engi match
+     sees the same side cues. */
+  border: 1px solid var(--line);
+  border-top: 5px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+/* Aka/Shiro side treatment (DESIGN.md §4): a real tinted fill + a coloured top
+   bar, matching the kendo score card (.sb-side--aka/--shiro) exactly (same
+   fill tokens, same 45° hatch pitch), rather than relying on the small badge
+   chip alone. A dense form card needs real area, not a hairline. */
+.engi-side--aka {
+  border-top-color: var(--red);
+  background: var(--red-soft);
+}
+
+.engi-side--shiro {
+  border-top-color: var(--accent);
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
+}
+
+/* Winner: bolder name + a slightly thicker top bar (not a colour flood, which
+   would fight the side's own tint) — mirrors the bracket card's v1 winner. */
+.engi-side--winner {
+  border-top-width: 7px;
+}
+.engi-side--winner .engi-side__name {
+  font-weight: 700;
+}
+
+.engi-side__badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* Framed white, never flat grey (DESIGN.md §4: "all Shiro badges are framed
+   white: never flat grey"). Aka is a solid red badge, matching every other
+   Aka badge in the app. */
+.engi-side__badge--shiro {
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+}
+
+.engi-side__badge--aka {
+  background: var(--red);
+  color: #fff;
+  border: 1px solid var(--red);
+}
+
+.engi-side__names {
+  text-align: center;
+}
+
+/* Pair names must never be clipped: they consist of two member names. */
+.engi-side__name {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.engi-side__dojo {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.engi-pips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.engi-pip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  background: transparent;
+  display: inline-block;
+}
+
+/* Filled pips carry the side's own colour (DESIGN.md §2: distinguish by
+   treatment, redundantly with hue). Aka pips are red, Shiro pips are navy,
+   so the primary "how many flags" glyph agrees with the side's tinted cell
+   instead of both reading navy. Falls back to --accent for an unscoped pip. */
+.engi-pip--filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.engi-pips--aka .engi-pip--filled {
+  background: var(--red);
+  border-color: var(--red);
+}
+.engi-pips--shiro .engi-pip--filled {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.engi-counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 36px base honours DESIGN.md §6's shared-surface floor for laptop-mouse
+   operators; the coarse-pointer rule bumps this to 44px for tablets. */
+.engi-counter__btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 0;
+  border-radius: var(--r);
+}
+
+.engi-counter__value {
+  font-size: 22px;
+  font-weight: 700;
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.engi-divider {
+  align-self: center;
+  font-size: 12px;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+.engi-total {
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.engi-total--valid {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.engi-total--invalid {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* === End engi editor === */
+
 .score-editor__bar {
   display: flex;
   gap: 10px;
@@ -6920,6 +7133,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     min-height: 44px;
   }
   .team-bouts-scroll .lineup-name__clear {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* --- Touch-target floor for the Engi flag counters --------------------- *
+   .engi-counter__btn is the single most-tapped control in the Engi flow
+   (every flag increment) and had no coarse-pointer override at all: it sat
+   at a flat 32px on every device, including the tablets operators actually
+   score on. Bring it up to the same ≥44px floor as .ipt-btn. */
+@media (pointer: coarse) {
+  .engi-counter__btn {
     min-width: 44px;
     min-height: 44px;
   }

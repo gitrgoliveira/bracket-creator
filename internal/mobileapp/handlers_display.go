@@ -90,6 +90,26 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					return
 				}
 			}
+			// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds, not
+			// inside it. A running bronze bout must appear as "current" on its
+			// court so the OBS/vMix overlay stays live (Finding 1).
+			if bm := bracket.ThirdPlaceMatch; bm != nil &&
+				strings.EqualFold(bm.Court, court) &&
+				bm.Status == state.MatchStatusRunning {
+				players := currentMatchPlayers(store, comp)
+				ipponsA, hansokuA := parseScore(bm.ScoreA)
+				ipponsB, hansokuB := parseScore(bm.ScoreB)
+				// phaseFromMatchID(bm.ID) would return "m" for the bronze
+				// match's single-hyphen "m-bronze" ID: not meaningful. This
+				// branch already knows it's the bronze match, so pass a
+				// stable literal label instead of deriving one from the ID
+				// (matches the "3rd Place Match" label kachinuki_export.go
+				// uses for the same match).
+				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
+					bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
+					"3rd Place Match", "", ""))
+				return
+			}
 		}
 
 		// No running match on this court.
@@ -217,6 +237,13 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 					return true
 				}
 			}
+		}
+		// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds; a
+		// bronze-only court must not be excluded from the court feed (Finding 4).
+		if bm := bracket.ThirdPlaceMatch; bm != nil &&
+			strings.EqualFold(bm.Court, court) &&
+			courtMatchSidesReal(bm.SideA, bm.SideB) {
+			return true
 		}
 	}
 	return false

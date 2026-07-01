@@ -297,4 +297,98 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     const text = collectText(tree);
     expect(text).toContain('3/3 matches');
   });
+
+  // ── Engi league: overview mini-standings (GAP A) ────────────────────────────
+  // Engi competitions score by flag count; standings columns are Victories +
+  // Flags, NOT the kendo W/L/D/PW/PL columns. The overview mini-table must
+  // route through the engi branch when comp.engi is truthy.
+
+  function makeEngiStandings(count) {
+    const rows = [];
+    for (let i = 0; i < count; i++) {
+      rows.push({
+        player: {
+          id: `e${i}`,
+          name: `Member1-${i + 1}`,
+          displayName: `Member2-${i + 1}`,
+          dojo: `Dojo ${i + 1}`,
+        },
+        wins: count - i,
+        flags: (count - i) * 3,
+        rank: i + 1,
+      });
+    }
+    return rows;
+  }
+
+  const engiLeagueComp = (status = 'pools') => ({
+    format: 'league',
+    status,
+    kind: 'individual',
+    teamSize: 0,
+    engi: true,
+  });
+
+  it('engi league overview shows Victories and Flags column headers, not W/L/D/PW/PL', () => {
+    const standings = { League: makeEngiStandings(3) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: engiLeagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 2),
+    });
+    const text = collectText(tree);
+    // Engi header: "Pair", "V" (Victories), "Flags"
+    expect(text).toContain('Pair');
+    expect(text).toContain('Flags');
+    // Standard kendo columns must NOT appear in engi mode
+    expect(text).not.toContain('Player');
+    expect(text).not.toContain('PW');
+    expect(text).not.toContain('PL');
+  });
+
+  it('engi league overview rows show wins (V) and flags values', () => {
+    const standings = { League: makeEngiStandings(3) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: engiLeagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 2),
+    });
+    const text = collectText(tree);
+    // Row data: first entry has wins=3, flags=9
+    expect(text).toContain('Member1-1');
+  });
+
+  it('engi league overview shows member2 (displayName) stacked below member1', () => {
+    const standings = { League: makeEngiStandings(2) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: engiLeagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 1),
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Member1-1');
+    expect(text).toContain('Member2-1');
+  });
+
+  it('non-engi league does NOT show Pair/Flags header', () => {
+    const standings = { League: makeStandings(3) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: leagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 2),
+    });
+    const text = collectText(tree);
+    expect(text).not.toContain('Pair');
+    expect(text).not.toContain('Flags');
+    expect(text).toContain('Player');
+    expect(text).toContain('PW');
+  });
 });

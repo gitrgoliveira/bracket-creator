@@ -553,6 +553,216 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 });
 
 // ------------------------------------------------------------------
+// mp-gy6g (Naginata/Engi): PoolNumberedMatchRow renders stacked pair
+// names (member1 over member2) when isEngi=true
+// ------------------------------------------------------------------
+describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolNumberedMatchRow;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    global.window.matchStateCell = (m, ippB, ippA) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
+      : m?.status === 'running' ? 'vs' : '–';
+    global.window.ipponsFromScore = () => [];
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolNumberedMatchRow } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders both member names (name + displayName) for each side when isEngi=true', () => {
+    const m = {
+      id: 'Pool A-0',
+      sideA: { name: 'Yamada Hanako', displayName: 'Suzuki Yuki', dojo: 'Dojo A' },
+      sideB: { name: 'Tanaka Hiroshi', displayName: 'Ito Keiko', dojo: 'Dojo B' },
+      status: 'scheduled',
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1, isEngi: true });
+    const text = collectText(tree);
+    // Both members of Shiro pair (sideA in a match = Aka in engi pool, but
+    // name/displayName both render)
+    expect(text).toContain('Yamada Hanako');
+    expect(text).toContain('Suzuki Yuki');
+    // Both members of Aka pair
+    expect(text).toContain('Tanaka Hiroshi');
+    expect(text).toContain('Ito Keiko');
+  });
+
+  it('does NOT render displayName text when isEngi=false (non-engi match)', () => {
+    const m = {
+      id: 'Pool A-1',
+      sideA: { name: 'Watanabe', displayName: 'ZEKKEN-W', dojo: 'Dojo A' },
+      sideB: { name: 'Fujimoto', displayName: 'ZEKKEN-F', dojo: 'Dojo B' },
+      status: 'scheduled',
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2, isEngi: false });
+    const text = collectText(tree);
+    expect(text).toContain('Watanabe');
+    expect(text).toContain('Fujimoto');
+    // displayName must NOT appear when engi is off
+    expect(text).not.toContain('ZEKKEN-W');
+    expect(text).not.toContain('ZEKKEN-F');
+  });
+
+  it('renders only member1 when member2 (displayName) is absent even with isEngi=true', () => {
+    const m = {
+      id: 'Pool B-0',
+      sideA: { name: 'Solo Shiro', dojo: 'Dojo S' },
+      sideB: { name: 'Solo Aka', dojo: 'Dojo T' },
+      status: 'scheduled',
+    };
+
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 3, isEngi: true });
+    const text = collectText(tree);
+    expect(text).toContain('Solo Shiro');
+    expect(text).toContain('Solo Aka');
+  });
+});
+
+// ------------------------------------------------------------------
+// mp-gy6g (Naginata/Engi): PoolsViewer standings shows stacked pair
+// names (member1 over member2) when competition.engi=true
+// ------------------------------------------------------------------
+describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolsViewer;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact'];
+
+  const tweaks = { showDojo: false };
+  const engiComp = { format: 'league', kind: 'individual', teamSize: 0, engi: true, poolWinners: 2 };
+  const nonEngiComp = { format: 'mixed', kind: 'individual', teamSize: 0, engi: false, poolWinners: 2 };
+
+  const engiPool = {
+    poolName: 'Pool A',
+    players: [
+      { name: 'Pair1-Member1', displayName: 'Pair1-Member2', dojo: 'Dojo A' },
+      { name: 'Pair2-Member1', displayName: 'Pair2-Member2', dojo: 'Dojo B' },
+    ],
+  };
+
+  const engiStandings = {
+    'Pool A': [
+      { player: { name: 'Pair1-Member1', displayName: 'Pair1-Member2', dojo: 'Dojo A' }, wins: 1, losses: 0, draws: 0, flags: 7 },
+      { player: { name: 'Pair2-Member1', displayName: 'Pair2-Member2', dojo: 'Dojo B' }, wins: 0, losses: 1, draws: 0, flags: 3 },
+    ],
+  };
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m, ippB, ippA) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(ippB, ippA, m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    global.window.matchStateCell = (m, ippB, ippA) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m, ippB, ippA) || '-')
+      : m?.status === 'running' ? 'vs' : '–';
+    global.window.ipponsFromScore = () => [];
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolsViewer } = await import('../viewer.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('renders both member1 and member2 names in standings rows when engi=true', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [engiPool],
+      standings: engiStandings,
+      poolMatches: [],
+      tweaks,
+      competition: engiComp,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Pair1-Member1');
+    expect(text).toContain('Pair1-Member2');
+    expect(text).toContain('Pair2-Member1');
+    expect(text).toContain('Pair2-Member2');
+  });
+
+  it('does NOT render displayName in standings when engi=false', () => {
+    const pool = {
+      poolName: 'Pool A',
+      players: [
+        { name: 'Watanabe', displayName: 'ZEKKEN-W', dojo: 'Dojo A' },
+        { name: 'Fujimoto', displayName: 'ZEKKEN-F', dojo: 'Dojo B' },
+      ],
+    };
+    const standings = {
+      'Pool A': [
+        { player: { name: 'Watanabe', displayName: 'ZEKKEN-W', dojo: 'Dojo A' }, wins: 1, losses: 0, draws: 0 },
+        { player: { name: 'Fujimoto', displayName: 'ZEKKEN-F', dojo: 'Dojo B' }, wins: 0, losses: 1, draws: 0 },
+      ],
+    };
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool],
+      standings,
+      poolMatches: [],
+      tweaks,
+      competition: nonEngiComp,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Watanabe');
+    expect(text).toContain('Fujimoto');
+    expect(text).not.toContain('ZEKKEN-W');
+    expect(text).not.toContain('ZEKKEN-F');
+  });
+});
+
+// ------------------------------------------------------------------
 // mp-8rc9 Phase 1: poolLabel format-aware label helper
 // ------------------------------------------------------------------
 describe('poolLabel: format-aware phase label (mp-8rc9)', () => {

@@ -7,8 +7,12 @@ import { competitionKindLabel } from './viewer_utils.jsx';
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const EmptyState = window.EmptyState;
 
-// deriveAwards returns up to four placements for the closing ceremony per
-// FIK convention: 1st, 2nd, and two 3rds (semi-final losers: no bronze match).
+// deriveAwards returns the closing-ceremony placements.
+// Kendo convention (no thirdPlaceMatch): 1st, 2nd, and two joint 3rds
+// (semi-final losers, no bronze match).
+// Naginata convention (thirdPlaceMatch present): 1st, 2nd, 3rd only. There is
+// NO 4th-place award; the bronze match decides which beaten semi-finalist takes
+// the single 3rd place, and the loser (4th) is not part of the ceremony.
 // Returns [] when no podium data exists yet.
 // `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
@@ -45,16 +49,42 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
       const winnerName = toName(final.winner);
       const champion = final.winner;
       const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
+      const slot = (place, side) => {
+        const r = lookup(side);
+        return r ? { place, ...r } : null;
+      };
+
+      // Naginata / explicit bronze match path: only 1st, 2nd, 3rd get awards
+      // (Naginata convention: there is NO 4th-place award; the bronze match
+      // exists solely to decide which beaten semi-finalist takes the single
+      // 3rd place. The loser is 4th but is not part of the closing ceremony).
+      const bronze = bracket.thirdPlaceMatch;
+      if (bronze) {
+        if (bronze.winner) {
+          // Decided bronze: the bronze winner is the sole 3rd place.
+          return [
+            slot(1, champion),
+            slot(2, runnerUp),
+            slot(3, bronze.winner),
+          ].filter(Boolean);
+        }
+        // Undecided bronze (unusual once the final is decided, since the
+        // bronze is normally played first): the single 3rd place is not yet
+        // determined, so only 1st and 2nd are shown until the bronze decides
+        // it. Naginata never awards joint 3rds.
+        return [
+          slot(1, champion),
+          slot(2, runnerUp),
+        ].filter(Boolean);
+      }
+
+      // Kendo convention: no bronze match, two joint 3rds from SF losers.
       const thirds = sfRound
         .map((m) => {
           if (!m.winner) return null;
           return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
         })
         .filter(Boolean);
-      const slot = (place, side) => {
-        const r = lookup(side);
-        return r ? { place, ...r } : null;
-      };
       return [
         slot(1, champion),
         slot(2, runnerUp),

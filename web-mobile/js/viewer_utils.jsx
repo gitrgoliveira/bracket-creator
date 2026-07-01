@@ -71,7 +71,7 @@ export function compMatches(c) {
   rawPoolMatches.forEach(m => {
     const isDH = isPoolDaihyosenID(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize, compEngi: isDH ? false : !!c.engi });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin
@@ -96,8 +96,32 @@ export function compMatches(c) {
     compName: c.name,
     compFormat: c.format,
     compKind: c.kind,
-    teamSize: c.teamSize
+    teamSize: c.teamSize,
+    compEngi: !!c.engi,
   })));
+
+  // Bronze (3rd-place) playoff: a sibling of bracket.rounds (naginata only),
+  // so the rounds loop above does not cover it. Surface it as a first-class
+  // bracket match so it appears in the shiaijo court queue / find-my-matches /
+  // schedule alongside the final (the two are conventionally run on the same
+  // shiaijo). roundIndex sits one past the final so groupQueueMatches gives it
+  // its own "3rd Place" group rather than folding it into the final's.
+  const bronze = !isPreviewBracket && c.bracket && c.bracket.thirdPlaceMatch;
+  if (bronze) {
+    out.push({
+      ...bronze,
+      phase: "bracket",
+      round: "3rd Place",
+      phaseName: "3rd Place",
+      roundIndex: rounds.length,
+      compId: c.id,
+      compName: c.name,
+      compFormat: c.format,
+      compKind: c.kind,
+      teamSize: c.teamSize,
+      compEngi: !!c.engi,
+    });
+  }
 
   // Add poolPosition (1-based) and poolCount (total RR matches in this pool)
   // to each pool match so the eyebrow and queue rows can show "Match N of M"

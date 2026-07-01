@@ -70,6 +70,16 @@ function toBackendMatchResult(patch, match) {
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
     }
     if (winnerId) result.winnerId = winnerId;
+    // Engi (kata) matches score by referee flag count, not ippons: carry
+    // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
+    // submit payload). Omitted otherwise so non-engi payloads stay minimal.
+    if (patch.flagsA != null) result.flagsA = patch.flagsA;
+    if (patch.flagsB != null) result.flagsB = patch.flagsB;
+    // Audit reason captured by ReasonPrompt when correcting a completed
+    // match (admin_scoring_shared.jsx CORRECTION_PRESETS). Without this the
+    // operator's typed/selected reason never reached the wire and the audit
+    // trail silently stayed empty on every correction, kendo and team alike.
+    if (patch.correctionReason) result.correctionReason = patch.correctionReason;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
@@ -180,6 +190,9 @@ function normalizeMatch(m, playerMap) {
             ippons: aWin ? norm.ipponsA : norm.ipponsB,
         };
     }
+    // Carry engi flag counts through (additive, no kendo code reads these).
+    if (m.flagsA != null) norm.flagsA = m.flagsA;
+    if (m.flagsB != null) norm.flagsB = m.flagsB;
     return norm;
 }
 
@@ -292,13 +305,14 @@ function normalizeCompetitionDetail(data) {
         }));
     }
 
-    // Normalize standings player field
+    // Normalize standings player field (carry flags for engi standings)
     if (result.standings) {
         const standings = {};
         for (const key of Object.keys(result.standings)) {
             standings[key] = result.standings[key].map(s => ({
                 ...s,
                 player: normalizePlayer(s.player),
+                flags: s.flags || 0,
             }));
         }
         result.standings = standings;
@@ -313,6 +327,10 @@ function normalizeCompetitionDetail(data) {
         result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
             round.map(m => normalizeMatch(m, playerMap))
         )};
+    }
+    // Normalize bronze/3rd-place match when present (naginata competitions)
+    if (result.bracket && result.bracket.thirdPlaceMatch) {
+        result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap) };
     }
     return result;
 }

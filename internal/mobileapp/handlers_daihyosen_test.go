@@ -60,6 +60,27 @@ func countEligibleForSides(store *state.Store, compID, sideA, sideB string) (a i
 	return a, b, err
 }
 
+// TestDaihyosenHandler_EngiGuard verifies the daihyosen endpoint rejects engi
+// competitions with 400 (not 500): a representative bout has no meaning when
+// scoring is by referee flag counts. Mirrors the quick-score / override /
+// decision engi guards.
+func TestDaihyosenHandler_EngiGuard(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+
+	cid := "engi-daihyosen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true, TeamSize: 3}))
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "Team A", SideB: "Team B"}}},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+cid+"/matches/b1/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "daihyosen on engi comp must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "engi")
+}
+
 // TestFindMatchForDaihyosen_PoolFound verifies that a pool match is located
 // when searched by its "Pool *" ID.
 func TestFindMatchForDaihyosen_PoolFound(t *testing.T) {

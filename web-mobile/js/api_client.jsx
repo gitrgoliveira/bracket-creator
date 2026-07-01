@@ -986,6 +986,26 @@ const API = {
             throw new Error(err.error || "Failed to discard draw");
         }
     },
+    // completeCompetition: POST /competitions/:id/complete. The only trigger
+    // for a bracket-based competition (playoffs, or mixed once its knockout is
+    // running) to reach status "completed": MaybeAutoCompletePools only
+    // auto-transitions the League format, so a finished bracket otherwise sits
+    // in "pools"/"playoffs" forever and the public viewer's Awards tab (gated
+    // on status === "completed") never becomes reachable. 400 when the
+    // competition isn't in "pools" or "playoffs" status (already completed, or
+    // not started yet); 404 when the competition doesn't exist.
+    async completeCompetition(id, password) {
+        const res = await fetch(`/api/competitions/${id}/complete`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to complete competition");
+        }
+        const data = await res.json();
+        return normalizeCompetitionDetail(data);
+    },
     // Subscribe to the server's SSE event stream. `callback` is fired
     // for each parsed event. `onStatus` (optional) is fired with
     // 'open' when the EventSource transitions to open and 'error' when

@@ -1522,6 +1522,64 @@ func TestPUTCompetition_CheckInEnabledPersists(t *testing.T) {
 	assert.False(t, saved.CheckInEnabled, "checkInEnabled=false must also persist")
 }
 
+// TestPUTCompetition_NaginataStartedGuard is a Finding 8 regression test:
+// the naginata flag may only be toggled before the competition starts. After
+// start, flipping it would add or remove the bronze match while results are
+// in flight, corrupting the bracket. The handler must return 400 and leave
+// the flag unchanged.
+func TestPUTCompetition_NaginataStartedGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "naginata-guard"
+	// Start the competition in an active state (not setup/draw-ready).
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       cid,
+		Name:     "Naginata Guard",
+		Date:     "12-05-2026",
+		Format:   state.CompFormatPlayoffs,
+		Naginata: true,
+		Status:   state.CompStatusPlayoffs, // past setup
+	}))
+
+	// Attempt to toggle Naginata=false on a started competition.
+	body := []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"playoffs","naginata":false}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equalf(t, http.StatusBadRequest, w.Code,
+		"toggling naginata on a started competition must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "naginata",
+		"error message must mention naginata")
+
+	// Confirm stored value is unchanged.
+	saved, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.True(t, saved.Naginata, "naginata flag must remain unchanged after rejected PUT")
+
+	// Toggle is allowed on a setup (not yet started) competition.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       cid,
+		Name:     "Naginata Guard",
+		Date:     "12-05-2026",
+		Format:   state.CompFormatPlayoffs,
+		Naginata: true,
+		Status:   state.CompStatusSetup,
+	}))
+	body = []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"playoffs","naginata":false}`)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equalf(t, http.StatusOK, w.Code,
+		"toggling naginata on a setup competition must succeed; body: %s", w.Body.String())
+
+	saved, err = store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.False(t, saved.Naginata, "naginata must be updated to false on setup competition")
+}
+
 func TestGenerateDrawHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

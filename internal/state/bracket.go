@@ -71,6 +71,17 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 			}
 		}
 	}
+	// Deep-copy the optional bronze match so a returned bracket never aliases the
+	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders).
+	if b.ThirdPlaceMatch != nil {
+		tpm := *b.ThirdPlaceMatch
+		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
+		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
+		if b.ThirdPlaceMatch.Feeders != nil {
+			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
+		}
+		res.ThirdPlaceMatch = &tpm
+	}
 	return res
 }
 

@@ -285,15 +285,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
 	)
 	if prior != nil {
-		// Fail closed at the gate too: if the competition record can't be read
-		// we can't tell whether this re-score needs the guard, so abort rather
-		// than let a potentially-unsafe re-score through. Nothing is staged yet,
-		// so returning here aborts cleanly. (First scores have prior == nil and
-		// skip this block entirely, so non-re-score writes are unaffected.)
-		comp, compErr := tx.LoadCompetition(compID)
-		if compErr != nil {
-			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
-		}
+		// mp-e2k1: reuse the comp already loaded (and error-checked) at the
+		// engi-dispatch above rather than re-reading config.md from disk — the
+		// tx sees no pending config write, so a reload would just re-parse the
+		// same bytes. The load error is already returned there, so this path is
+		// still fail-closed; a nil comp skips the mixed guard as before.
 		if comp != nil && comp.Format == state.CompFormatMixed {
 			// Only actual pool matches ("Pool X-…") can change pool finishers.
 			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i"), whose ID

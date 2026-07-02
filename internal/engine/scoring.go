@@ -520,15 +520,9 @@ type poolStandingsLoader interface {
 // computeStandingsFrom so the kendo scoring weights, tiebreaker/daihyosen
 // grouping, and override sort live in exactly ONE place.
 func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStanding, error) {
-	// Engi dispatch seam: an engi (flag-scored) competition delegates to the
-	// engi standings slice; kendo computeStandingsFrom is left fully unchanged.
-	comp, err := e.store.LoadCompetition(compId)
-	if err != nil {
-		return nil, fmt.Errorf("computeStandings: load competition %s: %w", compId, err)
-	}
-	if comp != nil && comp.Engi {
-		return e.computeEngiStandings(e.store, compId)
-	}
+	// The engi dispatch lives inside computeStandingsFrom so it happens on a
+	// single competition load shared with the kendo path, not one load here plus
+	// another there.
 	return e.computeStandingsFrom(e.store, compId)
 }
 
@@ -539,6 +533,23 @@ func (e *Engine) computeStandings(compId string) (map[string][]state.PlayerStand
 // and are not part of any transaction's mutation set, so no tx variant is
 // needed.
 func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string) (map[string][]state.PlayerStanding, error) {
+	comp, err := loader.LoadCompetition(compId)
+	if err != nil {
+		// Propagate a genuine read/parse fault rather than silently proceeding
+		// with comp==nil, which would pick the wrong scoring mode (individual vs
+		// team) and undermine the tx guard's fail-closed intent. A genuinely
+		// absent competition maps to (nil, nil) and is left as individual mode.
+		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
+	}
+	// Engi dispatch seam: a flag-scored competition delegates to the engi
+	// standings slice; the kendo logic below is left fully unchanged. Uses the
+	// same loader so a tx caller sees its just-applied write. Non-engi tx callers
+	// never reach the engi branch: the tx scoring path early-returns on engi
+	// before computeStandingsFrom is ever called.
+	if comp != nil && comp.Engi {
+		return e.computeEngiStandings(loader, compId)
+	}
+
 	pools, err := loader.LoadPools(compId)
 	if err != nil {
 		return nil, err
@@ -548,14 +559,6 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		return nil, err
 	}
 
-	comp, err := loader.LoadCompetition(compId)
-	if err != nil {
-		// Propagate a genuine read/parse fault rather than silently proceeding
-		// with comp==nil, which would pick the wrong scoring mode (individual vs
-		// team) and undermine the tx guard's fail-closed intent. A genuinely
-		// absent competition maps to (nil, nil) and is left as individual mode.
-		return nil, fmt.Errorf("computeStandingsFrom: load competition %s: %w", compId, err)
-	}
 	isTeam := comp != nil && comp.TeamSize > 0
 
 	// Map match results by pool using poolNameFromMatchID so hyphenated pool

@@ -1106,17 +1106,12 @@ a:hover {
   min-width: max-content;
 }
 
-/* Wrapper around the 3rd-place (bronze) match card in bracket views. Capped to
-   the same width as a bracket round column (.bc-round's min-width) so the
-   card reads as a peer of the tree's M1/M2/M3 cards instead of stretching
-   full-bleed across the canvas; the top border grounds it as its own
-   "consolation" zone below the elimination ladder rather than looking like a
-   stray row bolted onto the bottom. */
-.bracket-bronze-section {
-  width: 230px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-}
+/* The 3rd-place (bronze) section wrapper (.bracket-bronze-section) has no CSS
+   of its own: its width, horizontal offset (UNDER the final match card), and
+   top gap are set inline by bronzeUnderFinalStyle (bracket.jsx), since the
+   offset depends on the bracket's column count. The 3rd-place bout is a
+   consolation match run alongside the final, so it renders smaller and beneath
+   it, separated from the ladder above by the top gap + the label below. */
 
 /* Label above the 3rd-place (bronze) match card. Typography matches
    .bc-round-label (SEMIFINALS/FINAL) so it reads as a peer section header,

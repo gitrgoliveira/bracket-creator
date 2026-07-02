@@ -829,8 +829,28 @@ function matchStateCell(m, ipponsB, ipponsA) {
   return "–";
 }
 
+// bronzeUnderFinalStyle: inline style that places the 3rd-place (bronze) card
+// UNDER the final match card and makes it smaller than a full round card. The
+// bronze section is a sibling of the bracket tree inside .bracket-canvas__inner,
+// so it shares the tree's left origin. The final is always the LAST column, at
+// (numCols - 1) column-steps from that origin; a column step is .bc-round's
+// min-width (COL) + .bc-tree's gap (GAP). numCols comes from the same
+// buildDisplayModel the tree renders from, so phantom bye columns are counted
+// and the offset stays correct for any bracket size. The smaller card (CARD) is
+// centred under the full-width final column.
+function bronzeUnderFinalStyle(rounds) {
+  const COL = 230, GAP = 56, CARD = 200; // keep COL/GAP in sync with .bc-round / .bc-tree
+  const model = buildDisplayModel(rounds);
+  const numCols = (model && model.hasMeta && Array.isArray(model.columns))
+    ? model.columns.length
+    : (Array.isArray(rounds) ? rounds.length : 1);
+  const colOffset = Math.max(0, numCols - 1) * (COL + GAP);
+  return { width: CARD, marginLeft: colOffset + (COL - CARD) / 2 };
+}
+
 window.BracketTree = BracketTree;
 window.MatchCard = MatchCard;
+window.bronzeUnderFinalStyle = bronzeUnderFinalStyle;
 window.roundLabel = roundLabel;
 // Exposed so the bracket winner-picker panel can label a selected match with
 // the SAME number ("M1") and round the tree shows on its cards/columns.
@@ -844,4 +864,4 @@ window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle };

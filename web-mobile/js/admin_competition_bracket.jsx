@@ -312,11 +312,11 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               const isHighlighted = selected?.matchId === bm.id;
               // The "3rd Place Match" section header identifies the lone bronze
               // card, so the card omits a per-card meta badge (no redundant
-              // "3RD" repeating the header). The extra top gap + hairline
-              // detaches it from the semifinal column so it can't be misread
-              // as a 4th semifinal.
+              // "3RD" repeating the header). It renders smaller and offset UNDER
+              // the final match card (bronzeUnderFinalStyle) — the two "end"
+              // matches read together, and it can't be misread as a semifinal.
               return (
-                <div className="bracket-bronze-section" style={{ marginTop: 28 }} data-testid="bracket-bronze-match">
+                <div className="bracket-bronze-section" style={{ marginTop: 28, ...window.bronzeUnderFinalStyle(bracket.rounds) }} data-testid="bracket-bronze-match">
                   <div className="bracket-bronze-label">
                     3rd Place Match
                   </div>

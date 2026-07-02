@@ -324,11 +324,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                   />
                   {derivedBracket.thirdPlaceMatch && (() => {
                     const bm = derivedBracket.thirdPlaceMatch;
-                    // Header identifies the lone bronze card; the card omits a
-                    // redundant per-card "3RD" badge and the extra top gap
-                    // detaches it from the bracket above.
+                    // Header identifies the lone bronze card; it renders smaller
+                    // and offset UNDER the final match card (bronzeUnderFinalStyle)
+                    // so the two "end" matches read together.
                     return (
-                      <div className="bracket-bronze-section" style={{ marginTop: 28 }} data-testid="viewer-bronze-section">
+                      <div className="bracket-bronze-section" style={{ marginTop: 28, ...window.bronzeUnderFinalStyle(derivedBracket.rounds) }} data-testid="viewer-bronze-section">
                         <div className="bracket-bronze-label">
                           3rd Place
                         </div>

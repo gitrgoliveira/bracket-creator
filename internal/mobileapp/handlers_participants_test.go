@@ -1159,3 +1159,46 @@ func TestPutParticipant_DrawReady_DojoConflictWarning(t *testing.T) {
 	}
 	assert.True(t, graceFound, "Grace must appear in pools after cascade")
 }
+
+// TestEngiParticipantAddPreservesMemberTwo is a regression for Copilot PR #326
+// round 3 (backend sibling of the frontend fix): the add handler stripped
+// displayName based on the raw comp.WithZekkenName, so an Engi comp
+// (WithZekkenName=false, effective layout = WithZekkenName||Engi) dropped the
+// pair's member 2 (DisplayName), which then auto-derived from Name 1. Now keyed
+// off EffectiveWithZekkenName().
+func TestEngiParticipantAddPreservesMemberTwo(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "engi-add-handler"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:             compID,
+		Name:           "Engi Add Handler",
+		Status:         state.CompStatusSetup,
+		Engi:           true,
+		WithZekkenName: false, // effective layout is still zekken via Engi
+	}))
+
+	payload := map[string]interface{}{
+		"name":        "Emi Sasaki",
+		"displayName": "Ren Fujita", // pair member 2
+		"dojo":        "Getsurin Dojo",
+	}
+	bodyBytes, _ := json.Marshal(payload)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants", bytes.NewBuffer(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var added domain.Player
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	assert.Equal(t, "Ren Fujita", added.DisplayName, "engi member 2 must not be stripped/auto-derived on add")
+
+	// Persisted: reload with the effective flag (engi forces the 4-col layout).
+	stored, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, "Ren Fujita", stored[0].DisplayName, "engi member 2 must round-trip")
+	assert.Equal(t, "Getsurin Dojo", stored[0].Dojo)
+}

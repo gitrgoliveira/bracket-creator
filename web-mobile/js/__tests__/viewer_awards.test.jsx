@@ -70,6 +70,31 @@ describe('deriveAwards (bracket-based)', () => {
     expect(deriveAwards(bracket, null, null, new Map())).toEqual([]);
   });
 
+  // Copilot #326: when both finalists share a display name (same-name /
+  // different-dojo, supported in this PR), the runner-up must be resolved by
+  // stable id, not name. With the old name comparison the winner ("Ken"/Bunkyo)
+  // matched sideA's name and the WINNER was mis-picked as runner-up.
+  it('resolves the runner-up by id when both finalists share a name', () => {
+    const p = (id, name, dojo) => ({ id, name, dojo });
+    const bracket = {
+      rounds: [
+        [],
+        [
+          { sideA: p('p1', 'Ken', 'Aoyama'), sideB: p('p3', 'Ren', 'Chiba'), winner: p('p1', 'Ken', 'Aoyama') },
+          { sideA: p('p2', 'Ken', 'Bunkyo'), sideB: p('p4', 'Sora', 'Denenchofu'), winner: p('p2', 'Ken', 'Bunkyo') },
+        ],
+        // Final: two "Ken"; the Bunkyo Ken (id p2, = sideB) wins.
+        [{ sideA: p('p1', 'Ken', 'Aoyama'), sideB: p('p2', 'Ken', 'Bunkyo'), winner: p('p2', 'Ken', 'Bunkyo') }],
+      ],
+    };
+    expect(deriveAwards(bracket, null, null, new Map())).toEqual([
+      { place: 1, name: 'Ken', dojo: 'Bunkyo' },  // champion (id p2)
+      { place: 2, name: 'Ken', dojo: 'Aoyama' },  // runner-up = the OTHER Ken (id p1), not the winner
+      { place: 3, name: 'Ren', dojo: 'Chiba' },
+      { place: 3, name: 'Sora', dojo: 'Denenchofu' },
+    ]);
+  });
+
   it('handles missing dojos by defaulting to empty string', () => {
     const bracket = {
       rounds: [

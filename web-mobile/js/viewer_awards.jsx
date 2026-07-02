@@ -26,6 +26,19 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
   // backend payload) or a normalized object ({id, name, dojo}) produced by
   // normalizeMatch() in api_serializers.jsx.
   const toName = (v) => (v && typeof v === "object" ? v.name || "" : v || "");
+  // Companion id extractor; empty for legacy string-only payloads.
+  const toId = (v) => (v && typeof v === "object" ? v.id || "" : "");
+  // Return the side of a decided match that is NOT the winner (runner-up / SF
+  // loser). Prefers matching by stable id so same-name / different-dojo
+  // finalists (supported in this PR) can't collide onto the wrong side; falls
+  // back to name matching only when ids aren't both present (raw string
+  // payloads).
+  const otherSide = (winner, sideA, sideB) => {
+    const wId = toId(winner);
+    const aId = toId(sideA);
+    if (wId && aId) return wId === aId ? sideB : sideA;
+    return toName(winner) === toName(sideA) ? sideB : sideA;
+  };
 
   // Enrich a player field with dojo info. If the field is already a normalized
   // object with a dojo, use it directly; otherwise fall back to nameToPlayer.
@@ -46,9 +59,8 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
     const final = finalRound[0];
     if (final && final.winner) {
-      const winnerName = toName(final.winner);
       const champion = final.winner;
-      const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
+      const runnerUp = otherSide(final.winner, final.sideA, final.sideB);
       const slot = (place, side) => {
         const r = lookup(side);
         return r ? { place, ...r } : null;
@@ -82,7 +94,7 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
       const thirds = sfRound
         .map((m) => {
           if (!m.winner) return null;
-          return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
+          return otherSide(m.winner, m.sideA, m.sideB);
         })
         .filter(Boolean);
       return [

@@ -149,6 +149,20 @@ function normalizeMatch(m, playerMap) {
     if (typeof norm.winner === "string" && norm.winner) {
         norm.winner = resolveSide(norm.winner, m.winnerId);
     }
+    // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
+    // {id,name} above with the server's authoritative flat ids), so same-name /
+    // different-dojo finalists don't collide onto the wrong side and swap the
+    // displayed winner/loser tallies. Fall back to name only when an id isn't
+    // present on both.
+    const sideAWon = (w, a) => {
+        if (!w || !a) return false;
+        const wId = typeof w === "object" ? w.id || "" : "";
+        const aId = typeof a === "object" ? a.id || "" : "";
+        if (wId && aId) return wId === aId;
+        const wn = typeof w === "object" ? w.name : w;
+        const an = typeof a === "object" ? a.name : a;
+        return wn === an;
+    };
     // Build score object from flat scoreA/scoreB if needed (bracket matches)
     if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
         // Strip the trailing "(HN)" hansoku suffix (with optional separator
@@ -163,7 +177,7 @@ function normalizeMatch(m, playerMap) {
         const stripHansoku = (s) => (s || "").replace(/\s*\(H\d+\)$/, "");
         const cleanA = stripHansoku(norm.scoreA);
         const cleanB = stripHansoku(norm.scoreB);
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        const aWin = sideAWon(norm.winner, norm.sideA);
         // Recover BOTH sides' waza letters into the per-side ippon arrays (when
         // the server didn't send them for bracket matches). scoreA/scoreB are
         // each formatScore(IpponsA/B) on the server: i.e. both sides' letters: 
@@ -182,7 +196,7 @@ function normalizeMatch(m, playerMap) {
     }
     // Build score from ipponsA/ipponsB for pool matches
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        const aWin = sideAWon(norm.winner, norm.sideA);
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
             winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),

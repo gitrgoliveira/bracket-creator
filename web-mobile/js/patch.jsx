@@ -178,6 +178,19 @@ function recomputeBracketQueuePositions(bracket) {
             });
         });
     });
+    // The naginata bronze match (thirdPlaceMatch) is a SIBLING of bracket.rounds,
+    // not a row in it, but it shares a court with the final and must take part in
+    // that court's queue ordering. Key it "bronze:0" so it can't collide with any
+    // real "ri:mi".
+    if (bracket.thirdPlaceMatch) {
+        entries.push({
+            idx: entries.length,
+            m: bracket.thirdPlaceMatch,
+            court: bracket.thirdPlaceMatch.court || "",
+            ri: "bronze",
+            mi: 0,
+        });
+    }
     const byCourt = _orderByCourtKey(entries);
     const positionsByKey = new Map();
     for (const bucket of byCourt.values()) {
@@ -206,7 +219,19 @@ function recomputeBracketQueuePositions(bracket) {
         });
         return roundTouched ? nextRound : round;
     });
-    return touched ? { ...bracket, rounds: nextRounds } : bracket;
+    // Write the bronze's recomputed queue position back (keyed "bronze:0").
+    let nextBronze = bracket.thirdPlaceMatch;
+    if (bracket.thirdPlaceMatch) {
+        const pos = positionsByKey.get("bronze:0") || 0;
+        if ((bracket.thirdPlaceMatch.queuePosition || 0) !== pos) {
+            nextBronze = { ...bracket.thirdPlaceMatch, queuePosition: pos };
+            touched = true;
+        }
+    }
+    if (!touched) return bracket;
+    const result = { ...bracket, rounds: nextRounds };
+    if (nextBronze !== bracket.thirdPlaceMatch) result.thirdPlaceMatch = nextBronze;
+    return result;
 }
 
 // T099: re-broadcast competitor_status_updated SSE events as a window-level
@@ -429,6 +454,27 @@ function applyPatch(prev, event) {
             next.bracket = { ...next.bracket, rounds };
             if (bracketNeedsQueueRecompute) {
                 next.bracket = recomputeBracketQueuePositions(next.bracket);
+            }
+        }
+
+        // The naginata bronze match (thirdPlaceMatch) is a SIBLING of
+        // bracket.rounds, not a row inside it, so the loop above never sees it.
+        // Apply an SSE match_updated for the bronze here (same field-mapping as
+        // a round match), else its score stays stale until the background
+        // refetch. Recompute queue positions when its status transitions.
+        if (next.bracket.thirdPlaceMatch) {
+            const bm = next.bracket.thirdPlaceMatch;
+            const update = resultMap.get(bm.id);
+            if (update) {
+                changed = true;
+                const patch = { ...update };
+                if (patch.ipponsA) patch.scoreA = patch.ipponsA.join("");
+                if (patch.ipponsB) patch.scoreB = patch.ipponsB.join("");
+                const merged = normalizeMatch(_mergeMatchPatch(bm, patch), getPlayerMap());
+                next.bracket = { ...next.bracket, thirdPlaceMatch: merged };
+                if (isScheduleAffecting(bm.status, merged.status, bm, merged)) {
+                    next.bracket = recomputeBracketQueuePositions(next.bracket);
+                }
             }
         }
     }

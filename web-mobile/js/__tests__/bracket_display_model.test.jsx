@@ -9,11 +9,12 @@ import { buildDisplayModel, computeMetaTops, roundLabel, bronzeUnderFinalStyle }
 describe('bronzeUnderFinalStyle: smaller card offset under the final column', () => {
   const m = (a, b) => ({ id: `${a}-${b}`, sideA: { name: a }, sideB: { name: b } });
 
+  // A 210px card centred under the 230px final → +(230-210)/2 = 10px.
   it('offsets by (numCols-1) steps and centres the smaller card under the final', () => {
-    // 2 rounds (SF + Final) → 2 columns → marginLeft = 1*286 + 15 = 301.
+    // 2 rounds (SF + Final) → 2 columns → marginLeft = 1*286 + 10 = 296.
     const s = bronzeUnderFinalStyle([[m('A', 'B'), m('C', 'D')], [m('W1', 'W2')]]);
-    expect(s.width).toBe(200);
-    expect(s.marginLeft).toBe(301);
+    expect(s.width).toBe(210);
+    expect(s.marginLeft).toBe(296);
   });
 
   it('scales the offset with bracket depth (further right for more rounds)', () => {
@@ -22,13 +23,13 @@ describe('bronzeUnderFinalStyle: smaller card offset under the final column', ()
       [m('w', 'x'), m('y', 'z')],
       [m('f1', 'f2')],
     ];
-    expect(bronzeUnderFinalStyle(rounds).marginLeft).toBe(2 * 286 + 15); // 587
+    expect(bronzeUnderFinalStyle(rounds).marginLeft).toBe(2 * 286 + 10); // 582
   });
 
   it('never goes negative for a single-round or empty bracket', () => {
-    expect(bronzeUnderFinalStyle([[m('a', 'b')]]).marginLeft).toBe(15);
-    expect(bronzeUnderFinalStyle([]).marginLeft).toBe(15);
-    expect(bronzeUnderFinalStyle(undefined).marginLeft).toBe(15);
+    expect(bronzeUnderFinalStyle([[m('a', 'b')]]).marginLeft).toBe(10);
+    expect(bronzeUnderFinalStyle([]).marginLeft).toBe(10);
+    expect(bronzeUnderFinalStyle(undefined).marginLeft).toBe(10);
   });
 });
 

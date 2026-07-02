@@ -839,7 +839,11 @@ function matchStateCell(m, ipponsB, ipponsA) {
 // and the offset stays correct for any bracket size. The smaller card (CARD) is
 // centred under the full-width final column.
 function bronzeUnderFinalStyle(rounds) {
-  const COL = 230, GAP = 56, CARD = 200; // keep COL/GAP in sync with .bc-round / .bc-tree
+  // CARD (210) is the smallest width that still fits a typical winner name
+  // without ellipsis truncation (measured live: "Haruto Watanabe" fits at 210,
+  // truncates at 205), while staying visibly smaller than the 230px final it
+  // sits under. COL/GAP mirror .bc-round min-width / .bc-tree gap.
+  const COL = 230, GAP = 56, CARD = 210;
   const model = buildDisplayModel(rounds);
   const numCols = (model && model.hasMeta && Array.isArray(model.columns))
     ? model.columns.length

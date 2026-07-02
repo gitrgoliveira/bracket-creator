@@ -69,11 +69,15 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
 		}
 	}
-	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds; add it with a
-	// sentinel round (999) so it sorts after all real rounds on its court (Finding 7).
+	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds. The bronze is
+	// conventionally played JUST BEFORE the final (viewer_awards.jsx: "the
+	// bronze is normally played first"), so slot it into the final's round with
+	// a position sentinel of -1: on their shared court, when scheduledAt is
+	// blank/equal, it sorts after the semifinals but before the final.
 	if b.ThirdPlaceMatch != nil {
+		finalRound := len(b.Rounds) - 1
 		byCourt[b.ThirdPlaceMatch.Court] = append(byCourt[b.ThirdPlaceMatch.Court],
-			entry{m: b.ThirdPlaceMatch, round: 999, position: 0})
+			entry{m: b.ThirdPlaceMatch, round: finalRound, position: -1})
 	}
 
 	statusOrder := func(s state.MatchStatus) int {

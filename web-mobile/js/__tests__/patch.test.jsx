@@ -617,4 +617,20 @@ describe('recomputeBracketQueuePositions: bronze participates in its court queue
     expect(out.thirdPlaceMatch.queuePosition).toBe(0);
     expect(out.rounds[0][0].queuePosition).toBe(1);
   });
+
+  it('orders the bronze BEFORE the final when scheduledAt is blank (bronze plays first)', () => {
+    // No scheduledAt anywhere → the idx tie-break decides. The bronze must slot
+    // in just before the final on their shared court (viewer_awards: "the bronze
+    // is normally played first"), not after it.
+    const bracket = {
+      rounds: [
+        [{ id: "sf1", court: "A", status: "completed" }, { id: "sf2", court: "B", status: "completed" }],
+        [{ id: "final", court: "A", status: "scheduled" }],
+      ],
+      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled" },
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.thirdPlaceMatch.queuePosition).toBe(1); // bronze first
+    expect(out.rounds[1][0].queuePosition).toBe(2); // final second
+  });
 });

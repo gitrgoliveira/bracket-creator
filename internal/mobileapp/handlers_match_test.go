@@ -1625,10 +1625,12 @@ func TestAnnotateBracketQueuePositions_ThirdPlaceMatch(t *testing.T) {
 	}
 	annotateBracketQueuePositions(b)
 
-	// Final and bronze are both scheduled on court A; sentinel round 999 pushes
-	// bronze after the final.
-	assert.Equal(t, 1, b.Rounds[1][0].QueuePosition, "final must be 1st scheduled")
-	assert.Equal(t, 2, b.ThirdPlaceMatch.QueuePosition, "bronze must be 2nd scheduled (sentinel round 999)")
+	// Final and bronze are both scheduled on court A with blank scheduledAt. The
+	// bronze is conventionally played JUST BEFORE the final (viewer_awards: "the
+	// bronze is normally played first"), so it sorts first (round=finalRound,
+	// position -1), then the final.
+	assert.Equal(t, 1, b.ThirdPlaceMatch.QueuePosition, "bronze must be 1st scheduled (plays before the final)")
+	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "final must be 2nd scheduled")
 	// Completed semis get no queue position.
 	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "completed sf1 must have position 0")
 	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "completed sf2 must have position 0")

@@ -180,11 +180,17 @@ function recomputeBracketQueuePositions(bracket) {
     });
     // The naginata bronze match (thirdPlaceMatch) is a SIBLING of bracket.rounds,
     // not a row in it, but it shares a court with the final and must take part in
-    // that court's queue ordering. Key it "bronze:0" so it can't collide with any
-    // real "ri:mi".
+    // that court's queue ordering. The bronze is conventionally played JUST
+    // BEFORE the final (viewer_awards.jsx: "the bronze is normally played
+    // first"). _orderByCourtKey tie-breaks on idx when status+scheduledAt are
+    // equal, and the final is the last-pushed entry (last round's sole match),
+    // so give the bronze idx = finalIdx - 0.5 to slot it immediately before the
+    // final and after the semifinals. Key it "bronze:0" so it can't collide with
+    // any real "ri:mi".
     if (bracket.thirdPlaceMatch) {
+        const finalIdx = entries.length - 1;
         entries.push({
-            idx: entries.length,
+            idx: finalIdx - 0.5,
             m: bracket.thirdPlaceMatch,
             court: bracket.thirdPlaceMatch.court || "",
             ri: "bronze",

@@ -392,14 +392,17 @@ func parsePoolMatchesRecords(records [][]string) []MatchResult {
 		}
 		// Engi flag columns (appended after RepPlayerB), the referee flag counts
 		// per side for an engi (kata demonstration) bout. Absent in files written
-		// before engi support → stay 0. A non-numeric value is treated as 0.
+		// before engi support → stay 0. A non-numeric value is treated as 0, and
+		// a negative value is clamped to 0: flags are validated non-negative at
+		// the HTTP boundary, so a corrupted / hand-edited pool-matches.csv must
+		// not load negative counts that would break engi standings/rendering.
 		if len(rec) > 22 {
-			if v, err := strconv.Atoi(rec[22]); err == nil {
+			if v, err := strconv.Atoi(rec[22]); err == nil && v > 0 {
 				m.FlagsA = v
 			}
 		}
 		if len(rec) > 23 {
-			if v, err := strconv.Atoi(rec[23]); err == nil {
+			if v, err := strconv.Atoi(rec[23]); err == nil && v > 0 {
 				m.FlagsB = v
 			}
 		}

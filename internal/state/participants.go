@@ -839,6 +839,21 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		}
 	}
 
+	// Force the Engi 4-column layout on write, symmetric with the read core
+	// (loadParticipantsNoLock): an engi pair keeps member 2 in the DisplayName
+	// column, so persisting with a caller-supplied WithZekkenName=false would
+	// silently drop it. This is the sole marshalParticipantsCSV caller, so
+	// forcing it here covers AddParticipant / updateParticipantNoLock (which
+	// pass the raw comp.WithZekkenName); the bulk SaveParticipants path already
+	// resolves the effective flag before calling in. Only re-load when the
+	// caller didn't already ask for the zekken layout; a read error is
+	// non-fatal (fall back to the caller's flag), matching the read core.
+	if !withZekkenName {
+		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.Engi {
+			withZekkenName = true
+		}
+	}
+
 	path := s.compPath(compID, "participants.csv")
 
 	data, err := marshalParticipantsCSV(players, withZekkenName)

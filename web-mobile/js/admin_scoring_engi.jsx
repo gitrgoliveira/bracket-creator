@@ -63,7 +63,7 @@ function EngiShortcutHint({ hasNav = false }) {
     >
       <kbd style={kbd}>A</kbd><kbd style={kbd}>S</kbd><span>add Aka/Shiro flag</span>
       <span aria-hidden="true">·</span>
-      <kbd style={kbd}>⇧A</kbd><kbd style={kbd}>⇧S</kbd><span>remove</span>
+      <kbd style={kbd}>⌫</kbd><span>undo</span>
       <span aria-hidden="true">·</span>
       <kbd style={kbd}>Enter</kbd><span>save</span>
       {hasNav && <><span aria-hidden="true">·</span><kbd style={kbd}>←</kbd><kbd style={kbd}>→</kbd><span>prev/next</span></>}
@@ -235,15 +235,22 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     else doSubmit(() => onSubmit(payload));
   };
 
-  // Keyboard flag entry (impeccable critique P2: Engi had none, so an operator
-  // running an all-Engi court was tap-only while the kendo court beside it
-  // typed scores). Mnemonic mirrors the kendo editor's Shift-picks-Aka scheme:
-  //   a → Aka +1     Shift+a (A) → Aka −1
-  //   s → Shiro +1   Shift+s (S) → Shiro −1
+  // Keyboard flag entry (impeccable critique P2/P3). Engi scores are COUNTS,
+  // not waza TYPES, so the kendo editor's "bare letter = waza to Shiro, Shift =
+  // award to Aka" model doesn't map; instead the side is named by its initial
+  // (A = Aka, S = Shiro), which is more intuitive for a two-counter entry:
+  //   a / A → Aka + 1        (case-insensitive: Shift is INERT, not a surprise)
+  //   s / S → Shiro + 1
+  //   Backspace / Delete → undo the last flag added (removes from that side)
   //   Enter → save (same completed-match/correction gating as the button)
-  // Registered once; reads fresh state via kbRef so the listener never goes
-  // stale. Escape stays owned by useEscapeToClose above.
+  //   ← / → → prev/next match
+  // Case-insensitive adds are deliberate: a kendo-trained operator whose muscle
+  // memory is "hold Shift for Aka" gets Aka +1 (harmless), NOT a decrement — the
+  // one cross-editor collision the re-critique flagged. Removal lives on
+  // Backspace (a universal "undo") rather than Shift. Registered once; reads
+  // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
+  const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
   kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, setFlagsA, setFlagsB, clamp, handleSubmit, onPrev, onNext };
   useEffectE(() => {
     const onKeyDown = (ev) => {
@@ -266,10 +273,15 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         return;
       }
       switch (ev.key) {
-        case "a": ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA + 1)); break;
-        case "A": ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA - 1)); break;
-        case "s": ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB + 1)); break;
-        case "S": ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB - 1)); break;
+        case "a": case "A":
+          ev.preventDefault(); s.setFlagsA(s.clamp(s.flagsA + 1)); lastSideRef.current = "a"; break;
+        case "s": case "S":
+          ev.preventDefault(); s.setFlagsB(s.clamp(s.flagsB + 1)); lastSideRef.current = "s"; break;
+        case "Backspace": case "Delete":
+          ev.preventDefault();
+          if (lastSideRef.current === "a") s.setFlagsA(s.clamp(s.flagsA - 1));
+          else if (lastSideRef.current === "s") s.setFlagsB(s.clamp(s.flagsB - 1));
+          break;
         default: break;
       }
     };

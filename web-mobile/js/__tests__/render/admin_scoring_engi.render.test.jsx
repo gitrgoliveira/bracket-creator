@@ -153,8 +153,8 @@ describe('EngiScoreEditorModal Finish + Start Next (impeccable critique P2)', ()
   });
 });
 
-describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2)', () => {
-  it('a/s add a flag to Aka/Shiro, Shift+A/S remove, Enter saves', async () => {
+describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2/P3)', () => {
+  it('a/s add to Aka/Shiro (case-insensitive), Backspace undoes the last, Enter saves', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={onSubmit} />);
 
@@ -167,12 +167,22 @@ describe('EngiScoreEditorModal keyboard flag entry (impeccable critique P2)', ()
     expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
     expect(screen.getByTestId('engi-shiro-count').textContent).toBe('2');
 
-    // Shift+A (key 'A') removes an Aka flag → Aka=2, total 4 (invalid, no save).
-    fireEvent.keyDown(document.body, { key: 'A' });
-    expect(screen.getByTestId('engi-aka-count').textContent).toBe('2');
+    // Backspace undoes the last flag added (Shiro) → Shiro=1, total 4 (invalid).
+    fireEvent.keyDown(document.body, { key: 'Backspace' });
+    expect(screen.getByTestId('engi-shiro-count').textContent).toBe('1');
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
 
-    // Bring Aka back to 3 (total 5), then Enter saves the {3,2} payload.
-    fireEvent.keyDown(document.body, { key: 'a' });
+    // Shift is INERT (no decrement surprise for a kendo-trained operator):
+    // Shift+A (key 'A') ADDS to Aka, not removes → Aka=4.
+    fireEvent.keyDown(document.body, { key: 'A' });
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('4');
+
+    // Undo that (last side was Aka via the 'A' add) → Aka=3, Shiro=1... bring
+    // Shiro back to 2 for a valid total, then Enter saves the {3,2} payload.
+    fireEvent.keyDown(document.body, { key: 'Backspace' }); // Aka 4→3 (last add was Aka)
+    fireEvent.keyDown(document.body, { key: 's' });         // Shiro 1→2
+    expect(screen.getByTestId('engi-aka-count').textContent).toBe('3');
+    expect(screen.getByTestId('engi-shiro-count').textContent).toBe('2');
     fireEvent.keyDown(document.body, { key: 'Enter' });
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ flagsA: 3, flagsB: 2, status: 'completed' }));
   });

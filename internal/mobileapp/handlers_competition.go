@@ -1382,9 +1382,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the server is the authority. Load the bracket up front: the comp lock is
 		// not reentrant, so we can't load inside UpdateCompetitionChanged. Guard on
 		// len(Rounds) > 0 so bracketless formats (league/swiss/pools, which
-		// complete via their own path) skip this gate. A load error yields a nil
-		// bracket -> gate skipped (fail-open; the client gate still applies).
-		bracket, _ := store.LoadBracket(id)
+		// complete via their own path) skip this gate -- those have no bracket.json,
+		// and LoadBracket maps a missing file to an empty bracket + nil error, so a
+		// non-nil error here is a genuine I/O/parse fault. Completion is
+		// IRREVERSIBLE, so fail CLOSED on that fault (500) rather than seal a comp
+		// with unknown bracket state.
+		bracket, bracketErr := store.LoadBracket(id)
+		if bracketErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load bracket"})
+			return
+		}
 		bracketIncomplete := bracket != nil && len(bracket.Rounds) > 0 && !bracketFullyComplete(bracket)
 
 		// Atomic Load + Status check + Save. Pre-fix, the

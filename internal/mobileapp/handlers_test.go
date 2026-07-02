@@ -2532,3 +2532,26 @@ func TestBracketFullyComplete(t *testing.T) {
 		assert.True(t, bracketFullyComplete(b), "a scheduled bye/phantom must not block completion")
 	})
 }
+
+// TestCompleteHandler_BracketLoadErrorFailsClosed pins Copilot #326: completion
+// is IRREVERSIBLE, so a genuine bracket I/O/parse fault must fail CLOSED (500),
+// not fall through and seal the competition with unknown bracket state. (A
+// MISSING bracket.json is not a fault -- LoadBracket maps it to an empty bracket
+// + nil error -- so bracketless formats still complete.)
+func TestCompleteHandler_BracketLoadErrorFailsClosed(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+
+	compID := "complete-bracket-io-fail"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "IO Fail", Status: state.CompStatusPlayoffs,
+	}))
+	// Corrupt bracket.json so LoadBracket returns a parse error (distinct from
+	// os.IsNotExist, which maps to an empty bracket).
+	bracketPath := filepath.Join(tempDir, "competitions", compID, "bracket.json")
+	require.NoError(t, os.WriteFile(bracketPath, []byte("{ not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}

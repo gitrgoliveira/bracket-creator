@@ -993,11 +993,13 @@ const API = {
     // in "pools"/"playoffs" forever and the public viewer's Awards tab (gated
     // on status === "completed") never becomes reachable. 400 when the
     // competition isn't in "pools" or "playoffs" status (already completed, or
-    // not started yet); 404 when the competition doesn't exist.
-    async completeCompetition(id, password) {
+    // not started yet), or a naginata 3rd-place match is still unscored; 404
+    // when the competition doesn't exist. Elevated-gated (irreversible), so it
+    // takes the admin password like discardDraw.
+    async completeCompetition(id, password, adminPassword) {
         const res = await fetch(`/api/competitions/${id}/complete`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password }
+            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

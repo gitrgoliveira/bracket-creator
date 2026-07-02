@@ -246,6 +246,9 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
 
   it('calls the API and refreshes on confirm', async () => {
     window.confirmDialog.mockResolvedValueOnce(true);
+    // Completion is elevated-gated; promptAdminPassword resolves "" (no admin
+    // password configured) so the handler proceeds.
+    window.promptAdminPassword.mockResolvedValueOnce('');
     window.API.completeCompetition.mockClear();
     const onRefreshCompetition = vi.fn();
     const showToast = vi.fn();
@@ -283,7 +286,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     expect(btn).not.toBeUndefined();
     await act(async () => { fireEvent.click(btn); });
 
-    await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledWith('nagi-1', 'shiaijo2026'));
+    await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledWith('nagi-1', 'shiaijo2026', ''));
     expect(onRefreshCompetition).toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('marked complete'));
   });

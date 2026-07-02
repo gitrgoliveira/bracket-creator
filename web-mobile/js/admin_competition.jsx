@@ -154,9 +154,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       confirmLabel: "Complete competition",
       danger: true,
     }))) return;
+    // Completion is irreversible → elevated-gated on the server; prompt for the
+    // admin password (a no-op when no admin password is configured).
+    const admin = await window.promptAdminPassword();
+    if (admin === null) return;
     setCompleting(true);
     try {
-      await window.API.completeCompetition(c.id, password);
+      await window.API.completeCompetition(c.id, password, admin);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`${c.name} marked complete`);

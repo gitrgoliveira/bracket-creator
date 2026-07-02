@@ -1364,11 +1364,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.POST("/competitions/:id/complete", func(c *gin.Context) {
+	// Elevated-gated: completing a competition is IRREVERSIBLE (invalidate
+	// rejects a completed comp), like DELETE /competitions/:id and
+	// /invalidate. In file mode without an admin password the gate is a no-op.
+	r.POST("/competitions/:id/complete", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
+
+		// Naginata bronze-completion gate: the 3rd-place match must be scored
+		// before the competition can be sealed, else the Awards podium would
+		// show an incomplete 3rd place. The JS "Complete competition" button
+		// enforces this (bracketFullyComplete), but a direct API call would
+		// bypass it. Load the bracket up front: the comp lock is not reentrant,
+		// so we can't load inside UpdateCompetitionChanged. A nil bracket / load
+		// error / no-bronze case is treated as "nothing to gate" (fail-open;
+		// only a started naginata bracket has a bronze).
+		bracket, _ := store.LoadBracket(id)
+		bronzeIncomplete := bracket != nil && bracket.ThirdPlaceMatch != nil &&
+			bracket.ThirdPlaceMatch.Status != state.MatchStatusCompleted
 
 		// Atomic Load + Status check + Save. Pre-fix, the
 		// LoadCompetition + saveCompetitionWithPlayers sequence had
@@ -1385,6 +1400,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
 				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
+				return nil, nil
+			}
+			if current.Naginata && bronzeIncomplete {
+				statusErr = fmt.Errorf("the 3rd-place match must be completed before this competition can be finished")
 				return nil, nil
 			}
 			current.Status = state.CompStatusComplete

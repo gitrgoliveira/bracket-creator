@@ -2427,3 +2427,40 @@ func TestCompetitionHandlers_DefaultDate_IsDay1(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "15-07-2026", loaded.Date, "empty competition date should default to tournament Day 1")
 }
+
+// TestCompleteHandler_NaginataBronzeGate is a regression for the tri-review
+// finding: POST /complete must not seal a naginata competition whose 3rd-place
+// (bronze) match is unscored (the Awards podium would show an incomplete 3rd).
+// The JS "Complete competition" button enforces this via bracketFullyComplete;
+// this pins the same guard server-side against a direct API call.
+func TestCompleteHandler_NaginataBronzeGate(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "nag-complete-gate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Nag Complete Gate", Status: state.CompStatusPlayoffs, Naginata: true,
+	}))
+	// Bracket with a completed final but an UNSCORED bronze.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{{ID: "m-final", Status: state.MatchStatusCompleted}}},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Status: state.MatchStatusScheduled},
+	}))
+
+	// Complete is blocked while the bronze is unscored.
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "3rd-place")
+
+	// Score the bronze → completion now succeeds.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{{ID: "m-final", Status: state.MatchStatusCompleted}}},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Status: state.MatchStatusCompleted},
+	}))
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}

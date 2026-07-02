@@ -4,8 +4,8 @@ import { buildDisplayModel, computeMetaTops, roundLabel, bronzeUnderFinalStyle }
 // bronzeUnderFinalStyle positions the 3rd-place (bronze) card UNDER the final
 // match card and makes it smaller. The tree is a flex row of 230px columns
 // (.bc-round min-width) with a 56px gap, so each column step is 286px; the
-// final is the last column, and the 200px bronze is centred under the 230px
-// final (+(230-200)/2 = 15px).
+// final is the last column, and the 210px bronze is centred under the 230px
+// final (+(230-210)/2 = 10px).
 describe('bronzeUnderFinalStyle: smaller card offset under the final column', () => {
   const m = (a, b) => ({ id: `${a}-${b}`, sideA: { name: a }, sideB: { name: b } });
 

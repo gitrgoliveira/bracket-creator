@@ -351,9 +351,11 @@ type Competition struct {
 	// Engi competitors are PAIRS (two member names, one shared dojo). On the Go
 	// side a pair is a single competitor stored in the WithZekkenName column
 	// layout: Player.Name holds member 1, Player.DisplayName holds member 2,
-	// Player.Dojo holds the shared dojo. Engi competitions therefore carry
-	// WithZekkenName=true so the participant CSV reader/writer use the 4-column
-	// [id, Name, DisplayName, Dojo] form.
+	// Player.Dojo holds the shared dojo. The stored WithZekkenName flag is NOT
+	// forced true for engi; instead the participant CSV reader/writer derive the
+	// effective layout via EffectiveWithZekkenName() (WithZekkenName || Engi), so
+	// an engi roster always uses the 4-column [id, Name, DisplayName, Dojo] form
+	// whether or not WithZekkenName itself is set.
 	Engi bool `yaml:"engi,omitempty" json:"engi"`
 
 	CheckInEnabled bool `yaml:"check_in_enabled,omitempty" json:"checkInEnabled,omitempty"`

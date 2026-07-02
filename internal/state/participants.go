@@ -107,9 +107,11 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 	// Engi competitions ALWAYS use the 4-column zekken layout (member 2 stored in
 	// the DisplayName column); force it on regardless of the caller's flag so an
 	// engi-pair roster reads back its second member name. Non-engi parsing is
-	// unaffected (Engi defaults false). The comp record is read again below for
-	// the HasParticipantIDs check; this early read is cheap (cached) and keeps
-	// the effective layout decision in one spot. A read error is non-fatal here:
+	// unaffected (Engi defaults false). This uses the lock-free
+	// loadCompetitionLocked: we already hold the comp lock, and the public
+	// LoadCompetition would re-lock the non-reentrant mutex and deadlock. It's a
+	// small config.md parse from disk (not a cache hit), kept here so the
+	// effective-layout decision lives in one spot. A read error is non-fatal:
 	// fall back to the caller's flag rather than failing the whole load.
 	if !withZekkenName {
 		if comp, _ := s.loadCompetitionLocked(compID); comp != nil && comp.Engi {

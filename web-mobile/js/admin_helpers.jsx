@@ -109,9 +109,29 @@ function bracketFullyComplete(bracket) {
   const matches = [];
   bracket.rounds.forEach((r) => (r || []).forEach((m) => { if (m) matches.push(m); }));
   if (bracket.thirdPlaceMatch) matches.push(bracket.thirdPlaceMatch);
-  const real = matches.filter(hasBothSides);
-  if (!real.length) return false;
-  return real.every((m) => m.status === "completed");
+  // Use isRequiredBracketMatch, NOT hasBothSides, for the completion gate.
+  // hasBothSides excludes "Winner of rX-mY" / "Pool A-1st" PLACEHOLDER sides
+  // (correct for progress stats), but an SSE match_updated only carries the one
+  // scored match, so a downstream final/bronze can transiently still show a
+  // placeholder side until the next refetch. Filtering those out would let this
+  // return true and enable "Complete competition" before the final/bronze is
+  // actually played. A placeholder-sided match is required-and-incomplete;
+  // byes (one empty side) and hidden phantoms are still excluded (Copilot #326).
+  const required = matches.filter(isRequiredBracketMatch);
+  if (!required.length) return false;
+  return required.every((m) => m.status === "completed");
+}
+
+// A bracket match that must eventually be played before the competition is
+// complete: both sides are NAMED -- including a "Winner of rX-mY" or "Pool
+// A-1st" placeholder that propagation/refetch hasn't resolved yet -- and it is
+// not a structural bye (one empty side) or a hidden empty-vs-empty phantom
+// (state.BracketMatch.Hidden). Unlike hasBothSides this KEEPS placeholder-sided
+// matches, so the completion gate can't fire while a downstream match is still
+// waiting on its feeder.
+function isRequiredBracketMatch(m) {
+  if (!m || m.hidden) return false;
+  return !!sideName(m.sideA) && !!sideName(m.sideB);
 }
 
 // Canonical numeric bounds. The year range is shared by every date

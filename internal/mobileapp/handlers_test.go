@@ -2441,26 +2441,94 @@ func TestCompleteHandler_NaginataBronzeGate(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Nag Complete Gate", Status: state.CompStatusPlayoffs, Naginata: true,
 	}))
-	// Bracket with a completed final but an UNSCORED bronze.
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds:          [][]state.BracketMatch{{{ID: "m-final", Status: state.MatchStatusCompleted}}},
-		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Status: state.MatchStatusScheduled},
-	}))
 
-	// Complete is blocked while the bronze is unscored.
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
-	r.ServeHTTP(w, req)
+	post := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+		r.ServeHTTP(w, req)
+		return w
+	}
+	final := func(status state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: "m-final", SideA: "Alice", SideB: "Bob", Status: status}
+	}
+	bronze := func(status state.MatchStatus) *state.BracketMatch {
+		return &state.BracketMatch{ID: "m-bronze", SideA: "Charlie", SideB: "Dave", Status: status}
+	}
+
+	// Completed final but an UNSCORED bronze → blocked (bronze is a required
+	// must-play match).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusCompleted)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusScheduled),
+	}))
+	w := post()
 	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
-	assert.Contains(t, w.Body.String(), "3rd-place")
+	assert.Contains(t, w.Body.String(), "all bracket matches")
 
-	// Score the bronze → completion now succeeds.
+	// Scored bronze but an UNSCORED final → still blocked (the general gate
+	// covers non-bronze matches too; closes the kendo direct-API hole).
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds:          [][]state.BracketMatch{{{ID: "m-final", Status: state.MatchStatusCompleted}}},
-		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Status: state.MatchStatusCompleted},
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusScheduled)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusCompleted),
 	}))
-	w = httptest.NewRecorder()
-	req, _ = http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
-	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, post().Code)
+
+	// Both the final and the bronze completed → completion succeeds.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusCompleted)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusCompleted),
+	}))
+	w = post()
 	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// TestBracketFullyComplete pins the completion predicate, especially the
+// placeholder case behind Copilot #326: a downstream match still holding a
+// "Winner of rX-mY" placeholder side (SSE hasn't propagated its real sides yet)
+// must count as required-and-incomplete, so the gate can't fire early. Byes
+// (one empty side) and Hidden phantoms are excluded.
+func TestBracketFullyComplete(t *testing.T) {
+	comp := func(id string, a, b string, s state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: id, SideA: a, SideB: b, Status: s}
+	}
+
+	t.Run("nil / empty bracket is not complete", func(t *testing.T) {
+		assert.False(t, bracketFullyComplete(nil))
+		assert.False(t, bracketFullyComplete(&state.Bracket{}))
+	})
+
+	t.Run("final still a placeholder blocks completion", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{comp("m-sf1", "Alice", "Bob", state.MatchStatusCompleted)},
+			{comp("m-final", "Winner of r0-m0", "Winner of r0-m1", state.MatchStatusScheduled)},
+		}}
+		assert.False(t, bracketFullyComplete(b), "placeholder final is required-and-incomplete")
+	})
+
+	t.Run("all real matches completed is complete", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{comp("m-sf1", "Alice", "Bob", state.MatchStatusCompleted)},
+			{comp("m-final", "Alice", "Carol", state.MatchStatusCompleted)},
+		}}
+		assert.True(t, bracketFullyComplete(b))
+	})
+
+	t.Run("unscored bronze blocks completion", func(t *testing.T) {
+		b := &state.Bracket{
+			Rounds:          [][]state.BracketMatch{{comp("m-final", "Alice", "Carol", state.MatchStatusCompleted)}},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", SideA: "Bob", SideB: "Dave", Status: state.MatchStatusScheduled},
+		}
+		assert.False(t, bracketFullyComplete(b))
+	})
+
+	t.Run("byes and hidden phantoms are excluded", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{
+				comp("m-final", "Alice", "Bob", state.MatchStatusCompleted),
+				comp("m-bye", "Carol", "", state.MatchStatusScheduled),              // bye: one empty side
+				{ID: "m-phantom", Hidden: true, Status: state.MatchStatusScheduled}, // hidden phantom
+			},
+		}}
+		assert.True(t, bracketFullyComplete(b), "a scheduled bye/phantom must not block completion")
+	})
 }

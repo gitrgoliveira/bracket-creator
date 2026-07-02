@@ -1373,17 +1373,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Naginata bronze-completion gate: the 3rd-place match must be scored
-		// before the competition can be sealed, else the Awards podium would
-		// show an incomplete 3rd place. The JS "Complete competition" button
-		// enforces this (bracketFullyComplete), but a direct API call would
-		// bypass it. Load the bracket up front: the comp lock is not reentrant,
-		// so we can't load inside UpdateCompetitionChanged. A nil bracket / load
-		// error / no-bronze case is treated as "nothing to gate" (fail-open;
-		// only a started naginata bracket has a bronze).
+		// Full-bracket-completion gate: a bracket-format competition (playoffs, or
+		// a mixed comp's knockout) must have EVERY must-play match completed --
+		// all rounds plus the naginata bronze (ThirdPlaceMatch, a sibling of
+		// Rounds) -- before it can be sealed, else the Awards podium would show an
+		// unplayed final/bronze. The JS "Complete competition" button enforces
+		// this (bracketFullyComplete), but a direct API call would bypass it, so
+		// the server is the authority. Load the bracket up front: the comp lock is
+		// not reentrant, so we can't load inside UpdateCompetitionChanged. Guard on
+		// len(Rounds) > 0 so bracketless formats (league/swiss/pools, which
+		// complete via their own path) skip this gate. A load error yields a nil
+		// bracket -> gate skipped (fail-open; the client gate still applies).
 		bracket, _ := store.LoadBracket(id)
-		bronzeIncomplete := bracket != nil && bracket.ThirdPlaceMatch != nil &&
-			bracket.ThirdPlaceMatch.Status != state.MatchStatusCompleted
+		bracketIncomplete := bracket != nil && len(bracket.Rounds) > 0 && !bracketFullyComplete(bracket)
 
 		// Atomic Load + Status check + Save. Pre-fix, the
 		// LoadCompetition + saveCompetitionWithPlayers sequence had
@@ -1402,8 +1404,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
 				return nil, nil
 			}
-			if current.Naginata && bronzeIncomplete {
-				statusErr = fmt.Errorf("the 3rd-place match must be completed before this competition can be finished")
+			if bracketIncomplete {
+				statusErr = fmt.Errorf("all bracket matches must be completed before this competition can be finished")
 				return nil, nil
 			}
 			current.Status = state.CompStatusComplete
@@ -1665,4 +1667,54 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		c.JSON(http.StatusOK, compOut)
 	})
+}
+
+// bracketFullyComplete reports whether every must-play match in the bracket --
+// all round matches plus the naginata bronze (ThirdPlaceMatch, a sibling of
+// Rounds) -- is completed. It mirrors the JS bracketFullyComplete /
+// isRequiredBracketMatch gate (web-mobile/js/admin_helpers.jsx) so the server is
+// the authority for POST /complete: a direct API call can't seal a competition
+// with an unplayed final/bronze even if a client shows the button prematurely
+// (an SSE match_updated carries only the scored match, so a downstream match can
+// transiently still hold a "Winner of rX-mY" placeholder side). Returns false for
+// a bracket with no must-play matches, so callers guard on len(Rounds) > 0 to
+// skip bracketless formats (league/swiss/pools complete via their own path).
+func bracketFullyComplete(b *state.Bracket) bool {
+	if b == nil {
+		return false
+	}
+	required := 0
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if !isRequiredBracketMatch(m) {
+				continue
+			}
+			required++
+			if m.Status != state.MatchStatusCompleted {
+				return false
+			}
+		}
+	}
+	if isRequiredBracketMatch(b.ThirdPlaceMatch) {
+		required++
+		if b.ThirdPlaceMatch.Status != state.MatchStatusCompleted {
+			return false
+		}
+	}
+	return required > 0
+}
+
+// isRequiredBracketMatch reports whether a bracket match must be played before
+// the competition is complete: both sides are named -- INCLUDING an unresolved
+// "Winner of rX-mY" / "Pool A-1st" placeholder that propagation hasn't filled in
+// yet (required, just not yet playable) -- and it is not a structural bye (one
+// empty side) or a Hidden empty-vs-empty phantom. Keeping placeholder-sided
+// matches is what stops the completion gate firing while a downstream match is
+// still waiting on its feeder.
+func isRequiredBracketMatch(m *state.BracketMatch) bool {
+	if m == nil || m.Hidden {
+		return false
+	}
+	return strings.TrimSpace(m.SideA) != "" && strings.TrimSpace(m.SideB) != ""
 }

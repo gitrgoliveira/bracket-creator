@@ -258,10 +258,26 @@ describe('bracketFullyComplete', () => {
     expect(bracketFullyComplete(bracket)).toBe(true);
   });
 
-  it('ignores byes / unresolved future-round placeholders', () => {
+  it('ignores byes (one empty side) and hidden phantoms', () => {
     const byeMatch = { sideA: { id: "a", name: "Alice" }, sideB: { id: "", name: "" }, status: "scheduled" };
+    const hiddenPhantom = { sideA: "", sideB: "", status: "scheduled", hidden: true };
+    const bracket = { rounds: [[realMatch("completed"), byeMatch, hiddenPhantom]] };
+    expect(bracketFullyComplete(bracket)).toBe(true);
+  });
+
+  // Copilot #326: an SSE match_updated carries only the scored match, so a
+  // downstream final/bronze can transiently keep a "Winner of rX-mY" placeholder
+  // side. Such a match is REQUIRED-and-incomplete and must block completion, or
+  // the "Complete competition" button enables before the final is actually
+  // played. (Previously this was treated like a bye and ignored.)
+  it('stays false while a downstream match is still a "Winner of X" placeholder', () => {
     const feederPlaceholder = { sideA: "Winner of r0-m0", sideB: "Winner of r0-m1", status: "scheduled" };
-    const bracket = { rounds: [[realMatch("completed"), byeMatch], [feederPlaceholder]] };
+    const bracket = { rounds: [[realMatch("completed"), realMatch("completed")], [feederPlaceholder]] };
+    expect(bracketFullyComplete(bracket)).toBe(false);
+  });
+
+  it('returns true once the placeholder final is resolved and completed', () => {
+    const bracket = { rounds: [[realMatch("completed"), realMatch("completed")], [realMatch("completed")]] };
     expect(bracketFullyComplete(bracket)).toBe(true);
   });
 });

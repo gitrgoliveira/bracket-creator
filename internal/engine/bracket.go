@@ -275,11 +275,28 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 			ID:           "m-bronze",
 			Status:       state.MatchStatusScheduled,
 			DisplayRound: -1,
-			Court:        finalCourt,
+			Court:        bronzeDefaultCourt(finalCourt, comp.Courts),
 		}
 	}
 
 	return bracket, nil
+}
+
+// bronzeDefaultCourt chooses the 3rd-place (bronze) match's default court. The
+// bronze conventionally shares the FINAL's court, so that wins when set. If the
+// final's court is unset (a court-assignment gap) but the competition has
+// courts, fall back to the first court so the bronze still lands on a shiaijo
+// queue and doesn't render an empty "Shiaijo" label. A genuinely court-less
+// competition keeps "" — consistent with every other match; don't invent a
+// court. Operators can reassign via UpdateMatchCourt.
+func bronzeDefaultCourt(finalCourt string, courts []string) string {
+	if finalCourt != "" {
+		return finalCourt
+	}
+	if len(courts) > 0 {
+		return courts[0]
+	}
+	return ""
 }
 
 // assignBracketMatchNumbers sets MatchNumber on every real (non-Hidden,

@@ -8,6 +8,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestBronzeDefaultCourt covers the court-defaulting logic (Copilot PR #326
+// round 4): the bronze shares the final's court, falls back to the first
+// configured court when the final's court is unset (a court-assignment gap),
+// and stays "" for a genuinely court-less competition rather than inventing a
+// court. The empty-final-court-but-courts-exist branch isn't reachable through
+// StartCompetition (court assignment always runs first), so it's unit-tested
+// here directly.
+func TestBronzeDefaultCourt(t *testing.T) {
+	assert.Equal(t, "A", bronzeDefaultCourt("A", []string{"A", "B"}), "final's court wins when set")
+	assert.Equal(t, "B", bronzeDefaultCourt("B", nil), "final's court wins even with no courts list")
+	assert.Equal(t, "A", bronzeDefaultCourt("", []string{"A", "B"}), "empty final court falls back to the first court")
+	assert.Equal(t, "", bronzeDefaultCourt("", nil), "court-less competition keeps empty court")
+	assert.Equal(t, "", bronzeDefaultCourt("", []string{}), "empty courts slice keeps empty court")
+}
+
 // createBronzeTestCompetition creates a playoffs competition with the naginata
 // flag set (or not) so the bronze-match generation gate can be exercised.
 func createBronzeTestCompetition(t *testing.T, store *state.Store, id string, naginata bool) {

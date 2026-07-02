@@ -591,6 +591,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 {sides.map((s, idx) => (
                   <React.Fragment key={s.key}>
                     <div className={`sb-side sb-side--${s.color}`}>
+                      {/* Explicit SHIRO/AKA pill, matching the Engi editor's
+                          side badge so both editors label the side the same way
+                          (impeccable re-critique symmetry). */}
+                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
                       <div className="sb-name">{s.name}</div>
                       <div className="sb-slots">
                         {[0, 1].map((i) => (

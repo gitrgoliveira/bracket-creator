@@ -747,6 +747,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
+                  {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
+                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
                   <div className="sb-name">{s.name}</div>
                 </div>
                 {idx === 0 && (

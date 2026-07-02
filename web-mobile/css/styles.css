@@ -4599,6 +4599,32 @@ button.pool-match-row {
   text-align: right;
 }
 
+/* Explicit SHIRO/AKA pill on each kendo side, matching .engi-side__badge so the
+   two editors label the side identically (framed white for Shiro, solid red for
+   Aka — DESIGN.md §4). `align-self` follows the side's inward text-align. */
+.sb-side__badge {
+  display: inline-block;
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.sb-side--shiro .sb-side__badge { align-self: flex-end; }
+.sb-side__badge--shiro {
+  background: #fff;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+}
+.sb-side__badge--aka {
+  background: var(--red);
+  color: #fff;
+  border: 1px solid var(--red);
+}
+
 .sb-name {
   font-size: 22px;
   font-weight: 700;

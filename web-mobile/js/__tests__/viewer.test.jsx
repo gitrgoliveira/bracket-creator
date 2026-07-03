@@ -298,6 +298,29 @@ describe('Viewer Utils', () => {
       expect(dh.teamSize).toBe(0);
     });
 
+    // A pool tiebreaker ('-TB-') is also a single ippon-shobu rep bout, so it
+    // must route to the individual editor just like a daihyosen. Guarding
+    // against the DH-only regression flagged on PR #330 (compKind/teamSize was
+    // gated on isPoolDaihyosenID, which misses '-TB-').
+    it('zeroes out compKind/teamSize for pool-tiebreaker matches (pool-TB guard)', () => {
+      const c = mkComp({
+        kind: 'team',
+        teamSize: 3,
+        poolMatches: [
+          { id: 'Pool A-0', status: 'completed' },
+          { id: 'Pool A-TB-0', status: 'completed' },
+        ],
+      });
+      const ms = compMatches(c);
+      const normal = ms.find(m => m.id === 'Pool A-0');
+      const tb = ms.find(m => m.id === 'Pool A-TB-0');
+      expect(normal.compKind).toBe('team');
+      expect(normal.teamSize).toBe(3);
+      expect(tb.compKind).toBe('');
+      expect(tb.teamSize).toBe(0);
+      expect(tb.compEngi).toBe(false);
+    });
+
     it('threads compKind and teamSize onto bracket matches for team comps', () => {
       global.window = global.window || {};
       const savedRoundLabel = global.window.roundLabel;

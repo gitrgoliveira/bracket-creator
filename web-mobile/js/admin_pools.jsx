@@ -805,8 +805,10 @@ window.AdminPools = AdminPools;
 
 // Expose enrichPoolMatchWithComp and isSupplementaryBout as window globals so
 // window-only modules (admin_shiaijo.jsx) can call them at render time without
-// ESM imports (which would double-eval those script-tagged modules). Guard for
-// SSR/test environments that have no window.
+// ESM imports (which would double-eval those script-tagged modules). This is a
+// browser-only admin module (its components read window.* at render time); the
+// typeof guard exists only so the vitest suite can ES-import the pure helpers
+// above without the top-level assignment throwing when window is absent.
 if (typeof window !== "undefined") {
   window.enrichPoolMatchWithComp = enrichPoolMatchWithComp;
   window.isSupplementaryBout = isSupplementaryBout;

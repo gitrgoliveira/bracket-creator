@@ -15,7 +15,7 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
-import { poolNameOf } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState } = React;
 const EmptyState = window.EmptyState;
@@ -636,9 +636,12 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 <div className="pool-match-numbered-list">
                   {matches.map((m, idx) => {
                     if (isTeam) {
-                      // Team: enrich match the same way as the legacy PoolMatchRow path
-                      const isDH = isPoolDaihyosenID(m.id || "");
-                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isDH ? "" : competition.kind, teamSize: isDH ? 0 : competition.teamSize };
+                      // Team: enrich match the same way as the legacy PoolMatchRow path.
+                      // A daihyosen ('-DH-') or tiebreaker ('-TB-') is a single rep
+                      // bout even in a team comp, so force compKind/teamSize to route
+                      // it to the individual editor (matches enrichPoolMatchWithComp).
+                      const isRepBout = isSupplementaryBout(m.id || "");
+                      const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}

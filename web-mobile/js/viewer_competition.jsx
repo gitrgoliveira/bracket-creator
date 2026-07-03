@@ -7,7 +7,7 @@ import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.js
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, DHBadge } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
-import { poolNameOf } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -17,7 +17,10 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
-// Pool daihyosen matches carry '-DH-' in their id.
+// Pool daihyosen matches carry '-DH-' in their id. Used only for the DH
+// standings badge, which is daihyosen-specific. For routing a bout to the
+// individual (rep-bout) editor, use isSupplementaryBout instead: a pool
+// tiebreaker ('-TB-') is also a single ippon-shobu rep bout, not a team bout.
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
 // mp-tidg: activeTab + onTabChange are controlled props: app.jsx owns the
@@ -35,8 +38,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
             // DH/TB suffix (matches the backend equality rule in daihyosen.go).
             const matches = poolMatches ? poolMatches.filter(m => poolNameOf(m.id) === p.poolName) : [];
             matches.forEach((m) => {
-                const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                // A daihyosen ('-DH-') or tiebreaker ('-TB-') is a single
+                // ippon-shobu rep bout even in a team comp: force compKind/teamSize
+                // so isTeam checks route it to the individual editor (mirrors
+                // enrichPoolMatchWithComp in admin_pools.jsx).
+                const isRepBout = isSupplementaryBout(m.id || "");
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize });
             });
         });
     }

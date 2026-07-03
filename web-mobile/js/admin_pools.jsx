@@ -579,7 +579,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                       <div style={{ fontWeight: 600 }}>
                         {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
                         {s.player.name}
-                        {isTeamComp && teamWonDaihyosen(selectedPool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 2) && (
+                        {isTeamComp && teamWonDaihyosen(selectedPool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 3) && (
                           <DHBadge />
                         )}
                       </div>
@@ -741,7 +741,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                           <div style={{ fontWeight: 500 }}>
                             {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
                             {s.player.name}
-                            {isTeamComp && teamWonDaihyosen(pool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 2) && (
+                            {isTeamComp && teamWonDaihyosen(pool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 3) && (
                               <DHBadge />
                             )}
                           </div>

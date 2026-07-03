@@ -559,7 +559,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
-                          {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 2) && (
+                          {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 3) && (
                             <DHBadge />
                           )}
                           {/* The rank badge is only informative when rows are in

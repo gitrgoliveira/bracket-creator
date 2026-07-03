@@ -1392,69 +1392,75 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Full-bracket-completion gate: a bracket-format competition (playoffs, or
-		// a mixed comp's knockout) must have EVERY must-play match completed --
-		// all rounds plus the naginata bronze (ThirdPlaceMatch, a sibling of
-		// Rounds) -- before it can be sealed, else the Awards podium would show an
-		// unplayed final/bronze. The JS "Complete competition" button enforces
-		// this (bracketFullyComplete), but a direct API call would bypass it, so
-		// the server is the authority. Load the bracket up front: the comp lock is
-		// not reentrant, so we can't load inside UpdateCompetitionChanged. Guard on
-		// len(Rounds) > 0 so bracketless formats (league/swiss/pools, which
-		// complete via their own path) skip this gate -- those have no bracket.json,
-		// and LoadBracket maps a missing file to an empty bracket + nil error, so a
-		// non-nil error here is a genuine I/O/parse fault. Completion is
-		// IRREVERSIBLE, so fail CLOSED on that fault (500) rather than seal a comp
-		// with unknown bracket state.
-		bracket, bracketErr := store.LoadBracket(id)
-		if bracketErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load bracket"})
-			return
-		}
-		bracketIncomplete := bracket != nil && len(bracket.Rounds) > 0 && !bracketFullyComplete(bracket)
-
-		// Atomic Load + Status check + Save. Pre-fix, the
-		// LoadCompetition + saveCompetitionWithPlayers sequence had
-		// a TOCTOU window where a concurrent invalidate (or a score-
-		// save's MaybeAutoCompletePools) could move Status between
-		// our read and write, losing one of the two mutations.
+		// Full-bracket-completion gate + atomic status transition, all under ONE
+		// per-comp write lock via WithTransaction. A bracket-format competition
+		// (playoffs, or a mixed comp's knockout) must have EVERY must-play match
+		// completed -- all rounds plus the naginata bronze (ThirdPlaceMatch, a
+		// sibling of Rounds) -- before it can be sealed, else the Awards podium
+		// would show an unplayed final/bronze. The JS "Complete competition"
+		// button enforces this (bracketFullyComplete), but a direct API call
+		// would bypass it, so the server is the authority.
+		//
+		// Reading the bracket via tx.LoadBracket INSIDE the transaction closes a
+		// TOCTOU window: a bare LoadBracket + a separate status write could
+		// otherwise observe a stale "incomplete" snapshot (a concurrent
+		// final-match score landing between the two) and spuriously reject
+		// completion. tx.LoadBracket reuses the already-held lock; the public
+		// Store.LoadBracket would deadlock the non-reentrant mutex.
+		//
+		// len(Rounds) > 0 skips bracketless formats (league/swiss/pools complete
+		// via their own path -- no bracket.json, which LoadBracket maps to an
+		// empty bracket + nil error). Completion is IRREVERSIBLE, so a genuine
+		// I/O/parse fault fails CLOSED (500) rather than sealing with unknown
+		// bracket state.
 		var compOut *state.Competition
-		var statusErr error
+		var statusErr, bracketFault error
 		var notFoundFlag bool
-		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
+			current, lerr := tx.LoadCompetition(id)
+			if lerr != nil {
+				return lerr
+			}
 			if current == nil {
 				notFoundFlag = true
-				return nil, nil
+				return nil
 			}
 			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
 				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
-				return nil, nil
+				return nil
 			}
-			if bracketIncomplete {
+			bracket, berr := tx.LoadBracket(id)
+			if berr != nil {
+				bracketFault = berr
+				return nil
+			}
+			if bracket != nil && len(bracket.Rounds) > 0 && !bracketFullyComplete(bracket) {
 				statusErr = fmt.Errorf("all bracket matches must be completed before this competition can be finished")
-				return nil, nil
+				return nil
 			}
 			current.Status = state.CompStatusComplete
 			compOut = current
-			return current, nil
+			return tx.SaveCompetition(current)
 		})
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if bracketFault != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load bracket"})
 			return
 		}
 		if statusErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
 			return
 		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
 			return
 		}
-		// Only broadcast on an actual content change (same idempotency
-		// semantics as the prior saveCompetitionWithPlayers call).
-		if changed {
-			hub.Broadcast(EventTournamentUpdated, nil)
-		}
+		// Reaching here means the status transitioned (pools/playoffs -> complete),
+		// always a real content change, so broadcast unconditionally.
+		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, compOut)
 	})
 

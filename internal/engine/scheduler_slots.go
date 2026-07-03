@@ -150,6 +150,20 @@ func skipCeremonyBlocks(t, lunchStart time.Time, lunchDurationMin int) time.Time
 	return t
 }
 
+// parseCeremonyParams derives the shared scheduling anchors from a competition
+// and (optional) tournament. dayStart is always valid; openingMin/lunchMin are
+// 0 and lunchStart is the zero Time when tournament is nil. Callers must still
+// guard comp == nil themselves (they return before reaching this).
+func parseCeremonyParams(comp *state.Competition, tournament *state.Tournament) (dayStart time.Time, openingMin, lunchMin int, lunchStart time.Time) {
+	dayStart = parseClockHHMM(comp.StartTime)
+	if tournament != nil {
+		openingMin = parseDurationMinutes(tournament.OpeningBlock)
+		lunchMin = parseDurationMinutes(tournament.LunchBlock)
+		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	return
+}
+
 // assignPoolMatchSlots walks the pool-match list and writes a per-
 // court time slot into each match's ScheduledAt field. Pool matches
 // are grouped by Court; matches on the same court are sequential,
@@ -181,15 +195,7 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 	if comp == nil {
 		return matches, time.Time{}
 	}
-	dayStart := parseClockHHMM(comp.StartTime)
-	openingMin := 0
-	lunchMin := 0
-	var lunchStart time.Time
-	if tournament != nil {
-		openingMin = parseDurationMinutes(tournament.OpeningBlock)
-		lunchMin = parseDurationMinutes(tournament.LunchBlock)
-		lunchStart = parseClockHHMM(defaultLunchStartClock)
-	}
+	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
 	if len(matches) == 0 {
 		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
@@ -252,15 +258,7 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 	if comp == nil {
 		return time.Time{}
 	}
-	dayStart := parseClockHHMM(comp.StartTime)
-	openingMin := 0
-	lunchMin := 0
-	var lunchStart time.Time
-	if tournament != nil {
-		openingMin = parseDurationMinutes(tournament.OpeningBlock)
-		lunchMin = parseDurationMinutes(tournament.LunchBlock)
-		lunchStart = parseClockHHMM(defaultLunchStartClock)
-	}
+	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
 	if len(rounds) == 0 {
 		return dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}

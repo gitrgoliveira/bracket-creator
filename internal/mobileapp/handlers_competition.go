@@ -340,6 +340,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Engi (individual PAIR paradigm) is mutually exclusive with team
+		// competitions: engi is never a team (the score editor skips the team
+		// check for engi and the scoring backend treats engi as non-team). The
+		// admin UI hides the Engi toggle unless kind=individual, but reject the
+		// contradictory combination here so a hand-crafted POST can't create a
+		// team comp with engi=true and route its matches to the wrong scorer.
+		if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engi is only valid for individual competitions, not team"})
+			return
+		}
+
 		// POST /competitions can land with an embedded roster via
 		// saveCompetitionWithPlayers, same required-field and length
 		// caps as the roster-PUT branch and POST /participants.
@@ -996,6 +1007,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// change rather than silently ignoring it.
 				if started && comp.Engi != current.Engi {
 					validationErr = fmt.Errorf("engi can only be changed before the competition starts")
+					return nil, nil
+				}
+				// Engi (individual PAIR paradigm) is mutually exclusive with team
+				// competitions (engi is never a team). Kind/TeamSize were already
+				// applied above, so reject rather than persist a contradictory
+				// team+engi state that would route matches to the wrong scorer.
+				if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+					validationErr = fmt.Errorf("engi is only valid for individual competitions, not team")
 					return nil, nil
 				}
 				current.Engi = comp.Engi

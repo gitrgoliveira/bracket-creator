@@ -1625,6 +1625,37 @@ func TestGenerateDrawHandler(t *testing.T) {
 	})
 }
 
+// TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual
+// PAIR paradigm) is mutually exclusive with team competitions. The admin UI
+// hides the Engi toggle unless kind=individual, but the server must reject the
+// contradictory combination so a hand-crafted POST can't create a team+engi
+// comp that routes matches to the wrong scorer.
+func TestCreateCompetitionEngiTeamExclusion(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	t.Run("POST team + engi=true returns 400", func(t *testing.T) {
+		comp := state.Competition{Name: "Team Engi", Kind: "team", TeamSize: 3, Engi: true}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "engi")
+	})
+
+	t.Run("POST individual + engi=true is accepted (not rejected by the exclusion)", func(t *testing.T) {
+		comp := state.Competition{Name: "Indiv Engi", Kind: "individual", Engi: true, Format: "playoffs", Date: "12-07-2026", StartTime: "09:00"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.NotContains(t, w.Body.String(), "engi is only valid", "individual+engi must not trip the team-exclusion guard")
+	})
+}
+
 func TestCreateCompetitionTeamSizeValidation(t *testing.T) {
 	r, _, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

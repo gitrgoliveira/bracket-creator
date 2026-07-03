@@ -920,9 +920,10 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     expect(src).toContain('local.status !== "draw-ready"');
   });
 
-  it('Engi checkbox is disabled when isStarted (in addition to isDrawReady)', () => {
-    // The checkbox input for Engi must gate on both flags.
-    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted\}/);
+  it('Engi checkbox is disabled when isStarted or team (in addition to isDrawReady)', () => {
+    // The checkbox input for Engi must gate on isDrawReady + isStarted, and also
+    // on kind==="team" (engi is individual-only; Copilot #326).
+    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted \|\| local\.kind === "team"\}/);
   });
 
   it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {

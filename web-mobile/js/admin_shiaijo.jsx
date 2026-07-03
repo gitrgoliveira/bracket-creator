@@ -256,6 +256,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     );
     const selectedMatch = useMemoSh(() => pickedMatch || running[0] || null, [pickedMatch, running]);
 
+    // For pool daihyosen/tiebreaker bouts, enrich the selected match with
+    // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
+    // (repIsTeam / repRosterA / repRosterB). Regular matches pass through
+    // unchanged. enrichPoolMatchWithComp is exposed by admin_pools.jsx via
+    // window.enrichPoolMatchWithComp; isSupplementaryBout via window.isSupplementaryBout.
+    // These globals are assigned at module evaluation time, so they are always
+    // present when admin_shiaijo.jsx executes (admin_pools.js loads first per
+    // the <script> order in index.html).
+    const editorMatch = useMemoSh(() => {
+        if (!selectedMatch) return selectedMatch;
+        if (window.isSupplementaryBout && window.isSupplementaryBout(selectedMatch.id) && window.enrichPoolMatchWithComp) {
+            const comp = courtCompetitions.find(c => c.id === selectedMatch.compId);
+            return window.enrichPoolMatchWithComp(selectedMatch, comp);
+        }
+        return selectedMatch;
+    }, [selectedMatch, courtCompetitions]);
+
     // Filtered to the selected competition (AC4).
     // Running matches are NEVER filtered: the panel must stay on the running
     // bout even if the operator switches comp (AC7).
@@ -632,6 +649,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 : upNext.phase === "bracket" && upNext.matchNumber > 0
                                                 ? ` · Match ${upNext.matchNumber}`
                                                 : ""}
+                                            {window.isSupplementaryBout && window.isSupplementaryBout(upNext.id) && (
+                                                <span className="tag-badge" style={{ marginLeft: 6 }}>
+                                                    {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                                                </span>
+                                            )}
                                         </div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
@@ -769,7 +791,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ScoreEditorModal
                                     key={`${matchKey(selectedMatch)}:${(selectedMatch.subResults || []).length}`}
                                     variant="inline"
-                                    match={selectedMatch}
+                                    match={editorMatch}
                                     onClose={() => {}}
                                     canClose={false}
                                     onSubmit={async (patch) => {
@@ -964,6 +986,11 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         : m.phase === "bracket" && m.matchNumber > 0
                         ? ` · Match ${m.matchNumber}`
                         : ""}
+                    {window.isSupplementaryBout && window.isSupplementaryBout(m.id) && (
+                        <span className="tag-badge" style={{ marginLeft: 4 }}>
+                            {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                        </span>
+                    )}
                 </span>
                 <span className="shiaijo-qrow__state">
                     {isComplete && <span className="shiaijo-qrow__final">Final</span>}

@@ -530,7 +530,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 ? <span> · Match {m.matchNumber}</span>
                 : null}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
+              {m.repIsTeam && (
+                <span className="tag-badge" style={{ marginLeft: 6 }}>
+                  {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                </span>
+              )}
             </div>
+            {m.repIsTeam && (
+              <div style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 2 }}>
+                {window.Term
+                  ? <>{React.createElement(window.Term, { name: "daihyosen" }, "Daihyosen")} · representative tie-break bout</>
+                  : "Daihyosen · representative tie-break bout"}
+              </div>
+            )}
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
               {/* C2: sync status indicator: inline on the title line (no dedicated

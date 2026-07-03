@@ -398,6 +398,94 @@ describe('enrichPoolMatchWithComp', () => {
     expect(enriched.sideA).toBe(sideA);
     expect(enriched.sideB).toBe(sideB);
   });
+
+  // --- DH / supplementary bout routing ---
+
+  it('sets repIsTeam=true and forces compKind="" + teamSize=0 for a team-comp DH bout', () => {
+    // Pool-DH matches are representative tie-break bouts scored as INDIVIDUAL
+    // even in a team competition. enrichPoolMatchWithComp must override
+    // compKind/teamSize so ScoreEditorModal routes to the individual editor,
+    // and must set repIsTeam so the rep-player dropdowns appear.
+    const teamComp = { id: 'tc1', name: 'Team Cup', kind: 'team', teamSize: 5 };
+    const m = { id: 'Pool A-DH-0', status: 'scheduled', sideA: 'Team Alpha', sideB: 'Team Beta' };
+    const enriched = enrichPoolMatchWithComp(m, teamComp);
+    expect(enriched.repIsTeam).toBe(true);
+    expect(enriched.compKind).toBe('');
+    expect(enriched.teamSize).toBe(0);
+  });
+
+  it('populates repRosterA and repRosterB via AdminLineupHelpers.rosterFor when stubbed', () => {
+    const rosterAlpha = [{ id: 'p1', name: 'Alice' }, { id: 'p2', name: 'Bob' }];
+    const rosterBeta = [{ id: 'p3', name: 'Carol' }];
+    const teamAlpha = { id: 't1', name: 'Team Alpha', Name: undefined };
+    const teamBeta = { id: 't2', name: 'Team Beta', Name: undefined };
+    const teamComp = {
+      id: 'tc1', name: 'Team Cup', kind: 'team', teamSize: 5,
+      players: [teamAlpha, teamBeta],
+    };
+    const m = { id: 'Pool A-DH-0', status: 'scheduled', sideA: 'Team Alpha', sideB: 'Team Beta' };
+    const prevHelpers = window.AdminLineupHelpers;
+    try {
+      window.AdminLineupHelpers = {
+        rosterFor: (team) => {
+          if (!team) return [];
+          if (team.name === 'Team Alpha') return rosterAlpha;
+          if (team.name === 'Team Beta') return rosterBeta;
+          return [];
+        },
+      };
+      const enriched = enrichPoolMatchWithComp(m, teamComp);
+      expect(enriched.repIsTeam).toBe(true);
+      expect(enriched.repRosterA).toEqual(rosterAlpha);
+      expect(enriched.repRosterB).toEqual(rosterBeta);
+    } finally {
+      if (prevHelpers === undefined) {
+        delete window.AdminLineupHelpers;
+      } else {
+        window.AdminLineupHelpers = prevHelpers;
+      }
+    }
+  });
+
+  it('repRosterA and repRosterB default to empty arrays when AdminLineupHelpers is absent', () => {
+    const teamComp = { id: 'tc1', name: 'Team Cup', kind: 'team', teamSize: 5 };
+    const m = { id: 'Pool A-DH-0', status: 'scheduled', sideA: 'Team Alpha', sideB: 'Team Beta' };
+    const prevHelpers = window.AdminLineupHelpers;
+    try {
+      delete window.AdminLineupHelpers;
+      const enriched = enrichPoolMatchWithComp(m, teamComp);
+      expect(enriched.repIsTeam).toBe(true);
+      expect(Array.isArray(enriched.repRosterA)).toBe(true);
+      expect(Array.isArray(enriched.repRosterB)).toBe(true);
+    } finally {
+      if (prevHelpers !== undefined) {
+        window.AdminLineupHelpers = prevHelpers;
+      }
+    }
+  });
+
+  it('sets repIsTeam=false for a regular pool match in a team competition', () => {
+    // Non-supplementary bouts should NOT get the rep-picker treatment even
+    // if the competition is a team comp.
+    const teamComp = { id: 'tc1', name: 'Team Cup', kind: 'team', teamSize: 5 };
+    const m = { id: 'Pool A-0', status: 'scheduled', sideA: 'Team Alpha', sideB: 'Team Beta' };
+    const enriched = enrichPoolMatchWithComp(m, teamComp);
+    expect(enriched.repIsTeam).toBe(false);
+    // Regular team match keeps the team routing fields intact.
+    expect(enriched.compKind).toBe('team');
+    expect(enriched.teamSize).toBe(5);
+  });
+
+  it('sets repIsTeam=false for a DH bout in an individual competition', () => {
+    // isTeamComp is false when kind !== "team" and teamSize is 0.
+    const individualComp = { id: 'ic1', name: 'Ind Cup', kind: 'individual', teamSize: 0 };
+    const m = { id: 'Pool A-DH-0', status: 'scheduled', sideA: 'Alice', sideB: 'Bob' };
+    const enriched = enrichPoolMatchWithComp(m, individualComp);
+    expect(enriched.repIsTeam).toBe(false);
+    // compKind/teamSize are still overridden for individual routing.
+    expect(enriched.compKind).toBe('');
+    expect(enriched.teamSize).toBe(0);
+  });
 });
 
 describe('poolMatchesForPool', () => {

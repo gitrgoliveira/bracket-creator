@@ -171,7 +171,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
       {open && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? (filtered.length > 30 ? "30+ matches" : pluralize(filtered.length, "match", "matches")) : `${pluralize(roster.length, "participant")}: type to search`}
+            {q ? (filtered.length > 30 ? "30+ participants" : pluralize(filtered.length, "participant")) : `${pluralize(roster.length, "participant")}: type to search`}
             {(picked.length > 0 || dojoText) && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}

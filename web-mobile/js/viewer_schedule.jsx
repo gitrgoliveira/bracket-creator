@@ -123,7 +123,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
 
   const q = query.trim().toLowerCase();
   const matches = q ? roster.filter((p) =>
-    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
+    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q) || (p.number || "").toLowerCase().includes(q)
   ).slice(0, 30) : roster.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);
@@ -136,8 +136,8 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   return (
     <div className="pmf" ref={ref}>
       <div className="pmf__bar" onClick={() => setOpen(true)}>
-        {picked.length === 0 && !dojoText ? (
-          <span className="pmf__placeholder">Filter by player, team, or dojo…</span>
+        {picked.length === 0 && !dojoText && !query ? (
+          <span className="pmf__placeholder">Filter by player, tag, team, or dojo…</span>
         ) : null}
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
@@ -177,7 +177,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match text "<b>{query}</b>" in any name/dojo</span>
+              <span>Match "<b>{query}</b>" in any name, tag, or dojo</span>
             </button>
           )}
           {matches.map((p) => {

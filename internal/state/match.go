@@ -75,6 +75,9 @@ func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, e
 			}
 		}
 	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && bm.Status == MatchStatusRunning && bm.Court == court {
+		return &CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+	}
 	return nil, nil
 }
 

@@ -433,6 +433,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // naginata) remain editable. Discard the draw from the competition header to
   // unlock everything.
   const isDrawReady = local.status === "draw-ready";
+  // Engi and Naginata are locked once the competition has started (pools, playoffs,
+  // completed, or any future status beyond draw-ready): flipping engi mid-tournament
+  // changes the scoring paradigm; flipping naginata affects the bronze match.
+  const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
   return (
     <div className="card">
@@ -719,8 +723,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} /> Naginata competition</label>
-          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} disabled={isDrawReady || isStarted} /> Naginata competition</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || local.kind === "team"} /> Engi (kata demonstration)</label>
+          <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>

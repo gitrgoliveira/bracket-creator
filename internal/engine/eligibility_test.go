@@ -1271,3 +1271,25 @@ func TestCheckCrossCompCourtBusy(t *testing.T) {
 		assert.NoError(t, eng.CheckCrossCompCourtBusy("comp1", "P-0"))
 	})
 }
+
+// TestEligibilityHelpers_NilCompetitionNoPanic pins Copilot #326: when
+// LoadCompetition returns (nil, nil) for a missing/deleted config, the
+// eligibility helpers must guard comp==nil before calling
+// comp.EffectiveWithZekkenName() instead of panicking on the nil pointer.
+func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	const missing = "no-such-competition"
+
+	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
+		status, err := eng.restoreCompetitorEligibility(missing, "Bob", "m1")
+		assert.NoError(t, err)
+		assert.Nil(t, status)
+	})
+
+	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
+		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}
+		status, err := eng.recordIneligibilityFromDecision(missing, "m1", result)
+		assert.NoError(t, err)
+		assert.Nil(t, status)
+	})
+}

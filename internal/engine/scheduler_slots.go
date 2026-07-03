@@ -306,3 +306,52 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 	}
 	return maxCursor
 }
+
+// scheduleBronze slots the 3rd-place (bronze) match immediately BEFORE the final
+// on its shared court. assignBracketMatchSlots only walks Rounds, so the bronze
+// -- a sibling of Rounds -- otherwise keeps a blank ScheduledAt and sinks to the
+// end of every scheduledAt-ordered surface (court queue, printed schedule,
+// find-my-matches), rendering AFTER the final even though it is conventionally
+// played first (viewer_awards.jsx: "the bronze is normally played first"; the
+// finalists rest while it runs, then the final is the closing bout).
+//
+// The final is the last round's sole match, hence the last match on its court,
+// so the bronze takes the final's slot and the final is pushed one match-
+// duration later: ...semifinals, bronze, final. Both carry real times, so every
+// downstream scheduledAt sort orders bronze-then-final with no special-casing.
+//
+// Only interleaves when the bronze shares the final's court (the default set by
+// bronzeDefaultCourt). If a court-assignment gap placed them on different courts,
+// the bronze simply inherits the final's time as a sane default and the final's
+// own court timeline is left untouched. A blank final time (comp == nil, or no
+// StartTime) leaves the bronze blank too, matching the rounds.
+func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament *state.Tournament) {
+	if bracket == nil || bracket.ThirdPlaceMatch == nil || len(bracket.Rounds) == 0 {
+		return
+	}
+	lastRound := bracket.Rounds[len(bracket.Rounds)-1]
+	if len(lastRound) == 0 {
+		return
+	}
+	final := &lastRound[0]
+	if final.ScheduledAt == "" {
+		return
+	}
+	bronze := bracket.ThirdPlaceMatch
+	bronze.ScheduledAt = final.ScheduledAt
+	if bronze.Court != final.Court {
+		return
+	}
+	// Push the final one match-slot later, honoring ceremony/lunch blocks the
+	// same way assignBracketMatchSlots does.
+	lunchMin := 0
+	var lunchStart time.Time
+	if tournament != nil {
+		lunchMin = parseDurationMinutes(tournament.LunchBlock)
+		lunchStart = parseClockHHMM(defaultLunchStartClock)
+	}
+	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
+	cursor := parseClockHHMM(final.ScheduledAt).Add(time.Duration(perMatchMin) * time.Minute)
+	cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+	final.ScheduledAt = cursor.Format(scheduleClockLayout)
+}

@@ -123,6 +123,27 @@ func (e *Engine) ReplaceParticipantInDraw(
 				}
 			}
 		}
+		// The Naginata 3rd-place (bronze) match is a sibling of bracket.Rounds,
+		// not an element of it, so the loop above never reaches it. Rename the
+		// participant here too, mirroring the Rounds rename, so a replacement
+		// does not leave a stale name in ThirdPlaceMatch.SideA/SideB/Winner.
+		if bm := bracket.ThirdPlaceMatch; bm != nil {
+			if bm.SideA == oldName {
+				bm.SideA = newName
+				bracketChanged = true
+				bracketFound = true
+			}
+			if bm.SideB == oldName {
+				bm.SideB = newName
+				bracketChanged = true
+				bracketFound = true
+			}
+			if bm.Winner == oldName {
+				bm.Winner = newName
+				bracketChanged = true
+				bracketFound = true
+			}
+		}
 		if bracketChanged {
 			if err := tx.SaveBracket(compID, bracket); err != nil {
 				return fmt.Errorf("saving bracket: %w", err)

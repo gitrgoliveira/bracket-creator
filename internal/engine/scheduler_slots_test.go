@@ -2,6 +2,7 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -453,4 +454,55 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 	// nil comp → zero time.Time (dayStart cannot be derived).
 	_, nilCur := assignPoolMatchSlots(nil, nil, nil)
 	assert.True(t, nilCur.IsZero(), "nil comp should return zero time.Time")
+}
+
+// TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt pins the fix for the
+// court-queue ordering bug: assignBracketMatchSlots only walks Rounds, so the
+// naginata bronze (a sibling of Rounds) kept a blank ScheduledAt and sorted
+// AFTER the final everywhere. scheduleBronze must give it the final's slot and
+// push the final one match-duration later, so bronze-then-final holds.
+func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
+	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDuration: 5, Courts: []string{"A"}, Naginata: true}
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},
+			{{ID: "final", Court: "A"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "A", Status: state.MatchStatusScheduled},
+	}
+	assignBracketMatchSlots(bracket.Rounds, comp, nil)
+	finalBefore := bracket.Rounds[1][0].ScheduledAt
+	require.NotEmpty(t, finalBefore)
+
+	scheduleBronze(bracket, comp, nil)
+
+	bronze := bracket.ThirdPlaceMatch.ScheduledAt
+	finalAfter := bracket.Rounds[1][0].ScheduledAt
+	assert.Equal(t, finalBefore, bronze, "bronze takes the final's original slot")
+	assert.True(t, parseClockHHMM(bronze).Before(parseClockHHMM(finalAfter)), "bronze plays before the final")
+	per := perMatchElapsedMinutes(comp, nil, true)
+	assert.Equal(t,
+		parseClockHHMM(bronze).Add(time.Duration(per)*time.Minute).Format(scheduleClockLayout),
+		finalAfter, "final is pushed exactly one match-duration later")
+}
+
+// TestScheduleBronze_DifferentCourtInheritsFinalTimeOnly: when the bronze was
+// reassigned to a different court, it just borrows the final's time as a sane
+// default and must NOT disturb the final's own court timeline.
+func TestScheduleBronze_DifferentCourtInheritsFinalTimeOnly(t *testing.T) {
+	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDuration: 5, Courts: []string{"A", "B"}, Naginata: true}
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},
+			{{ID: "final", Court: "A"}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", Court: "B", Status: state.MatchStatusScheduled},
+	}
+	assignBracketMatchSlots(bracket.Rounds, comp, nil)
+	finalBefore := bracket.Rounds[1][0].ScheduledAt
+
+	scheduleBronze(bracket, comp, nil)
+
+	assert.Equal(t, finalBefore, bracket.ThirdPlaceMatch.ScheduledAt, "different-court bronze inherits the final's time")
+	assert.Equal(t, finalBefore, bracket.Rounds[1][0].ScheduledAt, "different-court bronze must not push the final")
 }

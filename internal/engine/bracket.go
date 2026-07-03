@@ -254,7 +254,54 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 	// = Hidden or both-sides-empty in the web bracket).
 	assignBracketMatchNumbers(bracket)
 
+	// Bronze (3rd-place) playoff: naginata only, and only when a real semifinal
+	// round exists (len(Rounds) >= 2; a 2-player bracket has a single round and
+	// no semifinal, so no bronze). Modelled as a sibling field rather than a row
+	// in Rounds to preserve the power-of-two advancement geometry (see
+	// state.Bracket.ThirdPlaceMatch). Sides start empty and are filled from the
+	// two semifinal losers by propagateBracketWinner. DisplayRound -1 is a
+	// sentinel telling renderers to label this "3rd Place".
+	if comp.Naginata && len(bracket.Rounds) >= 2 {
+		// Default the bronze to the FINAL's court: the final and the 3rd-place
+		// playoff are conventionally run on the same shiaijo, so the bronze
+		// shows up in that court's queue out of the box. The final is the sole
+		// match in the last round. Operators can still reassign it via
+		// UpdateMatchCourt like any other bracket match.
+		finalCourt := ""
+		if last := bracket.Rounds[len(bracket.Rounds)-1]; len(last) > 0 {
+			finalCourt = last[0].Court
+		}
+		bracket.ThirdPlaceMatch = &state.BracketMatch{
+			ID:           "m-bronze",
+			Status:       state.MatchStatusScheduled,
+			DisplayRound: -1,
+			Court:        bronzeDefaultCourt(finalCourt, comp.Courts),
+		}
+		// Give the bronze a real time slot just before the final on its court:
+		// assignBracketMatchSlots above only walked Rounds, so the bronze would
+		// otherwise stay blank and sort AFTER the final everywhere. Must run
+		// after the bronze's court is set above.
+		scheduleBronze(bracket, comp, tournament)
+	}
+
 	return bracket, nil
+}
+
+// bronzeDefaultCourt chooses the 3rd-place (bronze) match's default court. The
+// bronze conventionally shares the FINAL's court, so that wins when set. If the
+// final's court is unset (a court-assignment gap) but the competition has
+// courts, fall back to the first court so the bronze still lands on a shiaijo
+// queue and doesn't render an empty "Shiaijo" label. A genuinely court-less
+// competition keeps "" — consistent with every other match; don't invent a
+// court. Operators can reassign via UpdateMatchCourt.
+func bronzeDefaultCourt(finalCourt string, courts []string) string {
+	if finalCourt != "" {
+		return finalCourt
+	}
+	if len(courts) > 0 {
+		return courts[0]
+	}
+	return ""
 }
 
 // assignBracketMatchNumbers sets MatchNumber on every real (non-Hidden,

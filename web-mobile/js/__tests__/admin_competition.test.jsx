@@ -897,3 +897,95 @@ describe('formatCompMinutes (mp-zoh)', () => {
     expect(formatCompMinutes(183)).toBe('3h 03m');
   });
 });
+
+// ── Finding 3/6: Engi and Naginata checkboxes locked after start ──────────────
+//
+// Both checkboxes must be disabled once the competition has started (any
+// status beyond "setup" and "draw-ready"). Previously only isDrawReady
+// (status === "draw-ready") disabled Engi; Naginata had no guard at all.
+// Flipping engi mid-tournament changes the scoring paradigm; flipping
+// naginata affects whether a bronze 3rd-place match is run.
+
+describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '..', 'admin_competition_settings.jsx'),
+    'utf8'
+  );
+
+  it('defines isStarted derived from local.status excluding setup and draw-ready', () => {
+    // Must be a synchronous const, not async state.
+    expect(src).toMatch(/const isStarted\s*=/);
+    // Must exclude both setup and draw-ready statuses.
+    expect(src).toContain('local.status !== "setup"');
+    expect(src).toContain('local.status !== "draw-ready"');
+  });
+
+  it('Engi checkbox is disabled when isStarted or team (in addition to isDrawReady)', () => {
+    // The checkbox input for Engi must gate on isDrawReady + isStarted, and also
+    // on kind==="team" (engi is individual-only; Copilot #326).
+    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted \|\| local\.kind === "team"\}/);
+  });
+
+  it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {
+    // The checkbox input for Naginata must gate on both flags.
+    expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted\}/);
+  });
+});
+
+// ── Finding 10: isEngi derived synchronously from m.compEngi ─────────────────
+//
+// Previously isEngi was React state initialised to false and set via an async
+// competition-config fetch, causing a flash where the kendo editor showed
+// briefly before the engi editor. The fix derives isEngi synchronously from
+// m.compEngi (stamped at match-enrichment time).
+
+describe('ScoreEditorModal isEngi derived synchronously (finding 10)', () => {
+  const src = readFileSync(
+    resolve(__dirname, '..', 'admin_scoring_individual.jsx'),
+    'utf8'
+  );
+
+  it('isEngi is a const derived from m.compEngi, not useState', () => {
+    // Must be a synchronous const, not useStateA.
+    expect(src).toMatch(/const isEngi\s*=\s*!!m\.compEngi/);
+    // There must be no useState for isEngi.
+    expect(src).not.toMatch(/useStateA\(false\)[^;]*isEngi/);
+    expect(src).not.toContain('setIsEngi');
+  });
+
+  it('the async fetch effect no longer calls setIsEngi', () => {
+    // The fetchCompetitionDetails effect still runs for maxEnchoPeriods
+    // and isNaginata; it must not set isEngi.
+    const fetchBlock = src.match(/fetchCompetitionDetails[\s\S]{0,500}catch\(\)/)?.[0] || '';
+    expect(fetchBlock).not.toContain('setIsEngi');
+    expect(fetchBlock).not.toContain('engi');
+  });
+
+  it('compEngi is stamped on pool matches by enrichPoolMatchWithComp', () => {
+    const poolsSrc = readFileSync(
+      resolve(__dirname, '..', 'admin_pools.jsx'),
+      'utf8'
+    );
+    // The return object of enrichPoolMatchWithComp must include compEngi.
+    expect(poolsSrc).toMatch(/compEngi\s*:/);
+  });
+
+  it('compEngi is stamped on bracket matches by scoringMatch in admin_competition_bracket', () => {
+    const bracketSrc = readFileSync(
+      resolve(__dirname, '..', 'admin_competition_bracket.jsx'),
+      'utf8'
+    );
+    // The scoringMatch spread must include compEngi.
+    expect(bracketSrc).toMatch(/compEngi\s*:/);
+  });
+
+  it('compEngi is stamped on all compMatches entries in viewer_utils', () => {
+    const utilsSrc = readFileSync(
+      resolve(__dirname, '..', 'viewer_utils.jsx'),
+      'utf8'
+    );
+    // Both pool and bracket enrichment paths must carry compEngi.
+    const occurrences = (utilsSrc.match(/compEngi/g) || []).length;
+    expect(occurrences).toBeGreaterThanOrEqual(2);
+  });
+});

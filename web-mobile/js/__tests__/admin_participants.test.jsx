@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows } from '../admin_participants.jsx';
+import { mintParticipantIds, findSeedMatchIndex, participantSearchTarget, generateRosterText, validateRosterRows, participantTemplateCSV, participantFormError } from '../admin_participants.jsx';
 
 // Helper: parsed rows arrive from parseParticipantLines as
 // { name, displayName, dojo, danGrade, tag } objects. Test rows omit the
@@ -419,5 +419,46 @@ describe('validateRosterRows', () => {
   it('handles null/empty input defensively', () => {
     expect(validateRosterRows(null, true)).toEqual([]);
     expect(validateRosterRows([], false)).toEqual([]);
+  });
+});
+
+// Copilot PR #326 round 3: Engi competitions may carry withZekkenName=false
+// (the effective flag is withZekkenName||engi), so template selection and the
+// add/replace required-field check must branch on c.engi, not raw
+// c.withZekkenName. Otherwise an Engi comp gets a non-pair template and the
+// form drops member 2 (displayName), corrupting the pair.
+describe('participantTemplateCSV', () => {
+  it('offers the pair template for engi even when withZekkenName is false', () => {
+    const csv = participantTemplateCSV({ kind: 'individual', engi: true, withZekkenName: false });
+    expect(csv).toContain('Name 1, Name 2, Dojo');
+    expect(csv).toContain('Emi Sasaki, Ren Fujita');
+  });
+  it('offers the zekken template for a non-engi zekken comp', () => {
+    expect(participantTemplateCSV({ kind: 'individual', withZekkenName: true })).toContain('Name, Zekken, Dojo');
+  });
+  it('offers the plain template for a plain individual comp', () => {
+    const csv = participantTemplateCSV({ kind: 'individual' });
+    expect(csv).toContain('Name, Dojo, Dan');
+    expect(csv).not.toContain('Name 1');
+    expect(csv).not.toContain('Zekken');
+  });
+  it('offers the team template for a team comp regardless of engi/zekken', () => {
+    expect(participantTemplateCSV({ kind: 'team', engi: true })).toContain('Team Name, Dojo');
+  });
+});
+
+describe('participantFormError', () => {
+  it('requires name and dojo for every competition', () => {
+    expect(participantFormError({ name: '', dojo: 'D', zekken: '', engi: false })).toMatch(/Name and dojo/);
+    expect(participantFormError({ name: 'N', dojo: '', zekken: '', engi: false })).toMatch(/Name and dojo/);
+  });
+  it('requires member 2 (zekken) for engi pairs', () => {
+    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', zekken: '', engi: true })).toMatch(/Both member names/);
+  });
+  it('accepts a complete engi pair', () => {
+    expect(participantFormError({ name: 'Emi Sasaki', dojo: 'Getsurin', zekken: 'Ren Fujita', engi: true })).toBeNull();
+  });
+  it('does not require a zekken for a non-engi comp (member 2 is optional)', () => {
+    expect(participantFormError({ name: 'Alice', dojo: 'DojoA', zekken: '', engi: false })).toBeNull();
   });
 });

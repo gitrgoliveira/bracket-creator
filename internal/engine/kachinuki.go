@@ -369,10 +369,9 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 			for rIdx := range bracket.Rounds {
 				for mIdx := range bracket.Rounds[rIdx] {
 					if bracket.Rounds[rIdx][mIdx].ID == matchID {
-						// BracketMatch carries no SubResults; the
-						// authoritative bout log lives on the parent
-						// MatchResult side of the world. For kachinuki
-						// finals we mirror Winner/Decision only.
+						// We mirror Winner/Decision/Status onto the BracketMatch
+						// on a finalized kachinuki match; the per-bout SubResults
+						// are persisted separately by the team scoring path.
 						bm := &bracket.Rounds[rIdx][mIdx]
 						if out.MatchEnded {
 							bm.Status = state.MatchStatusCompleted
@@ -387,6 +386,22 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, error) {
 						return nil
 					}
 				}
+			}
+			// The Naginata 3rd-place (bronze) match is a sibling of
+			// bracket.Rounds, not an element of it, so the loop above never
+			// reaches it. Finalize it here, mirroring the Rounds finalize.
+			if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+				if out.MatchEnded {
+					bm.Status = state.MatchStatusCompleted
+					bm.Decision = out.Decision
+					switch out.WinningSide {
+					case "A":
+						bm.Winner = bm.SideA
+					case "B":
+						bm.Winner = bm.SideB
+					}
+				}
+				return nil
 			}
 			return notFoundErrorf("bracket match %s not found", matchID)
 		}); err != nil {
@@ -421,21 +436,50 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:          bm.ID,
-						SideA:       bm.SideA,
-						SideB:       bm.SideB,
-						Winner:      bm.Winner,
-						Status:      bm.Status,
-						Court:       bm.Court,
-						ScheduledAt: bm.ScheduledAt,
-						Decision:    bm.Decision,
-					}, true, nil
+					return bracketMatchToTeamResult(bm), true, nil
 				}
 			}
 		}
+		// The Naginata 3rd-place (bronze) match is a sibling of
+		// bracket.Rounds, not an element of it; look it up here.
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+			return bracketMatchToTeamResult(*bm), true, nil
+		}
 	}
 	return nil, false, nil
+}
+
+// bracketMatchToTeamResult projects a BracketMatch into the *MatchResult shape
+// findTeamMatch returns for kachinuki lookups. It carries Court + ScheduledAt
+// (unlike bracketMatchAsResult in bracket_result.go, which omits them and adds
+// decision/encho/flag detail for the eligibility/rollback paths), so the two
+// projections are deliberately distinct.
+//
+// SubResults is carried through by reference, same as bracketMatchAsResult:
+// e.store.LoadBracket / tx.LoadBracket already deep-copy every BracketMatch
+// (including SubResults, via Store.copyBracket) before handing the bracket
+// back, so this projection is never aliased to the on-disk store cache. Only
+// the FINDTEAMMATCH POOL branch's caller (MaybeAdvanceKachinuki's mutate
+// closure) appends to a returned result's SubResults in place, and that
+// closure only ever runs against the independently-loaded pool MatchResult
+// from UpdatePoolMatchByID, never against a bracket-sourced result from this
+// helper (the bracket branch mirrors Winner/Status directly onto the
+// BracketMatch instead). If a future caller appends in place to a
+// bracket-sourced result here, copy SubResults first (mirrors
+// handlers_daihyosen.go's daihyosenBracketResult, which does exactly that for
+// its own in-place-append call site).
+func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
+	return &state.MatchResult{
+		ID:          bm.ID,
+		SideA:       bm.SideA,
+		SideB:       bm.SideB,
+		Winner:      bm.Winner,
+		Status:      bm.Status,
+		Court:       bm.Court,
+		ScheduledAt: bm.ScheduledAt,
+		Decision:    bm.Decision,
+		SubResults:  bm.SubResults,
+	}
 }
 
 // kachinukiRemainingRoster derives the remaining un-retired roster per

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act } from '@testing-library/react';
+import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 
 // mp-hpe3 Phase 0 safety net: RENDER-SMOKE characterization of the sections
@@ -64,6 +64,7 @@ const STUBBED_GLOBALS = {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
     swissGenerateRound: vi.fn().mockResolvedValue(null),
     updateCompetitionAwards: vi.fn().mockResolvedValue(null),
+    completeCompetition: vi.fn().mockResolvedValue({ status: 'completed' }),
   },
 };
 
@@ -120,7 +121,7 @@ function makeTournament(comp, overrides = {}) {
 // fetch) flush and settle their state updates inside the act boundary: the
 // render harness fails the test on the "not wrapped in act(...)" console.error
 // otherwise. Returns the render result; a throw during mount fails the test.
-async function mountSection(section, { comp = makeCompetition(), tweaks = {} } = {}) {
+async function mountSection(section, { comp = makeCompetition(), tweaks = {}, bracket = null } = {}) {
   const t = makeTournament(comp);
   let result;
   await act(async () => {
@@ -131,7 +132,7 @@ async function mountSection(section, { comp = makeCompetition(), tweaks = {} } =
         pools={[]}
         poolMatches={[]}
         standings={[]}
-        bracket={null}
+        bracket={bracket}
         section={section}
         onSection={noop}
         onBack={noop}
@@ -182,5 +183,124 @@ describe('AdminCompetition section render-smoke (mp-hpe3 split characterization)
     const comp = makeCompetition({ kind: 'team', players: [{ id: 't1', name: 'Team A' }] });
     const { container } = await mountSection('overview', { comp });
     expect(container.querySelector('[data-stub="AdminTopbar"]')).not.toBeNull();
+  });
+});
+
+// mp-gy6g: "Complete competition" is the only trigger for a bracket-based
+// (playoffs, or mixed-after-knockout) competition to ever reach status
+// "completed" — MaybeAutoCompletePools only auto-transitions League on its
+// last pool match. Gated on canComplete (admin_competition.jsx), which
+// delegates to bracketFullyComplete (admin_helpers.jsx, exercised for real
+// here per this file's header comment).
+describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
+  const realMatch = (status) => ({
+    sideA: { id: 'p1', name: 'Alice' },
+    sideB: { id: 'p2', name: 'Bob' },
+    status,
+  });
+  const findButton = (container, text) =>
+    Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === text);
+
+  it('is hidden while a bracket match is still unfinished', async () => {
+    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs' });
+    const bracket = { rounds: [[realMatch('completed')], [realMatch('running')]] };
+    const { container } = await mountSection('overview', { comp, bracket });
+    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+  });
+
+  it('stays hidden once every round match is done but the bronze match is not (thirdPlaceMatch is a sibling of rounds)', async () => {
+    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs', naginata: true });
+    const bracket = {
+      rounds: [[realMatch('completed')], [realMatch('completed')]],
+      thirdPlaceMatch: realMatch('running'),
+    };
+    const { container } = await mountSection('overview', { comp, bracket });
+    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+  });
+
+  it('appears once every bracket match, including the bronze match, is completed', async () => {
+    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs', naginata: true });
+    const bracket = {
+      rounds: [[realMatch('completed')], [realMatch('completed')]],
+      thirdPlaceMatch: realMatch('completed'),
+    };
+    const { container } = await mountSection('overview', { comp, bracket });
+    expect(findButton(container, 'Complete competition →')).not.toBeUndefined();
+  });
+
+  it('is hidden once the competition is already completed', async () => {
+    const comp = makeCompetition({ format: 'playoffs', status: 'completed' });
+    const bracket = { rounds: [[realMatch('completed')], [realMatch('completed')]] };
+    const { container } = await mountSection('overview', { comp, bracket });
+    expect(findButton(container, 'Complete competition →')).toBeUndefined();
+  });
+
+  it('is hidden while setup/draw-ready, even if a stale bracket looks complete', async () => {
+    const bracket = { rounds: [[realMatch('completed')]] };
+    for (const status of ['setup', 'draw-ready']) {
+      const comp = makeCompetition({ format: 'playoffs', status });
+      const { container } = await mountSection('overview', { comp, bracket });
+      expect(findButton(container, 'Complete competition →')).toBeUndefined();
+    }
+  });
+
+  it('calls the API and refreshes on confirm', async () => {
+    window.confirmDialog.mockResolvedValueOnce(true);
+    // Completion is elevated-gated; promptAdminPassword resolves "" (no admin
+    // password configured) so the handler proceeds.
+    window.promptAdminPassword.mockResolvedValueOnce('');
+    window.API.completeCompetition.mockClear();
+    const onRefreshCompetition = vi.fn();
+    const showToast = vi.fn();
+    const comp = makeCompetition({ id: 'nagi-1', format: 'playoffs', status: 'playoffs' });
+    const bracket = { rounds: [[realMatch('completed')], [realMatch('completed')]] };
+    const t = makeTournament(comp);
+    let container;
+    await act(async () => {
+      ({ container } = render(
+        <AdminCompetition
+          tournament={t}
+          competition={comp}
+          pools={[]}
+          poolMatches={[]}
+          standings={[]}
+          bracket={bracket}
+          section="overview"
+          onSection={noop}
+          onBack={noop}
+          onOpenCompetition={noop}
+          onUpdate={noop}
+          onRefreshCompetition={onRefreshCompetition}
+          onMoveCourt={noop}
+          onEditScore={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          tweaks={{}}
+          password="shiaijo2026"
+          showToast={showToast}
+        />
+      ));
+    });
+
+    const btn = findButton(container, 'Complete competition →');
+    expect(btn).not.toBeUndefined();
+    await act(async () => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledWith('nagi-1', 'shiaijo2026', ''));
+    expect(onRefreshCompetition).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('marked complete'));
+  });
+
+  it('does not call the API when the operator cancels the confirm dialog', async () => {
+    window.confirmDialog.mockResolvedValueOnce(false);
+    window.API.completeCompetition.mockClear();
+    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs' });
+    const bracket = { rounds: [[realMatch('completed')]] };
+    const { container } = await mountSection('overview', { comp, bracket });
+
+    const btn = findButton(container, 'Complete competition →');
+    await act(async () => { fireEvent.click(btn); });
+
+    expect(window.API.completeCompetition).not.toHaveBeenCalled();
   });
 });

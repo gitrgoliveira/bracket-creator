@@ -39,6 +39,23 @@ func TestParseBracketBytes(t *testing.T) {
 		_, err := parseBracketBytes([]byte(`{not valid json}`))
 		assert.Error(t, err)
 	})
+
+	// Regression (Copilot PR #326 round 2): a corrupted/hand-edited bracket.json
+	// must not load negative engi flag counts (validated non-negative at the
+	// HTTP boundary). parseBracketBytes clamps negatives to 0 on both the rounds
+	// and the bronze match, symmetric with the pool CSV parser.
+	t.Run("negative engi flag counts are clamped to 0", func(t *testing.T) {
+		raw := []byte(`{"rounds":[[{"id":"m1","flagsA":-3,"flagsB":2}]],"thirdPlaceMatch":{"id":"m-bronze","flagsA":1,"flagsB":-5}}`)
+		b, err := parseBracketBytes(raw)
+		require.NoError(t, err)
+		require.Len(t, b.Rounds, 1)
+		require.Len(t, b.Rounds[0], 1)
+		assert.Equal(t, 0, b.Rounds[0][0].FlagsA, "negative round FlagsA clamped to 0")
+		assert.Equal(t, 2, b.Rounds[0][0].FlagsB, "non-negative FlagsB preserved")
+		require.NotNil(t, b.ThirdPlaceMatch)
+		assert.Equal(t, 1, b.ThirdPlaceMatch.FlagsA, "non-negative bronze FlagsA preserved")
+		assert.Equal(t, 0, b.ThirdPlaceMatch.FlagsB, "negative bronze FlagsB clamped to 0")
+	})
 }
 
 func TestUpdateBracket_Basic(t *testing.T) {

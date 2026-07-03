@@ -632,8 +632,11 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Delay revoke so the browser initiates the download before the blob URL is torn down
-      setTimeout(() => window.URL.revokeObjectURL(dlUrl), 100);
+      // Delay revoke so the browser initiates the download before the blob URL
+      // is torn down. Guard against a torn-down context: in a real browser
+      // window is always present, but in unit-test teardown this fire-and-forget
+      // timer can outlive the jsdom window and would otherwise throw uncaught.
+      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
       if (showToast) showToast("PDFs generated. Download started.");
     } catch (err) {
       if (showToast) showToast("PDF export failed: " + err.message, "error");

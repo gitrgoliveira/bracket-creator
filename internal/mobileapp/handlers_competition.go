@@ -340,6 +340,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
+		// Engi (individual PAIR paradigm) is mutually exclusive with team
+		// competitions: engi is never a team (the score editor skips the team
+		// check for engi and the scoring backend treats engi as non-team). The
+		// admin UI hides the Engi toggle unless kind=individual, but reject the
+		// contradictory combination here so a hand-crafted POST can't create a
+		// team comp with engi=true and route its matches to the wrong scorer.
+		if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "engi is only valid for individual competitions, not team"})
+			return
+		}
+
 		// POST /competitions can land with an embedded roster via
 		// saveCompetitionWithPlayers, same required-field and length
 		// caps as the roster-PUT branch and POST /participants.
@@ -876,10 +887,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// Mutating output-affecting fields while draw-ready would
 				// leave config.md inconsistent with those artifacts when
 				// StartCompetition runs. Fields that do NOT reach the Excel
-				// generator (Name, Date, StartTime, CheckInEnabled, Naginata)
-				// stay editable in draw-ready and are applied below. NOTE:
+				// generator (Name, Date, StartTime, CheckInEnabled) stay
+				// editable in draw-ready and are applied below. NOTE:
 				// NumberPrefix and WithZekkenName DO reach the generator
-				// (player numbers / name columns) and are gated below. This
+				// (player numbers / name columns) and are gated below.
+				// Naginata and Engi are NOT editable in draw-ready either: the
+				// `started` guard below (current.Status != setup) treats
+				// draw-ready as started, so a change to them is rejected. This
 				// mirrors the participant/seed 409s in handlers_participants.go.
 				if current.Status == state.CompStatusDrawReady {
 					// Compare the EFFECTIVE (about-to-be-applied) values
@@ -977,7 +991,33 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// gates StartCompetition on Status=setup). After start,
 				// the field is read-only via the same Status gate.
 				current.SwissRounds = comp.SwissRounds
+				// Naginata (3rd-place play-off) is only settable before the
+				// competition starts. Changing it after start would add or remove a
+				// bronze match while results are already in flight. Reject rather than
+				// silently ignoring it (Finding 8; mirrors the Engi guard below).
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				if started && comp.Naginata != current.Naginata {
+					validationErr = fmt.Errorf("naginata can only be changed before the competition starts")
+					return nil, nil
+				}
 				current.Naginata = comp.Naginata
+				// Engi (flag-scoring paradigm) is only settable before the
+				// competition starts. Flipping it mid-tournament switches the
+				// scoring paradigm and corrupts recorded results. Reject a
+				// change rather than silently ignoring it.
+				if started && comp.Engi != current.Engi {
+					validationErr = fmt.Errorf("engi can only be changed before the competition starts")
+					return nil, nil
+				}
+				// Engi (individual PAIR paradigm) is mutually exclusive with team
+				// competitions (engi is never a team). Kind/TeamSize were already
+				// applied above, so reject rather than persist a contradictory
+				// team+engi state that would route matches to the wrong scorer.
+				if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+					validationErr = fmt.Errorf("engi is only valid for individual competitions, not team")
+					return nil, nil
+				}
+				current.Engi = comp.Engi
 				current.CheckInEnabled = comp.CheckInEnabled
 				// League tie-breaker config (Phase 3b) is only settable pre-start.
 				// Once the competition has started (status past setup) the
@@ -988,7 +1028,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// state already returned early above; the PUT validator enforces
 				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
 				// the finalize endpoint, never here.
-				started := current.Status != state.CompStatusSetup && current.Status != ""
 				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
 					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
 					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
@@ -1344,50 +1383,84 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.POST("/competitions/:id/complete", func(c *gin.Context) {
+	// Elevated-gated: completing a competition is IRREVERSIBLE (invalidate
+	// rejects a completed comp), like DELETE /competitions/:id and
+	// /invalidate. In file mode without an admin password the gate is a no-op.
+	r.POST("/competitions/:id/complete", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
 		}
 
-		// Atomic Load + Status check + Save. Pre-fix, the
-		// LoadCompetition + saveCompetitionWithPlayers sequence had
-		// a TOCTOU window where a concurrent invalidate (or a score-
-		// save's MaybeAutoCompletePools) could move Status between
-		// our read and write, losing one of the two mutations.
+		// Full-bracket-completion gate + atomic status transition, all under ONE
+		// per-comp write lock via WithTransaction. A bracket-format competition
+		// (playoffs, or a mixed comp's knockout) must have EVERY must-play match
+		// completed -- all rounds plus the naginata bronze (ThirdPlaceMatch, a
+		// sibling of Rounds) -- before it can be sealed, else the Awards podium
+		// would show an unplayed final/bronze. The JS "Complete competition"
+		// button enforces this (bracketFullyComplete), but a direct API call
+		// would bypass it, so the server is the authority.
+		//
+		// Reading the bracket via tx.LoadBracket INSIDE the transaction closes a
+		// TOCTOU window: a bare LoadBracket + a separate status write could
+		// otherwise observe a stale "incomplete" snapshot (a concurrent
+		// final-match score landing between the two) and spuriously reject
+		// completion. tx.LoadBracket reuses the already-held lock; the public
+		// Store.LoadBracket would deadlock the non-reentrant mutex.
+		//
+		// len(Rounds) > 0 skips bracketless formats (league/swiss/pools complete
+		// via their own path -- no bracket.json, which LoadBracket maps to an
+		// empty bracket + nil error). Completion is IRREVERSIBLE, so a genuine
+		// I/O/parse fault fails CLOSED (500) rather than sealing with unknown
+		// bracket state.
 		var compOut *state.Competition
-		var statusErr error
+		var statusErr, bracketFault error
 		var notFoundFlag bool
-		changed, err := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
+			current, lerr := tx.LoadCompetition(id)
+			if lerr != nil {
+				return lerr
+			}
 			if current == nil {
 				notFoundFlag = true
-				return nil, nil
+				return nil
 			}
 			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
 				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
-				return nil, nil
+				return nil
+			}
+			bracket, berr := tx.LoadBracket(id)
+			if berr != nil {
+				bracketFault = berr
+				return nil
+			}
+			if bracket != nil && len(bracket.Rounds) > 0 && !bracketFullyComplete(bracket) {
+				statusErr = fmt.Errorf("all bracket matches must be completed before this competition can be finished")
+				return nil
 			}
 			current.Status = state.CompStatusComplete
 			compOut = current
-			return current, nil
+			return tx.SaveCompetition(current)
 		})
 		if notFoundFlag {
 			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+			return
+		}
+		if bracketFault != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load bracket"})
 			return
 		}
 		if statusErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": statusErr.Error()})
 			return
 		}
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
 			return
 		}
-		// Only broadcast on an actual content change (same idempotency
-		// semantics as the prior saveCompetitionWithPlayers call).
-		if changed {
-			hub.Broadcast(EventTournamentUpdated, nil)
-		}
+		// Reaching here means the status transitioned (pools/playoffs -> complete),
+		// always a real content change, so broadcast unconditionally.
+		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, compOut)
 	})
 
@@ -1626,4 +1699,54 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		c.JSON(http.StatusOK, compOut)
 	})
+}
+
+// bracketFullyComplete reports whether every must-play match in the bracket --
+// all round matches plus the naginata bronze (ThirdPlaceMatch, a sibling of
+// Rounds) -- is completed. It mirrors the JS bracketFullyComplete /
+// isRequiredBracketMatch gate (web-mobile/js/admin_helpers.jsx) so the server is
+// the authority for POST /complete: a direct API call can't seal a competition
+// with an unplayed final/bronze even if a client shows the button prematurely
+// (an SSE match_updated carries only the scored match, so a downstream match can
+// transiently still hold a "Winner of rX-mY" placeholder side). Returns false for
+// a bracket with no must-play matches, so callers guard on len(Rounds) > 0 to
+// skip bracketless formats (league/swiss/pools complete via their own path).
+func bracketFullyComplete(b *state.Bracket) bool {
+	if b == nil {
+		return false
+	}
+	required := 0
+	for ri := range b.Rounds {
+		for mi := range b.Rounds[ri] {
+			m := &b.Rounds[ri][mi]
+			if !isRequiredBracketMatch(m) {
+				continue
+			}
+			required++
+			if m.Status != state.MatchStatusCompleted {
+				return false
+			}
+		}
+	}
+	if isRequiredBracketMatch(b.ThirdPlaceMatch) {
+		required++
+		if b.ThirdPlaceMatch.Status != state.MatchStatusCompleted {
+			return false
+		}
+	}
+	return required > 0
+}
+
+// isRequiredBracketMatch reports whether a bracket match must be played before
+// the competition is complete: both sides are named -- INCLUDING an unresolved
+// "Winner of rX-mY" / "Pool A-1st" placeholder that propagation hasn't filled in
+// yet (required, just not yet playable) -- and it is not a structural bye (one
+// empty side) or a Hidden empty-vs-empty phantom. Keeping placeholder-sided
+// matches is what stops the completion gate firing while a downstream match is
+// still waiting on its feeder.
+func isRequiredBracketMatch(m *state.BracketMatch) bool {
+	if m == nil || m.Hidden {
+		return false
+	}
+	return strings.TrimSpace(m.SideA) != "" && strings.TrimSpace(m.SideB) != ""
 }

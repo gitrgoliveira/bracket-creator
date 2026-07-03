@@ -565,3 +565,72 @@ describe('recomputeBracketQueuePositions', () => {
     expect(byId.c1.queuePosition).toBe(1); // 10:30 is first on B
   });
 });
+
+// Tri-review: the naginata bronze match (thirdPlaceMatch) is a SIBLING of
+// bracket.rounds, so applyPatch's rounds loop and recomputeBracketQueuePositions
+// both used to skip it — an SSE bronze score stayed stale until the background
+// refetch, and the bronze never got a queue position on its court.
+describe('applyPatch: naginata bronze (thirdPlaceMatch)', () => {
+  const makeBronzeState = () => ({
+    poolMatches: [],
+    bracket: {
+      rounds: [
+        [{ id: "b1", court: "A", status: "completed" }, { id: "b2", court: "A", status: "completed" }],
+        [{ id: "final", court: "A", status: "running" }],
+      ],
+      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled", queuePosition: 0 },
+    },
+  });
+
+  it('applies an SSE match_updated to the bronze match (was silently skipped)', () => {
+    const prev = makeBronzeState();
+    const next = applyPatch(prev, { data: { result: { id: "m-bronze", status: "completed", winner: "Alice", ipponsA: ["M"] } } });
+    expect(next).not.toBe(prev);
+    expect(next.bracket.thirdPlaceMatch.status).toBe("completed");
+    expect(next.bracket.thirdPlaceMatch.scoreA).toBe("M"); // ippons→score mapping
+  });
+
+  it('preserves bronze identity when the event targets a different match', () => {
+    const prev = makeBronzeState();
+    const next = applyPatch(prev, { data: { result: { id: "final", status: "completed", winner: "Bob" } } });
+    expect(next.bracket.thirdPlaceMatch).toBe(prev.bracket.thirdPlaceMatch);
+  });
+});
+
+describe('recomputeBracketQueuePositions: bronze participates in its court queue', () => {
+  it('assigns the bronze a queue position alongside the rounds on the same court', () => {
+    const bracket = {
+      rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:00" }]],
+      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled", scheduledAt: "12:05" },
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.rounds[0][0].queuePosition).toBe(1); // earlier scheduledAt → 1st
+    expect(out.thirdPlaceMatch.queuePosition).toBe(2); // later → 2nd
+  });
+
+  it('drops the bronze queue position to 0 once it is no longer scheduled', () => {
+    const bracket = {
+      rounds: [[{ id: "final", court: "A", status: "scheduled", scheduledAt: "12:00" }]],
+      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "completed", scheduledAt: "12:05", queuePosition: 2 },
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.thirdPlaceMatch.queuePosition).toBe(0);
+    expect(out.rounds[0][0].queuePosition).toBe(1);
+  });
+
+  it('orders the bronze BEFORE the final when scheduledAt is blank (bronze plays first)', () => {
+    // No scheduledAt anywhere → the idx tie-break decides. The bronze must slot
+    // in just before the final on their shared court (viewer_awards: "the bronze
+    // is normally played first"), not after it.
+    const bracket = {
+      rounds: [
+        [{ id: "sf1", court: "A", status: "completed" }, { id: "sf2", court: "B", status: "completed" }],
+        [{ id: "final", court: "A", status: "scheduled" }],
+      ],
+      thirdPlaceMatch: { id: "m-bronze", court: "A", status: "scheduled" },
+    };
+    const out = recomputeBracketQueuePositions(bracket);
+    expect(out.thirdPlaceMatch.queuePosition).toBe(1); // bronze first
+    expect(out.rounds[1][0].queuePosition).toBe(2); // final second
+  });
+});

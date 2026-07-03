@@ -349,6 +349,9 @@ func (s *Store) matchIsRunningOrCompletedLocked(compID, matchID string) (bool, e
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
+			return bm.Status == MatchStatusRunning || bm.Status == MatchStatusCompleted, nil
+		}
 	}
 	poolParsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
 	if err != nil {

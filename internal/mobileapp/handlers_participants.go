@@ -109,14 +109,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				source = "manual"
 			}
 
-			// Strip displayName for non-zekken competitions. Otherwise
-			// saveParticipantsNoLock writes a 3-column row (Name,DisplayName,Dojo)
-			// that LoadParticipants(withZekkenName=false) then mis-parses,
-			// displayName takes column 2, the real Dojo gets pushed into
-			// Metadata. Store.AddParticipant re-derives via SanitizeName(Name)
-			// when DisplayName is empty.
+			// Strip displayName unless the EFFECTIVE layout is zekken
+			// (WithZekkenName || Engi). For a plain non-zekken comp a non-empty
+			// DisplayName would make saveParticipantsNoLock write a 3-column row
+			// that LoadParticipants mis-parses; engi comps keep it (it holds
+			// pair member 2). Using the raw WithZekkenName here would drop an
+			// engi pair's member 2 for a comp with WithZekkenName=false.
+			// Store.AddParticipant re-derives via SanitizeName(Name) when empty.
 			displayName := req.DisplayName
-			if !comp.WithZekkenName {
+			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
 			}
 
@@ -222,11 +223,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		players := make([]domain.Player, 0, len(req.Players))
 		for i, p := range req.Players {
-			// Mirror the single-add/replace strip: a non-empty DisplayName on
-			// a non-zekken competition produces a 3-column CSV row that
-			// LoadParticipants(_, false) mis-parses on the next read. Force "".
+			// Mirror the single-add/replace strip, keyed off the EFFECTIVE
+			// layout (WithZekkenName || Engi): a non-empty DisplayName on a
+			// plain non-zekken comp produces a 3-column CSV row that
+			// LoadParticipants(_, false) mis-parses; engi comps keep member 2.
 			displayName := p.DisplayName
-			if !comp.WithZekkenName {
+			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
 			}
 			players = append(players, domain.Player{
@@ -348,13 +350,14 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return state.ErrCompetitionNotInSetup
 			}
 
-			// Strip displayName for non-zekken competitions, same CSV-corruption
-			// guard as the single-add path: a 3-column row written here would be
-			// mis-parsed on the next LoadParticipants(withZekkenName=false) read,
-			// shifting Dojo into Metadata. Empty DisplayName triggers SanitizeName
+			// Strip displayName unless the EFFECTIVE layout is zekken
+			// (WithZekkenName || Engi), same CSV-corruption guard as the
+			// single-add path: a 3-column row written for a plain non-zekken
+			// comp is mis-parsed on the next LoadParticipants read; engi comps
+			// keep member 2. Empty DisplayName triggers SanitizeName
 			// re-derivation in saveParticipantsNoLock.
 			displayName := req.DisplayName
-			if !comp.WithZekkenName {
+			if !comp.EffectiveWithZekkenName() {
 				displayName = ""
 			}
 

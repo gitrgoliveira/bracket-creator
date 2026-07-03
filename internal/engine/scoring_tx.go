@@ -126,6 +126,16 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 			}
 		}
 
+		// Bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, outside
+		// Rounds; resolve it here (twin of recordBracketMatchResult). No
+		// propagation out of bronze.
+		if !found && bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			if err := applyBronzeMatchResult(bracket.ThirdPlaceMatch, result); err != nil {
+				return err
+			}
+			found = true
+		}
+
 		if !found {
 			return notFoundErrorf("bracket match %s not found", matchID)
 		}
@@ -156,7 +166,10 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 	if comp == nil {
 		return nil, nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi competitions force the zekken layout (two-column participant CSV)
+	// so participants must be parsed with WithZekkenName even when the comp
+	// flag is not set via user input; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +249,24 @@ func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string,
 // T156.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
 	result.ID = matchID
+
+	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
+	// engi slice through the SAME tx so the write stays inside the caller's
+	// single per-comp lock acquire. Engi has no eligibility concept, so the
+	// status return is nil.
+	comp, loadErr := tx.LoadCompetition(compID)
+	if loadErr != nil {
+		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
+	}
+	if comp != nil && comp.Engi {
+		rec, recErr := e.recordEngiMatchResultTx(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		if recErr != nil {
+			return nil, recErr
+		}
+		backfillEngiResult(result, rec)
+		return nil, nil
+	}
+
 	applyHansokuIppons(result)
 	deriveDaihyosenWinner(result)
 
@@ -249,21 +280,20 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// the match's pool so we can compare after the write and detect whether
 	// any qualifying finisher would be displaced from a started knockout match.
 	// We only need this for re-scores (prior != nil) in mixed comps.
+	// NOTE: the engi early-return above ensures this block only runs for
+	// non-engi competitions, so compIsEngi is always false here and is not
+	// tracked as a variable.
 	var (
 		poolRescoredName string   // pool this match belongs to (empty = not a pool match)
 		oldTopN          []string // qualifying finisher names BEFORE the write
 		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
 	)
 	if prior != nil {
-		// Fail closed at the gate too: if the competition record can't be read
-		// we can't tell whether this re-score needs the guard, so abort rather
-		// than let a potentially-unsafe re-score through. Nothing is staged yet,
-		// so returning here aborts cleanly. (First scores have prior == nil and
-		// skip this block entirely, so non-re-score writes are unaffected.)
-		comp, compErr := tx.LoadCompetition(compID)
-		if compErr != nil {
-			return nil, fmt.Errorf("mp-e2k1: load competition %s: %w", compID, compErr)
-		}
+		// mp-e2k1: reuse the comp already loaded (and error-checked) at the
+		// engi-dispatch above rather than re-reading config.md from disk — the
+		// tx sees no pending config write, so a reload would just re-parse the
+		// same bytes. The load error is already returned there, so this path is
+		// still fail-closed; a nil comp skips the mixed guard as before.
 		if comp != nil && comp.Format == state.CompFormatMixed {
 			// Only actual pool matches ("Pool X-…") can change pool finishers.
 			// Gate on IsPoolMatchID so a knockout re-score ("m-rN-i"), whose ID
@@ -472,26 +502,14 @@ func (e *Engine) lookupExistingResultTx(tx state.StoreTx, compID, matchID string
 	bracket, err := tx.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:              bm.ID,
-						SideA:           bm.SideA,
-						SideB:           bm.SideB,
-						Winner:          bm.Winner,
-						Status:          bm.Status,
-						Decision:        bm.Decision,
-						DecisionBy:      bm.DecisionBy,
-						DecisionReason:  bm.DecisionReason,
-						Encho:           bm.Encho,
-						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-						// Include the persisted sub-results so a rollback replay
-						// restores the full team-bout state. LoadBracket deep-copies,
-						// so this slice is safe to hand back without aliasing cache.
-						SubResults: bm.SubResults,
-					}, nil
+			for i := range round {
+				if round[i].ID == matchID {
+					return bracketMatchAsResult(&round[i]), nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
 		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
@@ -515,6 +533,9 @@ func (e *Engine) lookupMatchSidesTx(tx state.StoreTx, compID, matchID string) (s
 					return bm.SideA, bm.SideB, nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
 		}
 	}
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
@@ -547,7 +568,8 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err != nil || comp == nil {
 		return err
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return err
 	}
@@ -627,6 +649,20 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+		}
 	}
 
 	return nil
@@ -679,6 +715,9 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Court, nil
+		}
 	}
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -713,6 +752,9 @@ func courtOccupiedInCompTx(tx state.StoreTx, compID, court, skipMatchID string) 
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != skipMatchID && bm.Status == state.MatchStatusRunning && bm.Court == court {
+			return &state.CourtOccupancy{CompID: compID, MatchID: bm.ID}, nil
+		}
 	}
 	return nil, nil
 }
@@ -722,7 +764,8 @@ func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, 
 	if err != nil || comp == nil {
 		return sideA, sideB
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return sideA, sideB
 	}
@@ -754,7 +797,8 @@ func (e *Engine) checkConcurrentIneligibilityTx(tx state.StoreTx, compID, matchI
 		}
 		return nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		log.Printf("engine: checkConcurrentIneligibilityTx LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
@@ -826,6 +870,11 @@ func (e *Engine) hasDownstreamMatchStartedTx(tx state.StoreTx, compID string, pl
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
+			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
+				return true, nil
+			}
+		}
 	}
 	return false, nil
 }
@@ -887,6 +936,11 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 			}
 		}
 	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil && isStarted(bm.Status) {
+		if name := matchedSide(bm.SideA, bm.SideB); name != "" {
+			return name, bm.ID, nil
+		}
+	}
 	return "", "", nil
 }
 
@@ -903,7 +957,8 @@ func (e *Engine) restoreCompetitorEligibilityTx(tx state.StoreTx, compID, priorL
 	if comp == nil {
 		return nil, nil
 	}
-	participants, err := tx.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}

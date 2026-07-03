@@ -362,6 +362,51 @@ func TestMaybeAdvanceKachinuki_BracketPath(t *testing.T) {
 	assert.False(t, changed)
 }
 
+// TestMaybeAdvanceKachinuki_BronzeFinalize verifies the Naginata 3rd-place
+// (bronze) match — a sibling of bracket.Rounds, not an element of it — is
+// found and finalized by the kachinuki advancement path, at parity with a
+// Rounds bracket match.
+func TestMaybeAdvanceKachinuki_BronzeFinalize(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "advance-bronze"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Naginata:      true,
+	}))
+
+	// Bronze match with a single bout: R-Senpo beats W-Senpo. The winner stays
+	// and SideB's queue is exhausted → AdvanceKachinuki ends the match (same
+	// shape as TestMaybeAdvanceKachinuki_AppendsBout).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-r1-0", SideA: "RedTeam", SideB: "WhiteTeam", Winner: "RedTeam", Status: state.MatchStatusCompleted}},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:    "m-bronze",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "R-Senpo", SideB: "W-Senpo", Winner: "R-Senpo", Decision: "fought"},
+			},
+		},
+	}))
+	// No pool matches so findTeamMatch falls through to the bracket search.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	changed, err := eng.MaybeAdvanceKachinuki(compID, "m-bronze")
+	require.NoError(t, err)
+	assert.True(t, changed, "bronze kachinuki match must be found and finalized")
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, bracket.ThirdPlaceMatch)
+	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status, "bronze finalized")
+	assert.Equal(t, "RedTeam", bracket.ThirdPlaceMatch.Winner, "bronze winner mirrored from kachinuki outcome")
+}
+
 // TestMaybeAdvanceKachinuki_AppendsBoutNextRound verifies the case where
 // the last bout has a winner AND both sides still have players, so the
 // engine appends the next bout rather than ending the match.

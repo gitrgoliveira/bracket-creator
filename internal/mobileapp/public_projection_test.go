@@ -96,6 +96,32 @@ func TestStripBracketAudit(t *testing.T) {
 		assert.Empty(t, b.Rounds[1][0].DecisionReason)
 		assert.Equal(t, "r0-m0", b.Rounds[0][0].ID, "non-audit fields preserved")
 	})
+	// Finding 2 regression: ThirdPlaceMatch (Naginata bronze) is a sibling of
+	// Rounds; its CorrectionReason and DecisionReason must also be stripped from
+	// the public viewer projection or operator audit notes leak unauthenticated.
+	t.Run("clears ThirdPlaceMatch audit fields", func(t *testing.T) {
+		b := &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "m-sf1", CorrectionReason: "cr-sf1", DecisionReason: "dr-sf1", DecisionBy: "shiro"}},
+			},
+			ThirdPlaceMatch: &state.BracketMatch{
+				ID:               "m-bronze",
+				CorrectionReason: "injury note for bronze",
+				DecisionReason:   "competitor withdrew",
+				DecisionBy:       "aka",
+			},
+		}
+		stripBracketAudit(b)
+		// Rounds still cleared.
+		assert.Empty(t, b.Rounds[0][0].CorrectionReason, "Rounds[0][0].CorrectionReason must be cleared")
+		assert.Empty(t, b.Rounds[0][0].DecisionReason, "Rounds[0][0].DecisionReason must be cleared")
+		// ThirdPlaceMatch cleared (the regression).
+		assert.Empty(t, b.ThirdPlaceMatch.CorrectionReason, "ThirdPlaceMatch.CorrectionReason must be stripped")
+		assert.Empty(t, b.ThirdPlaceMatch.DecisionReason, "ThirdPlaceMatch.DecisionReason must be stripped")
+		// Non-audit fields preserved.
+		assert.Equal(t, "m-bronze", b.ThirdPlaceMatch.ID, "ThirdPlaceMatch.ID must be preserved")
+		assert.Equal(t, "aka", b.ThirdPlaceMatch.DecisionBy, "ThirdPlaceMatch.DecisionBy (not audit) must be preserved")
+	})
 }
 
 func TestLineupForPublic_StripsChangeReasonAndCopies(t *testing.T) {

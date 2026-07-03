@@ -626,6 +626,64 @@ func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
 	})
 }
 
+// TestOverrideWinner_EngiGuard verifies the override-winner endpoint rejects
+// engi competitions with 400: a manual winner override sets Winner without
+// FlagsA/FlagsB, which would leave a completed engi match with a 0-0 flag
+// total that violates the {1,3,5} invariant. Flag scoring is the only engi
+// result path. Mirrors TestDecisionHandler_EngiGuard.
+func TestOverrideWinner_EngiGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "engi-override"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true}))
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "P1", SideB: "P2"}}},
+	}))
+
+	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/b1/override-winner", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "override-winner on engi comp must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "engi")
+
+	// The bracket winner must remain unset (the guard returns before the engine).
+	stored, err := store.LoadBracket(cid)
+	require.NoError(t, err)
+	assert.Empty(t, stored.Rounds[0][0].Winner, "engi override must not set a winner")
+}
+
+// TestOverrideWinner_FailsClosedOnLoadError verifies the engi guard on the
+// override-winner endpoint fails CLOSED: when LoadCompetition faults we can't
+// tell whether the comp is engi, so the override is rejected with 500 rather
+// than slipping through into the inconsistent flag-less state the guard exists
+// to prevent. Mirrors the quick-score / daihyosen / decision guards.
+func TestOverrideWinner_FailsClosedOnLoadError(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "override-fail-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	realStore, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(realStore)
+	hub := NewHub()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
+
+	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+	req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
+}
+
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1543,6 +1601,39 @@ func TestAnnotateBracketQueuePositions_EmptyScheduledAt(t *testing.T) {
 
 	assert.Equal(t, 1, b.Rounds[0][1].QueuePosition, "has-time = 1st")
 	assert.Equal(t, 2, b.Rounds[0][0].QueuePosition, "no-time = 2nd (sinks to end)")
+}
+
+// TestAnnotateBracketQueuePositions_ThirdPlaceMatch is a Finding 7 regression
+// test: the bronze Naginata match is a sibling of Rounds (bracket.ThirdPlaceMatch)
+// and must receive a queue position so operators see it in the schedule feed.
+func TestAnnotateBracketQueuePositions_ThirdPlaceMatch(t *testing.T) {
+	b := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-sf1", Court: "A", Status: state.MatchStatusCompleted},
+				{ID: "m-sf2", Court: "A", Status: state.MatchStatusCompleted},
+			},
+			{
+				{ID: "m-final", Court: "A", Status: state.MatchStatusScheduled},
+			},
+		},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			Court:  "A",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	annotateBracketQueuePositions(b)
+
+	// Final and bronze are both scheduled on court A with blank scheduledAt. The
+	// bronze is conventionally played JUST BEFORE the final (viewer_awards: "the
+	// bronze is normally played first"), so it sorts first (round=finalRound,
+	// position -1), then the final.
+	assert.Equal(t, 1, b.ThirdPlaceMatch.QueuePosition, "bronze must be 1st scheduled (plays before the final)")
+	assert.Equal(t, 2, b.Rounds[1][0].QueuePosition, "final must be 2nd scheduled")
+	// Completed semis get no queue position.
+	assert.Equal(t, 0, b.Rounds[0][0].QueuePosition, "completed sf1 must have position 0")
+	assert.Equal(t, 0, b.Rounds[0][1].QueuePosition, "completed sf2 must have position 0")
 }
 
 // setupSelfRunScoreRouter creates a minimal gin router with just the score

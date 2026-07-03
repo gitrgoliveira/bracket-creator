@@ -307,9 +307,24 @@ Not every bout is decided on points. The score editor records the kendo outcomes
 
 A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches, and the app blocks starting an ineligible competitor until they are reinstated, so a withdrawal cannot silently re-enter the draw.
 
+### Naginata competitions
+
+Turn on **Naginata competition** in a competition's Settings tab (locked once the draw is generated) to enable naginata-specific rules:
+
+- **Sune ippon**: the score editor's waza buttons add **S** (Sune, a strike to the shin) alongside M/K/D/T/H, and the same keyboard shortcuts apply (`s` for Shiro, `Shift+S` for Aka).
+- **3rd-place playoff**: unlike kendo's two joint 3rd places, naginata plays a decider between the two semi-final losers. Once both semi-finals are complete the playoff appears in the bracket and, if it shares the final's court, in that shiaijo's queue too, labelled **3rd Place**. The winner takes 3rd; the loser is 4th and does not appear on the awards podium.
+
+### Engi-kyogi (kata) competitions
+
+Turn on **Engi (kata demonstration)** in a competition's Settings tab (locked once the draw is generated) for flag-count scoring instead of ippon waza. An Engi competitor is a **pair**, entered as one participant row: `Name 1, Name 2, Dojo`.
+
+- **Scoring**: the score editor becomes a referee flag counter for each side. A bout's flags must total 1, 3, or 5 (an odd panel size), so a bout can never end in a draw.
+- **Standings**: pools and leagues rank pairs by total wins first, then by total flags accumulated across all bouts (both the winning and losing side's flags count toward their own tally).
+- Quick-score, manual winner overrides, and daihyosen are all kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
+
 ### Awards and winners
 
-When a competition finishes, the public viewer shows its **podium**, following the kendo convention of **1st, 2nd, and two equal 3rd places** (there is no bronze-medal match). For a mixed competition still in its pool phase, it shows a provisional cross-pool ranking until the knockout decides the final places. Operators also get an **all-competition winners** view that gathers every result in one place, and each competition can carry optional **fighting-spirit (敢闘賞) awards**, free-text individual honours that also appear to viewers.
+When a competition finishes, the public viewer shows its **podium**. Kendo competitions follow the convention of **1st, 2nd, and two equal 3rd places** (there is no bronze-medal match); naginata competitions instead show a single 3rd place, decided by the 3rd-place playoff. For a mixed competition still in its pool phase, it shows a provisional cross-pool ranking until the knockout decides the final places. Operators also get an **all-competition winners** view that gathers every result in one place, and each competition can carry optional **fighting-spirit (敢闘賞) awards**, free-text individual honours that also appear to viewers.
 
 ### Export & print
 

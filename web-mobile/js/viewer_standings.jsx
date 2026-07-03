@@ -311,6 +311,13 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 const ipponsA = (m.ipponsA || []).filter(x => x && x !== "•");
                 const ipponsB = (m.ipponsB || []).filter(x => x && x !== "•");
                 const rowIppons = rowIsAka ? ipponsA : ipponsB;
+                // Engi (flag-count scoring) is the ONLY competition type
+                // where a matrix cell shows a NUMBER; every other type shows
+                // the row player's own ippon letters above. Engi never
+                // draws (odd flag totals), so this only ever feeds the
+                // win/loss branches below.
+                const isEngiCell = m.flagsA != null || m.flagsB != null;
+                const rowFlags = rowIsAka ? (m.flagsA || 0) : (m.flagsB || 0);
                 // Prefer the winner id: when two participants share a name,
                 // the winner name alone can't tell them apart (e.g. the
                 // head-to-head between two same-name/different-dojo players).
@@ -344,12 +351,14 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   // Show the row player's ippon letters (M/K/D/T/H); the green
                   // cell colour signals the win. No "W" fallback: W is not an
                   // ippon. A win with no recorded ippons (walkover/hantei)
-                  // shows an empty green cell.
-                  cellContent = <span className="league-matrix__win">{rowIppons.join("")}</span>;
+                  // shows an empty green cell. Engi shows its own flag count
+                  // (a number) instead: there are no ippon letters to show.
+                  cellContent = <span className="league-matrix__win">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Win";
                 } else {
-                  // The loser's own ippons (red), or empty when they scored none.
-                  cellContent = <span className="league-matrix__loss">{rowIppons.join("")}</span>;
+                  // The loser's own ippons (red), or empty when they scored
+                  // none. Engi shows its own flag count instead.
+                  cellContent = <span className="league-matrix__loss">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
@@ -389,10 +398,15 @@ function rankOrdinal(rank) {
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides and the formatted score string (via formatIpponsScore when completed).
 // sideB = Shiro (left), sideA = Aka (right): matches PoolMatchRow convention.
-export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
+// isEngi: when true, each side is an engi pair — render member1 (name) over
+// member2 (displayName) stacked, matching the engi score editor layout.
+export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }) => {
   // withNumber prepends the assigned competitor number (e.g. "K1") when present.
   const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : m.sideA;
   const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : m.sideB;
+  // Engi pair: member2 lives in displayName.
+  const aDN = isEngi && typeof m.sideA === "object" ? (m.sideA.displayName || "") : "";
+  const bDN = isEngi && typeof m.sideB === "object" ? (m.sideB.displayName || "") : "";
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
@@ -406,6 +420,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
         <span className="pool-match-numbered-row__name">{bName || "-"}</span>
+        {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
       <span className="pool-match-numbered-row__score">
         {/* Running matches are signalled by the row highlight (shared .is-running),
@@ -416,6 +431,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick }) => {
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
         <span className="pool-match-numbered-row__name">{aName || "-"}</span>
+        {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>
   );
@@ -424,6 +440,9 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  // Engi-Kyogi (kata demonstration): flag-count scoring. Standings show
+  // Victories (V) and total Flags columns only.
+  const isEngi = !!(competition && competition.engi);
   // FR-050 / FR-051: league competitions render Final standings instead of
   // pool standings, and surface a Winner badge once every match is complete.
   // Format check is value-based so older competitions without a Format
@@ -518,7 +537,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
             {/* Standings table: rows in draw position order, rank looked up by player key (id or name||dojo) */}
             <table className="pool__table">
               <thead>
-                {isTeam ? (
+                {isEngi ? (
+                  <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
+                ) : isTeam ? (
                   <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
                 ) : (
                   <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
@@ -573,21 +594,32 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             </span>
                           ) : null}
                         </div>
+                        {/* Engi pair: member2 (displayName) stacked below member1. */}
+                        {isEngi && p.displayName ? <div className="pool__player-name">{p.displayName}</div> : null}
                         {tweaks.showDojo ? <div className="pool__dojo-name">{p.dojo}</div> : null}
                       </td>
                       {s ? (
                         <>
-                          <td className="num">{s.wins}</td>
-                          <td className="num">{s.losses}</td>
-                          <td className="num">{s.draws}</td>
-                          {isTeam && <td className="num">{s.individualWins || 0}</td>}
-                          {isTeam && <td className="num">{s.individualLosses || 0}</td>}
-                          {isTeam && <td className="num">{s.individualDraws || 0}</td>}
-                          <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                          <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                          {isEngi ? (
+                            <>
+                              <td className="num">{s.wins}</td>
+                              <td className="num">{s.flags || 0}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="num">{s.wins}</td>
+                              <td className="num">{s.losses}</td>
+                              <td className="num">{s.draws}</td>
+                              {isTeam && <td className="num">{s.individualWins || 0}</td>}
+                              {isTeam && <td className="num">{s.individualLosses || 0}</td>}
+                              {isTeam && <td className="num">{s.individualDraws || 0}</td>}
+                              <td className="num">{isTeam ? (s.pointsWon || 0) : s.ipponsGiven}</td>
+                              <td className="num">{isTeam ? (s.pointsLost || 0) : s.ipponsTaken}</td>
+                            </>
+                          )}
                         </>
                       ) : (
-                        Array.from({ length: isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">-</td>)
+                        Array.from({ length: isEngi ? 2 : isTeam ? 8 : 5 }, (_, j) => <td key={j} className="num">-</td>)
                       )}
                     </tr>
                   );
@@ -614,13 +646,14 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         />
                       );
                     } else {
-                      // Individual: ippon notation score
+                      // Individual or engi: delegates name/pair rendering to PoolNumberedMatchRow (isEngi passed through for name stacking)
                       const enriched = { ...m, phase: "pool", poolName: pool.poolName, phaseName: pool.poolName, compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
                       return (
                         <PoolNumberedMatchRow
                           key={m.id}
                           m={m}
                           num={idx + 1}
+                          isEngi={isEngi}
                           onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
                         />
                       );

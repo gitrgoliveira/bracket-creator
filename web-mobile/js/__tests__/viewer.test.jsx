@@ -729,6 +729,27 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(lossCell).toBeTruthy();
   });
 
+  // Engi (flag-count scoring) is the ONLY competition type where a matrix
+  // cell shows a NUMBER; every other type shows ippon letters (tested
+  // above via completedMatch's "M"). flagsA=sideA=Aka, flagsB=sideB=Shiro.
+  it('renders the flag COUNT (not ippon letters) in an engi league matrix cell', () => {
+    const engiMatch = {
+      id: 'Pool A-1',
+      sideA: { id: 'pA', name: 'Alice' },
+      sideB: { id: 'pB', name: 'Bob' },
+      status: 'completed',
+      winner: { id: 'pA', name: 'Alice' },
+      flagsA: 3, flagsB: 2,
+      ipponsA: [], ipponsB: [],
+    };
+    const tree = runtime.mount(PM, { pool, matches: [engiMatch], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
+    expect(textContent(winCell)).toBe('3');  // Alice = sideA = Aka = flagsA
+    expect(textContent(lossCell)).toBe('2'); // Bob = sideB = Shiro = flagsB
+  });
+
   it('clicking a completed-match cell fires onMatchClick with enriched match', () => {
     const spy = vi.fn();
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {}, onMatchClick: spy });

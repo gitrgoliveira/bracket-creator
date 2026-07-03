@@ -7,8 +7,12 @@ import { competitionKindLabel } from './viewer_utils.jsx';
 const { useState, useMemo, useRef: useRefV, useEffect } = React;
 const EmptyState = window.EmptyState;
 
-// deriveAwards returns up to four placements for the closing ceremony per
-// FIK convention: 1st, 2nd, and two 3rds (semi-final losers: no bronze match).
+// deriveAwards returns the closing-ceremony placements.
+// Kendo convention (no thirdPlaceMatch): 1st, 2nd, and two joint 3rds
+// (semi-final losers, no bronze match).
+// Naginata convention (thirdPlaceMatch present): 1st, 2nd, 3rd only. There is
+// NO 4th-place award; the bronze match decides which beaten semi-finalist takes
+// the single 3rd place, and the loser (4th) is not part of the ceremony.
 // Returns [] when no podium data exists yet.
 // `nameToPlayer` is an optional Map(name → {name, dojo}) to enrich bracket
 // entries with dojo info; missing names fall back to {name, dojo: ""}.
@@ -22,6 +26,19 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
   // backend payload) or a normalized object ({id, name, dojo}) produced by
   // normalizeMatch() in api_serializers.jsx.
   const toName = (v) => (v && typeof v === "object" ? v.name || "" : v || "");
+  // Companion id extractor; empty for legacy string-only payloads.
+  const toId = (v) => (v && typeof v === "object" ? v.id || "" : "");
+  // Return the side of a decided match that is NOT the winner (runner-up / SF
+  // loser). Prefers matching by stable id so same-name / different-dojo
+  // finalists (supported in this PR) can't collide onto the wrong side; falls
+  // back to name matching only when ids aren't both present (raw string
+  // payloads).
+  const otherSide = (winner, sideA, sideB) => {
+    const wId = toId(winner);
+    const aId = toId(sideA);
+    if (wId && aId) return wId === aId ? sideB : sideA;
+    return toName(winner) === toName(sideA) ? sideB : sideA;
+  };
 
   // Enrich a player field with dojo info. If the field is already a normalized
   // object with a dojo, use it directly; otherwise fall back to nameToPlayer.
@@ -42,19 +59,44 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     const sfRound = bracket.rounds[bracket.rounds.length - 2] || [];
     const final = finalRound[0];
     if (final && final.winner) {
-      const winnerName = toName(final.winner);
       const champion = final.winner;
-      const runnerUp = winnerName === toName(final.sideA) ? final.sideB : final.sideA;
-      const thirds = sfRound
-        .map((m) => {
-          if (!m.winner) return null;
-          return toName(m.winner) === toName(m.sideA) ? m.sideB : m.sideA;
-        })
-        .filter(Boolean);
+      const runnerUp = otherSide(final.winner, final.sideA, final.sideB);
       const slot = (place, side) => {
         const r = lookup(side);
         return r ? { place, ...r } : null;
       };
+
+      // Naginata / explicit bronze match path: only 1st, 2nd, 3rd get awards
+      // (Naginata convention: there is NO 4th-place award; the bronze match
+      // exists solely to decide which beaten semi-finalist takes the single
+      // 3rd place. The loser is 4th but is not part of the closing ceremony).
+      const bronze = bracket.thirdPlaceMatch;
+      if (bronze) {
+        if (bronze.winner) {
+          // Decided bronze: the bronze winner is the sole 3rd place.
+          return [
+            slot(1, champion),
+            slot(2, runnerUp),
+            slot(3, bronze.winner),
+          ].filter(Boolean);
+        }
+        // Undecided bronze (unusual once the final is decided, since the
+        // bronze is normally played first): the single 3rd place is not yet
+        // determined, so only 1st and 2nd are shown until the bronze decides
+        // it. Naginata never awards joint 3rds.
+        return [
+          slot(1, champion),
+          slot(2, runnerUp),
+        ].filter(Boolean);
+      }
+
+      // Kendo convention: no bronze match, two joint 3rds from SF losers.
+      const thirds = sfRound
+        .map((m) => {
+          if (!m.winner) return null;
+          return otherSide(m.winner, m.sideA, m.sideB);
+        })
+        .filter(Boolean);
       return [
         slot(1, champion),
         slot(2, runnerUp),

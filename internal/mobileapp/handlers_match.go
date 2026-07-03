@@ -69,6 +69,16 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
 		}
 	}
+	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds. The bronze is
+	// conventionally played JUST BEFORE the final (viewer_awards.jsx: "the
+	// bronze is normally played first"), so slot it into the final's round with
+	// a position sentinel of -1: on their shared court, when scheduledAt is
+	// blank/equal, it sorts after the semifinals but before the final.
+	if b.ThirdPlaceMatch != nil {
+		finalRound := len(b.Rounds) - 1
+		byCourt[b.ThirdPlaceMatch.Court] = append(byCourt[b.ThirdPlaceMatch.Court],
+			entry{m: b.ThirdPlaceMatch, round: finalRound, position: -1})
+	}
 
 	statusOrder := func(s state.MatchStatus) int {
 		switch s {
@@ -408,6 +418,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// Engi competitions use flag-based scoring, not ippon tallies.
+		// Quick-score builds an ippon-style result, which bypasses the
+		// engi dispatch and would corrupt standings for flag-scored bouts.
+		comp, err := store.LoadCompetition(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if comp != nil && comp.Engi {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "quick-score is not supported for engi competitions"})
+			return
+		}
+
 		// Determine team winner per kendo rules: most individual wins wins.
 		// winnerSide records the WINNING SIDE (not just the name) so the
 		// engine can stamp WinnerID even when both sides share a name,
@@ -551,6 +574,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// Engi competitions decide bouts by referee flag counts. A manual
+		// winner override sets Winner without FlagsA/FlagsB, leaving a
+		// completed engi match with a 0-0 flag total that violates the
+		// {1,3,5} invariant. Reject it (mirrors the quick-score / decision
+		// guards) so flag scoring stays the only engi result path. Fail
+		// CLOSED on a load error, like those siblings: a transient fault must
+		// not let an engi override slip through into inconsistent state.
+		comp, loadErr := store.LoadCompetition(id)
+		if loadErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": loadErr.Error()})
+			return
+		}
+		if comp != nil && comp.Engi {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "override-winner is not supported for engi competitions; use flag scoring instead"})
+			return
+		}
+
 		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -680,6 +720,12 @@ func checkFinalizedUnderTx(stx state.StoreTx, compID, matchID string) error {
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			mr := bracketMatchToResult(bracket.ThirdPlaceMatch)
+			if isMatchFinalized(mr) {
+				return errResultFinalized
+			}
+		}
 	}
 	return nil
 }
@@ -727,6 +773,9 @@ func lookupMatchStatusUnderTx(stx state.StoreTx, compID, matchID string) state.M
 					return round[i].Status
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Status
 		}
 	}
 	return ""

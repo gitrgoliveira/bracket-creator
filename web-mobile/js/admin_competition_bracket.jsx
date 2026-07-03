@@ -188,8 +188,14 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // Recenter on the running match whenever it changes (initial bracket
   // load, or one match finishing and the next starting). Empty deps would
   // miss the case where `bracket` is still null on first mount and only
-  // populates via the detail fetch / SSE.
-  const runningMatchId = (bracket?.rounds || []).flatMap(r => r || []).find(m => m && m.status === "running")?.id || null;
+  // populates via the detail fetch / SSE. Also check thirdPlaceMatch.
+  const runningMatchId = (() => {
+    const inRounds = (bracket?.rounds || []).flatMap(r => r || []).find(m => m && m.status === "running");
+    if (inRounds) return inRounds.id;
+    const bronze = bracket?.thirdPlaceMatch;
+    if (bronze && bronze.status === "running") return bronze.id;
+    return null;
+  })();
   useEffectA(() => {
     if (runningMatchId) setAutoScrollId(runningMatchId + "::" + Date.now());
   }, [runningMatchId]);
@@ -234,6 +240,9 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         if (m && m.id === selected.matchId) return m;
       }
     }
+    // Also check the bronze/3rd-place match (naginata competitions).
+    const bronze = bracket?.thirdPlaceMatch;
+    if (bronze && bronze.id === selected.matchId) return bronze;
     return null;
   };
   // All bracket scoring now flows through the shared inline ScoreEditorModal →
@@ -258,6 +267,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     compFormat: selectedMatch.compFormat || c.format || "",
     compKind: selectedMatch.compKind || c.kind || "",
     teamSize: selectedMatch.teamSize ?? c.teamSize ?? 0,
+    compEngi: !!(selectedMatch.compEngi ?? c.engi),
     phase: selectedMatch.phase || "bracket",
     round: selectedMatch.round || selectedMeta.roundName,
     matchNumber: selectedMatch.matchNumber || selectedMeta.matchNum || 0,
@@ -296,6 +306,30 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
               autoScrollMatchId={autoScrollId}
               scrollContainerRef={scrollRef}
             />
+            {bracket.thirdPlaceMatch && (() => {
+              const bm = bracket.thirdPlaceMatch;
+              const isReady = hasBothSides(bm);
+              const isHighlighted = selected?.matchId === bm.id;
+              // The "3rd Place Match" section header identifies the lone bronze
+              // card, so the card omits a per-card meta badge (no redundant
+              // "3RD" repeating the header). It renders smaller and offset UNDER
+              // the final match card (bronzeUnderFinalStyle) — the two "end"
+              // matches read together, and it can't be misread as a semifinal.
+              return (
+                <div className="bracket-bronze-section" style={{ marginTop: 28, ...window.bronzeUnderFinalStyle(bracket.rounds) }} data-testid="bracket-bronze-match">
+                  <div className="bracket-bronze-label">
+                    3rd Place Match
+                  </div>
+                  <window.MatchCard
+                    match={bm}
+                    variant={tweaks.cardVariant}
+                    showDojo={tweaks.showDojo}
+                    highlighted={isHighlighted}
+                    onClick={isReady ? () => select(bm, -1, 0) : undefined}
+                  />
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>

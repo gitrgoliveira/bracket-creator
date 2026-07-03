@@ -110,9 +110,11 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			return
 		}
 
-		// Strip displayName for non-zekken competitions to avoid CSV mis-parse.
+		// Strip displayName unless the effective layout is zekken
+		// (WithZekkenName || Engi) to avoid CSV mis-parse; engi comps keep
+		// member 2 even when the stored WithZekkenName is false.
 		displayName := strings.TrimSpace(req.DisplayName)
-		if !comp.WithZekkenName {
+		if !comp.EffectiveWithZekkenName() {
 			displayName = ""
 		}
 

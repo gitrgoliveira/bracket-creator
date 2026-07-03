@@ -134,3 +134,24 @@ describe('ScoreEditorModal render-smoke', () => {
     expect(() => renderModal(makeTeamMatch({ status: 'completed' }))).not.toThrow();
   });
 });
+
+// impeccable re-critique symmetry: the individual (kendo) and team editors now
+// carry the same explicit SHIRO/AKA pill badge the Engi editor has, so the side
+// is labelled identically across all three editors.
+describe('ScoreEditorModal SHIRO/AKA side badges', () => {
+  it('renders a framed Shiro badge and a solid Aka badge on the individual editor', () => {
+    const { container } = renderModal(makeIndividualMatch());
+    const shiro = container.querySelector('.sb-side--shiro .sb-side__badge--shiro');
+    const aka = container.querySelector('.sb-side--aka .sb-side__badge--aka');
+    expect(shiro).not.toBeNull();
+    expect(aka).not.toBeNull();
+    expect(shiro.textContent).toBe('Shiro');
+    expect(aka.textContent).toBe('Aka');
+  });
+
+  it('renders the same badges on the team editor', () => {
+    const { container } = renderModal(makeTeamMatch());
+    expect(container.querySelector('.sb-side--shiro .sb-side__badge--shiro')?.textContent).toBe('Shiro');
+    expect(container.querySelector('.sb-side--aka .sb-side__badge--aka')?.textContent).toBe('Aka');
+  });
+});

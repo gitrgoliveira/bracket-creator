@@ -149,6 +149,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     compFormat: m.compFormat || (comp && comp.format) || "",
     compKind: isSupplementary ? "" : (m.compKind || (comp && comp.kind) || ""),
     teamSize: isSupplementary ? 0 : (m.teamSize ?? (comp && comp.teamSize) ?? 0),
+    compEngi: isSupplementary ? false : !!(m.compEngi ?? (comp && comp.engi)),
     phase: m.phase || "pool",
     poolName: m.poolName || derivedPoolName,
     // Rep-bout dropdown inputs (empty/false for non-supplementary matches).
@@ -653,7 +654,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
-                      {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● NOW" : "-"}
+                      {m.status === "completed" ? window.matchScoreStr(m, m.ipponsB, m.ipponsA) : m.status === "running" ? "● NOW" : "-"}
                     </div>
                     <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
                       {m.status === "completed" ? "Correct" : "Score"}
@@ -782,7 +783,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sideA?.name || m.sideA}</span>
                         </div>
                         <div style={{ fontSize: 11, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap" }}>
-                          {m.status === "completed" ? window.formatIpponsScore(m.ipponsB, m.ipponsA, m.score, m.decision, m.encho, m.decidedByHantei) : m.status === "running" ? "● NOW" : "-"}
+                          {m.status === "completed" ? window.matchScoreStr(m, m.ipponsB, m.ipponsA) : m.status === "running" ? "● NOW" : "-"}
                         </div>
                         <button type="button" className={getScoreBtnClass(m.status)} style={{ minWidth: 0 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
                       </div>

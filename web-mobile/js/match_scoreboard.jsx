@@ -156,6 +156,29 @@ function slotCells(letters, side, testid) {
 // and render through the normal slot path, so they never reach this fallback.
 // A plain helper (not a component) so it renders inline into the parent's tree.
 function centreMarks(sub, matchSideA, matchSideB) {
+  // Engi (flag-count scoring) is the ONLY competition type where the centre
+  // marks are numeric (a referee flag count, single digit 0-5). There are no
+  // ippon letters, hansoku fouls, or hikiwake draws in an engi bout, so this
+  // branches before all of that logic; sub.flagsA/flagsB=sideA(Aka)/sideB
+  // (Shiro), same convention as engiFlagScore in bracket.jsx.
+  if (sub.flagsA != null || sub.flagsB != null) {
+    const flagsB = sub.flagsB || 0, flagsA = sub.flagsA || 0;
+    const winShiro = flagsB > flagsA;
+    const winAka = flagsA > flagsB;
+    return (
+      <span className="msb-marks" data-testid="sub-marks">
+        <span className={"msb-slots" + (winShiro ? " msb-slots--win" : "")}>
+          {slotCells([String(flagsB), ""], "shiro", "sub-flags-b")}
+        </span>
+        <span className="msb-vs">
+          <span className="msb-sep" aria-hidden="true">–</span>
+        </span>
+        <span className={"msb-slots msb-slots--aka" + (winAka ? " msb-slots--win" : "")}>
+          {slotCells([String(flagsA), ""], "aka", "sub-flags-a")}
+        </span>
+      </span>
+    );
+  }
   const lettersB = ipponLetters(sub.ipponsB); // shiro / left
   const lettersA = ipponLetters(sub.ipponsA); // aka / right
   const foulB = boutHansokuMark(sub.hansokuB);
@@ -286,6 +309,7 @@ export function IndividualScore({ match, variant, showNames, withZekkenName }) {
     decidedByHantei: match.decidedByHantei, score: match.score, decision: match.decision,
     winner: ambiguous ? "" : (sideId(match.winner) || sideName(match.winner)),
     sideA: aKey, sideB: bKey,
+    flagsA: match.flagsA, flagsB: match.flagsB,
   };
   // showNames fills the (otherwise empty) name spans with the two competitors,
   // colour-coded Shiro dark / Aka red: used by the TV pool/round list where

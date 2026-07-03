@@ -277,6 +277,11 @@ func (e *Engine) buildBracketFromLeaves(comp *state.Competition, leaves []string
 			DisplayRound: -1,
 			Court:        bronzeDefaultCourt(finalCourt, comp.Courts),
 		}
+		// Give the bronze a real time slot just before the final on its court:
+		// assignBracketMatchSlots above only walked Rounds, so the bronze would
+		// otherwise stay blank and sort AFTER the final everywhere. Must run
+		// after the bronze's court is set above.
+		scheduleBronze(bracket, comp, tournament)
 	}
 
 	return bracket, nil

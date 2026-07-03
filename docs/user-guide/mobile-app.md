@@ -74,7 +74,7 @@ The public surfaces (viewer, displays) need no password; the operator and manage
 The default view needs no password: it is the one screen **competitors, coaches, and spectators** share. It shows:
 
 - A personal **Watchlist**: track yourself, specific competitors, or a whole dojo, and get an on-deck nudge as a watched match approaches, so players know when to warm up and coaches know when to be matside.
-- The full match schedule across all shiai-jo, filterable by player or team.
+- The full match schedule across all shiai-jo, filterable by player or team. The free-text filter also matches a competitor's assigned number or tag (for example "A1"), so you can jump straight to a competitor's bouts by their tag.
 - Pool standings updated in real time as scores are entered.
 - The elimination bracket as it fills in.
 

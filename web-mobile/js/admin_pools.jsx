@@ -378,19 +378,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
-  // True when teamName won a completed daihyosen (play-off) bout in poolName.
-  // Drives the "DH" badge in the standings table. Purely informational: the
-  // play-off only decides ORDER within the tied group (per FIK 6.1.6.1.2) and
-  // never feeds the ranking cascade, so no stat is altered, this badge is the
-  // only signal that a play-off settled two otherwise-identical rows.
-  const teamWonDaihyosen = (poolName, teamName) => {
-    const prefix = poolName + "-DH-";
-    return (poolMatches || []).some(m => {
-      if (!(m.id || "").startsWith(prefix) || m.status !== "completed" || !m.winner) return false;
-      const w = typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
-      return w === teamName;
-    });
-  };
+  // teamWonDaihyosen (the "DH" badge lookup) is defined below, after the
+  // dhWinnersByPool memo it reads: see just past poolMatchesMap.
 
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
@@ -497,6 +486,33 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     return map;
   }, [poolMatches]);
   const poolMatchesFor = (poolName) => poolMatchesMap.get(poolName) ?? [];
+
+  // Precompute Map<poolName, Set<winnerName>> of daihyosen play-off winners so
+  // the "DH" badge lookup is O(1) per standings row. teamWonDaihyosen is called
+  // once per row in BOTH standings tables (selected-pool + pool-card grid); the
+  // old per-call form re-scanned the full poolMatches array each time, making
+  // renders O(rows × matches) and noticeably costly on SSE-driven refreshes for
+  // large competitions.
+  const dhWinnersByPool = useMemoA(() => {
+    const map = new Map();
+    for (const m of (poolMatches || [])) {
+      if (!(m.id || "").includes("-DH-") || m.status !== "completed" || !m.winner) continue;
+      const pool = poolNameOf(m.id);
+      if (!pool) continue;
+      const w = typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
+      if (!w) continue;
+      const set = map.get(pool);
+      if (set) { set.add(w); } else { map.set(pool, new Set([w])); }
+    }
+    return map;
+  }, [poolMatches]);
+
+  // True when teamName won a completed daihyosen (play-off) bout in poolName.
+  // Drives the "DH" badge in the standings table. Purely informational: the
+  // play-off only decides ORDER within the tied group (per FIK 6.1.6.1.2) and
+  // never feeds the ranking cascade, so no stat is altered, this badge is the
+  // only signal that a play-off settled two otherwise-identical rows.
+  const teamWonDaihyosen = (poolName, teamName) => dhWinnersByPool.get(poolName)?.has(teamName) ?? false;
 
   // Modal rendered in both return paths (detail view and card list).
   const scoreModal = scoreOpenMatch ? (

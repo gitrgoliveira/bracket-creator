@@ -454,6 +454,20 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 // (unlike bracketMatchAsResult in bracket_result.go, which omits them and adds
 // decision/encho/flag detail for the eligibility/rollback paths), so the two
 // projections are deliberately distinct.
+//
+// SubResults is carried through by reference, same as bracketMatchAsResult:
+// e.store.LoadBracket / tx.LoadBracket already deep-copy every BracketMatch
+// (including SubResults, via Store.copyBracket) before handing the bracket
+// back, so this projection is never aliased to the on-disk store cache. Only
+// the FINDTEAMMATCH POOL branch's caller (MaybeAdvanceKachinuki's mutate
+// closure) appends to a returned result's SubResults in place, and that
+// closure only ever runs against the independently-loaded pool MatchResult
+// from UpdatePoolMatchByID, never against a bracket-sourced result from this
+// helper (the bracket branch mirrors Winner/Status directly onto the
+// BracketMatch instead). If a future caller appends in place to a
+// bracket-sourced result here, copy SubResults first (mirrors
+// handlers_daihyosen.go's daihyosenBracketResult, which does exactly that for
+// its own in-place-append call site).
 func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 	return &state.MatchResult{
 		ID:          bm.ID,

@@ -370,6 +370,13 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 // (the daihyosen append re-runs the score path, which needs the slot) on top
 // of the fields the engine's bracketMatchAsResult projects, so it deliberately
 // does NOT reuse that engine helper.
+//
+// SubResults is copied (not aliased) so an in-place append on the returned
+// MatchResult can never reach into bm's backing array via shared capacity: the
+// caller's own comment ("SubResults must be copied ... the daihyosen append
+// doesn't overwrite existing data") depends on that being true at the source,
+// not as an incidental side effect of how the one current call site happens to
+// build its own copy before appending.
 func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 	return &state.MatchResult{
 		ID:              bm.ID,
@@ -384,7 +391,7 @@ func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 		DecisionReason:  bm.DecisionReason,
 		Encho:           bm.Encho,
 		DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-		SubResults:      bm.SubResults,
+		SubResults:      append([]state.SubMatchResult(nil), bm.SubResults...),
 	}
 }
 

@@ -7,6 +7,7 @@ import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.js
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
+import { poolNameOf } from './pool_ids.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -29,7 +30,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     const out = [];
     if (pools) {
         pools.forEach((p) => {
-            const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
+            // Exact parsed pool name, not a raw prefix: startsWith("Pool A-")
+            // would also swallow "Pool A-East-…" ids. poolNameOf strips any
+            // DH/TB suffix (matches the backend equality rule in daihyosen.go).
+            const matches = poolMatches ? poolMatches.filter(m => poolNameOf(m.id) === p.poolName) : [];
             matches.forEach((m) => {
                 const isDH = isPoolDaihyosenID(m.id || "");
                 out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });

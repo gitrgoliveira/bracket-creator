@@ -15,6 +15,7 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
+import { poolNameOf } from './pool_ids.jsx';
 
 const { useState } = React;
 const EmptyState = window.EmptyState;
@@ -467,10 +468,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
       {isLeague && leagueWinner && <div style={{ gridColumn: "1 / -1" }}><WinnerBadge name={leagueWinner.player?.name || ""} /></div>}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
-        const matches = poolMatches ? poolMatches.filter(m => {
-          const id = m.id || "";
-          return id.startsWith(pool.poolName + "-");
-        }) : [];
+        // Match ids belong to this pool by EXACT parsed pool name, not a raw
+        // prefix: startsWith("Pool A-") would also swallow "Pool A-East-…"
+        // ids when pool names overlap by prefix. poolNameOf strips any DH/TB
+        // suffix and matches the backend's equality rule (daihyosen.go).
+        const matches = poolMatches ? poolMatches.filter(m => poolNameOf(m.id) === pool.poolName) : [];
 
         // Teams that won a completed daihyosen (play-off) in this pool drive the
         // "DH" badge next to their name. The play-off decides order within the

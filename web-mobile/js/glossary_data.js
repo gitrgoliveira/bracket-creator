@@ -8,7 +8,7 @@
 export const GLOSSARY = {
   "aka": {"id":"aka","kanji":"赤","short":"Red","tooltip":"The competitor wearing a red ribbon at the back. Always shown on the right in this app."},
   "chuken": {"id":"chuken","kanji":"中堅","short":"Middle player","tooltip":"The team's middle player, fights bout 3 in a 5-person team."},
-  "daihyosen": {"id":"daihyosen","kanji":"代表選","short":"Representative bout","tooltip":"Tiebreaker for team knockout matches. When two teams finish equal on both individual wins and points, each picks one player to fight a single-point bout (ippon-shobu) to decide the match.","seeAlso":["ippon-shobu","ippon"]},
+  "daihyosen": {"id":"daihyosen","kanji":"代表選","short":"Representative bout","tooltip":"Representative tiebreaker bout for teams. When teams finish level, each side sends one player to fight a single-point bout (ippon-shobu) that decides the ranking. Used to break tied team pools and tied team knockout matches.","seeAlso":["ippon-shobu","ippon"]},
   "dan": {"id":"dan","kanji":"段","short":"Rank","tooltip":"A competitor's grade, shodan (1st), nidan (2nd), sandan (3rd), up to 8th. Optional in the entry form."},
   "dojo": {"id":"dojo","kanji":"道場","short":"Club or school","tooltip":"The training school or club a competitor represents. The pool generator avoids placing two competitors from the same dojo in the same pool when it can."},
   "encho": {"id":"encho","kanji":"延長","short":"Overtime","tooltip":"Overtime, when a knockout match is tied at the end of regulation, an extra period is played until someone scores. Scoring in Encho follows ippon-shobu rules: first to one point wins.","seeAlso":["ippon-shobu","ippon"]},

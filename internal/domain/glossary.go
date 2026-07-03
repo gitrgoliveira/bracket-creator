@@ -94,7 +94,7 @@ var Glossary = map[string]Term{
 		ID:      "daihyosen",
 		Kanji:   "代表選",
 		Short:   "Representative bout",
-		Tooltip: "Tiebreaker for team knockout matches. When two teams finish equal on both individual wins and points, each picks one player to fight a single-point bout (ippon-shobu) to decide the match.",
+		Tooltip: "Representative tiebreaker bout for teams. When teams finish level, each side sends one player to fight a single-point bout (ippon-shobu) that decides the ranking. Used to break tied team pools and tied team knockout matches.",
 		SeeAlso: []string{"ippon-shobu", "ippon"},
 	},
 	"hansoku": {

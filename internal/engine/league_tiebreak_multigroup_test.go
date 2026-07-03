@@ -176,3 +176,32 @@ func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteTransitioned, outcome, "resolved single group must complete, not wedge")
 }
+
+// TestMaybeAutoCompletePools_TwoGroups_StandingsOrderReflectsDHWinners is the
+// league-lifecycle counterpart to the completion-gating tests above: it pins the
+// FINAL RANK ORDER after both groups' tie-breakers are scored through the real
+// operator path (GenerateLeagueTiebreakMatches). The existing league tests only
+// assert the AutoComplete* outcome; none verify that the DH winner actually ends
+// up ranked above the loser, which is the "who advances and in which position"
+// property. It also guards cross-group isolation: the bottom group's DH winner
+// must not be lifted above the top group (both DH results are excluded from the
+// Points totals, so ordering comes solely from the per-group DH secondary sort).
+func TestMaybeAutoCompletePools_TwoGroups_StandingsOrderReflectsDHWinners(t *testing.T) {
+	compID := "two-tie-order"
+	eng, store := setupTwoTiedGroupLeague(t, compID)
+
+	// Within each tied group, the DH winner is the team that finished the raw
+	// standings lower (Beta below Alpha, Delta below Gamma), so a correct
+	// secondary sort must visibly reorder them.
+	scoreGroupDH(t, eng, store, compID, []string{"Alpha", "Beta"}, "Beta")
+	scoreGroupDH(t, eng, store, compID, []string{"Gamma", "Delta"}, "Gamma")
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	require.Equal(t, AutoCompleteTransitioned, outcome, "both groups resolved must complete")
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Beta", "Alpha", "Gamma", "Delta"}, poolOrder(standings["Pool A"]),
+		"DH winners must advance within their own group; bottom-group win must not cross into the top group")
+}

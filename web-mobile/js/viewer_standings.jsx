@@ -23,6 +23,17 @@ const EmptyState = window.EmptyState;
 // ViewerCompetition which stays there; this copy serves PoolsViewer here).
 const isPoolDaihyosenID = id => id.includes('-DH-');
 
+// DHBadge: the "DH" tag marking a team that won a daihyosen play-off. The label
+// is a kendo-glossary term (tap/focus to define daihyosen), matching the
+// bracket's DH chip and staying explainable on touch where a title tooltip
+// isn't. Falls back to a plain badge before glossary.jsx attaches window.Term.
+function DHBadge() {
+  const label = (typeof window !== "undefined" && window.Term)
+    ? React.createElement(window.Term, { name: "daihyosen" }, "DH")
+    : "DH";
+  return <span className="tag-badge">{label}</span>;
+}
+
 // ---------------------------------------------------------------------------
 // isSwissFinalStandings
 // testable without mounting the component. Mirrors the
@@ -442,6 +453,18 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           return id.startsWith(pool.poolName + "-");
         }) : [];
 
+        // Teams that won a completed daihyosen (play-off) in this pool drive the
+        // "DH" badge next to their name. The play-off decides order within the
+        // tied group only (FIK 6.1.6.1.2) and never feeds the ranking cascade,
+        // so the badge is the only visible signal that a play-off settled two
+        // otherwise-identical rows.
+        const dhWinnerNames = new Set(
+          matches
+            .filter(m => isPoolDaihyosenID(m.id || "") && m.status === "completed" && m.winner)
+            .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+            .filter(Boolean)
+        );
+
         // Build playerKey→{rank, standingEntry} map from the rank-sorted standings array.
         // Rank is the backend's authoritative PlayerStanding.rank (single source of
         // truth: it already folds in tiebreakers and manual rank overrides; see
@@ -536,6 +559,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
+                          {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 2) && (
+                            <DHBadge />
+                          )}
                           {/* The rank badge is only informative when rows are in
                               DRAW order (non-league pools), where rank ≠ the "#"
                               draw-position column. League standings are rank-sorted,

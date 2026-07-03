@@ -69,6 +69,17 @@ function poolMatchesForPool(poolMatches, poolName) {
   return (poolMatches || []).filter(m => poolNameOf(m.id) === poolName);
 }
 
+// DHBadge: the "DH" tag marking a team that won a daihyosen play-off. The label
+// is a kendo-glossary term (tap/focus to define daihyosen), matching the
+// bracket's DH chip and staying explainable on touch where a title tooltip
+// isn't. Falls back to a plain badge before glossary.jsx attaches window.Term.
+function DHBadge() {
+  const label = (typeof window !== "undefined" && window.Term)
+    ? React.createElement(window.Term, { name: "daihyosen" }, "DH")
+    : "DH";
+  return <span className="tag-badge">{label}</span>;
+}
+
 // Enrich a pool-match object with the comp-* metadata that
 // ScoreEditorModal reads off the match prop. Pool matches arrive as the
 // raw MatchResult shape (id, status, sides, ippons, decision) with none
@@ -366,6 +377,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
+  // True when teamName won a completed daihyosen (play-off) bout in poolName.
+  // Drives the "DH" badge in the standings table. Purely informational: the
+  // play-off only decides ORDER within the tied group (per FIK 6.1.6.1.2) and
+  // never feeds the ranking cascade, so no stat is altered, this badge is the
+  // only signal that a play-off settled two otherwise-identical rows.
+  const teamWonDaihyosen = (poolName, teamName) => {
+    const prefix = poolName + "-DH-";
+    return (poolMatches || []).some(m => {
+      if (!(m.id || "").startsWith(prefix) || m.status !== "completed" || !m.winner) return false;
+      const w = typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
+      return w === teamName;
+    });
+  };
+
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
   const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
@@ -554,6 +579,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                       <div style={{ fontWeight: 600 }}>
                         {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
                         {s.player.name}
+                        {isTeamComp && teamWonDaihyosen(selectedPool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 2) && (
+                          <DHBadge />
+                        )}
                       </div>
                       {tweaks.showDojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
                     </td>
@@ -713,6 +741,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                           <div style={{ fontWeight: 500 }}>
                             {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
                             {s.player.name}
+                            {isTeamComp && teamWonDaihyosen(pool.poolName, s.player.name) && (!isLeague || (s.rank || i + 1) <= 2) && (
+                              <DHBadge />
+                            )}
                           </div>
                           {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
                         </td>

@@ -436,38 +436,36 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
 				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:          bm.ID,
-						SideA:       bm.SideA,
-						SideB:       bm.SideB,
-						Winner:      bm.Winner,
-						Status:      bm.Status,
-						Court:       bm.Court,
-						ScheduledAt: bm.ScheduledAt,
-						Decision:    bm.Decision,
-						SubResults:  bm.SubResults,
-					}, true, nil
+					return bracketMatchToTeamResult(bm), true, nil
 				}
 			}
 		}
 		// The Naginata 3rd-place (bronze) match is a sibling of
-		// bracket.Rounds, not an element of it; look it up here, projecting
-		// the same fields the Rounds branch returns.
+		// bracket.Rounds, not an element of it; look it up here.
 		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-			return &state.MatchResult{
-				ID:          bm.ID,
-				SideA:       bm.SideA,
-				SideB:       bm.SideB,
-				Winner:      bm.Winner,
-				Status:      bm.Status,
-				Court:       bm.Court,
-				ScheduledAt: bm.ScheduledAt,
-				Decision:    bm.Decision,
-				SubResults:  bm.SubResults,
-			}, true, nil
+			return bracketMatchToTeamResult(*bm), true, nil
 		}
 	}
 	return nil, false, nil
+}
+
+// bracketMatchToTeamResult projects a BracketMatch into the *MatchResult shape
+// findTeamMatch returns for kachinuki lookups. It carries Court + ScheduledAt
+// (unlike bracketMatchAsResult in bracket_result.go, which omits them and adds
+// decision/encho/flag detail for the eligibility/rollback paths), so the two
+// projections are deliberately distinct.
+func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
+	return &state.MatchResult{
+		ID:          bm.ID,
+		SideA:       bm.SideA,
+		SideB:       bm.SideB,
+		Winner:      bm.Winner,
+		Status:      bm.Status,
+		Court:       bm.Court,
+		ScheduledAt: bm.ScheduledAt,
+		Decision:    bm.Decision,
+		SubResults:  bm.SubResults,
+	}
 }
 
 // kachinukiRemainingRoster derives the remaining un-retired roster per

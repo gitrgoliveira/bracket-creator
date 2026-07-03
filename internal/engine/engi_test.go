@@ -639,3 +639,35 @@ func TestRecordMatchResultWithIneligibility_EngiBronzeDispatch(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, bracket.ThirdPlaceMatch.Status)
 	assert.NotEmpty(t, bracket.ThirdPlaceMatch.Winner)
 }
+
+// TestRecordMatchResult_EngiBackfillsWinnerForBroadcast pins the tri-review
+// finding: the engi score client submits only flag counts (never a winner), and
+// the engi dispatch used to discard the engine's recorded result, so the
+// handler's SSE match_updated broadcast (which sends `result`) carried no
+// winner and the bracket card showed no highlight until the next refetch.
+// RecordMatchResultWithIneligibility must back-fill the flag-derived winner onto
+// the caller's result.
+func TestRecordMatchResult_EngiBackfillsWinnerForBroadcast(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-backfill"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	first := matches[0]
+
+	// Mirror the wire payload: flags + status only, NO winner.
+	result := &state.MatchResult{FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted}
+	status, err := eng.RecordMatchResultWithIneligibility(compID, first.ID, result)
+	require.NoError(t, err)
+	assert.Nil(t, status, "engi has no eligibility concept")
+
+	// Back-filled from the engine's flag-derived decision.
+	assert.Equal(t, first.SideA, result.Winner, "3-2 → SideA wins, back-filled onto result for the broadcast")
+	assert.Equal(t, "A", result.WinnerSide)
+	assert.Equal(t, state.MatchStatusCompleted, result.Status)
+}

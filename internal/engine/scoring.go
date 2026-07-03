@@ -328,8 +328,12 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibility: load competition %s: %w", compId, loadErr)
 	}
 	if comp != nil && comp.Engi {
-		_, recErr := e.recordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB, result.CorrectionReason)
-		return nil, recErr
+		rec, recErr := e.recordEngiMatchResult(compId, matchId, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		if recErr != nil {
+			return nil, recErr
+		}
+		backfillEngiResult(result, rec)
+		return nil, nil
 	}
 
 	applyHansokuIppons(result)

@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -86,6 +85,25 @@ func (e *Engine) recordEngiMatchResultTx(tx state.StoreTx, compID, matchID strin
 	)
 }
 
+// backfillEngiResult copies the engine-derived identity from a recorded engi
+// MatchResult (rec) onto the caller's result so the handler's SSE
+// match_updated broadcast carries the winner. The engi score client submits
+// only flag counts and status, never a winner, so without this the bracket
+// card / scoreboard would show the match completed but with no winner
+// highlight until the next background refetch. Winner/WinnerSide are set by
+// engiWinnerSide; WinnerID is populated for pool bouts (from SideAID/SideBID)
+// and empty for bracket bouts (BracketMatch has no per-side IDs), matching the
+// authoritative on-disk state either way.
+func backfillEngiResult(result, rec *state.MatchResult) {
+	if result == nil || rec == nil {
+		return
+	}
+	result.Winner = rec.Winner
+	result.WinnerSide = rec.WinnerSide
+	result.WinnerID = rec.WinnerID
+	result.Status = rec.Status
+}
+
 // recordEngiMatch is the shared record core for both the tx and non-tx paths.
 // poolUpdate and bracketUpdate abstract the persistence layer so the same logic
 // runs against either e.store (non-tx) or a StoreTx (tx).
@@ -98,7 +116,7 @@ func (e *Engine) recordEngiMatch(
 ) (*state.MatchResult, error) {
 	if !engiValidTotal(flagsA, flagsB) {
 		return nil, validationErrorf(
-			"engi: flag total %d+%d=%d is invalid; total must be in {1,3,5} with flagsA != flagsB",
+			"engi: flag total %d+%d=%d is invalid; total must be odd and in {1,3,5} (3- or 5-referee panel, no draw possible)",
 			flagsA, flagsB, flagsA+flagsB,
 		)
 	}
@@ -219,14 +237,6 @@ func engiPlayerKey(id, name string) string {
 	return "name:" + name
 }
 
-// engiStandingsLoader is the minimal read surface computeEngiStandings
-// requires. It is narrower than poolStandingsLoader (which also mandates
-// LoadCompetition); both *state.Store and state.StoreTx satisfy it.
-type engiStandingsLoader interface {
-	LoadPools(compID string) ([]helper.Pool, error)
-	LoadPoolMatches(compID string) ([]state.MatchResult, error)
-}
-
 // computeEngiStandings is the engi standings core, fully independent of the
 // kendo computeStandingsFrom. It ranks each pool by (1) total Wins, then
 // (2) total accumulated OWN-SIDE flags across every completed bout (the winner
@@ -237,7 +247,10 @@ type engiStandingsLoader interface {
 // computeStandings sits above the pool/league split: a league competition
 // stores all its bouts as pool matches under its single league pool, so the
 // same per-pool aggregation applies.
-func (e *Engine) computeEngiStandings(loader engiStandingsLoader, compID string) (map[string][]state.PlayerStanding, error) {
+// It takes the same poolStandingsLoader as computeStandingsFrom (it only calls
+// LoadPools + LoadPoolMatches, never LoadCompetition), so both *state.Store and
+// state.StoreTx satisfy it.
+func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string) (map[string][]state.PlayerStanding, error) {
 	pools, err := loader.LoadPools(compID)
 	if err != nil {
 		return nil, err

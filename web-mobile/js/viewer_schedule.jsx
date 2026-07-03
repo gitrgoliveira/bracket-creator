@@ -210,7 +210,7 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
       if (!hit) return false;
     }
     if (dt) {
-      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(dt));
+      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt));
       if (!hit) return false;
     }
     return true;
@@ -222,7 +222,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   const names = new Set(picked.map((p) => p.name).filter(Boolean));
   if (ids.size > 0 && ((m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name))))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
-  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(dt))) return true;
+  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
   return false;
 }
 

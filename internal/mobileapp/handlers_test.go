@@ -2427,3 +2427,131 @@ func TestCompetitionHandlers_DefaultDate_IsDay1(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "15-07-2026", loaded.Date, "empty competition date should default to tournament Day 1")
 }
+
+// TestCompleteHandler_NaginataBronzeGate is a regression for the tri-review
+// finding: POST /complete must not seal a naginata competition whose 3rd-place
+// (bronze) match is unscored (the Awards podium would show an incomplete 3rd).
+// The JS "Complete competition" button enforces this via bracketFullyComplete;
+// this pins the same guard server-side against a direct API call.
+func TestCompleteHandler_NaginataBronzeGate(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "nag-complete-gate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Nag Complete Gate", Status: state.CompStatusPlayoffs, Naginata: true,
+	}))
+
+	post := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+		r.ServeHTTP(w, req)
+		return w
+	}
+	final := func(status state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: "m-final", SideA: "Alice", SideB: "Bob", Status: status}
+	}
+	bronze := func(status state.MatchStatus) *state.BracketMatch {
+		return &state.BracketMatch{ID: "m-bronze", SideA: "Charlie", SideB: "Dave", Status: status}
+	}
+
+	// Completed final but an UNSCORED bronze → blocked (bronze is a required
+	// must-play match).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusCompleted)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusScheduled),
+	}))
+	w := post()
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "all bracket matches")
+
+	// Scored bronze but an UNSCORED final → still blocked (the general gate
+	// covers non-bronze matches too; closes the kendo direct-API hole).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusScheduled)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusCompleted),
+	}))
+	assert.Equal(t, http.StatusBadRequest, post().Code)
+
+	// Both the final and the bronze completed → completion succeeds.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds:          [][]state.BracketMatch{{final(state.MatchStatusCompleted)}},
+		ThirdPlaceMatch: bronze(state.MatchStatusCompleted),
+	}))
+	w = post()
+	assert.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// TestBracketFullyComplete pins the completion predicate, especially the
+// placeholder case behind Copilot #326: a downstream match still holding a
+// "Winner of rX-mY" placeholder side (SSE hasn't propagated its real sides yet)
+// must count as required-and-incomplete, so the gate can't fire early. Byes
+// (one empty side) and Hidden phantoms are excluded.
+func TestBracketFullyComplete(t *testing.T) {
+	comp := func(id string, a, b string, s state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: id, SideA: a, SideB: b, Status: s}
+	}
+
+	t.Run("nil / empty bracket is not complete", func(t *testing.T) {
+		assert.False(t, bracketFullyComplete(nil))
+		assert.False(t, bracketFullyComplete(&state.Bracket{}))
+	})
+
+	t.Run("final still a placeholder blocks completion", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{comp("m-sf1", "Alice", "Bob", state.MatchStatusCompleted)},
+			{comp("m-final", "Winner of r0-m0", "Winner of r0-m1", state.MatchStatusScheduled)},
+		}}
+		assert.False(t, bracketFullyComplete(b), "placeholder final is required-and-incomplete")
+	})
+
+	t.Run("all real matches completed is complete", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{comp("m-sf1", "Alice", "Bob", state.MatchStatusCompleted)},
+			{comp("m-final", "Alice", "Carol", state.MatchStatusCompleted)},
+		}}
+		assert.True(t, bracketFullyComplete(b))
+	})
+
+	t.Run("unscored bronze blocks completion", func(t *testing.T) {
+		b := &state.Bracket{
+			Rounds:          [][]state.BracketMatch{{comp("m-final", "Alice", "Carol", state.MatchStatusCompleted)}},
+			ThirdPlaceMatch: &state.BracketMatch{ID: "m-bronze", SideA: "Bob", SideB: "Dave", Status: state.MatchStatusScheduled},
+		}
+		assert.False(t, bracketFullyComplete(b))
+	})
+
+	t.Run("byes and hidden phantoms are excluded", func(t *testing.T) {
+		b := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{
+				comp("m-final", "Alice", "Bob", state.MatchStatusCompleted),
+				comp("m-bye", "Carol", "", state.MatchStatusScheduled),              // bye: one empty side
+				{ID: "m-phantom", Hidden: true, Status: state.MatchStatusScheduled}, // hidden phantom
+			},
+		}}
+		assert.True(t, bracketFullyComplete(b), "a scheduled bye/phantom must not block completion")
+	})
+}
+
+// TestCompleteHandler_BracketLoadErrorFailsClosed pins Copilot #326: completion
+// is IRREVERSIBLE, so a genuine bracket I/O/parse fault must fail CLOSED (500),
+// not fall through and seal the competition with unknown bracket state. (A
+// MISSING bracket.json is not a fault -- LoadBracket maps it to an empty bracket
+// + nil error -- so bracketless formats still complete.)
+func TestCompleteHandler_BracketLoadErrorFailsClosed(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+
+	compID := "complete-bracket-io-fail"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "IO Fail", Status: state.CompStatusPlayoffs,
+	}))
+	// Corrupt bracket.json so LoadBracket returns a parse error (distinct from
+	// os.IsNotExist, which maps to an empty bracket).
+	bracketPath := filepath.Join(tempDir, "competitions", compID, "bracket.json")
+	require.NoError(t, os.WriteFile(bracketPath, []byte("{ not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/complete", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}

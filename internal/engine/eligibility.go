@@ -93,7 +93,8 @@ func (e *Engine) checkConcurrentIneligibility(compID, matchID, loserName string)
 		}
 		return nil
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
 		return nil
@@ -237,6 +238,9 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 				}
 			}
 		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.Court, nil
+		}
 	}
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
@@ -299,6 +303,20 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+				return &IneligibleCompetitorError{
+					PlayerID: idA,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+				return &IneligibleCompetitorError{
+					PlayerID: idB,
+					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
+				}
+			}
+		}
 	}
 
 	return nil
@@ -309,7 +327,8 @@ func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) 
 	if err != nil || comp == nil {
 		return sideA, sideB
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return sideA, sideB
 	}
@@ -486,26 +505,14 @@ func (e *Engine) lookupExistingResult(compID, matchID string) (*state.MatchResul
 	bracket, err := e.store.LoadBracket(compID)
 	if err == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID {
-					return &state.MatchResult{
-						ID:              bm.ID,
-						SideA:           bm.SideA,
-						SideB:           bm.SideB,
-						Winner:          bm.Winner,
-						Status:          bm.Status,
-						Decision:        bm.Decision,
-						DecisionBy:      bm.DecisionBy,
-						DecisionReason:  bm.DecisionReason,
-						Encho:           bm.Encho,
-						DecidedByHantei: state.HanteiPtr(bm.DecidedByHantei),
-						// Include the persisted sub-results so a rollback replay
-						// restores the full team-bout state. LoadBracket deep-copies,
-						// so this slice is safe to hand back without aliasing cache.
-						SubResults: bm.SubResults,
-					}, nil
+			for i := range round {
+				if round[i].ID == matchID {
+					return bracketMatchAsResult(&round[i]), nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracketMatchAsResult(bracket.ThirdPlaceMatch), nil
 		}
 	}
 	return nil, notFoundErrorf("match %q not found in competition %q", matchID, compID)
@@ -558,6 +565,11 @@ func (e *Engine) hasDownstreamMatchStarted(compID string, playerNames []string, 
 				}
 			}
 		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
+			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
+				return true, nil
+			}
+		}
 	}
 	return false, nil
 }
@@ -579,7 +591,13 @@ func (e *Engine) restoreCompetitorEligibility(compID, priorLoser, matchID string
 	if err != nil {
 		return nil, err
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if comp == nil {
+		// Missing/deleted config: nothing to resolve. Best-effort like the
+		// unresolvable-player case below, so an undo isn't failed by it.
+		return nil, nil
+	}
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -612,7 +630,13 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if comp == nil {
+		// This helper returns an error path already, so fail cleanly rather
+		// than panic when the competition record is missing/deleted.
+		return nil, notFoundErrorf("competition %s not found", compID)
+	}
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}
@@ -637,6 +661,9 @@ func (e *Engine) lookupMatchSides(compID, matchID string) (string, string, error
 					return bm.SideA, bm.SideB, nil
 				}
 			}
+		}
+		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+			return bracket.ThirdPlaceMatch.SideA, bracket.ThirdPlaceMatch.SideB, nil
 		}
 	}
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
@@ -697,7 +724,13 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	if err != nil {
 		return nil, err
 	}
-	participants, err := e.store.LoadParticipants(compID, comp.WithZekkenName)
+	if comp == nil {
+		// Side-effect helper: no config means no eligibility record to write,
+		// so safely no-op rather than panic on a missing/deleted competition.
+		return nil, nil
+	}
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
 	}

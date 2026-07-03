@@ -657,3 +657,25 @@ func TestParsePoolsFile_LegacyNoCol2(t *testing.T) {
 	assert.Equal(t, "Bob", loaded[0].Players[1].Name)
 	assert.Equal(t, "Charlie", loaded[0].Players[2].Name)
 }
+
+// TestParsePoolMatchesRecords_ClampsNegativeFlags is a regression for Copilot
+// PR #326 round 2: a corrupted / hand-edited pool-matches.csv must not load
+// negative engi flag counts (flags are validated non-negative at the HTTP
+// boundary). parsePoolMatchesRecords clamps negatives to 0.
+func TestParsePoolMatchesRecords_ClampsNegativeFlags(t *testing.T) {
+	rec := make([]string, 24)
+	rec[0], rec[1], rec[2], rec[3] = "Pool A", "0", "X", "Y"
+	rec[22], rec[23] = "-3", "-5" // corrupted negative flag counts
+
+	got := parsePoolMatchesRecords([][]string{rec})
+	require.Len(t, got, 1)
+	assert.Equal(t, 0, got[0].FlagsA, "negative FlagsA clamped to 0")
+	assert.Equal(t, 0, got[0].FlagsB, "negative FlagsB clamped to 0")
+
+	// A valid non-negative value still loads unchanged.
+	rec[22], rec[23] = "3", "2"
+	got = parsePoolMatchesRecords([][]string{rec})
+	require.Len(t, got, 1)
+	assert.Equal(t, 3, got[0].FlagsA)
+	assert.Equal(t, 2, got[0].FlagsB)
+}

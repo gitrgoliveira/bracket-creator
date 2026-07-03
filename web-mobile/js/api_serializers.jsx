@@ -70,6 +70,16 @@ function toBackendMatchResult(patch, match) {
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = bId || "";
     }
     if (winnerId) result.winnerId = winnerId;
+    // Engi (kata) matches score by referee flag count, not ippons: carry
+    // flagsA/flagsB through when the patch sets them (EngiScoreEditorModal's
+    // submit payload). Omitted otherwise so non-engi payloads stay minimal.
+    if (patch.flagsA != null) result.flagsA = patch.flagsA;
+    if (patch.flagsB != null) result.flagsB = patch.flagsB;
+    // Audit reason captured by ReasonPrompt when correcting a completed
+    // match (admin_scoring_shared.jsx CORRECTION_PRESETS). Without this the
+    // operator's typed/selected reason never reached the wire and the audit
+    // trail silently stayed empty on every correction, kendo and team alike.
+    if (patch.correctionReason) result.correctionReason = patch.correctionReason;
     if (patch.subResults) {
         result.subResults = patch.subResults;
     }
@@ -139,6 +149,20 @@ function normalizeMatch(m, playerMap) {
     if (typeof norm.winner === "string" && norm.winner) {
         norm.winner = resolveSide(norm.winner, m.winnerId);
     }
+    // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
+    // {id,name} above with the server's authoritative flat ids), so same-name /
+    // different-dojo finalists don't collide onto the wrong side and swap the
+    // displayed winner/loser tallies. Fall back to name only when an id isn't
+    // present on both.
+    const sideAWon = (w, a) => {
+        if (!w || !a) return false;
+        const wId = typeof w === "object" ? w.id || "" : "";
+        const aId = typeof a === "object" ? a.id || "" : "";
+        if (wId && aId) return wId === aId;
+        const wn = typeof w === "object" ? w.name : w;
+        const an = typeof a === "object" ? a.name : a;
+        return wn === an;
+    };
     // Build score object from flat scoreA/scoreB if needed (bracket matches)
     if (!norm.score && (norm.scoreA || norm.scoreB) && norm.status === "completed") {
         // Strip the trailing "(HN)" hansoku suffix (with optional separator
@@ -153,7 +177,7 @@ function normalizeMatch(m, playerMap) {
         const stripHansoku = (s) => (s || "").replace(/\s*\(H\d+\)$/, "");
         const cleanA = stripHansoku(norm.scoreA);
         const cleanB = stripHansoku(norm.scoreB);
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        const aWin = sideAWon(norm.winner, norm.sideA);
         // Recover BOTH sides' waza letters into the per-side ippon arrays (when
         // the server didn't send them for bracket matches). scoreA/scoreB are
         // each formatScore(IpponsA/B) on the server: i.e. both sides' letters: 
@@ -172,7 +196,7 @@ function normalizeMatch(m, playerMap) {
     }
     // Build score from ipponsA/ipponsB for pool matches
     if (!norm.score && (norm.ipponsA?.length || norm.ipponsB?.length) && norm.status === "completed") {
-        const aWin = norm.winner && norm.sideA && (typeof norm.winner === "object" ? norm.winner.name : norm.winner) === (typeof norm.sideA === "object" ? norm.sideA.name : norm.sideA);
+        const aWin = sideAWon(norm.winner, norm.sideA);
         norm.score = {
             type: isHikiwake(norm.decision) ? "hikiwake" : "ippon",
             winnerPts: aWin ? (norm.ipponsA?.length || 0) : (norm.ipponsB?.length || 0),
@@ -180,6 +204,9 @@ function normalizeMatch(m, playerMap) {
             ippons: aWin ? norm.ipponsA : norm.ipponsB,
         };
     }
+    // Carry engi flag counts through (additive, no kendo code reads these).
+    if (m.flagsA != null) norm.flagsA = m.flagsA;
+    if (m.flagsB != null) norm.flagsB = m.flagsB;
     return norm;
 }
 
@@ -292,13 +319,14 @@ function normalizeCompetitionDetail(data) {
         }));
     }
 
-    // Normalize standings player field
+    // Normalize standings player field (carry flags for engi standings)
     if (result.standings) {
         const standings = {};
         for (const key of Object.keys(result.standings)) {
             standings[key] = result.standings[key].map(s => ({
                 ...s,
                 player: normalizePlayer(s.player),
+                flags: s.flags || 0,
             }));
         }
         result.standings = standings;
@@ -313,6 +341,10 @@ function normalizeCompetitionDetail(data) {
         result.bracket = { ...result.bracket, rounds: result.bracket.rounds.map(round =>
             round.map(m => normalizeMatch(m, playerMap))
         )};
+    }
+    // Normalize bronze/3rd-place match when present (naginata competitions)
+    if (result.bracket && result.bracket.thirdPlaceMatch) {
+        result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap) };
     }
     return result;
 }

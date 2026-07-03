@@ -148,3 +148,56 @@ func TestDecisionHandler_MatchNotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
+
+// TestDecisionHandler_EngiGuard is a Finding 9 regression test: kiken and
+// fusenpai decisions make no sense for engi competitions (no ippons), so the
+// endpoint must return 400 before touching the engine.
+func TestDecisionHandler_EngiGuard(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "engi-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:   cid,
+		Engi: true,
+	}))
+
+	for _, dec := range []string{"kiken", "kiken-voluntary", "kiken-injury", "fusenpai", "fusensho", "daihyosen"} {
+		body, _ := json.Marshal(DecisionRequest{Decision: dec, DecisionBy: "shiro"})
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/competitions/"+cid+"/matches/m1/decision",
+			bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		assert.Equalf(t, http.StatusBadRequest, w.Code,
+			"decision %q on engi comp must return 400; body: %s", dec, w.Body.String())
+		assert.Contains(t, w.Body.String(), "engi",
+			"error message must mention engi for decision %q", dec)
+	}
+}
+
+// TestDecisionHandler_NonEngiUnaffected verifies that a non-engi competition
+// is not blocked by the engi guard and proceeds normally (404 expected because
+// there is no such match, not 400 from the guard).
+func TestDecisionHandler_NonEngiUnaffected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	cid := "kendo-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:   cid,
+		Engi: false,
+	}))
+
+	body, _ := json.Marshal(DecisionRequest{Decision: "kiken", DecisionBy: "shiro"})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/"+cid+"/matches/no-such-match/decision",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	// The guard must NOT fire for non-engi; expect 404 (match not found), not 400.
+	assert.Equal(t, http.StatusNotFound, w.Code,
+		"non-engi competition must not be blocked by engi guard; expected 404 from engine")
+}

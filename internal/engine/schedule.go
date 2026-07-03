@@ -379,6 +379,26 @@ func (e *Engine) GenerateSchedule(compID string) error {
 					})
 				}
 			}
+			// Bronze (3rd-place) playoff is a sibling field, not a row in Rounds;
+			// count it as one extra bracket bout when present (naginata only).
+			if bracket.ThirdPlaceMatch != nil {
+				bm := bracket.ThirdPlaceMatch
+				court := bm.Court
+				if court == "" {
+					court = "A"
+				}
+				entries = append(entries, state.ScheduleEntry{
+					MatchType: "bracket",
+					// Bronze is not in a numbered round, so it can't use the
+					// "R{n}-M{id}" round-match ref. Use the bare match id so
+					// patchScheduleCourt's exact-match clause keeps the
+					// schedule court in sync when the bronze court changes.
+					MatchRef:    bm.ID,
+					Court:       court,
+					ScheduledAt: bm.ScheduledAt,
+					Status:      string(bm.Status),
+				})
+			}
 		}
 	}
 

@@ -295,6 +295,41 @@ func TestCollectKachinukiMatches_WithBracketStub(t *testing.T) {
 	assert.Empty(t, out, "bracket stub with no bouts should be skipped by the renderer guard")
 }
 
+// TestCollectKachinukiMatches_BronzeStub verifies the Naginata 3rd-place
+// (bronze) match — a sibling of bracket.Rounds — is considered by the export
+// at parity with Rounds matches (kachinuki-exhaustion stub, skipped when it
+// has no bouts).
+func TestCollectKachinukiMatches_BronzeStub(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kachinuki-bronze-stub"
+
+	comp := &state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+		Naginata:      true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:       "m-bronze",
+			SideA:    "RedTeam",
+			SideB:    "WhiteTeam",
+			Winner:   "RedTeam",
+			Decision: string(domain.DecisionKachinukiExhaustion),
+		},
+	}))
+
+	out, err := eng.collectKachinukiMatches(compID, comp)
+	require.NoError(t, err)
+	// Bronze stub has no bouts → skipped by the renderer guard, same as a
+	// Rounds bracket stub.
+	assert.Empty(t, out, "bronze stub with no bouts should be skipped")
+}
+
 // TestResolveKachinukiPosition_PrefersMatchScoped verifies the mp-825
 // selection: a match-scoped lineup wins over the round-scoped fallback,
 // and the fallback applies when no match-scoped entry exists.

@@ -52,6 +52,51 @@ describe('API Utils', () => {
       expect(result.decidedByHantei).toBe(true);
     });
 
+    it('forwards flagsA/flagsB for an engi submission (mp-gy6g regression)', () => {
+      // EngiScoreEditorModal's submit payload is {flagsA, flagsB, status}.
+      // Without this, the wire payload drops the flags entirely and the
+      // server sees 0+0, which fails engi's odd-total validation and
+      // triggers an infinite queued-write retry storm.
+      const match = { sideA: 'Aka Pair', sideB: 'Shiro Pair' };
+      const result = toBackendMatchResult({ flagsA: 3, flagsB: 0, status: 'completed' }, match);
+      expect(result.flagsA).toBe(3);
+      expect(result.flagsB).toBe(0);
+    });
+
+    it('omits flagsA/flagsB for a non-engi patch (kendo payload stays minimal)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.flagsA).toBeUndefined();
+      expect(result.flagsB).toBeUndefined();
+    });
+
+    it('forwards flagsA/flagsB = 0 explicitly (unanimous shutout, one side has zero flags)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({ flagsA: 0, flagsB: 5, status: 'completed' }, match);
+      expect(result.flagsA).toBe(0);
+      expect(result.flagsB).toBe(5);
+    });
+
+    it('forwards correctionReason when present (audit trail regression)', () => {
+      // ReasonPrompt (admin_scoring_shared.jsx) captures the operator's reason
+      // and merges it into the patch as correctionReason. Without forwarding
+      // it here, the audit trail was silently empty on every correction.
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [],
+        correctionReason: 'Scoring error',
+      }, match);
+      expect(result.correctionReason).toBe('Scoring error');
+    });
+
+    it('omits correctionReason when absent or empty (fresh entries stay minimal)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.correctionReason).toBeUndefined();
+      const result2 = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [], correctionReason: '' }, match);
+      expect(result2.correctionReason).toBeUndefined();
+    });
+
     it('forwards decidedByHantei = false (so a re-edit can clear it)', () => {
       const match = { sideA: 'A', sideB: 'B' };
       const result = toBackendMatchResult({

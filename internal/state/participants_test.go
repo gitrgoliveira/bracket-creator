@@ -286,6 +286,36 @@ func TestParticipantsDistinctDisplayNameRoundTrip(t *testing.T) {
 	assert.Equal(t, "Dojo C", loaded[0].Dojo)
 }
 
+// Regression (Copilot PR #326 round 2): the participant WRITE core must force
+// the Engi 4-column zekken layout too, not just the read core. An Engi comp
+// keeps WithZekkenName=false (the effective flag is WithZekkenName||Engi), and
+// handlers call AddParticipant with the RAW comp.WithZekkenName. Before the fix
+// that write mismatched the forced-zekken read, corrupting the pair's member 2
+// (DisplayName) on add. saveParticipantsNoLock now forces the engi layout on
+// write, symmetric with loadParticipantsNoLock.
+func TestEngiAddParticipantPreservesMemberTwo(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "engi-add-rt"
+	// Engi=true but WithZekkenName=false: the stored flag is NOT forced true.
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Engi Add", Engi: true, WithZekkenName: false,
+	}))
+
+	// Handlers pass the raw comp.WithZekkenName (false); member 2 = DisplayName.
+	pair := domain.Player{Name: "Emi Sasaki", DisplayName: "Ren Fujita", Dojo: "Getsurin Dojo"}
+	_, err = store.AddParticipant(compID, pair, false)
+	require.NoError(t, err)
+
+	// Member 2 (DisplayName) and the shared dojo must round-trip intact.
+	loaded, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	assert.Equal(t, "Ren Fujita", loaded[0].DisplayName, "engi member-2 must round-trip after AddParticipant")
+	assert.Equal(t, "Getsurin Dojo", loaded[0].Dojo, "engi dojo must round-trip")
+}
+
 func TestMetadataRoundTrip(t *testing.T) {
 	// Regression: saveParticipantsNoLock must write Metadata (danGrade and
 	// other extra CSV columns) so they survive a save→load cycle. Previously

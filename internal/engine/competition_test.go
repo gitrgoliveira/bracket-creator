@@ -695,6 +695,45 @@ func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
 	assert.True(t, findNameInBracket(bracketAfter, "Alicia"), "new name must appear in bracket after swap")
 }
 
+// TestReplaceParticipantInDraw_NaginataBronzeMatch verifies the participant
+// rename also reaches the Naginata 3rd-place (bronze) match, which is a sibling
+// of bracket.Rounds and is therefore not covered by the Rounds rename loop.
+func TestReplaceParticipantInDraw_NaginataBronzeMatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-bronze"
+	comp := &state.Competition{
+		ID: compID, Name: "Naginata Cup", Kind: "individual",
+		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		StartTime: "09:00", Status: "setup", Naginata: true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo0"}, {Name: "Bob", Dojo: "Dojo1"},
+		{Name: "Charlie", Dojo: "Dojo2"}, {Name: "Dave", Dojo: "Dojo3"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	// Simulate a semifinal loser having been fed into the bronze match, so the
+	// participant's name actually appears in ThirdPlaceMatch.
+	require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
+		require.NotNil(t, b.ThirdPlaceMatch, "naginata 4-player draw must have a bronze match")
+		b.ThirdPlaceMatch.SideA = "Alice"
+		b.ThirdPlaceMatch.Winner = "Alice"
+		return nil
+	}))
+
+	_, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
+	require.NoError(t, err)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, b.ThirdPlaceMatch)
+	assert.Equal(t, "Alicia", b.ThirdPlaceMatch.SideA, "bronze SideA must be renamed")
+	assert.Equal(t, "Alicia", b.ThirdPlaceMatch.Winner, "bronze Winner must be renamed")
+	assert.NotContains(t, []string{b.ThirdPlaceMatch.SideA, b.ThirdPlaceMatch.Winner}, "Alice", "stale name must not remain in the bronze match")
+}
+
 func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
 	// Create 6 players where pool-size=3 so we get 2 pools of 3.
 	// Alice and Bob both come from DojoX; the generator will try to keep them

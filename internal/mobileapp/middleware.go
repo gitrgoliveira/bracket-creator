@@ -215,7 +215,8 @@ func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
 // the main-password gate even in self-run mode (mp-7h7 / Copilot #203).
 //
 // Self-run makes the OPERATIONAL play surface public (scoring, check-in,
-// start/complete, draw generation) because there is no table operator. But
+// start, draw generation) because there is no table operator. But
+// competition COMPLETION is elevated-gated (irreversible, like invalidate).
 // configuration mutations are NOT operational play and are NOT elevated-gated,
 // so the self-run pass-through would otherwise let an anonymous client tamper
 // with setup. The routes below mutate: tournament setup (name/password/courts/
@@ -324,10 +325,10 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		}
 
 		// Self-run mode (mp-7h7): skip the main-password gate for operational
-		// routes (scoring, check-in, start, complete, generate draw, etc.),
+		// routes (scoring, check-in, start, generate draw, etc.),
 		// there is no dedicated table operator, so participants drive their own
-		// flow. Destructive routes (delete competition, invalidate, draw,
-		// overrides, participant roster mutations, import) remain gated by the
+		// flow. Destructive routes (delete competition, invalidate, complete,
+		// draw, overrides, participant roster mutations, import) remain gated by the
 		// EXISTING RequireElevatedPassword / enforceElevated decorators that
 		// already fire downstream on those specific routes. No new allowlist
 		// needed, the elevated-decorator set IS the allowlist (DRY).

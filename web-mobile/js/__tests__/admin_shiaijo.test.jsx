@@ -5,17 +5,20 @@ import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMa
 
 // A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
-// wins or points. Individual bouts show the self-explanatory ippon score.
-describe('shiaijoScoreCell; team numbers are never context-free', () => {
+// wins or points. Engi (flag-count scoring) is the ONLY competition type where
+// the headline figure is a number at all, and it too carries an explicit
+// label. Every other individual bout shows the self-explanatory ippon LETTERS.
+describe('shiaijoScoreCell; team and engi numbers are never context-free', () => {
   const orig = {};
   beforeEach(() => {
-    orig.iv = window.teamIVScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore;
+    orig.iv = window.teamIVScore; orig.fmt = window.formatIpponsScore; orig.ip = window.ipponsFromScore; orig.engi = window.engiFlagScore;
     window.teamIVScore = (m) => (m.subResults && m.subResults.length ? '2–1' : null);
     window.formatIpponsScore = () => 'M–K';
     window.ipponsFromScore = () => [];
+    window.engiFlagScore = (m) => (m.flagsA != null || m.flagsB != null ? `${m.flagsB || 0}–${m.flagsA || 0}` : null);
   });
   afterEach(() => {
-    window.teamIVScore = orig.iv; window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip;
+    window.teamIVScore = orig.iv; window.formatIpponsScore = orig.fmt; window.ipponsFromScore = orig.ip; window.engiFlagScore = orig.engi;
   });
 
   it('routes a completed team match to a labeled IV cell', () => {
@@ -31,6 +34,16 @@ describe('shiaijoScoreCell; team numbers are never context-free', () => {
   it('routes an individual match to the self-explanatory ippon score', () => {
     expect(shiaijoScoreCell({ status: 'completed', teamSize: 0 }))
       .toEqual({ kind: 'ippon', ippon: 'M–K' });
+  });
+
+  it('routes a completed engi match to a labeled flags cell, not a bare number', () => {
+    expect(shiaijoScoreCell({ status: 'completed', teamSize: 0, flagsA: 2, flagsB: 3 }))
+      .toEqual({ kind: 'engi', flags: '3–2' });
+  });
+
+  it('engi flags take priority over the ippon fallback when both are present', () => {
+    expect(shiaijoScoreCell({ status: 'completed', teamSize: 0, flagsA: 1, flagsB: 0 }))
+      .toEqual({ kind: 'engi', flags: '0–1' });
   });
 
   it('shows "vs" for a scheduled match regardless of team size', () => {

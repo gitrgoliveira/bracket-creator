@@ -60,6 +60,27 @@ func countEligibleForSides(store *state.Store, compID, sideA, sideB string) (a i
 	return a, b, err
 }
 
+// TestDaihyosenHandler_EngiGuard verifies the daihyosen endpoint rejects engi
+// competitions with 400 (not 500): a representative bout has no meaning when
+// scoring is by referee flag counts. Mirrors the quick-score / override /
+// decision engi guards.
+func TestDaihyosenHandler_EngiGuard(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+
+	cid := "engi-daihyosen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true, TeamSize: 3}))
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "Team A", SideB: "Team B"}}},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/competitions/"+cid+"/matches/b1/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "daihyosen on engi comp must return 400; body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "engi")
+}
+
 // TestFindMatchForDaihyosen_PoolFound verifies that a pool match is located
 // when searched by its "Pool *" ID.
 func TestFindMatchForDaihyosen_PoolFound(t *testing.T) {
@@ -126,6 +147,45 @@ func TestFindMatchForDaihyosen_BracketFound(t *testing.T) {
 	require.NotNil(t, match)
 	assert.Equal(t, "B1", match.ID)
 	assert.Equal(t, "TeamA", match.SideA)
+}
+
+// TestDaihyosenBracketResult_SubResultsNotAliased pins the tri-review /
+// Copilot finding: daihyosenBracketResult must COPY SubResults, not alias the
+// source BracketMatch's slice. An in-place append to the returned
+// MatchResult's SubResults (the pattern findMatchForDaihyosenTx's own comment
+// warns against) must never be observable on the original BracketMatch, even
+// when the slice has spare capacity (append reuses the backing array in that
+// case, which is exactly the failure mode a bare `SubResults: bm.SubResults`
+// assignment would expose).
+func TestDaihyosenBracketResult_SubResultsNotAliased(t *testing.T) {
+	bm := &state.BracketMatch{
+		ID:    "B1",
+		SideA: "TeamA",
+		SideB: "TeamB",
+		// Build with spare capacity so a naive aliased append would reuse the
+		// backing array instead of reallocating.
+		SubResults: make([]state.SubMatchResult, 1, 4),
+	}
+	bm.SubResults[0] = state.SubMatchResult{Position: 1, Winner: "Alice"}
+
+	result := daihyosenBracketResult(bm)
+	require.Len(t, result.SubResults, 1)
+	require.Equal(t, 4, cap(bm.SubResults), "sanity: spare capacity exists to reuse")
+
+	// In-place append on the returned result, mirroring the shape of a
+	// hypothetical future call site that doesn't defensively re-copy first.
+	// A slice-length assertion on bm.SubResults would NOT catch an aliasing
+	// bug here (its len is untouched either way; append only writes into the
+	// shared backing array at an index beyond bm.SubResults's own len). Detect
+	// the corruption directly by re-slicing bm.SubResults out to its full
+	// capacity and inspecting the cell the append would have written into.
+	result.SubResults = append(result.SubResults, state.SubMatchResult{Position: 2, Winner: "Bob"})
+
+	assert.Len(t, result.SubResults, 2, "the returned result itself grows")
+	assert.Len(t, bm.SubResults, 1, "the source BracketMatch's own length must be untouched")
+	assert.Equal(t, "Alice", bm.SubResults[0].Winner)
+	fullCap := bm.SubResults[:cap(bm.SubResults)]
+	assert.Empty(t, fullCap[1].Winner, "the append must not have written into bm's backing array at all (would read 'Bob' if aliased)")
 }
 
 // TestFindMatchForDaihyosen_BracketNotFound verifies that a missing bracket

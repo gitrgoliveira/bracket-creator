@@ -71,12 +71,17 @@ export const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize |
 // Exported so the team-vs-individual routing is unit-testable. A team
 // encounter's headline number is Individual Victories (IV); it must always
 // carry the IV label and never appear as a bare figure (which could be read
-// as wins or points). Individual bouts show the self-explanatory ippon score.
-// Returns one of: {kind:"team",iv} | {kind:"ippon",ippon} | {kind:"vs"} | {kind:"none"}.
+// as wins or points). Engi (flag-count scoring) is the ONLY competition type
+// where the headline figure is a number at all; it also carries an explicit
+// label so it isn't mistaken for an ippon count. Every other individual bout
+// shows the self-explanatory ippon LETTERS, never digits.
+// Returns one of: {kind:"team",iv} | {kind:"engi",flags} | {kind:"ippon",ippon} | {kind:"vs"} | {kind:"none"}.
 export function shiaijoScoreCell(m) {
     if (!m) return { kind: "none" };
     if (m.status === "scheduled") return { kind: "vs" };
     if (m.status !== "completed" && m.status !== "running") return { kind: "none" };
+    const flags = window.engiFlagScore ? window.engiFlagScore(m) : null;
+    if (flags) return { kind: "engi", flags };
     const isTeam = isTeamMatch(m);
     if (isTeam) {
         const iv = window.teamIVScore ? window.teamIVScore(m) : null;
@@ -980,9 +985,10 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 (often long) names keep the full-width line and never crowd. The
                 ippon string is shiro: aka, matching the Shiro-left/Aka-right
                 names above. */}
-            {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team") && (
+            {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team" || scoreCell.kind === "engi") && (
                 <div className="shiaijo-qrow__result">
                     {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {scoreCell.kind === "engi" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Total flags received">Flags</abbr>{scoreCell.flags}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
                 </div>
             )}

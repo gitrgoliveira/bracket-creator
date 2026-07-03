@@ -252,6 +252,12 @@ func validateBulkScoreLengths(r *state.MatchResult) error {
 	if err := validateIpponCounts("", r.IpponsA, r.IpponsB); err != nil {
 		return err
 	}
+	if r.FlagsA < 0 {
+		return &ValidationError{Field: "flagsA", Message: "must not be negative"}
+	}
+	if r.FlagsB < 0 {
+		return &ValidationError{Field: "flagsB", Message: "must not be negative"}
+	}
 	for i := range r.SubResults {
 		sr := &r.SubResults[i]
 		prefix := fmt.Sprintf("subResults[%d].", i)
@@ -445,6 +451,16 @@ func (r *ScoreRequest) Validate() error {
 	// reject it outright.
 	if r.Rev < 0 {
 		return &ValidationError{Field: "rev", Message: "must not be negative"}
+	}
+	// Engi referee flag counts must be non-negative. The {1,3,5}-total
+	// completed-match invariant is enforced by the engine (engiValidTotal);
+	// here we only reject the impossible negatives at the HTTP boundary,
+	// since a running/partial save may legitimately carry a 0 total.
+	if r.FlagsA < 0 {
+		return &ValidationError{Field: "flagsA", Message: "must not be negative"}
+	}
+	if r.FlagsB < 0 {
+		return &ValidationError{Field: "flagsB", Message: "must not be negative"}
 	}
 	// Winner, when supplied, must name one of the two sides. Empty
 	// winner is permitted (draw or pre-completion update). We only

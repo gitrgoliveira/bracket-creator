@@ -91,6 +91,49 @@ function compMatchStats(c) {
   return { total, done, running };
 }
 
+// True when a bracket exists and every real match in it -- including
+// bracket.thirdPlaceMatch, the naginata bronze match, which is a SIBLING
+// field of bracket.rounds, not a row inside it -- is completed. Deliberately
+// does NOT reuse compMatchStats's total/done counters: those never walk
+// thirdPlaceMatch, so a completed bronze match would be silently ignored and
+// a naginata bracket could read as "fully done" one match early.
+//
+// Gates the "Complete competition" action (admin_competition.jsx): League
+// and pure-pools formats auto-complete server-side once every pool match is
+// in (MaybeAutoCompletePools) and never produce a `bracket`, so this
+// predicate naturally returns false for them without a format check. Mixed
+// competitions only reach here once their knockout bracket is seeded (before
+// that, `bracket` is absent/empty).
+function bracketFullyComplete(bracket) {
+  if (!bracket || !bracket.rounds || !bracket.rounds.length) return false;
+  const matches = [];
+  bracket.rounds.forEach((r) => (r || []).forEach((m) => { if (m) matches.push(m); }));
+  if (bracket.thirdPlaceMatch) matches.push(bracket.thirdPlaceMatch);
+  // Use isRequiredBracketMatch, NOT hasBothSides, for the completion gate.
+  // hasBothSides excludes "Winner of rX-mY" / "Pool A-1st" PLACEHOLDER sides
+  // (correct for progress stats), but an SSE match_updated only carries the one
+  // scored match, so a downstream final/bronze can transiently still show a
+  // placeholder side until the next refetch. Filtering those out would let this
+  // return true and enable "Complete competition" before the final/bronze is
+  // actually played. A placeholder-sided match is required-and-incomplete;
+  // byes (one empty side) and hidden phantoms are still excluded (Copilot #326).
+  const required = matches.filter(isRequiredBracketMatch);
+  if (!required.length) return false;
+  return required.every((m) => m.status === "completed");
+}
+
+// A bracket match that must eventually be played before the competition is
+// complete: both sides are NAMED -- including a "Winner of rX-mY" or "Pool
+// A-1st" placeholder that propagation/refetch hasn't resolved yet -- and it is
+// not a structural bye (one empty side) or a hidden empty-vs-empty phantom
+// (state.BracketMatch.Hidden). Unlike hasBothSides this KEEPS placeholder-sided
+// matches, so the completion gate can't fire while a downstream match is still
+// waiting on its feeder.
+function isRequiredBracketMatch(m) {
+  if (!m || m.hidden) return false;
+  return !!sideName(m.sideA) && !!sideName(m.sideB);
+}
+
 // Canonical numeric bounds. The year range is shared by every date
 // validator (admin_helpers.jsx validateAndNormalizeDate, admin_competition.jsx
 // saveNow inline). MAX_TEAM_SIZE is the canonical team-size cap; the
@@ -337,6 +380,7 @@ if (typeof window !== "undefined") {
   window.hasBothSides = hasBothSides;
   window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
   window.compMatchStats = compMatchStats;
+  window.bracketFullyComplete = bracketFullyComplete;
   window.normalizeDate = normalizeDate;
   window.dmyToIso = dmyToIso;
   window.isoToDmy = isoToDmy;
@@ -432,6 +476,7 @@ export {
   hasBothSides,
   hasPoolOriginPlaceholder,
   compMatchStats,
+  bracketFullyComplete,
   normalizeDate,
   dmyToIso,
   isoToDmy,

@@ -171,7 +171,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // A just-started running bout is 0–0, where formatIpponsScore returns "".
           // Fall back so the cell is never blank: running 0–0 → "vs", a completed
           // match with no recorded score → ":". Live techniques show once present.
-          const seScore = showScore ? window.formatIpponsScore(seIpponsB, seIpponsA, m.score, m.decision, m.encho, m.decidedByHantei) : "";
+          const seScore = showScore ? window.matchScoreStr(m, seIpponsB, seIpponsA) : "";
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>

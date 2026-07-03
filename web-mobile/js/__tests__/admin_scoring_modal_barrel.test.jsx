@@ -61,6 +61,8 @@ const EXPECTED_EXPORTS = [
   // Lineup resolvers (from lineup_resolver.jsx in post-split world)
   'resolveMatchLineup',
   'resolveLineupTeamId',
+  // Engi scoring (from admin_scoring_engi.jsx)
+  'EngiScoreEditorModal',
 ];
 
 describe('admin_scoring_modal barrel completeness', () => {

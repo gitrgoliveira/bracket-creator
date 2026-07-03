@@ -685,6 +685,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
+  const [engi, setEngi] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
   const safeCourts = window.normalizeCourts(tournament.courts);
   const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
@@ -844,6 +845,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.swissRounds = swissRounds;
     }
     c.naginata = naginata;
+    // Engi (kata demonstration) is an individual PAIR paradigm; it is never a
+    // team competition (ScoreEditorModal skips the team check for engi, and the
+    // scoring backend treats engi as non-team). Force it off for non-individual
+    // kinds even if the state lingered from a kind switch, so a team comp can't
+    // be created with engi=true. The checkbox is also hidden unless individual.
+    c.engi = kind === "individual" ? engi : false;
     onCreate(c);
   };
 
@@ -1063,6 +1070,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => setNaginata(e.target.checked)} /> Naginata competition</label>
             <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
           </div>
+
+          {kind === "individual" && (
+            <div className="field">
+              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> Engi (kata demonstration)</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.</div>
+            </div>
+          )}
 
           <div className="field">
             <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> Check-in tracking</label>

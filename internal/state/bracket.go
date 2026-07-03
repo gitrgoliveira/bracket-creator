@@ -44,7 +44,31 @@ func parseBracketBytes(raw []byte) (*Bracket, error) {
 	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil, err
 	}
+	// Clamp negative engi flag counts to 0 on load, symmetric with the pool CSV
+	// parser (pools.go parsePoolMatchesRecords): flags are validated
+	// non-negative at the HTTP boundary, so a corrupted / hand-edited
+	// bracket.json must not load negative counts that would break engi
+	// standings / score rendering.
+	for i := range b.Rounds {
+		for j := range b.Rounds[i] {
+			clampBracketMatchFlags(&b.Rounds[i][j])
+		}
+	}
+	if b.ThirdPlaceMatch != nil {
+		clampBracketMatchFlags(b.ThirdPlaceMatch)
+	}
 	return &b, nil
+}
+
+// clampBracketMatchFlags forces negative engi flag counts to 0 (see
+// parseBracketBytes). Non-negative values pass through unchanged.
+func clampBracketMatchFlags(m *BracketMatch) {
+	if m.FlagsA < 0 {
+		m.FlagsA = 0
+	}
+	if m.FlagsB < 0 {
+		m.FlagsB = 0
+	}
 }
 
 func (s *Store) copyBracket(b *Bracket) *Bracket {
@@ -70,6 +94,17 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
 		}
+	}
+	// Deep-copy the optional bronze match so a returned bracket never aliases the
+	// cached ThirdPlaceMatch pointer (or its nested Encho/SubResults/Feeders).
+	if b.ThirdPlaceMatch != nil {
+		tpm := *b.ThirdPlaceMatch
+		tpm.Encho = b.ThirdPlaceMatch.Encho.Clone()
+		tpm.SubResults = cloneSubResults(b.ThirdPlaceMatch.SubResults)
+		if b.ThirdPlaceMatch.Feeders != nil {
+			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
+		}
+		res.ThirdPlaceMatch = &tpm
 	}
 	return res
 }

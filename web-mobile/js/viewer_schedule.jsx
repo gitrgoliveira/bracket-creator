@@ -122,9 +122,10 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   }, [tournament]);
 
   const q = query.trim().toLowerCase();
-  const matches = q ? roster.filter((p) =>
+  const filtered = q ? roster.filter((p) =>
     p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q) || (p.number || "").toLowerCase().includes(q)
-  ).slice(0, 30) : roster.slice(0, 30);
+  ) : roster;
+  const matches = filtered.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);
 
@@ -170,7 +171,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
       {open && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")}: type to search`}
+            {q ? (filtered.length > 30 ? "30+ matches" : pluralize(filtered.length, "match", "matches")) : `${pluralize(roster.length, "participant")}: type to search`}
             {(picked.length > 0 || dojoText) && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}
@@ -186,7 +187,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
               <button type="button" key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} onClick={() => toggle(p)}>
                 <span className="pmf__check">{isPicked ? "✓" : ""}</span>
                 <span className="pmf__opt-body">
-                  <span className="pmf__opt-name">{p.name}</span>
+                  <span className="pmf__opt-name">{p.number ? `${p.number} · ` : ""}{p.name}</span>
                   <span className="pmf__opt-dojo">{p.dojo}{p.comps?.length ? ` · ${p.comps.join(", ")}` : ""}</span>
                 </span>
               </button>

@@ -28,7 +28,7 @@ const isPoolDaihyosenID = id => id.includes('-DH-');
 // is a kendo-glossary term (tap/focus to define daihyosen), matching the
 // bracket's DH chip and staying explainable on touch where a title tooltip
 // isn't. Falls back to a plain badge before glossary.jsx attaches window.Term.
-function DHBadge() {
+export function DHBadge() {
   const label = (typeof window !== "undefined" && window.Term)
     ? React.createElement(window.Term, { name: "daihyosen" }, "DH")
     : "DH";

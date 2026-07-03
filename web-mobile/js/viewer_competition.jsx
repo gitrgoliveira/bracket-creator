@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, DHBadge } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf } from './pool_ids.jsx';
@@ -389,6 +389,17 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
     return all.length > 0 && all.every(m => m.status === "completed");
   })();
   const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
+  // Teams that won a completed daihyosen play-off in the league. Mirrors the
+  // full standings (PoolsViewer): the play-off decides order within the tied
+  // group only, so the badge is the sole signal that a DH settled otherwise
+  // identical podium rows. Scope by exact pool name (poolNameOf), not a raw
+  // prefix, matching the backend equality rule in daihyosen.go.
+  const leagueDhWinnerNames = new Set(
+    (poolMatches || [])
+      .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenID(m.id || "") && m.status === "completed" && m.winner)
+      .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+      .filter(Boolean)
+  );
 
   // setup: no draw yet: plain "not started" message.
   if (!c.status || c.status === "setup") {
@@ -496,6 +507,11 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                     <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
+                      {/* DH badge on the podium (ranks 1-3), matching the full
+                          standings (PoolsViewer). A league daihyosen is played to
+                          settle the top places, so a spectator on the Overview
+                          preview sees why identical rows are ordered as they are. */}
+                      {isTeam && leagueDhWinnerNames.has(s.player?.name) && (s.rank || i + 1) <= 3 && <DHBadge />}
                       {/* No rank badge here: this summary is rank-sorted, so the
                           "#" column already IS the rank: a badge would just echo
                           it. The rank badge only carries information when rows are

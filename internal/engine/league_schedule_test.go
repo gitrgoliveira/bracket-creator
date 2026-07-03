@@ -146,7 +146,9 @@ func TestScheduleLeagueSlots_CompletenessG1G2(t *testing.T) {
 
 // --- Warning zone: numCourts = floor(n/2) (one above SuggestedMaxCourts) ---
 // G2 is a hard invariant (idle slots are inserted when needed), so it holds
-// here too; the higher court count only means a longer schedule.
+// here too regardless of court count. This test asserts correctness (G1/G2),
+// not schedule length; the court count changes how the matches pack into slots
+// but never whether the rest guarantee holds.
 
 func TestScheduleLeagueSlots_WarningZone_StillG2(t *testing.T) {
 	t.Parallel()

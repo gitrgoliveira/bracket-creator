@@ -69,6 +69,29 @@ function poolMatchesForPool(poolMatches, poolName) {
   return (poolMatches || []).filter(m => poolNameOf(m.id) === poolName);
 }
 
+// orderStandingRows: the row order for a pool's standings table.
+// - League: rank-first — the backend `standings[poolName]` array already arrives
+//   in rank order (CalculatePoolStandings sorts by the tiebreak cascade), so use
+//   it as-is.
+// - Non-league pool: DRAW order (poolObj.players) so the operator reads the
+//   fight-order chart; each row's rank is surfaced by the RankInput (looked up
+//   from the standing, not the row position), so scoring never reshuffles rows.
+// Mirrors the public viewer (viewer_standings.jsx PoolsViewer). Rows without a
+// standing yet fall back to a zero-stat entry.
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function orderStandingRows(poolObj, standings, isLeague) {
+  const st = standings ? standings[poolObj.poolName] : null;
+  if (isLeague && st) return st;
+  const byKey = new Map();
+  (st || []).forEach((s) => {
+    byKey.set(s.player.id || `${s.player.name}||${s.player.dojo || ""}`, s);
+  });
+  return (poolObj.players || []).map((p) =>
+    byKey.get(p.id || `${p.name}||${p.dojo || ""}`) ||
+    { player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }
+  );
+}
+
 // DHBadge: the "DH" tag marking a team that won a daihyosen play-off. The label
 // is a kendo-glossary term (tap/focus to define daihyosen), matching the
 // bracket's DH chip and staying explainable on touch where a title tooltip
@@ -514,6 +537,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // only signal that a play-off settled two otherwise-identical rows.
   const teamWonDaihyosen = (poolName, teamName) => dhWinnersByPool.get(poolName)?.has(teamName) ?? false;
 
+  // Draw-order-for-pools / rank-order-for-leagues row ordering. Delegates to the
+  // exported pure orderStandingRows (unit-tested); see its docstring.
+  const orderedStandingRows = (poolObj) => orderStandingRows(poolObj, standings, isLeague);
+
   // Modal rendered in both return paths (detail view and card list).
   const scoreModal = scoreOpenMatch ? (
     <ScoreEditorModal
@@ -542,7 +569,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
 
   if (selectedPool) {
-    const poolStandings = standings ? standings[selectedPool.poolName] : null;
     const court = c.courts[pools.indexOf(selectedPool) % c.courts.length];
     return (
       <>
@@ -573,7 +599,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               )}
             </thead>
             <tbody>
-              {(poolStandings || selectedPool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
+              {orderedStandingRows(selectedPool).map((s, i) => {
                 const isTeamComp = c.kind === "team" || c.teamSize > 0;
                 return (
                   <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
@@ -698,7 +724,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       <div className="pools-grid">
         {pools.map((pool) => {
-          const poolStandings = standings ? standings[pool.poolName] : null;
           const court = c.courts[pools.indexOf(pool) % c.courts.length];
           const pm = poolMatchesFor(pool.poolName);
           // pool.matches (helper.Match) has no status field; use poolMatches-
@@ -732,7 +757,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   )}
                 </thead>
                 <tbody>
-                  {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
+                  {orderedStandingRows(pool).map((s, i) => {
                     const isTeamComp = c.kind === "team" || c.teamSize > 0;
                     return (
                       <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
@@ -844,4 +869,4 @@ function isRanksLocked(compStatus) {
   return compStatus !== "pools";
 }
 
-export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, buildRunningById, isRanksLocked };
+export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, orderStandingRows, buildRunningById, isRanksLocked };

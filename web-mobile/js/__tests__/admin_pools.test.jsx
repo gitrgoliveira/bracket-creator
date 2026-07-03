@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideRankCommit, enrichPoolMatchWithComp, buildRunningById, isRanksLocked, poolMatchesForPool } from '../admin_pools.jsx';
+import { decideRankCommit, enrichPoolMatchWithComp, buildRunningById, isRanksLocked, poolMatchesForPool, orderStandingRows } from '../admin_pools.jsx';
 
 // decideRankCommit is the pure predicate that drives RankInput.handleBlur.
 // It returns one of:
@@ -548,5 +548,66 @@ describe('poolMatchesForPool', () => {
     const result = poolMatchesForPool(mixed, 'Pool A');
     expect(result[0].status).toBe('completed');
     expect(result[1].status).toBe('scheduled');
+  });
+});
+
+describe('orderStandingRows', () => {
+  // Pool draw order A, B, C but the backend standings arrive rank-sorted C, A, B.
+  const pool = {
+    poolName: 'Pool A',
+    players: [
+      { id: 'a', name: 'Alpha', dojo: 'DA' },
+      { id: 'b', name: 'Bravo', dojo: 'DB' },
+      { id: 'c', name: 'Charlie', dojo: 'DC' },
+    ],
+  };
+  const standings = {
+    'Pool A': [
+      { player: { id: 'c', name: 'Charlie', dojo: 'DC' }, rank: 1, wins: 2 },
+      { player: { id: 'a', name: 'Alpha', dojo: 'DA' }, rank: 2, wins: 1 },
+      { player: { id: 'b', name: 'Bravo', dojo: 'DB' }, rank: 3, wins: 0 },
+    ],
+  };
+
+  it('pool (non-league): rows stay in DRAW order, not rank order', () => {
+    const rows = orderStandingRows(pool, standings, false);
+    expect(rows.map(s => s.player.name)).toEqual(['Alpha', 'Bravo', 'Charlie']);
+  });
+
+  it('pool: each row carries its looked-up rank (so the RankInput shows rank, not row position)', () => {
+    const rows = orderStandingRows(pool, standings, false);
+    expect(rows.map(s => s.rank)).toEqual([2, 3, 1]); // Alpha=2, Bravo=3, Charlie=1
+  });
+
+  it('league: rows follow the standings (rank) order', () => {
+    const rows = orderStandingRows(pool, standings, true);
+    expect(rows.map(s => s.player.name)).toEqual(['Charlie', 'Alpha', 'Bravo']);
+    expect(rows.map(s => s.rank)).toEqual([1, 2, 3]);
+  });
+
+  it('pool with no standings yet: draw order with zero-stat fallback rows', () => {
+    const rows = orderStandingRows(pool, null, false);
+    expect(rows.map(s => s.player.name)).toEqual(['Alpha', 'Bravo', 'Charlie']);
+    expect(rows.every(s => s.wins === 0 && s.rank === undefined)).toBe(true);
+  });
+
+  it('same-name players in different dojos are matched by id, not name', () => {
+    const twins = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'x1', name: 'Same', dojo: 'North' },
+        { id: 'x2', name: 'Same', dojo: 'South' },
+      ],
+    };
+    const st = {
+      'Pool A': [
+        { player: { id: 'x2', name: 'Same', dojo: 'South' }, rank: 1, wins: 3 },
+        { player: { id: 'x1', name: 'Same', dojo: 'North' }, rank: 2, wins: 1 },
+      ],
+    };
+    const rows = orderStandingRows(twins, st, false);
+    // Draw order preserved (North then South), each keeping its own rank/stats.
+    expect(rows.map(s => s.player.dojo)).toEqual(['North', 'South']);
+    expect(rows.map(s => s.rank)).toEqual([2, 1]);
   });
 });

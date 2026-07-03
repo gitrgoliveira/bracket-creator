@@ -591,6 +591,11 @@ func (e *Engine) restoreCompetitorEligibility(compID, priorLoser, matchID string
 	if err != nil {
 		return nil, err
 	}
+	if comp == nil {
+		// Missing/deleted config: nothing to resolve. Best-effort like the
+		// unresolvable-player case below, so an undo isn't failed by it.
+		return nil, nil
+	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
@@ -624,6 +629,11 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
+	}
+	if comp == nil {
+		// This helper returns an error path already, so fail cleanly rather
+		// than panic when the competition record is missing/deleted.
+		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
@@ -713,6 +723,11 @@ func (e *Engine) recordIneligibilityFromDecision(compID, matchID string, result 
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
+	}
+	if comp == nil {
+		// Side-effect helper: no config means no eligibility record to write,
+		// so safely no-op rather than panic on a missing/deleted competition.
+		return nil, nil
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())

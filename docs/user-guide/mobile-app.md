@@ -151,7 +151,7 @@ actions, so that table staff who hold the main password can run matches and
 check-in without being able to destroy data. The gate covers:
 
 - Delete a competition; mark a competition invalid.
-- Discard a generated draw; reset rank/winner overrides.
+- Discard a generated draw.
 - Add, edit, or replace participants; import competitions from a folder.
 
 It does **not** cover routine operations (scoring, decisions, check-in,
@@ -276,7 +276,7 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 
 ### Pools
 
-Once the competition has started, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores** tab or the dedicated score editor to record match results.
+Once the competition has started, the **Pools** tab shows all pools and their current standings. The operator sees the same standings as the public viewer: rows stay in draw (fight-order) position and each team's rank is shown as a badge. Ranks are computed automatically from results (there is no manual rank editing); a tie that decides who advances (or their seed) is settled by a daihyosen (see [Recording match decisions](#recording-match-decisions)), and the team that wins it carries a **DH** badge. Scorers can use the **Scores** tab or the dedicated score editor to record match results.
 
 ![Pools view: per-pool standings (W/L/D/PW/PL) with each pool's matches below, scored ones showing the waza result and unscored ones offering a Score button.](../screenshots/mobile-pool-standings.png)
 
@@ -320,7 +320,7 @@ Turn on **Engi (kata demonstration)** in a competition's Settings tab (locked on
 
 - **Scoring**: the score editor becomes a referee flag counter for each side. A bout's flags must total 1, 3, or 5 (an odd panel size), so a bout can never end in a draw.
 - **Standings**: pools and leagues rank pairs by total wins first, then by total flags accumulated across all bouts (both the winning and losing side's flags count toward their own tally).
-- Quick-score, manual winner overrides, and daihyosen are all kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
+- Quick-score and daihyosen are kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
 
 ### Awards and winners
 

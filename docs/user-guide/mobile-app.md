@@ -151,7 +151,7 @@ actions, so that table staff who hold the main password can run matches and
 check-in without being able to destroy data. The gate covers:
 
 - Delete a competition; mark a competition invalid.
-- Discard a generated draw; reset a competition's recorded rank overrides (a chusen result).
+- Discard a generated draw; reset a competition's manual overrides (recorded chusen ranks and match winner overrides).
 - Add, edit, or replace participants; import competitions from a folder.
 
 It does **not** cover routine operations (scoring, decisions, check-in,

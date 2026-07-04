@@ -89,6 +89,16 @@ describe('Viewer Utils', () => {
       expect(filtered.length).toBe(2);
     });
 
+    it('matches the free-text filter against a side competitor number/tag (mp-ce66)', () => {
+      const tagged = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'p1', name: 'Alice', dojo: 'Dojo A', number: 'A1' }, sideB: { id: 'p2', name: 'Bob', dojo: 'Dojo B', number: 'A2' } },
+        { id: 'm2', compId: 'c2', sideA: { id: 'p3', name: 'Charlie', dojo: 'Dojo A', number: 'B1' }, sideB: { id: 'p4', name: 'David', dojo: 'Dojo C', number: 'B2' } },
+      ];
+      const filtered = applyFilters(tagged, [], 'A1', 'all');
+      expect(filtered.length).toBe(1);
+      expect(filtered[0].id).toBe('m1');
+    });
+
     it('matches by name when picked id differs from match side id (UUID vs name)', () => {
       const uuidMatches = [
         { id: 'm1', compId: 'c1', sideA: { id: 'Alice', name: 'Alice' }, sideB: { id: 'Bob', name: 'Bob' } },
@@ -116,6 +126,12 @@ describe('Viewer Utils', () => {
     it('should return true if dojo matches', () => {
       expect(matchHighlightedBy(match, [], 'Dojo B')).toBe(true);
       expect(matchHighlightedBy(match, [], 'Dojo C')).toBe(false);
+    });
+
+    it('highlights when the free-text filter matches a competitor number/tag (mp-ce66)', () => {
+      const tagged = { sideA: { id: 'p1', name: 'Alice', dojo: 'Dojo A', number: 'A1' }, sideB: { id: 'p2', name: 'Bob', dojo: 'Dojo B', number: 'A2' } };
+      expect(matchHighlightedBy(tagged, [], 'A2')).toBe(true);
+      expect(matchHighlightedBy(tagged, [], 'A9')).toBe(false);
     });
 
     it('highlights by name when picked id differs from match side id', () => {

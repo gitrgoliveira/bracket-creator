@@ -122,9 +122,10 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   }, [tournament]);
 
   const q = query.trim().toLowerCase();
-  const matches = q ? roster.filter((p) =>
-    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
-  ).slice(0, 30) : roster.slice(0, 30);
+  const filtered = q ? roster.filter((p) =>
+    p.name.toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q) || (p.number || "").toLowerCase().includes(q)
+  ) : roster;
+  const matches = filtered.slice(0, 30);
 
   window.useClickOutside(ref, () => setOpen(false), open);
 
@@ -136,8 +137,8 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   return (
     <div className="pmf" ref={ref}>
       <div className="pmf__bar" onClick={() => setOpen(true)}>
-        {picked.length === 0 && !dojoText ? (
-          <span className="pmf__placeholder">Filter by player, team, or dojo…</span>
+        {picked.length === 0 && !dojoText && !query ? (
+          <span className="pmf__placeholder">Filter by player, tag, team, or dojo…</span>
         ) : null}
         {picked.map((p) => (
           <span key={p.id} className="pmf__chip">
@@ -170,14 +171,14 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
       {open && (
         <div className="pmf__dropdown">
           <div className="pmf__dropdown-head">
-            {q ? pluralize(matches.length, "match", "matches") : `${pluralize(roster.length, "participant")}: type to search`}
+            {q ? (filtered.length > 30 ? "30+ participants" : pluralize(filtered.length, "participant")) : `${pluralize(roster.length, "participant")}: type to search`}
             {(picked.length > 0 || dojoText) && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setQuery(""); }}>Clear all</button>
             )}
           </div>
           {q && (
             <button type="button" className="pmf__option pmf__option--text" onClick={() => { setDojoText(query.trim()); setQuery(""); }}>
-              <span>Match text "<b>{query}</b>" in any name/dojo</span>
+              <span>Match "<b>{query}</b>" in any name, tag, or dojo</span>
             </button>
           )}
           {matches.map((p) => {
@@ -186,7 +187,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
               <button type="button" key={p.id} className={`pmf__option ${isPicked ? "is-picked" : ""}`} onClick={() => toggle(p)}>
                 <span className="pmf__check">{isPicked ? "✓" : ""}</span>
                 <span className="pmf__opt-body">
-                  <span className="pmf__opt-name">{p.name}</span>
+                  <span className="pmf__opt-name">{p.number ? `${p.number} · ` : ""}{p.name}</span>
                   <span className="pmf__opt-dojo">{p.dojo}{p.comps?.length ? ` · ${p.comps.join(", ")}` : ""}</span>
                 </span>
               </button>
@@ -210,7 +211,7 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
       if (!hit) return false;
     }
     if (dt) {
-      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(dt));
+      const hit = [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt));
       if (!hit) return false;
     }
     return true;
@@ -222,7 +223,7 @@ export function matchHighlightedBy(m, picked, dojoText) {
   const names = new Set(picked.map((p) => p.name).filter(Boolean));
   if (ids.size > 0 && ((m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name))))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
-  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo].some((s) => (s || "").toLowerCase().includes(dt))) return true;
+  if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
   return false;
 }
 

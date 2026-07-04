@@ -1019,7 +1019,8 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 names above. */}
             {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team" || scoreCell.kind === "engi") && (
                 <div className="shiaijo-qrow__result">
-                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {/* scoreCell.iv already self-labels ("IV s-a · PW s-a"), so no separate IV abbr prefix. */}
+                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore">{scoreCell.iv}</span>}
                     {scoreCell.kind === "engi" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Total flags received">Flags</abbr>{scoreCell.flags}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
                 </div>

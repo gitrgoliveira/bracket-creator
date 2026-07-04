@@ -1578,7 +1578,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// GET /competitions/:id/chusen-candidates
 	// Consequential team-pool ties the daihyosen left undetermined (a cycle /
 	// all-drawn); the operator settles each by chusen (drawing lots), recorded via
-	// the override-rank endpoint. Public read (mirrors league-tiebreak candidates).
+	// the override-rank endpoint. Admin-gated: RegisterCompetitionHandlers is
+	// mounted under the authenticated router group, so callers must send the
+	// tournament password header (unlike the public league-tiebreak candidates).
 	r.GET("/competitions/:id/chusen-candidates", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

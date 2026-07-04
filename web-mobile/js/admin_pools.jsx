@@ -254,7 +254,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;
-        const groupKey = poolName;
+        // A pool can hold more than one unresolved tied group (e.g. a cycle at
+        // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
+        // so the React key and the busy/error maps never collide across groups.
+        const groupKey = `${poolName}::${minPosition}`;
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
 
@@ -291,8 +294,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             for (const name of teamNames) {
               await window.API.overridePoolRank(c.id, poolName, name, effRank(name), password);
             }
-            // Optimistically hide - the effect re-fetches on next match update.
-            setChusenCandidates(prev => (prev || []).filter(g => g.poolName !== poolName));
+            // Optimistically hide THIS group only (a pool can hold several) - the
+            // effect re-fetches on the next update to reconcile.
+            setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
             // Clear inputs for this group.
             setChusenInputs(prev => {
               const next = { ...prev };

@@ -81,7 +81,7 @@ func setupTeamPool(t *testing.T, compID string, teams []string, matches []state.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Team Pool Advancement Test",
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
-		Courts: []string{"A"}, TeamSize: 2,
+		Courts: []string{"A"}, Kind: "team", TeamSize: 2,
 	}))
 	players := make([]helper.Player, len(teams))
 	for i, n := range teams {

@@ -5,6 +5,11 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Leaf module (no side effects): safe to ES-import. The DH label is
+// daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
+// tiebreaker is also a rep bout, just not a daihyosen).
+import { isPoolDaihyosenBout } from './pool_ids.jsx';
+
 import {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -530,13 +535,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 ? <span> · Match {m.matchNumber}</span>
                 : null}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
-              {m.repIsTeam && (
+              {isPoolDaihyosenBout(m.id) && (
                 <span className="tag-badge" style={{ marginLeft: 6 }}>
                   {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
                 </span>
               )}
             </div>
-            {m.repIsTeam && (
+            {isPoolDaihyosenBout(m.id) && (
               <div style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 2 }}>
                 {window.Term
                   ? <>{React.createElement(window.Term, { name: "daihyosen" }, "Daihyosen")} · representative tie-break bout</>

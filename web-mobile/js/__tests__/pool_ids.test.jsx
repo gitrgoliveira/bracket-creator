@@ -8,8 +8,12 @@ describe('poolNameOf', () => {
     expect(poolNameOf('Pool A-TB-2')).toBe('Pool A');
     expect(poolNameOf('Pool A-East-DH-0')).toBe('Pool A-East');
   });
-  it('returns "" for non-pool-shaped ids and non-strings', () => {
-    expect(poolNameOf('QF-0')).toBe('QF'); // caveat: any "-N" id parses; callers gate on format
+  it('parses any "-<digits>" suffix (incl. non-pool ids like "QF-0"); returns "" only when there is no such suffix', () => {
+    // Documented caveat: poolNameOf greedily parses any id ending in "-<digits>",
+    // so a non-pool id like "QF-0" yields "QF". Callers that must distinguish a
+    // real pool from another phase gate on the competition format, not on a
+    // truthy poolNameOf() result.
+    expect(poolNameOf('QF-0')).toBe('QF');
     expect(poolNameOf('nodash')).toBe('');
     expect(poolNameOf(undefined)).toBe('');
     expect(poolNameOf(null)).toBe('');

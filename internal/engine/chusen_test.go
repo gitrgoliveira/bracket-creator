@@ -104,3 +104,34 @@ func TestChusenCandidates_NonTeamHasNone(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cands)
 }
+
+// TestChusenCandidates_PartialRoundNotPremature: with only ONE of a 3-team
+// group's three daihyosen bouts scored, the partial win counts (1/0/0) contain a
+// spurious duplicate (the two zeros). Chusen must NOT surface until the whole
+// pairwise round is complete.
+func TestChusenCandidates_PartialRoundNotPremature(t *testing.T) {
+	compID := "chusen-partial"
+	eng, store := setupTeamPoolComp(t, compID, true) // 3 teams fully tied
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	// Complete exactly one of the three injected daihyosen bouts.
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	completedOne := false
+	for i := range all {
+		if IsPoolDaihyosenMatchID(all[i].ID) && !completedOne {
+			all[i].Status = state.MatchStatusCompleted
+			all[i].Winner = all[i].SideA
+			completedOne = true
+		}
+	}
+	require.True(t, completedOne, "expected at least one injected DH bout")
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	cands, err := eng.ChusenCandidates(compID)
+	require.NoError(t, err)
+	assert.Empty(t, cands, "chusen must not surface mid-round (only 1 of 3 DH bouts scored)")
+}

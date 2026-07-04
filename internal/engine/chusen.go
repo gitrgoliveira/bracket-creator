@@ -49,15 +49,29 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		names[s.Player.Name] = true
 	}
 	dhWins := make(map[string]int, len(group))
+	dhCompleted := 0
 	dhPlayed := false
 	for _, m := range allMatches {
-		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted {
 			continue
 		}
 		if names[m.SideA] && names[m.SideB] {
-			dhWins[m.Winner]++
-			dhPlayed = true
+			dhCompleted++
+			if m.Winner != "" {
+				dhWins[m.Winner]++
+				dhPlayed = true
+			}
 		}
+	}
+	// Only judge the group once its FULL pairwise daihyosen round is complete
+	// (a round-robin = N*(N-1)/2 bouts). Mid-round, partial win counts look like
+	// a cycle (e.g. after the first of three bouts the counts are 1/0/0, whose
+	// two zeros are a spurious duplicate), which would surface the chusen panel
+	// before the remaining bouts are played.
+	n := len(group)
+	expected := n * (n - 1) / 2
+	if expected == 0 || dhCompleted < expected {
+		return false
 	}
 	if !dhPlayed {
 		return false

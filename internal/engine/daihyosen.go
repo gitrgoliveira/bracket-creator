@@ -168,6 +168,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
 
+	// A daihyosen is played only where the tie affects advancement/seeding
+	// (see tieAffectsAdvancement): the top poolWinners of each pool advance.
+	poolWinners := comp.EffectivePoolWinners()
+
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
@@ -233,6 +237,11 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
+			// Only break ties that affect who advances / their seed: a tie sitting
+			// entirely below the top-poolWinners cut shares its rank with no bout.
+			if !tieAffectsAdvancement(positions, poolWinners) {
+				continue
+			}
 			group := standingsAt(poolStandings, positions)
 			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)

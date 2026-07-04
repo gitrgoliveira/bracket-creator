@@ -82,6 +82,10 @@ func setupTeamPool(t *testing.T, compID string, teams []string, matches []state.
 		ID: compID, Name: "Team Pool Advancement Test",
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		Courts: []string{"A"}, Kind: "team", TeamSize: 2,
+		// Everyone advances (seed order still matters), so every tied position is
+		// consequential: these fixtures exercise the round-robin ordering itself,
+		// not the band-aware cutoff (see pool_daihyosen_bandaware_test.go).
+		PoolWinners: len(teams),
 	}))
 	players := make([]helper.Player, len(teams))
 	for i, n := range teams {

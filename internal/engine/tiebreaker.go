@@ -115,6 +115,28 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 	}
 }
 
+// tieAffectsAdvancement reports whether a tied group (identified by its 0-based
+// positions from detectPoolTies over the sorted standings) can change the pool
+// outcome and therefore warrants a supplementary bout.
+//
+// A pool seeds its knockout from the top EffectivePoolWinners of each pool, and
+// 1st-place finishers get byes (bracket.go ApplyPoolAdjustments), so every
+// position in [1..poolWinners] is a distinct, consequential seed. A tied group
+// whose BEST position is already past the cutoff (positions[0]+1 > poolWinners)
+// sits entirely among eliminated ranks: those teams share that rank and no
+// supplementary ippon-shobu / daihyosen is played. This mirrors the rule that a
+// supplementary bout is held only "to determine their relative ranking" where
+// that ranking matters (running_a_kendo_tournament.md:405/441), and the
+// band-aware LeagueTiebreakCandidates gate used for team leagues.
+func tieAffectsAdvancement(positions []int, poolWinners int) bool {
+	if len(positions) == 0 {
+		return false
+	}
+	// positions[0] is 0-based into the descending-sorted standings; +1 makes it
+	// the 1-based finishing rank of the best-placed member of the tied group.
+	return positions[0]+1 <= poolWinners
+}
+
 // tiebreakerPairKey returns a canonical (order-independent) key for a
 // pair of player names, used to detect already-existing TB matches.
 func tiebreakerPairKey(a, b string) string {
@@ -168,6 +190,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	if comp == nil {
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
+
+	// Supplementary ippon-shobu bouts are held only where the tie affects
+	// advancement/seeding (see tieAffectsAdvancement): top poolWinners advance.
+	poolWinners := comp.EffectivePoolWinners()
 
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
@@ -231,6 +257,11 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
+			// Only break ties that affect who advances / their seed: a tie sitting
+			// entirely below the top-poolWinners cut shares its rank with no bout.
+			if !tieAffectsAdvancement(positions, poolWinners) {
+				continue
+			}
 			group := standingsAt(poolStandings, positions)
 			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)

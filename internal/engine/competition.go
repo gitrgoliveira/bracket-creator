@@ -219,12 +219,13 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// operator-triggered league tie-breakers or auto-injected mixed/pools DH):
 	// verify that the DH results actually broke all ties before transitioning.
 	// In the rare event that DH bouts produce a cycle (A>B, B>C, C>A, only
-	// possible in a 3+ team pool with a full round-robin DH), every team in
-	// that group still has equal DH win counts and standings remain
-	// unresolved.  Per tournament practice the pool would normally be
-	// replayed; here we block auto-completion so the operator can apply
-	// manual rank overrides via the admin UI rather than seeding playoffs
-	// from an arbitrary order.
+	// possible in a 3+ team pool whose tie was consequential), every team in
+	// that group still has equal DH win counts and standings remain unresolved.
+	// Per the rules a still-level 3-4 way group goes to a further round of
+	// supplementary ippon-shobu and ultimately chusen / drawing lots
+	// (running_a_kendo_tournament.md:181); rather than seed the playoff from an
+	// arbitrary order we block auto-completion until a decisive result exists.
+	// Any pre-existing pool-rank overrides are still honoured by dhCycleExists.
 	if isTeamComp && hasCompleteDH {
 		standings, standErr := e.CalculatePoolStandings(compID)
 		if standErr != nil {

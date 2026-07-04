@@ -15,14 +15,14 @@
 
 import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
-import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useState } = React;
 const EmptyState = window.EmptyState;
 
-// isPoolDaihyosenID: duplicated from viewer.jsx (that file also uses it in
-// ViewerCompetition which stays there; this copy serves PoolsViewer here).
-const isPoolDaihyosenID = id => id.includes('-DH-');
+// DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
+// (…-DH-N) so a pool name that happens to contain "-DH-" can't false-positive a
+// regular match as a daihyosen win.
 
 // DHBadge: the "DH" tag marking a team that won a daihyosen play-off. The label
 // is a kendo-glossary term (tap/focus to define daihyosen), matching the
@@ -481,7 +481,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         // otherwise-identical rows.
         const dhWinnerNames = new Set(
           matches
-            .filter(m => isPoolDaihyosenID(m.id || "") && m.status === "completed" && m.winner)
+            .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
             .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
             .filter(Boolean)
         );

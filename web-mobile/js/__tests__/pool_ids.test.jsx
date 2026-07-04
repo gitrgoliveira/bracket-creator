@@ -43,4 +43,11 @@ describe('isPoolDaihyosenBout (label: daihyosen ONLY, not tiebreaker)', () => {
     expect(isPoolDaihyosenBout('QF-0')).toBe(false);
     expect(isPoolDaihyosenBout(null)).toBe(false);
   });
+  it('suffix match: a pool NAME containing "-DH-" does not false-positive a regular match', () => {
+    // Pool literally named "Pool A-DH-East": its regular match is
+    // "Pool A-DH-East-0". A naive includes("-DH-") would flag it as a DH win.
+    expect(isPoolDaihyosenBout('Pool A-DH-East-0')).toBe(false);
+    // The pool's real daihyosen bout still matches (ends in -DH-N).
+    expect(isPoolDaihyosenBout('Pool A-DH-East-DH-0')).toBe(true);
+  });
 });

@@ -519,7 +519,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const dhWinnersByPool = useMemoA(() => {
     const map = new Map();
     for (const m of (poolMatches || [])) {
-      if (!(m.id || "").includes("-DH-") || m.status !== "completed" || !m.winner) continue;
+      if (!isPoolDaihyosenBout(m.id) || m.status !== "completed" || !m.winner) continue;
       const pool = poolNameOf(m.id);
       if (!pool) continue;
       const w = typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";

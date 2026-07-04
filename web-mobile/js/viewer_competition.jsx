@@ -7,7 +7,7 @@ import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.js
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, DHBadge } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
-import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -17,11 +17,11 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
-// Pool daihyosen matches carry '-DH-' in their id. Used only for the DH
-// standings badge, which is daihyosen-specific. For routing a bout to the
-// individual (rep-bout) editor, use isSupplementaryBout instead: a pool
-// tiebreaker ('-TB-') is also a single ippon-shobu rep bout, not a team bout.
-const isPoolDaihyosenID = id => id.includes('-DH-');
+// DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
+// (…-DH-N), daihyosen-specific, so a pool name containing "-DH-" can't
+// false-positive a regular match. Routing a bout to the individual (rep-bout)
+// editor uses isSupplementaryBout instead (a "-TB-" tiebreaker is also a rep
+// bout, just not a daihyosen for labelling).
 
 // mp-tidg: activeTab + onTabChange are controlled props: app.jsx owns the
 // tab state so browser back/forward across tabs works (each tab switch is a
@@ -403,7 +403,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   // prefix, matching the backend equality rule in daihyosen.go.
   const leagueDhWinnerNames = new Set(
     (poolMatches || [])
-      .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenID(m.id || "") && m.status === "completed" && m.winner)
+      .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
       .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
       .filter(Boolean)
   );

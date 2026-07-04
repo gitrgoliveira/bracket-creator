@@ -1184,12 +1184,22 @@ describe('API Utils', () => {
         expect(result).toEqual([]);
       });
 
-      it('throws on non-ok response', async () => {
+      it('throws with the status when the body has no error field', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           status: 500,
+          json: async () => ({}),
         });
-        await expect(API.chusenCandidates('comp-1')).rejects.toThrow('Failed to load chusen candidates');
+        await expect(API.chusenCandidates('comp-1', 'pw')).rejects.toThrow('Failed to load chusen candidates (500)');
+      });
+
+      it('surfaces the server-provided error payload', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'invalid tournament password' }),
+        });
+        await expect(API.chusenCandidates('comp-1', 'bad')).rejects.toThrow('invalid tournament password');
       });
     });
 

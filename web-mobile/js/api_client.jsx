@@ -1868,7 +1868,12 @@ const API = {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/chusen-candidates`, {
             headers: { 'X-Tournament-Password': password || '' }
         });
-        if (!res.ok) throw new Error("Failed to load chusen candidates");
+        if (!res.ok) {
+            // Surface the server-provided error + status so auth/config failures
+            // are diagnosable from the admin UI, matching the other helpers.
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to load chusen candidates (${res.status})`);
+        }
         const data = await res.json();
         return data.candidates || [];
     },

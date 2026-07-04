@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git / Worktree Rules
+
+- **Edit only inside the correct worktree branch, never the main repo directory.** This repo uses a git worktree per PR. Before any file edit, verify the current working directory (`pwd`) and branch (`git branch --show-current`). Edits landing in the wrong worktree (or the `main` checkout) force costly patch-and-revert recovery.
+
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
@@ -224,6 +228,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 ## Code Review (Copilot)
 
 - **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix or dismissal with a reason), then re-verify the count is zero. The `/review-loop` skill encodes the full loop.
+- **Report `resolved` and `outdated` threads separately.** Never claim zero unresolved threads without checking for outdated-but-visible threads that the user can still see in the GitHub UI. A query that filters out outdated threads produces a false "clean" that contradicts what the user sees.
 - **Re-request Copilot via the GraphQL `requestReviews` mutation with the bot node id**: both `gh pr edit --add-reviewer Copilot` (lowercases the login, fails) and REST `POST .../requested_reviewers -f "reviewers[]=Copilot"` (silently no-ops; that array is users-only and Copilot is a Bot) are broken. Full recipe + verification step in the `/review-loop` skill (rule 4).
 - Run `make go/test` after fixes and before pushing. A red gate means fix-or-revert, never push.
 
@@ -248,6 +253,15 @@ When rebasing or resolving conflicts, watch for these recurring breakages:
 - UUID-vs-name-string mismatches in player/entity maps: match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
 - Missed call sites when removing or renaming a symbol: `grep -r` the name across **all** packages **including `_test.go` files** before committing. A refactor that compiles can still leave stale test references or skip-test code pointing at dead paths.
 - Re-run `make go/test` after every rebase; a clean rebase that compiles must not be semantically broken.
+
+## Refactoring Rules
+
+- **Search ALL call sites, including test files, before removing code or parameters.** Run `grep -r` (or `grep -rn 'SYMBOL' . --include='*.go' --include='*.jsx'`) to find every reference, not just production code. A removal that compiles can still leave stale test references or skip-test code pointing at dead paths.
+- **Verify that guards and defensive code are intentional before removing them.** If a Copilot reviewer flags a removal, assume the guard was intentional unless you can prove otherwise from git blame or comments. Aggressive removal of guards (e.g. `sourceCompID` checks, `defer os.RemoveAll`) has had to be reverted.
+
+## Debugging Principles
+
+- **Never fabricate explanations for tool/infrastructure failures.** If you don't know the root cause of a CI failure, say so and investigate. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround (e.g. a fabricated "known bug in Codecov v6.0.x" masking a transient GPG keyserver failure). Read the actual logs first.
 
 
 # Validation

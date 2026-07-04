@@ -1859,6 +1859,20 @@ const API = {
         return res.json();
     },
 
+    // chusenCandidates: GET /competitions/:id/chusen-candidates
+    // Consequential team-pool ties the daihyosen could not settle; the operator
+    // resolves each by chusen (drawing lots), recorded via overridePoolRank.
+    async chusenCandidates(compID, password) {
+        // Lives in the admin-gated competition router, so it needs the
+        // tournament password header (unlike the public league candidates GET).
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/chusen-candidates`, {
+            headers: { 'X-Tournament-Password': password || '' }
+        });
+        if (!res.ok) throw new Error("Failed to load chusen candidates");
+        const data = await res.json();
+        return data.candidates || [];
+    },
+
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak
     // Body: { teamNames: string[] }: the tied group to break the tie.
     // Returns { matches: MatchResult[] } on 201.

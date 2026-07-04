@@ -1156,6 +1156,43 @@ describe('API Utils', () => {
       });
     });
 
+    describe('chusenCandidates', () => {
+      it('returns the candidates array from the response', async () => {
+        const payload = {
+          candidates: [
+            { poolName: 'Pool A', teamNames: ['Team 1', 'Team 2'], minPosition: 2 },
+          ],
+        };
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => payload,
+        });
+        const result = await API.chusenCandidates('comp-1', 'pw');
+        expect(result).toEqual(payload.candidates);
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/competitions/comp-1/chusen-candidates',
+          { headers: { 'X-Tournament-Password': 'pw' } }
+        );
+      });
+
+      it('returns [] when the candidates field is absent', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({}),
+        });
+        const result = await API.chusenCandidates('comp-1');
+        expect(result).toEqual([]);
+      });
+
+      it('throws on non-ok response', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+        });
+        await expect(API.chusenCandidates('comp-1')).rejects.toThrow('Failed to load chusen candidates');
+      });
+    });
+
     describe('updateCompetition', () => {
       it('converts danGrade → metadata[0] and preserves metadata[1+] slots', async () => {
         let capturedBody;

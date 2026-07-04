@@ -124,6 +124,33 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [tiebreakBusyAction, setTiebreakBusyAction] = useStateA(null);
   const [tiebreakErr, setTiebreakErr] = useStateA(null);
 
+  // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
+  // could not settle (a cycle / all-drawn). Only fetched for team comps in
+  // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
+  const isTeamComp = c && (c.kind === "team" || (c.teamSize || 0) > 0);
+  const [chusenCandidates, setChusenCandidates] = useStateA(null);
+  // Per-group input values: keys are "${poolName}::${teamName}" -> string.
+  const [chusenInputs, setChusenInputs] = useStateA({});
+  // Per-group busy flag: "${poolName}" -> bool.
+  const [chusenBusy, setChusenBusy] = useStateA({});
+  // Per-group error: "${poolName}" -> string.
+  const [chusenGroupErr, setChusenGroupErr] = useStateA({});
+
+  // Lightweight signature so the effect re-runs when match results change.
+  const poolMatchesSig = (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|");
+
+  useEffectA(() => {
+    if (!isTeamComp || !c || c.status !== "pools" || !window.API || typeof window.API.chusenCandidates !== "function") {
+      setChusenCandidates(null);
+      return;
+    }
+    let cancelled = false;
+    window.API.chusenCandidates(c.id, password)
+      .then(list => { if (!cancelled) setChusenCandidates(list); })
+      .catch(() => { if (!cancelled) setChusenCandidates(null); });
+    return () => { cancelled = true; };
+  }, [c && c.id, c && c.status, isTeamComp, poolMatchesSig, password]);
+
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
   useEffectA(() => {
@@ -212,6 +239,119 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       return m.status === "running" || m.status === "completed" || !!m.winner;
     });
   };
+
+  // Chusen banner: shown when chusenCandidates is non-empty (team comp in
+  // pools stage, at least one DH cycle left unresolved).
+  const chusenBanner = chusenCandidates && chusenCandidates.length > 0 ? (
+    <div
+      className="alert alert--warn league-tiebreak"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
+      <div className="league-tiebreak__desc">
+        The daihyosen ended level (a cycle). Draw lots and record each team&apos;s finishing position below.
+      </div>
+      {chusenCandidates.map((group) => {
+        const { poolName, teamNames, minPosition } = group;
+        const groupKey = poolName;
+        const isBusy = !!chusenBusy[groupKey];
+        const groupErrMsg = chusenGroupErr[groupKey] || null;
+
+        // Effective value for a team's input: the operator's edit if present,
+        // else the displayed default (minPosition + its listed index). Both the
+        // validation and the submit read this so accepting the shown defaults
+        // (already a valid permutation) records without forcing a manual edit.
+        const effRank = (name) => {
+          const raw = chusenInputs[`${poolName}::${name}`];
+          return parseInt(raw !== undefined ? raw : String(minPosition + teamNames.indexOf(name)), 10);
+        };
+
+        const handleRecord = async () => {
+          // Validate: entered positions must be exactly the set
+          // {minPosition .. minPosition + teamNames.length - 1}.
+          const expected = new Set();
+          for (let i = 0; i < teamNames.length; i++) expected.add(minPosition + i);
+          const entered = new Set();
+          let valid = true;
+          for (const name of teamNames) {
+            const val = effRank(name);
+            if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
+            entered.add(val);
+          }
+          if (!valid) {
+            const lo = minPosition;
+            const hi = minPosition + teamNames.length - 1;
+            setChusenGroupErr(prev => ({ ...prev, [groupKey]: `Enter each of positions ${lo} to ${hi} exactly once` }));
+            return;
+          }
+          setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
+          setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
+          try {
+            for (const name of teamNames) {
+              await window.API.overridePoolRank(c.id, poolName, name, effRank(name), password);
+            }
+            // Optimistically hide - the effect re-fetches on next match update.
+            setChusenCandidates(prev => (prev || []).filter(g => g.poolName !== poolName));
+            // Clear inputs for this group.
+            setChusenInputs(prev => {
+              const next = { ...prev };
+              for (const name of teamNames) delete next[`${poolName}::${name}`];
+              return next;
+            });
+          } catch (e) {
+            setChusenGroupErr(prev => ({ ...prev, [groupKey]: e.message || "Failed to record chusen result" }));
+          } finally {
+            setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
+          }
+        };
+
+        return (
+          <div key={groupKey} className="league-tiebreak__group">
+            <div className="league-tiebreak__group-header">
+              <span className="league-tiebreak__pos">{poolName}</span>
+              <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+            </div>
+            <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
+              Assign positions {minPosition} to {minPosition + teamNames.length - 1} (one per team):
+            </div>
+            {teamNames.map((name) => {
+              const inputKey = `${poolName}::${name}`;
+              const defaultVal = minPosition + teamNames.indexOf(name);
+              return (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <label style={{ flex: 1 }}>{name}</label>
+                  <input
+                    type="number"
+                    min={minPosition}
+                    max={minPosition + teamNames.length - 1}
+                    style={{ width: 64 }}
+                    value={chusenInputs[inputKey] !== undefined ? chusenInputs[inputKey] : String(defaultVal)}
+                    onChange={e => setChusenInputs(prev => ({ ...prev, [inputKey]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                </div>
+              );
+            })}
+            <div className="league-tiebreak__actions" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={isBusy}
+                onClick={handleRecord}
+              >
+                {isBusy && <span className="spinner" />}
+                Record chusen result
+              </button>
+            </div>
+            {groupErrMsg && (
+              <div className="league-tiebreak__err">{groupErrMsg}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
 
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
@@ -320,6 +460,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   return (
     <>
     <div>
+      {chusenBanner}
       {leagueTiebreakBanner}
       {PoolsViewer ? (
         <PoolsViewer

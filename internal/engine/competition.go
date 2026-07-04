@@ -371,49 +371,16 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 	return false
 }
 
+// dhCycleExists reports whether any tied group is still unresolved after its
+// daihyosen bouts (a cycle / all-drawn), i.e. it needs a chusen. Delegates the
+// per-group check to groupNeedsChusen (the same predicate ChusenCandidates uses
+// to surface those groups to the operator).
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
 			group := standingsAt(poolStandings, positions)
-			// If the operator has manually ranked every member of this
-			// tied group, treat the cycle as resolved.
-			if overrides := poolRanks[poolName]; len(overrides) > 0 {
-				allOverridden := true
-				for _, s := range group {
-					if _, ok := overrides[s.Player.Name]; !ok {
-						allOverridden = false
-						break
-					}
-				}
-				if allOverridden {
-					continue
-				}
-			}
-			groupNames := make(map[string]bool, len(group))
-			for _, s := range group {
-				groupNames[s.Player.Name] = true
-			}
-			dhWins := make(map[string]int, len(group))
-			dhPlayed := false
-			for _, m := range allMatches {
-				if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
-					continue
-				}
-				if groupNames[m.SideA] && groupNames[m.SideB] {
-					dhWins[m.Winner]++
-					dhPlayed = true
-				}
-			}
-			if !dhPlayed {
-				continue
-			}
-			seen := make(map[int]bool, len(group))
-			for _, s := range group {
-				count := dhWins[s.Player.Name]
-				if seen[count] {
-					return true
-				}
-				seen[count] = true
+			if groupNeedsChusen(group, allMatches, poolRanks[poolName]) {
+				return true
 			}
 		}
 	}

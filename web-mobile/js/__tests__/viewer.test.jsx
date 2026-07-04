@@ -321,6 +321,21 @@ describe('Viewer Utils', () => {
       expect(tb.compEngi).toBe(false);
     });
 
+    // Flat viewer-API poolMatches may carry an explicit poolName: undefined.
+    // The derived poolName/phaseName must survive the `...m` spread (regression:
+    // spreading m last clobbered the derived pool name with undefined).
+    it('derives poolName even when the match carries poolName: undefined', () => {
+      const c = mkComp({
+        kind: 'team',
+        teamSize: 3,
+        poolMatches: [{ id: 'Pool A-0', status: 'completed', poolName: undefined, phaseName: undefined }],
+      });
+      const m = compMatches(c).find(x => x.id === 'Pool A-0');
+      expect(m.poolName).toBe('Pool A');
+      expect(m.phaseName).toBe('Pool A');
+      expect(m.phase).toBe('pool');
+    });
+
     it('threads compKind and teamSize onto bracket matches for team comps', () => {
       global.window = global.window || {};
       const savedRoundLabel = global.window.roundLabel;

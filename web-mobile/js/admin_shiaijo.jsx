@@ -649,7 +649,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 : upNext.phase === "bracket" && upNext.matchNumber > 0
                                                 ? ` · Match ${upNext.matchNumber}`
                                                 : ""}
-                                            {window.isSupplementaryBout && window.isSupplementaryBout(upNext.id) && (
+                                            {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
+                                                (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"
+                                                tag gates on isPoolDaihyosenBout. Routing still uses
+                                                isSupplementaryBout (see editorMatch above). */}
+                                            {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(upNext.id) && (
                                                 <span className="tag-badge" style={{ marginLeft: 6 }}>
                                                     {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
                                                 </span>
@@ -986,7 +990,8 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         : m.phase === "bracket" && m.matchNumber > 0
                         ? ` · Match ${m.matchNumber}`
                         : ""}
-                    {window.isSupplementaryBout && window.isSupplementaryBout(m.id) && (
+                    {/* DH-only label (not "-TB-"): see the Up Next card note above. */}
+                    {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(m.id) && (
                         <span className="tag-badge" style={{ marginLeft: 4 }}>
                             {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
                         </span>

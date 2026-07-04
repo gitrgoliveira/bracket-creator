@@ -3,7 +3,7 @@
 
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
-import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const pluralize = window.pluralize;
@@ -853,6 +853,7 @@ window.AdminPools = AdminPools;
 if (typeof window !== "undefined") {
   window.enrichPoolMatchWithComp = enrichPoolMatchWithComp;
   window.isSupplementaryBout = isSupplementaryBout;
+  window.isPoolDaihyosenBout = isPoolDaihyosenBout;
 }
 
 // ES export for the vitest suite: pure helpers only. The component

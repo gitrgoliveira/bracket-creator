@@ -73,7 +73,11 @@ export function compMatches(c) {
   rawPoolMatches.forEach(m => {
     const isRepBout = isSupplementaryBout(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi });
+    // Spread `...m` FIRST, then the derived fields: flat viewer-API poolMatches
+    // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
+    // clobber the derived pool name with undefined. derivedPool already prefers
+    // m.poolName when present, so putting it last is both safe and authoritative.
+    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin

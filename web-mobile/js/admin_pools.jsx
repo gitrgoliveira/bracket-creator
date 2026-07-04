@@ -144,6 +144,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     () => (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|"),
     [poolMatches]
   );
+  // Override-sensitive signature: a chusen result is a rank override, which the
+  // backend broadcasts as EventTournamentUpdated WITHOUT changing pool matches.
+  // Capturing rank + isOverridden lets the fetch effect refresh candidates after
+  // an override recorded elsewhere (another operator tab), not only after a bout.
+  const standingsSig = useMemoA(
+    () => Object.keys(standings || {}).sort().map(pn =>
+      (standings[pn] || []).map(s => `${(s.player && s.player.name) || ""}:${s.rank}:${s.isOverridden ? 1 : 0}`).join(",")
+    ).join("|"),
+    [standings]
+  );
 
   useEffectA(() => {
     if (!isTeamComp || !c || c.status !== "pools" || !window.API || typeof window.API.chusenCandidates !== "function") {
@@ -155,7 +165,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       .then(list => { if (!cancelled) setChusenCandidates(list); })
       .catch(() => { if (!cancelled) setChusenCandidates(null); });
     return () => { cancelled = true; };
-  }, [c && c.id, c && c.status, isTeamComp, poolMatchesSig, password]);
+  }, [c && c.id, c && c.status, isTeamComp, poolMatchesSig, standingsSig, password]);
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
@@ -328,10 +338,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             {teamNames.map((name) => {
               const inputKey = `${poolName}::${name}`;
               const defaultVal = minPosition + teamNames.indexOf(name);
+              // Stable DOM id so the label is programmatically tied to its input.
+              const inputId = `chusen-${groupKey}-${teamNames.indexOf(name)}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
               return (
                 <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <label style={{ flex: 1 }}>{name}</label>
+                  <label htmlFor={inputId} style={{ flex: 1 }}>{name}</label>
                   <input
+                    id={inputId}
                     type="number"
                     min={minPosition}
                     max={minPosition + teamNames.length - 1}

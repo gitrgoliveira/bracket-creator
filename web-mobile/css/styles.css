@@ -1578,9 +1578,35 @@ a:hover {
   padding-right: 16px;
 }
 
+/* Caption: clarifies "#" = draw order (not rank) and names the table for AT. */
+.pool__table-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 8px 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.01em;
+}
+
 /* Uniform green advancing row (no ▲ arrow, no cut-border, tint + badge carry the signal) */
 .pool__table tr.advancing {
   background: #ecfdf5;
+}
+
+/* Team standings carry 8 numeric columns (W L T IV IL IT PW PL). On a phone
+   that collapses to unreadable ~28px cells, so below 480px drop the three
+   lowest-order tiebreakers (IL=child 7, IT=child 8, PL=child 10), keeping
+   # Team W L T IV PW. Header, body, and empty-placeholder rows share the
+   same column positions, so nth-child covers all of them. */
+@media (max-width: 480px) {
+  .pool__table--team th:nth-child(7),
+  .pool__table--team td:nth-child(7),
+  .pool__table--team th:nth-child(8),
+  .pool__table--team td:nth-child(8),
+  .pool__table--team th:nth-child(10),
+  .pool__table--team td:nth-child(10) {
+    display: none;
+  }
 }
 
 /* Rank badge inline after player name in the standings table */
@@ -1638,6 +1664,9 @@ a:hover {
   grid-template-columns: 20px 1fr auto 1fr;
   gap: 6px;
   align-items: center;
+  /* Tappable row on phones in a noisy hall: clear the 36px shared-surface
+     floor, and the 44px coarse-pointer target under touch. */
+  min-height: 36px;
   font-size: 13px;
   /* button-reset: keep visual identical to the old div, restore keyboard focus */
   appearance: none;
@@ -1675,7 +1704,6 @@ a:hover {
 .pool-match-numbered-row__side--aka {
   background: var(--red-soft, #fde7e8);
   justify-content: flex-end;
-  flex-direction: row-reverse;
   text-align: right;
   border-radius: 0 6px 6px 0;
 }
@@ -1713,6 +1741,16 @@ a:hover {
   min-width: 52px;
   text-align: center;
   letter-spacing: 0.04em;
+  /* Long team summaries ("IV 15-12 · PW 45-38") wrap in the centre cell
+     rather than starving the flanking Shiro/Aka name columns to zero. */
+  overflow-wrap: anywhere;
+}
+
+/* Under a coarse (touch) pointer, lift the match row to the 44px target. */
+@media (pointer: coarse) {
+  .pool-match-numbered-row {
+    min-height: 44px;
+  }
 }
 
 /* ---------- Pool match results ---------- */

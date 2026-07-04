@@ -409,6 +409,13 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   const aDN = isEngi && typeof m.sideA === "object" ? (m.sideA.displayName || "") : "";
   const bDN = isEngi && typeof m.sideB === "object" ? (m.sideB.displayName || "") : "";
 
+  // DH badge: show which side won a completed daihyosen bout.
+  const isDH = isPoolDaihyosenBout(m.id) && m.status === "completed";
+  const winnerName = m.winner && typeof m.winner === "object" ? m.winner.name : m.winner;
+  const nameOf = (side) => (typeof side === "object" ? side?.name : side) || "";
+  const shiroWonDH = isDH && !!winnerName && winnerName === nameOf(m.sideB); // shiro = sideB
+  const akaWonDH = isDH && !!winnerName && winnerName === nameOf(m.sideA);   // aka = sideA
+
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 
   // Non-interactive <div> when there's no handler (read-only reuse) so the row
@@ -421,6 +428,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
         <span className="pool-match-numbered-row__name">{bName || "-"}</span>
+        {shiroWonDH ? <DHBadge /> : null}
         {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
       <span className="pool-match-numbered-row__score">
@@ -432,6 +440,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
         <span className="pool-match-numbered-row__name">{aName || "-"}</span>
+        {akaWonDH ? <DHBadge /> : null}
         {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>
@@ -516,13 +525,12 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         );
 
         // Determine which players to iterate.
-        // - League: standings already arrive in rank order; use them so the table is
-        //   rank-first (pool.players is not meaningful for leagues and may be empty).
-        // - Non-league pools: use pool.players draw order so operators can read the
-        //   fight-order chart alongside the standings.
-        const drawOrderPlayers = isLeague && poolStandings
-          ? poolStandings.map(s => s.player)
-          : (pool.players || []);
+        // Both pools and leagues use pool.players draw order so operators can read
+        // the fight-order chart alongside the standings. Fall back to rank-sorted
+        // standings order only when pool.players is empty (e.g. legacy payloads).
+        const drawOrderPlayers = (pool.players && pool.players.length)
+          ? pool.players
+          : (poolStandings ? poolStandings.map(s => s.player) : []);
 
         return (
           // A lone pool (every league has exactly one) must span the full grid
@@ -537,7 +545,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
             </div>
 
             {/* Standings table: rows in draw position order, rank looked up by player key (id or name||dojo) */}
-            <table className="pool__table">
+            <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
+              {/* Clarifies the "#" column (draw order, not rank) for every reader
+                  and doubles as the table's accessible caption. */}
+              <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>
               <thead>
                 {isEngi ? (
                   <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
@@ -565,19 +576,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      {/* The "#" column means different things by format, and that is
-                          intentional and explicit:
-                          - League: the table is ordered by rank, so "#" shows the
-                            authoritative standing rank (s.rank). No separate rank
-                            badge: rank is shown exactly once here.
-                          - Pools: the table is in DRAW order (operators read it as a
-                            fight-order chart), so "#" is the draw position and the
-                            rank is surfaced separately by the badge next to the name. */}
-                      {isLeague ? (
-                        <td className={`pool-standings__draw-pos${s && s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{rank ?? drawPos}{s && s.isOverridden ? "*" : ""}</td>
-                      ) : (
-                        <td className="pool-standings__draw-pos">{drawPos}</td>
-                      )}
+                      {/* The "#" column is always the draw position. Both pools and
+                          leagues use pool.players draw order; rank is surfaced
+                          separately by the rank badge next to the name. */}
+                      <td className="pool-standings__draw-pos">{drawPos}</td>
                       <td>
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
@@ -585,12 +587,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 3) && (
                             <DHBadge />
                           )}
-                          {/* The rank badge is only informative when rows are in
-                              DRAW order (non-league pools), where rank ≠ the "#"
-                              draw-position column. League standings are rank-sorted,
-                              so "#" already equals the rank and a badge would just
-                              duplicate it: suppress it there. */}
-                          {!isLeague && poolHasResults && rank !== null ? (
+                          {/* The rank badge shows for both pools and leagues: the "#"
+                              column is always draw position, so the badge is the
+                              authoritative standing rank signal for both formats. */}
+                          {poolHasResults && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

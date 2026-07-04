@@ -53,11 +53,15 @@ describe('matchScoreStr; engi takes priority and everything else stays letters',
     expect(s).not.toMatch(/^\d/);
   });
 
-  it('a non-engi team match still returns the IV letter-adjacent aggregate, not flag digits', () => {
+  it('a non-engi team match returns the IV/PW aggregate, not flag digits', () => {
+    // Server-authoritative teamResult drives the team-match summary.
     const m = {
       sideA: 'TeamA', sideB: 'TeamB',
       subResults: [{ position: 0, winner: 'TeamB', sideA: 'P1', sideB: 'P2' }],
+      teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 2, akaPW: 1 },
     };
-    expect(matchScoreStr(m, [], [])).toBe('1–0');
+    const s = matchScoreStr(m, [], []);
+    expect(s).toBe('IV 1–0 · PW 2–1');
+    expect(s).not.toMatch(/^\d/);
   });
 });

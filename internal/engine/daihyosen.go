@@ -297,28 +297,15 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // Pass the names from the parent MatchResult.SideA / SideB so the
 // caller's view of "left team" / "right team" is canonical.
 func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string) (TeamSummary, TeamSummary) {
-	var a, b TeamSummary
-	for _, sub := range subResults {
-		// Skip the daihyosen placeholder itself (Position == -1) so a
-		// previously-added daihyosen bout doesn't double-count when an
-		// operator re-validates the tie.
-		if sub.Position < 0 {
-			continue
-		}
-		sideAWin := isWinForSide(sub.Winner, sideAName, sub.SideA)
-		sideBWin := isWinForSide(sub.Winner, sideBName, sub.SideB)
-		switch {
-		case sideAWin:
-			a.IndividualWins++
-		case sideBWin:
-			b.IndividualWins++
-		}
-		// PW counts every ippon scored regardless of bout outcome,
-		// hikiwake bouts where both sides scored still contribute.
-		a.PointsWon += len(sub.IpponsA)
-		b.PointsWon += len(sub.IpponsB)
+	// Delegate to the single source of truth in state (the same computation
+	// feeds the wire teamResult the frontend renders), so tie-break math and
+	// the displayed IV/PW never drift. SideA is Aka, SideB is Shiro.
+	line := state.TeamResultFrom(subResults, sideAName, sideBName)
+	if line == nil {
+		return TeamSummary{}, TeamSummary{}
 	}
-	return a, b
+	return TeamSummary{IndividualWins: line.AkaIV, PointsWon: line.AkaPW},
+		TeamSummary{IndividualWins: line.ShiroIV, PointsWon: line.ShiroPW}
 }
 
 // AddDaihyosen validates the request to add a daihyosen bout to a team

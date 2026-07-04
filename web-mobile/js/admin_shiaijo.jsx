@@ -84,7 +84,7 @@ export function shiaijoScoreCell(m) {
     if (flags) return { kind: "engi", flags };
     const isTeam = isTeamMatch(m);
     if (isTeam) {
-        const iv = window.teamIVScore ? window.teamIVScore(m) : null;
+        const iv = window.teamIVPWScore ? window.teamIVPWScore(m) : (window.teamIVScore ? window.teamIVScore(m) : null);
         return iv ? { kind: "team", iv } : { kind: "none" };
     }
     const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);

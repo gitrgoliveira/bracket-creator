@@ -321,7 +321,7 @@ Turn on **Engi (kata demonstration)** in a competition's Settings tab (locked on
 
 - **Scoring**: the score editor becomes a referee flag counter for each side. A bout's flags must total 1, 3, or 5 (an odd panel size), so a bout can never end in a draw.
 - **Standings**: pools and leagues rank pairs by total wins first, then by total flags accumulated across all bouts (both the winning and losing side's flags count toward their own tally).
-- Quick-score and daihyosen are kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
+- Quick-score, manual winner overrides, and daihyosen are kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
 
 ### Awards and winners
 

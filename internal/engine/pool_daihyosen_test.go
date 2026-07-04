@@ -135,7 +135,8 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 		Format:   state.CompFormatLeague,
 		Status:   state.CompStatusPools,
 		Courts:   []string{"A"},
-		TeamSize: 2, // 2-person teams keeps the SubResults simple
+		Kind:     "team", // pin the real team config (Kind AND TeamSize)
+		TeamSize: 2,      // 2-person teams keeps the SubResults simple
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{

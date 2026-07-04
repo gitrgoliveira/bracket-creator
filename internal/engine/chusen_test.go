@@ -135,3 +135,33 @@ func TestChusenCandidates_PartialRoundNotPremature(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, cands, "chusen must not surface mid-round (only 1 of 3 DH bouts scored)")
 }
+
+// TestChusenCandidates_AllDrawnNeedsChusen: a full daihyosen round completed as
+// all hikiwake (every bout Winner="") leaves every team on 0 wins, so the order
+// is undetermined and must surface as needing chusen (otherwise the competition
+// can never advance).
+func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
+	compID := "chusen-alldrawn"
+	eng, store := setupTeamPoolComp(t, compID, true) // 3 teams fully tied
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	scored := 0
+	for i := range all {
+		if IsPoolDaihyosenMatchID(all[i].ID) {
+			all[i].Status = state.MatchStatusCompleted
+			all[i].Winner = "" // hikiwake
+			scored++
+		}
+	}
+	require.Equal(t, 3, scored, "expected the 3-team round-robin of DH bouts")
+	require.NoError(t, store.SavePoolMatches(compID, all))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+
+	cands, err := eng.ChusenCandidates(compID)
+	require.NoError(t, err)
+	require.Len(t, cands, 1, "an all-drawn daihyosen round leaves the order undetermined -> chusen")
+}

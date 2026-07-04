@@ -5,7 +5,7 @@
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
 const ScoreEditorModal = window.ScoreEditorModal;
 
@@ -131,13 +131,19 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
   // Per-group input values: keys are "${poolName}::${teamName}" -> string.
   const [chusenInputs, setChusenInputs] = useStateA({});
-  // Per-group busy flag: "${poolName}" -> bool.
+  // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
+  // (a pool can hold more than one unresolved tied group).
   const [chusenBusy, setChusenBusy] = useStateA({});
-  // Per-group error: "${poolName}" -> string.
+  // Per-group error: keyed by the same "${poolName}::${minPosition}" -> string.
   const [chusenGroupErr, setChusenGroupErr] = useStateA({});
 
   // Lightweight signature so the effect re-runs when match results change.
-  const poolMatchesSig = (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|");
+  // Memoized so typing into a chusen position input (local state) does not
+  // re-scan every pool match on each render.
+  const poolMatchesSig = useMemoA(
+    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|"),
+    [poolMatches]
+  );
 
   useEffectA(() => {
     if (!isTeamComp || !c || c.status !== "pools" || !window.API || typeof window.API.chusenCandidates !== "function") {

@@ -50,16 +50,17 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	}
 	dhWins := make(map[string]int, len(group))
 	dhCompleted := 0
-	dhPlayed := false
 	for _, m := range allMatches {
 		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted {
 			continue
 		}
 		if names[m.SideA] && names[m.SideB] {
 			dhCompleted++
+			// A hikiwake (Winner == "") counts toward round completeness but adds
+			// no win, so an all-drawn round leaves every member on 0 wins - a
+			// duplicate, which correctly surfaces as needing chusen below.
 			if m.Winner != "" {
 				dhWins[m.Winner]++
-				dhPlayed = true
 			}
 		}
 	}
@@ -67,13 +68,12 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	// (a round-robin = N*(N-1)/2 bouts). Mid-round, partial win counts look like
 	// a cycle (e.g. after the first of three bouts the counts are 1/0/0, whose
 	// two zeros are a spurious duplicate), which would surface the chusen panel
-	// before the remaining bouts are played.
+	// before the remaining bouts are played. Once complete, a cycle OR an
+	// all-drawn round (every member on 0 wins) leaves the order undetermined; a
+	// strict win order (all distinct counts) does not.
 	n := len(group)
 	expected := n * (n - 1) / 2
 	if expected == 0 || dhCompleted < expected {
-		return false
-	}
-	if !dhPlayed {
 		return false
 	}
 	seen := make(map[int]bool, len(group))

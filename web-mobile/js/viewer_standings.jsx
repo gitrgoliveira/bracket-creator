@@ -716,8 +716,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               </div>
             </div>
 
-            {/* Standings table. Pools iterate in draw order (rank via badge);
-                leagues iterate in rank order ("#" is the rank). */}
+            {/* Standings table. PoolsViewer is pool-only: rows always iterate
+                in draw order with rank surfaced via a badge. Leagues render
+                through the separate LeagueStandingsViewer (rank order, "#" is
+                the rank, no badge). */}
             <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
               {/* Accessible caption whose wording matches the row ordering. */}
               <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>

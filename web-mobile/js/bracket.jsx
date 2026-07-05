@@ -168,7 +168,10 @@ function teamIVScore(m) {
   return `${ivB}–${ivA}`; // Shiro (B) – Aka (A)
 }
 
-// teamIVPWScore: the full team-match result "IV shiroIV–akaIV · PW shiroPW–akaPW".
+// teamIVPWScore: the full team-match result, IV over PW on two lines
+// ("IV shiroIV–akaIV\nPW shiroPW–akaPW") so the two totals stay readable in the
+// narrow centre score cell. Score containers use white-space: pre-line to honour
+// the newline; single-line contexts (ippon letters) are unaffected.
 // PW (points won) is AUTHORITATIVE from the server: Go MatchResult.MarshalJSON
 // attaches m.teamResult {shiroIV, akaIV, shiroPW, akaPW} for every team match, so
 // the client never re-derives PW (single source of truth with the standings PW
@@ -179,7 +182,7 @@ function teamIVScore(m) {
 function teamIVPWScore(m) {
   const tr = m && m.teamResult;
   if (tr && typeof tr === "object") {
-    return `IV ${tr.shiroIV}–${tr.akaIV} · PW ${tr.shiroPW}–${tr.akaPW}`;
+    return `IV ${tr.shiroIV}–${tr.akaIV}\nPW ${tr.shiroPW}–${tr.akaPW}`;
   }
   const iv = teamIVScore(m); // legacy fallback: IV only, no server teamResult
   return iv == null ? null : `IV ${iv}`;

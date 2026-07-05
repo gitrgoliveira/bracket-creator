@@ -125,7 +125,7 @@ describe('teamIVScore', () => {
   });
 });
 
-// teamIVPWScore: full team-match result "IV shiroIV–akaIV · PW shiroPW–akaPW".
+// teamIVPWScore: full team-match result "IV shiroIV–akaIV" over "PW shiroPW–akaPW" (newline-separated).
 // IV and PW come from the AUTHORITATIVE server field m.teamResult
 // {shiroIV, akaIV, shiroPW, akaPW} (Go MatchResult.MarshalJSON via
 // state.TeamResultFrom); the client does NOT re-derive PW. Legacy payloads that
@@ -149,16 +149,16 @@ describe('teamIVPWScore', () => {
       subResults: [{ position: 0, winner: 'TeamB' }], // present but ignored
       teamResult: { shiroIV: 2, akaIV: 1, shiroPW: 4, akaPW: 2 },
     };
-    expect(teamIVPWScore(m)).toBe('IV 2–1 · PW 4–2');
+    expect(teamIVPWScore(m)).toBe('IV 2–1\nPW 4–2');
   });
 
-  it('all draws from server teamResult → "IV 0–0 · PW 0–0"', () => {
+  it('all draws from server teamResult → "IV 0–0 / PW 0–0"', () => {
     const m = {
       sideA: 'TeamA',
       sideB: 'TeamB',
       teamResult: { shiroIV: 0, akaIV: 0, shiroPW: 0, akaPW: 0 },
     };
-    expect(teamIVPWScore(m)).toBe('IV 0–0 · PW 0–0');
+    expect(teamIVPWScore(m)).toBe('IV 0–0\nPW 0–0');
   });
 
   it('does NOT re-derive PW from ippons: trusts teamResult over subResults', () => {
@@ -169,7 +169,7 @@ describe('teamIVPWScore', () => {
       subResults: [{ position: 0, winner: 'TeamB', ipponsA: ['M'], ipponsB: ['M', 'K'] }],
       teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 9, akaPW: 9 },
     };
-    expect(teamIVPWScore(m)).toBe('IV 1–0 · PW 9–9');
+    expect(teamIVPWScore(m)).toBe('IV 1–0\nPW 9–9');
   });
 
   it('legacy fallback: no teamResult → IV only from subResults (no PW)', () => {

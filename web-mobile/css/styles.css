@@ -1390,6 +1390,9 @@ a:hover {
   color: var(--ink-2);
   min-width: 16px;
   text-align: center;
+  /* Team IV/PW stacks (newline from teamIVPWScore); single-line scores unaffected. */
+  white-space: pre-line;
+  line-height: 1.3;
 }
 
 .bc-side--winner .bc-score {
@@ -1741,8 +1744,10 @@ a:hover {
   min-width: 52px;
   text-align: center;
   letter-spacing: 0.04em;
-  /* Long team summaries ("IV 15-12 · PW 45-38") wrap in the centre cell
-     rather than starving the flanking Shiro/Aka name columns to zero. */
+  line-height: 1.3;
+  /* Team summaries stack IV over PW (newline from teamIVPWScore); pre-line honours
+     it. Long values also wrap rather than starving the flanking name columns. */
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
@@ -1879,6 +1884,9 @@ a:hover {
   font-weight: 700;
   font-size: 14px;
   color: var(--ink-2);
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 
 .sched-row__status {
@@ -2604,6 +2612,9 @@ a.vlist-item {
 .vsched-item__score {
   font-family: var(--font-mono);
   font-weight: 700;
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 /* Live (in-progress) score on a running match: accent-tinted so it reads as
    "current score, still climbing" rather than a settled final result. */
@@ -4527,6 +4538,9 @@ button.pool-match-row {
   align-items: center;
   justify-content: center;
   gap: 2px;
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 /* Symmetric foul gutters flanking the score (Shiro left, Aka right). Reserved
    even when empty so the centred score never shifts as a hansoku ▲ appears. */
@@ -8251,10 +8265,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 2px;
 }
 
-/* Team encounter score in the queue row: always carries an IV label so a
-   bare figure is never shown out of context (a team number could read as
-   wins / points otherwise). */
-.shiaijo-row__teamscore { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+/* Team encounter score in the queue row. The value self-labels ("IV s-a" over
+   "PW s-a") so a bare figure is never shown out of context; pre-line stacks the
+   two totals. */
+.shiaijo-row__teamscore { display: inline-block; text-align: center; white-space: pre-line; line-height: 1.25; }
 .shiaijo-row__iv {
   font-size: 9px;
   font-weight: 700;

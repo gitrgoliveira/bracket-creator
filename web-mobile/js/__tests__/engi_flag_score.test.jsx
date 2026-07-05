@@ -61,7 +61,7 @@ describe('matchScoreStr; engi takes priority and everything else stays letters',
       teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 2, akaPW: 1 },
     };
     const s = matchScoreStr(m, [], []);
-    expect(s).toBe('IV 1–0 · PW 2–1');
+    expect(s).toBe('IV 1–0\nPW 2–1');
     expect(s).not.toMatch(/^\d/);
   });
 });

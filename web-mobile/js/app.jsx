@@ -2,6 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
@@ -284,35 +285,6 @@ export function diffAnnouncementSnapshot(seenRef, list) {
   // that still contains the same IDs won't re-fire.
   arr.forEach(a => { if (a && a.id) seen.add(a.id); });
   return additions;
-}
-
-// createTimerPool: a self-pruning setTimeout pool for long-lived effects.
-// schedule() wraps the callback so a FIRED timer deletes its own id from the
-// pool; clearAll() cancels whatever is still pending. Without the self-prune,
-// an effect that stays mounted for an entire tournament day (a /display TV
-// wall, a viewer parked on one competition) accumulates one entry per
-// scheduled refetch, i.e. one or two per SSE event, for the tab's lifetime
-// (mp-wng6). Exported for unit tests.
-export function createTimerPool() {
-  const pending = new Set();
-  return {
-    schedule(fn, delay) {
-      const id = setTimeout(() => {
-        pending.delete(id);
-        fn();
-      }, delay);
-      pending.add(id);
-    },
-    clearAll() {
-      pending.forEach(clearTimeout);
-      pending.clear();
-    },
-    // pendingCount: pool-size observability. Currently read only by the
-    // timer_pool unit tests, which use it to assert the self-prune drains.
-    pendingCount() {
-      return pending.size;
-    },
-  };
 }
 
 // parseCourtFromSearch: read the normalized display court from the URL query

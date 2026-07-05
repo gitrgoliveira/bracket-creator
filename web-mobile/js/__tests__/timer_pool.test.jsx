@@ -7,7 +7,7 @@
 // per SSE event for the tab's lifetime.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createTimerPool } from '../app.jsx';
+import { createTimerPool } from '../timer_pool.jsx';
 
 describe('createTimerPool', () => {
   beforeEach(() => {

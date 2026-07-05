@@ -62,6 +62,10 @@ describe('createTimerPool', () => {
     pool.clearAll();
     pool.clearAll();
     expect(pool.pendingCount()).toBe(0);
+    // "Untouched" made executable: clearAll must not re-invoke a callback
+    // that already fired.
+    vi.runAllTimers();
+    expect(fired).toHaveBeenCalledTimes(1);
   });
 
 });

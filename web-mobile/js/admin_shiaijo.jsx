@@ -1086,8 +1086,12 @@ function MatchSides({ m, large }) {
 }
 
 // Collapsible context for the match being scored:
-//   • pool phase  → live standings + results for the current pool (the shared
-//     read-only window.PoolsViewer), plus which pool is next on this court.
+//   • pool phase  → live standings + results for the current pool. Standings
+//     ordering is decided by FORMAT, not surface (mp-ahu6): pools route to
+//     the shared read-only window.PoolsViewer (draw order, rank as a badge)
+//     and leagues route to window.LeagueStandingsViewer (rank order), same
+//     as the public viewer and admin Pools tab. Pools also show which pool
+//     is next on this court; leagues have no "next pool" concept.
 //   • bracket phase → a bracket fragment with the current match highlighted.
 function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
     const comp = (competitions || []).find((c) => c.id === match.compId);
@@ -1098,6 +1102,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
         ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
         : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
+    const LeagueStandingsViewer = window.LeagueStandingsViewer;
 
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
@@ -1134,21 +1139,14 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             {open && (
                 <div className="shiaijo-context__body">
                     {isPool ? (
-                        <>
-                            {!isLeagueComp && (
-                                <div className="shiaijo-context__next">
-                                    {nextPoolName
-                                        ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
-                                        : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
-                                </div>
-                            )}
-                            {PoolsViewer && currentPool ? (
+                        isLeagueComp ? (
+                            // Leagues are always RANK-ordered (mp-ahu6): never fall
+                            // through to the draw-order PoolsViewer here.
+                            LeagueStandingsViewer && detail ? (
                                 <div className="shiaijo-context__pools">
-                                    <PoolsViewer
-                                        pools={[currentPool]}
-                                        standings={detail.standings}
-                                        poolMatches={detail.poolMatches}
+                                    <LeagueStandingsViewer
                                         competition={comp || detail}
+                                        poolMatches={detail.poolMatches}
                                         tweaks={tweaks || { showDojo: true }}
                                         onMatchClick={null}
                                         highlightPlayers={[]}
@@ -1160,8 +1158,35 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                         ? "Couldn't load standings: they'll appear once the connection recovers."
                                         : "Loading standings…"}
                                 </p>
-                            )}
-                        </>
+                            )
+                        ) : (
+                            <>
+                                <div className="shiaijo-context__next">
+                                    {nextPoolName
+                                        ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
+                                        : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
+                                </div>
+                                {PoolsViewer && currentPool ? (
+                                    <div className="shiaijo-context__pools">
+                                        <PoolsViewer
+                                            pools={[currentPool]}
+                                            standings={detail.standings}
+                                            poolMatches={detail.poolMatches}
+                                            competition={comp || detail}
+                                            tweaks={tweaks || { showDojo: true }}
+                                            onMatchClick={null}
+                                            highlightPlayers={[]}
+                                        />
+                                    </div>
+                                ) : (
+                                    <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
+                                        {detailErr
+                                            ? "Couldn't load standings: they'll appear once the connection recovers."
+                                            : "Loading standings…"}
+                                    </p>
+                                )}
+                            </>
+                        )
                     ) : (match.phase === "bracket" && BracketTree && bracket && bracket.rounds) ? (
                         <div className="shiaijo-context__bracket">
                             <BracketTree rounds={bracket.rounds} highlightId={match.id} />

@@ -152,6 +152,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterPublicEligibilityHandlers(api, store)
 	RegisterPublicLineupHandlers(api, store)
 	RegisterPublicSwissHandlers(api, store, eng)
+	RegisterPublicLeagueHandlers(api, eng)
 	RegisterPublicAnnouncementHandlers(api, store)
 	RegisterPublicRegistrationHandlers(api, store, hub)
 	RegisterPublicSponsorHandlers(api, store)

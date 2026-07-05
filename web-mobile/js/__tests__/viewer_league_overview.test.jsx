@@ -225,7 +225,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).not.toContain('Player 1');
   });
 
-  it('view-full-standings button calls onSwitchTab("pools")', () => {
+  it('view-full-standings button calls onSwitchTab("league")', () => {
     const onSwitchTab = vi.fn();
     const standings = { League: makeStandings(3) };
     const tree = runtime.mount(ViewerOverview, {
@@ -241,7 +241,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     );
     expect(btn).not.toBeNull();
     btn.props.onClick();
-    expect(onSwitchTab).toHaveBeenCalledWith('pools');
+    expect(onSwitchTab).toHaveBeenCalledWith('league');
   });
 
   it('team league shows correct column headers (W/L/T/IV/IL/PW/PL)', () => {

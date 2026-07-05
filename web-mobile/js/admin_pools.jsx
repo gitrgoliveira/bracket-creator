@@ -480,22 +480,35 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   }
 
   const PoolsViewer = window.PoolsViewer;
+  const LeagueStandingsViewer = window.LeagueStandingsViewer;
   return (
     <>
     <div>
       {chusenBanner}
       {leagueTiebreakBanner}
-      {PoolsViewer ? (
-        <PoolsViewer
-          pools={pools}
-          standings={standings}
-          poolMatches={poolMatches}
-          competition={c}
-          tweaks={tweaks}
-          onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
-          highlightPlayers={[]}
-        />
-      ) : null}
+      {isLeague ? (
+        LeagueStandingsViewer ? (
+          <LeagueStandingsViewer
+            competition={c}
+            poolMatches={poolMatches}
+            tweaks={tweaks}
+            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            highlightPlayers={[]}
+          />
+        ) : null
+      ) : (
+        PoolsViewer ? (
+          <PoolsViewer
+            pools={pools}
+            standings={standings}
+            poolMatches={poolMatches}
+            competition={c}
+            tweaks={tweaks}
+            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            highlightPlayers={[]}
+          />
+        ) : null
+      )}
     </div>
     {scoreModal}
     </>

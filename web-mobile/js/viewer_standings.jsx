@@ -164,6 +164,159 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   );
 }
 
+export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatchClick, highlightPlayers }) {
+  const c = competition;
+  const [standings, setStandings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Re-fetch whenever poolMatches length changes (SSE-driven) so the
+  // standings table reflects the latest state after each scored bout.
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    window.API.leagueStandings(c.id)
+      .then(data => {
+        if (cancelled) return;
+        setStandings(Array.isArray(data) ? data : []);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error("Failed to load league standings", err);
+        setError(err.message || "Failed to load standings");
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [c.id, (poolMatches || []).length]);
+
+  const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
+  const isEngi = !!(competition && competition.engi);
+  const isCompleted = c.status === "completed";
+  const winner = isCompleted && standings.length > 0 ? standings[0] : null;
+
+  const completed = (poolMatches || []).filter(m => m.status === "completed").length;
+  const total = (poolMatches || []).length;
+
+  // DH-winners for team daihyosen badge.
+  const dhWinnerNames = new Set(
+    (poolMatches || [])
+      .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
+      .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+      .filter(Boolean)
+  );
+
+  if (loading) return <window.LoadingSpinner text="Loading standings..." />;
+  if (error) return <div className="alert alert--error">{error}</div>;
+
+  const colSpan = isEngi ? 4 : isTeam ? 10 : 7;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {isCompleted && standings.length > 0 && <WinnerBadge name={winner.player?.name || ""} />}
+      <div className="pool">
+        <div className="pool__head">
+          <div className="pool__name">{isCompleted ? "Final standings" : "Standings"}</div>
+          <div className="pool__match-count">{completed}/{total} matches</div>
+        </div>
+        <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
+          <caption className="pool__table-caption">Ranked by standings</caption>
+          <thead>
+            {isEngi ? (
+              <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
+            ) : isTeam ? (
+              <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
+            ) : (
+              <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
+            )}
+          </thead>
+          <tbody>
+            {standings.length > 0 ? standings.map((s, i) => {
+              const rank = s.rank || i + 1;
+              const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "") && rank <= 3;
+              return (
+                <tr key={s.player?.id || s.player?.name || i} className={isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : undefined}>
+                  <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
+                    {rank}{s.isOverridden ? "*" : ""}
+                  </td>
+                  <td>
+                    <div className="pool__player-name">
+                      {s.player?.name || ""}
+                      {isDHWinner ? <DHBadge /> : null}
+                    </div>
+                    {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
+                  </td>
+                  {isEngi ? (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.flags || 0}</td>
+                    </>
+                  ) : isTeam ? (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.losses || 0}</td>
+                      <td className="num">{s.draws || 0}</td>
+                      <td className="num">{s.individualWins || 0}</td>
+                      <td className="num">{s.individualLosses || 0}</td>
+                      <td className="num">{s.individualDraws || 0}</td>
+                      <td className="num">{s.pointsWon || 0}</td>
+                      <td className="num">{s.pointsLost || 0}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="num">{s.wins || 0}</td>
+                      <td className="num">{s.losses || 0}</td>
+                      <td className="num">{s.draws || 0}</td>
+                      <td className="num">{s.ipponsGiven || 0}</td>
+                      <td className="num">{s.ipponsTaken || 0}</td>
+                    </>
+                  )}
+                </tr>
+              );
+            }) : (
+              <tr><td colSpan={colSpan} className="pool__table-empty">No matches scored yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+        {/* Numbered match list for all scored matches in the league */}
+        {(poolMatches || []).length > 0 && (
+          <>
+            <div className="pool-match-section-label">Matches</div>
+            <div className="pool-match-numbered-list">
+              {(poolMatches || []).map((m, idx) => {
+                if (isTeam) {
+                  const isRepBout = isSupplementaryBout(m.id || "");
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: isRepBout ? "" : competition.kind, teamSize: isRepBout ? 0 : competition.teamSize };
+                  return (
+                    <PoolNumberedMatchRow
+                      key={m.id}
+                      m={m}
+                      num={idx + 1}
+                      onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                    />
+                  );
+                } else {
+                  const enriched = { ...m, phase: "pool", poolName: m.poolName || "", phaseName: m.poolName || "", compFormat: competition.format, compId: competition.id, compName: competition.name, compKind: "", teamSize: 0 };
+                  return (
+                    <PoolNumberedMatchRow
+                      key={m.id}
+                      m={m}
+                      num={idx + 1}
+                      isEngi={isEngi}
+                      onMatchClick={onMatchClick ? () => onMatchClick(enriched) : null}
+                    />
+                  );
+                }
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const PoolMatchRow = React.memo(({ m, onClick }) => {
   const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
@@ -461,20 +614,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
   if (!pools || pools.length === 0) {
     return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} />;
   }
-  const allMatchesComplete = isLeague && (() => {
-    const all = poolMatches || [];
-    return all.length > 0 && all.every(m => m.status === "completed");
-  })();
-  // Winner is the top-ranked player from the (single) league standings.
-  // pools[0] is the only pool for league formats: see internal/engine.
-  const leagueWinner = (isLeague && allMatchesComplete && pools[0] && standings)
-    ? (standings[pools[0].poolName] || [])[0]
-    : null;
   const poolWinners = competition ? (competition.poolWinners || 2) : 2;
 
   return (
     <div className="pools-grid">
-      {isLeague && leagueWinner && <div style={{ gridColumn: "1 / -1" }}><WinnerBadge name={leagueWinner.player?.name || ""} /></div>}
       {pools.map((pool) => {
         const poolStandings = standings ? standings[pool.poolName] : null;
         // Match ids belong to this pool by EXACT parsed pool name, not a raw
@@ -524,19 +667,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           (s) => (s.wins || 0) + (s.losses || 0) + (s.draws || 0) > 0
         );
 
-        // Determine iteration order.
-        // Pools list rows in draw (fight-order) position so operators can read the
-        // fight chart alongside the standings; the rank is surfaced by a badge.
-        // Leagues list rows in standings (rank) order - "#" IS the rank - matching
-        // the Overview league summary and the league/swiss convention. Each falls
-        // back to the other source when its primary is empty (legacy payloads).
-        const orderedPlayers = isLeague
-          ? (poolStandings && poolStandings.length
-              ? poolStandings.map(s => s.player)
-              : (pool.players || []))
-          : (pool.players && pool.players.length
-              ? pool.players
-              : (poolStandings ? poolStandings.map(s => s.player) : []));
+        // Rows are always in draw (fight-order) position so operators can read the
+        // fight chart alongside the standings; rank is surfaced by badge.
+        const drawOrderPlayers = pool.players && pool.players.length
+          ? pool.players
+          : (poolStandings ? poolStandings.map(s => s.player) : []);
 
         return (
           // A lone pool (every league has exactly one) must span the full grid
@@ -544,7 +679,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           // half width, mismatching the full-width Overview standings table.
           <div key={pool.poolName} className="pool" style={pools.length === 1 ? { gridColumn: "1 / -1" } : undefined}>
             <div className="pool__head">
-              <div className="pool__name">{isLeague ? (allMatchesComplete ? "Final standings" : "Standings") : pool.poolName}</div>
+              <div className="pool__name">{pool.poolName}</div>
               <div className="pool__match-count">
                 {matches.filter(m => m.status === "completed").length}/{matches.length} matches
               </div>
@@ -554,9 +689,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 leagues iterate in rank order ("#" is the rank). */}
             <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
               {/* Accessible caption whose wording matches the row ordering. */}
-              <caption className="pool__table-caption">
-                {isLeague ? "Ranked by standings" : "Listed in draw order; badge shows current rank"}
-              </caption>
+              <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>
               <thead>
                 {isEngi ? (
                   <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
@@ -567,7 +700,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 )}
               </thead>
               <tbody>
-                {orderedPlayers.map((p, i) => {
+                {drawOrderPlayers.map((p, i) => {
                   const drawPos = i + 1;
                   // Look up by id first (stable), fall back to name||dojo composite for
                   // legacy fixtures without UUIDs. Mirrors the key used when building rankByPlayerKey.
@@ -584,23 +717,17 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      {/* Pools: "#" is the draw position (rank via the badge below).
-                          Leagues: "#" IS the authoritative standing rank (with the
-                          override "*"), matching the Overview summary; no badge. */}
-                      <td className={`pool-standings__draw-pos${isLeague && s && s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
-                        {isLeague ? `${rank ?? drawPos}${s && s.isOverridden ? "*" : ""}` : drawPos}
+                      <td className="pool-standings__draw-pos">
+                        {drawPos}
                       </td>
                       <td>
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
                           {p.name}
-                          {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 3) && (
+                          {isTeam && dhWinnerNames.has(p.name) && (
                             <DHBadge />
                           )}
-                          {/* Rank badge only for pools, where "#" is the draw position
-                              so the badge carries the rank. Leagues put the rank in
-                              "#" itself (rank-ordered rows), so no badge here. */}
-                          {!isLeague && poolHasResults && rank !== null ? (
+                          {poolHasResults && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

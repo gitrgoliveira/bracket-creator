@@ -1697,6 +1697,14 @@ const API = {
         }
         return res.json();
     },
+    async leagueStandings(compID) {
+        const res = await fetch(`/api/competitions/${compID}/league/standings`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load league standings");
+        }
+        return res.json();
+    },
     async toggleCheckIn(compID, pid, checkedIn, password) {
         const method = checkedIn ? 'PUT' : 'DELETE';
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {

@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, DHBadge } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
@@ -165,7 +165,8 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const tabs = [
     { id: "overview", label: "Overview" },
     isSwiss ? { id: "swiss", label: "Standings" } : null,
-    hasPools && !isSwiss ? { id: "pools", label: isLeague ? "League" : "Pools" } : null,
+    isLeague && hasPools ? { id: "league", label: "League" } : null,
+    !isLeague && hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
     c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
@@ -358,8 +359,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               </div>
             </div>
           )}
-          {effectiveTab === "pools" && hasPools && (
+          {effectiveTab === "pools" && hasPools && !isLeague && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
+          )}
+          {effectiveTab === "league" && hasPools && isLeague && (
+            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
@@ -555,7 +559,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           {onSwitchTab && (
             <button type="button"
               className="btn btn--link pool__view-all-btn"
-              onClick={() => onSwitchTab("pools")}
+              onClick={() => onSwitchTab(isLeague ? "league" : "pools")}
               data-testid="league-overview-view-all"
             >
               View full standings →

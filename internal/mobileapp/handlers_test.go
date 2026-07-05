@@ -45,6 +45,7 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	publicAPI := r.Group("/api")
 	RegisterScheduleHandlers(publicAPI)
 	RegisterPublicSwissHandlers(publicAPI, store, eng)
+	RegisterPublicLeagueHandlers(publicAPI, eng)
 
 	// Admin API
 	admin := r.Group("/api")

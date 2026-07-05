@@ -28,6 +28,10 @@ func TestIsTiebreakerMatchID(t *testing.T) {
 		{"Pool A-TBx-0", false}, // wrong prefix
 		{"TB-0", false},         // no pool name separator
 		{"", false},
+		// Same sibling scenario as IsPoolDaihyosenMatchID: a pool literally
+		// named "Pool A-TB-East" must not have its regular match ids
+		// misclassified as tiebreaker bouts.
+		{"Pool A-TB-East-0", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {

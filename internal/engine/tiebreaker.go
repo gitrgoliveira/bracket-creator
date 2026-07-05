@@ -3,15 +3,17 @@ package engine
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // IsTiebreakerMatchID reports whether matchID identifies a supplementary
-// ippon-shobu tiebreaker match (IDs of the form "Pool X-TB-N").
+// ippon-shobu tiebreaker match (IDs of the form "Pool X-TB-N"). Suffix-anchored
+// via hasNumericSuffixAfter (daihyosen.go) for the same reason as its
+// IsPoolDaihyosenMatchID sibling: a plain substring match would misclassify a
+// regular match in a pool whose name happens to contain "-TB-".
 func IsTiebreakerMatchID(matchID string) bool {
-	return strings.Contains(matchID, "-TB-")
+	return hasNumericSuffixAfter(matchID, "-TB-")
 }
 
 // teamStandingPoints and individualStandingPoints compute the single packed

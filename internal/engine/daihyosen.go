@@ -107,6 +107,34 @@ func poolNameFromMatchID(id string) (string, bool) {
 	return "", false
 }
 
+// hasNumericSuffixAfter reports whether id ends with marker followed by one
+// or more digits and nothing else, e.g. hasNumericSuffixAfter("Pool A-DH-3",
+// "-DH-") is true. A plain strings.Contains(id, marker) would also match a
+// REGULAR pool match whose pool name happens to contain the marker, e.g. a
+// pool literally named "Pool A-DH-East" produces regular match ids like
+// "Pool A-DH-East-0"; that id contains "-DH-" but is not a daihyosen bout
+// (its numeric suffix follows a later, unmarked "-"). Anchoring the digits to
+// the LAST occurrence of marker rejects that case: the suffix after it is
+// "East-0", not all-digits, so it correctly reports false. Mirrors the JS
+// twin's anchored regex (pool_ids.jsx DAIHYOSEN_BOUT_RE / SUPPLEMENTARY_BOUT_RE,
+// both /-DH-\d+$/ style), which was already correctly suffix-anchored.
+func hasNumericSuffixAfter(id, marker string) bool {
+	i := strings.LastIndex(id, marker)
+	if i < 0 {
+		return false
+	}
+	suffix := id[i+len(marker):]
+	if suffix == "" {
+		return false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
 // daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
 // by InjectPoolDaihyosenMatches when all team-pool matches complete with
@@ -114,7 +142,7 @@ func poolNameFromMatchID(id string) (string, bool) {
 // but scored as individual (one representative per side) rather than as
 // full team bouts.
 func IsPoolDaihyosenMatchID(matchID string) bool {
-	return strings.Contains(matchID, "-DH-")
+	return hasNumericSuffixAfter(matchID, "-DH-")
 }
 
 // generatePoolDaihyosenMatches creates round-robin MatchResult entries for

@@ -2,6 +2,7 @@
 // (Men's Individual, Women's Individual, Teams, etc.). Auth gates admin mode.
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
@@ -848,17 +849,17 @@ function App() {
   useE(() => { setCachedAuthConfig(authConfig); }, [authConfig]);
 
   useE(() => {
-    // Track every jittered timer so the cleanup can cancel them when
+    // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
     // viewerCompId="A" fires after the user switches to comp "B",
     // calls setSelectedCompData(data_for_A), and races the new
     // useEffect([viewerCompId]) fetch: whichever resolves last wins.
-    const pendingTimers = [];
-    const jitteredTimeout = (fn, delay) => {
-        const id = setTimeout(fn, delay);
-        pendingTimers.push(id);
-        return id;
-    };
+    // The pool self-prunes fired timers (mp-wng6): this effect can stay
+    // mounted for an entire tournament day on a display wall or a parked
+    // viewer tab, so retaining fired ids would grow the set by one or two
+    // entries per SSE event for the tab's lifetime.
+    const timerPool = createTimerPool();
+    const jitteredTimeout = timerPool.schedule;
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
@@ -1115,7 +1116,7 @@ function App() {
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
     });
-    return () => { unsub(); pendingTimers.forEach(clearTimeout); document.removeEventListener('visibilitychange', onVisibilityChange); };
+    return () => { unsub(); timerPool.clearAll(); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);

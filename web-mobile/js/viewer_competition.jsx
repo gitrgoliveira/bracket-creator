@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, dhWinnerName } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
@@ -408,7 +408,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const leagueDhWinnerNames = new Set(
     (poolMatches || [])
       .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-      .map(m => dhWinnerName(m))
+      .map(m => matchWinnerName(m))
       .filter(Boolean)
   );
 

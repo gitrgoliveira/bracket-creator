@@ -13,12 +13,16 @@ import (
 // tournament.md:181, EKC 6.2.5.1) the last resort is chusen (drawing lots): the
 // operator draws lots and records the order, which persists as a per-pool rank
 // override and lets the competition advance.
+//
+// This is an INTERNAL engine type, not a wire DTO: the GET /chusen-candidates
+// handler builds its JSON response from a gin.H literal (a "teamNames" array),
+// so these fields are never marshaled directly and carry no json tags.
 type ChusenGroup struct {
-	PoolName string `json:"poolName"`
+	PoolName string
 	// Teams are the still-tied members in current standings order.
-	Teams []state.PlayerStanding `json:"teams"`
+	Teams []state.PlayerStanding
 	// MinPosition is the 1-based finishing position of the best-placed member.
-	MinPosition int `json:"minPosition"`
+	MinPosition int
 }
 
 // groupNeedsChusen reports whether a tied group remains unresolved after its

@@ -321,6 +321,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             });
           } catch (e) {
             setChusenGroupErr(prev => ({ ...prev, [groupKey]: e.message || "Failed to record chusen result" }));
+            // The per-team overridePoolRank writes are sequential, so a mid-loop
+            // failure may have persisted some ranks but not others. overridePoolRank
+            // is idempotent per team (retrying re-sends every rank), and the group
+            // stays visible on failure so the operator can retry. Re-fetch the
+            // candidates so the banner reflects exactly which teams still need a
+            // rank, rather than waiting for the next SSE-driven refresh.
+            if (window.API && typeof window.API.chusenCandidates === "function") {
+              window.API.chusenCandidates(c.id, password)
+                .then(list => setChusenCandidates(list))
+                .catch(() => {});
+            }
           } finally {
             setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
           }

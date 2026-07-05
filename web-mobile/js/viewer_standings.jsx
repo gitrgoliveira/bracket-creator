@@ -79,7 +79,7 @@ export function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
 }
 
 // Normalizes a match winner (string or {name}) to a display name, "" if unset.
-export function dhWinnerName(m) {
+export function matchWinnerName(m) {
   return typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
 }
 
@@ -200,7 +200,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   // standings stale until the match count itself changed. Same pattern as
   // admin_pools.jsx's poolMatchesSig.
   const poolMatchesSig = useMemo(
-    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${dhWinnerName(m)}`).join("|"),
+    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${matchWinnerName(m)}`).join("|"),
     [poolMatches]
   );
 
@@ -237,7 +237,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   const dhWinnerNames = new Set(
     (poolMatches || [])
       .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-      .map(m => dhWinnerName(m))
+      .map(m => matchWinnerName(m))
       .filter(Boolean)
   );
 
@@ -671,7 +671,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         const dhWinnerNames = new Set(
           matches
             .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-            .map(m => dhWinnerName(m))
+            .map(m => matchWinnerName(m))
             .filter(Boolean)
         );
 

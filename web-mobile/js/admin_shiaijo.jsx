@@ -1085,19 +1085,26 @@ function MatchSides({ m, large }) {
     );
 }
 
+// Standings ordering is decided by competition FORMAT, not by surface
+// (mp-ahu6): leagues are always rank-ordered (window.LeagueStandingsViewer),
+// pools are always draw-ordered with rank as a badge (window.PoolsViewer) -
+// same split as the public viewer and admin Pools tab. Exported so the
+// format->viewer decision is independently testable and this invariant
+// cannot silently regress again.
+export function shiaijoStandingsKind(match) {
+    return match && match.compFormat === "league" ? "league" : "pool";
+}
+
 // Collapsible context for the match being scored:
-//   • pool phase  → live standings + results for the current pool. Standings
-//     ordering is decided by FORMAT, not surface (mp-ahu6): pools route to
-//     the shared read-only window.PoolsViewer (draw order, rank as a badge)
-//     and leagues route to window.LeagueStandingsViewer (rank order), same
-//     as the public viewer and admin Pools tab. Pools also show which pool
-//     is next on this court; leagues have no "next pool" concept.
+//   • pool phase  → live standings + results for the current pool, routed by
+//     shiaijoStandingsKind. Pools also show which pool is next on this
+//     court; leagues have no "next pool" concept.
 //   • bracket phase → a bracket fragment with the current match highlighted.
 function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
     const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
-    const isLeagueComp = match.compFormat === "league";
+    const isLeagueComp = shiaijoStandingsKind(match) === "league";
     const phaseLabel = isPool
         ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
         : (match.round || "Elimination");

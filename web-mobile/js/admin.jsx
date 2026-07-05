@@ -2,6 +2,7 @@
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
+import { createTimerPool } from './timer_pool.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -429,14 +430,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       // This is what makes navigation-during-in-flight-fetch safe.
       let cancelled = false;
       const compId = view.id;
-      const timers = new Set();
+      const timerPool = createTimerPool();
       const schedule = (fn) => {
-        const id = setTimeout(() => {
-          timers.delete(id);
+        timerPool.schedule(() => {
           if (cancelled) return;
           fn(compId);
         }, Math.random() * 500);
-        timers.add(id);
       };
       // Coalesce tournament-wide refreshes across all events so the topbar's
       // running-strip stays current without firing one fetchCompetitions() per
@@ -581,8 +580,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       });
       return () => {
         cancelled = true;
-        timers.forEach(clearTimeout);
-        timers.clear();
+        timerPool.clearAll();
         if (pendingTournament) clearTimeout(pendingTournament);
         document.removeEventListener('visibilitychange', onVisibilityChange);
         unsub();

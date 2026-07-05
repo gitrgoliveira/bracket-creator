@@ -268,6 +268,65 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 	assert.Equal(t, 1, teamB.IndividualDraws, "sub with empty Winner+empty SideB → draw, not false win")
 }
 
+// TestTeamStandings_PlaceholderIpponsDontInflatePoints pins that a completed
+// team bout that still carries "•" unfilled-slot placeholders (or empty
+// entries) alongside real ippons counts ONLY the real ippons toward the pool
+// standings PointsWon/PointsLost. Using len() would count the placeholders and
+// inflate the tie-break points, and diverge from the wire teamResult PW (which
+// state.TeamResultFrom already computes via countScoringIppons).
+func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-placeholder-pts-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "placeholder-pts"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Team", TeamSize: 2,
+		Format: state.CompFormatLeague, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
+			Winner: "TeamA", Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{
+				// TeamA scored one real ippon ("M") plus an unfilled "•" slot
+				// and an empty slot; only the "M" is a real point.
+				{Position: 1, Winner: "TeamA", IpponsA: []string{"M", "•", ""}, IpponsB: []string{"•"}},
+				// TeamB scored one real ippon ("K"); TeamA has two "•" placeholders.
+				{Position: 2, Winner: "TeamB", IpponsA: []string{"•", "•"}, IpponsB: []string{"K"}},
+			},
+		},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	pool := standings["PoolA"]
+	require.Len(t, pool, 2)
+
+	var teamA, teamB state.PlayerStanding
+	for _, s := range pool {
+		switch s.Player.Name {
+		case "TeamA":
+			teamA = s
+		case "TeamB":
+			teamB = s
+		}
+	}
+	// TeamA (SideA): real ippons across subs = 1 ("M"); placeholders excluded.
+	assert.Equal(t, 1, teamA.PointsWon, "only the real 'M' ippon counts, not the '•'/empty slots")
+	// TeamA points lost = TeamB's real ippons = 1 ("K"); TeamB's "•" excluded.
+	assert.Equal(t, 1, teamA.PointsLost, "only TeamB's real 'K' ippon counts against A")
+	assert.Equal(t, 1, teamB.PointsWon, "only the real 'K' ippon counts for B")
+	assert.Equal(t, 1, teamB.PointsLost, "only TeamA's real 'M' ippon counts against B")
+}
+
 func TestMaybeAutoCompletePools(t *testing.T) {
 	dir, err := os.MkdirTemp("", "engine-autocomplete-*")
 	require.NoError(t, err)

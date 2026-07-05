@@ -645,12 +645,14 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		if sA == nil || sB == nil {
 			continue
 		}
-		// Ippons per side. Bye-marked completed matches above contain
-		// nil ippons, so len(...) = 0, correct for "0 points".
-		sA.IpponsGiven += len(m.IpponsA)
-		sA.IpponsTaken += len(m.IpponsB)
-		sB.IpponsGiven += len(m.IpponsB)
-		sB.IpponsTaken += len(m.IpponsA)
+		// Ippons per side, via countScoringIppons (not len): bye-marked
+		// completed matches contain nil ippons (count 0, correct), and a
+		// real completed match can retain "•" unfilled-slot placeholders or
+		// empty entries that are not scored points and must not be tallied.
+		sA.IpponsGiven += countScoringIppons(m.IpponsA)
+		sA.IpponsTaken += countScoringIppons(m.IpponsB)
+		sB.IpponsGiven += countScoringIppons(m.IpponsB)
+		sB.IpponsTaken += countScoringIppons(m.IpponsA)
 
 		switch {
 		case m.Winner == m.SideA:

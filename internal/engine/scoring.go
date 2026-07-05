@@ -628,17 +628,25 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 						sA.IndividualDraws++
 						sB.IndividualDraws++
 					}
-					sA.PointsWon += len(sub.IpponsA)
-					sA.PointsLost += len(sub.IpponsB)
-					sB.PointsWon += len(sub.IpponsB)
-					sB.PointsLost += len(sub.IpponsA)
+					// countScoringIppons (not len): a completed bout can retain
+					// "•" unfilled-slot placeholders or empty entries, which are
+					// not scored points. This keeps the ranking PointsWon in sync
+					// with the wire teamResult PW (state.TeamResultFrom uses the
+					// same rule) so the displayed points and the tie-break points
+					// cannot drift.
+					sA.PointsWon += countScoringIppons(sub.IpponsA)
+					sA.PointsLost += countScoringIppons(sub.IpponsB)
+					sB.PointsWon += countScoringIppons(sub.IpponsB)
+					sB.PointsLost += countScoringIppons(sub.IpponsA)
 				}
 			} else {
-				// Individual scoring: ippons at match level
-				sA.IpponsGiven += len(m.IpponsA)
-				sA.IpponsTaken += len(m.IpponsB)
-				sB.IpponsGiven += len(m.IpponsB)
-				sB.IpponsTaken += len(m.IpponsA)
+				// Individual scoring: ippons at match level. countScoringIppons
+				// (not len) so leftover "•" placeholders / empty slots in a
+				// completed match don't inflate the ippon tallies.
+				sA.IpponsGiven += countScoringIppons(m.IpponsA)
+				sA.IpponsTaken += countScoringIppons(m.IpponsB)
+				sB.IpponsGiven += countScoringIppons(m.IpponsB)
+				sB.IpponsTaken += countScoringIppons(m.IpponsA)
 			}
 		}
 

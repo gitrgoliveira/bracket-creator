@@ -140,4 +140,34 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     const text = collectText(finalTree);
     expect(text).toContain('Ranked by standings');
   });
+
+  // A scored bout changes poolMatchesSig, which re-triggers the fetch effect
+  // (setLoading(true)). Before the fix, the render gate was `if (loading)`,
+  // which blanked the table with a full-page spinner on every background
+  // refresh - much more visible here than on SwissStandingsViewer since the
+  // per-bout signature fires far more often than Swiss's per-round one.
+  it('keeps showing standings during a background re-fetch, no spinner flicker', async () => {
+    let resolveSecond;
+    global.window.API.leagueStandings = vi.fn()
+      .mockResolvedValueOnce(mockStandings)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveSecond = resolve; }));
+
+    const firstMatches = [{ id: 'Pool A-1', status: 'scheduled' }];
+    runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: firstMatches, tweaks });
+    await Promise.resolve();
+    let tree = runtime.updateProps({ competition: comp, poolMatches: firstMatches, tweaks });
+    expect(collectText(tree)).toContain('P3'); // initial load resolved: table visible
+
+    // A different match signature (the bout completed) re-triggers the fetch
+    // while it's still pending (the second mock never resolves yet).
+    const secondMatches = [{ id: 'Pool A-1', status: 'completed' }];
+    tree = runtime.updateProps({ competition: comp, poolMatches: secondMatches, tweaks });
+    const text = collectText(tree);
+    expect(text).not.toContain('Loading standings');
+    expect(text).toContain('P3'); // last-known standings stay on screen
+
+    resolveSecond(mockStandings);
+    await Promise.resolve();
+    runtime.updateProps({ competition: comp, poolMatches: secondMatches, tweaks });
+  });
 });

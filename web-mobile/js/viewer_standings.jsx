@@ -241,7 +241,12 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
       .filter(Boolean)
   );
 
-  if (loading) return <window.LoadingSpinner text="Loading standings..." />;
+  // Only show the full-page spinner for the INITIAL load (no standings yet).
+  // A scored bout re-fetches via poolMatchesSig above, and with the fine-
+  // grained per-bout signature that fires far more often than Swiss's
+  // per-round one; gating on loading alone would hide the table and flicker
+  // after every bout. Keep rendering the last standings while refreshing.
+  if (loading && standings.length === 0) return <window.LoadingSpinner text="Loading standings..." />;
   if (error) return <div className="alert alert--error">{error}</div>;
 
   const colSpan = isEngi ? 4 : isTeam ? 10 : 7;

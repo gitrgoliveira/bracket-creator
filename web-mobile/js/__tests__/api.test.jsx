@@ -777,6 +777,40 @@ describe('API Utils', () => {
       });
     });
 
+    describe('leagueStandings', () => {
+      it('GETs the standings without auth (public endpoint)', async () => {
+        const sample = [{ player: { name: 'Alice' }, wins: 3, losses: 1, draws: 0, rank: 1 }];
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => sample,
+        });
+        const r = await API.leagueStandings('c1');
+        expect(r).toEqual(sample);
+        // No password header on the public endpoint; pin the call shape so a
+        // refactor doesn't accidentally make it admin-only.
+        expect(global.fetch).toHaveBeenCalledWith('/api/competitions/c1/league/standings');
+      });
+
+      it('throws with server message on error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: 'competition not found' }),
+        });
+        await expect(API.leagueStandings('c1')).rejects.toThrow('competition not found');
+      });
+
+      it('throws a generic message when the error body is unparsable', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: async () => { throw new Error('not json'); },
+        });
+        await expect(API.leagueStandings('c1')).rejects.toThrow('Failed to load league standings');
+      });
+    });
+
     // POST /api/tournament; bootstrap. In file mode the call is
     // unauthenticated (the AuthMiddleware uninitialized branch lets
     // it through). In locked mode the server requires the env-var

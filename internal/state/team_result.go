@@ -21,16 +21,19 @@ type TeamResultLine struct {
 // (winner may carry the match-level or sub-level side name), and PW counts every
 // ippon scored regardless of bout outcome (a drawn bout where both sides scored
 // still contributes). SideA is Aka, SideB is Shiro. Returns nil when there are
-// no sub-bouts (an individual match). engine.ComputeTeamSummary delegates here.
+// no countable sub-bouts (an individual match, or a slice containing only the
+// daihyosen placeholder with Position < 0). engine.ComputeTeamSummary delegates here.
 func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *TeamResultLine {
 	if len(subResults) == 0 {
 		return nil
 	}
 	line := &TeamResultLine{}
+	hasBout := false
 	for _, sub := range subResults {
 		if sub.Position < 0 {
 			continue // skip the daihyosen placeholder itself
 		}
+		hasBout = true
 		switch {
 		case sub.Winner == sideAName || (sub.SideA != "" && sub.Winner == sub.SideA):
 			line.AkaIV++
@@ -39,6 +42,9 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 		}
 		line.AkaPW += len(sub.IpponsA)
 		line.ShiroPW += len(sub.IpponsB)
+	}
+	if !hasBout {
+		return nil
 	}
 	return line
 }

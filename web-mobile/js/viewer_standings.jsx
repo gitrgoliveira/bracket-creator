@@ -78,6 +78,30 @@ export function WinnerBadge({ name, isFs = false, testId, marginBottom }) {
   );
 }
 
+// Normalizes a match winner (string or {name}) to a display name, "" if unset.
+export function dhWinnerName(m) {
+  return typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || "";
+}
+
+// Module-private thead shared by LeagueStandingsViewer and PoolsViewer.
+// The three-way branch (isEngi / isTeam / individual) is byte-identical in
+// both consumers; extracted here to keep them in sync automatically.
+function StandingsTableHead({ isEngi, isTeam }) {
+  if (isEngi) {
+    return (
+      <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
+    );
+  }
+  if (isTeam) {
+    return (
+      <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
+    );
+  }
+  return (
+    <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
+  );
+}
+
 export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
   const c = competition;
   const [standings, setStandings] = useState([]);
@@ -203,7 +227,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   const dhWinnerNames = new Set(
     (poolMatches || [])
       .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-      .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+      .map(m => dhWinnerName(m))
       .filter(Boolean)
   );
 
@@ -223,18 +247,12 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
           <caption className="pool__table-caption">Ranked by standings</caption>
           <thead>
-            {isEngi ? (
-              <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
-            ) : isTeam ? (
-              <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
-            ) : (
-              <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
-            )}
+            <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
           </thead>
           <tbody>
             {standings.length > 0 ? standings.map((s, i) => {
               const rank = s.rank || i + 1;
-              const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "") && rank <= 3;
+              const isDHWinner = isTeam && dhWinnerNames.has(s.player?.name || "");
               return (
                 <tr key={s.player?.id || s.player?.name || i} className={isPlayerWatched(s.player, highlightPlayers) ? "pool__row--me" : undefined}>
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
@@ -637,7 +655,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         const dhWinnerNames = new Set(
           matches
             .filter(m => isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-            .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+            .map(m => dhWinnerName(m))
             .filter(Boolean)
         );
 
@@ -694,13 +712,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               {/* Accessible caption whose wording matches the row ordering. */}
               <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>
               <thead>
-                {isEngi ? (
-                  <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
-                ) : isTeam ? (
-                  <tr><th scope="col">#</th><th scope="col">Team</th><th className="num" scope="col"><abbr title="Team matches won">W</abbr></th><th className="num" scope="col"><abbr title="Team matches lost">L</abbr></th><th className="num" scope="col"><abbr title="Team matches tied">T</abbr></th><th className="num" scope="col"><abbr title="Individual victories">IV</abbr></th><th className="num" scope="col"><abbr title="Individual losses">IL</abbr></th><th className="num" scope="col"><abbr title="Individual ties (draws)">IT</abbr></th><th className="num" scope="col"><abbr title="Points won">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
-                ) : (
-                  <tr><th scope="col">#</th><th scope="col">Player</th><th className="num" scope="col"><abbr title="Fights won">W</abbr></th><th className="num" scope="col"><abbr title="Fights lost">L</abbr></th><th className="num" scope="col"><abbr title="Draws (hikiwake)">D</abbr></th><th className="num" scope="col"><abbr title="Points won (ippon)">PW</abbr></th><th className="num" scope="col"><abbr title="Points lost">PL</abbr></th></tr>
-                )}
+                <StandingsTableHead isEngi={isEngi} isTeam={isTeam} />
               </thead>
               <tbody>
                 {drawOrderPlayers.map((p, i) => {

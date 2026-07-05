@@ -115,7 +115,10 @@ func (e *Engine) ChusenCandidates(compID string) ([]ChusenGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	overridesObj, _ := e.store.LoadOverrides(compID)
+	overridesObj, err := e.store.LoadOverrides(compID)
+	if err != nil {
+		return nil, err
+	}
 	var poolRanks map[string]map[string]int
 	if overridesObj != nil {
 		poolRanks = overridesObj.PoolRanks

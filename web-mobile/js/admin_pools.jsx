@@ -74,7 +74,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   // each team's roster so ScoreEditorModal can render the two rep-player
   // dropdowns. comp.players entries ARE the teams (member names live in
   // team.metadata via AdminLineupHelpers.rosterFor); config may nest players.
-  const isTeamComp = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+  const isTeamComp = !!(comp && (comp.kind === "team" || comp.teamSize > 0));
   const repIsTeam = isSupplementary && isTeamComp;
   let repRosterA = [];
   let repRosterB = [];
@@ -127,7 +127,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
   // could not settle (a cycle / all-drawn). Only fetched for team comps in
   // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
-  const isTeamComp = c && (c.kind === "team" || (c.teamSize || 0) > 0);
+  const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
   // Per-group input values: keys are "${poolName}::${teamName}" -> string.
   const [chusenInputs, setChusenInputs] = useStateA({});

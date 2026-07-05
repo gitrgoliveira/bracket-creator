@@ -91,7 +91,7 @@ function StreamingOverlay({ court, position, competitions }) {
     const zekken = !!(comp && comp.withZekkenName);
 
     // mp-13y: team match detection.
-    const isTeamMatch = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+    const isTeamMatch = !!(comp && (comp.kind === "team" || comp.teamSize > 0));
     const teamSizeOvl = (comp && comp.teamSize) || 0;
 
     // mp-13y: per-match lineups for team overlay.

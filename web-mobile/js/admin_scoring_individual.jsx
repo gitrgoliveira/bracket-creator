@@ -46,7 +46,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // teamSize set (compKind empty) must still route to TeamScoreEditorModal,
   // and pool-daihyosen rows (compMatches forces compKind="" AND teamSize=0)
   // correctly stay on the individual editor.
-  const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
+  const isTeam = m.compKind === "team" || m.teamSize > 0;
   const teamSize = m.teamSize || 5;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);

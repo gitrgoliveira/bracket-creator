@@ -213,7 +213,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   {m.status === "completed" ? "Correct" : "Score"}
                 </button>
                 {/* mp-bkg: show Lineup button only for team competitions */}
-                {(m.compKind === "team" || (m.teamSize || 0) > 0) && (
+                {(m.compKind === "team" || m.teamSize > 0) && (
                   <button type="button"
                     className="btn btn--ghost btn--sm"
                     style={{ fontSize: 11 }}

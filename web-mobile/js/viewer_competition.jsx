@@ -4,7 +4,7 @@
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, dhWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
@@ -408,7 +408,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
   const leagueDhWinnerNames = new Set(
     (poolMatches || [])
       .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
-      .map(m => (typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""))
+      .map(m => dhWinnerName(m))
       .filter(Boolean)
   );
 
@@ -518,11 +518,12 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                     <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
-                      {/* DH badge on the podium (ranks 1-3), matching the full
-                          standings (PoolsViewer). A league daihyosen is played to
-                          settle the top places, so a spectator on the Overview
-                          preview sees why identical rows are ordered as they are. */}
-                      {isTeam && leagueDhWinnerNames.has(s.player?.name) && (s.rank || i + 1) <= 3 && <DHBadge />}
+                      {/* DH badge for any daihyosen winner, matching PoolsViewer.
+                          The backend already gates daihyosen bouts to ties that
+                          affect advancement (tieAffectsAdvancement), so the badge
+                          is informational and applies to any DH winner, not just
+                          the top 3 podium places. */}
+                      {isTeam && leagueDhWinnerNames.has(s.player?.name) && <DHBadge />}
                       {/* No rank badge here: this summary is rank-sorted, so the
                           "#" column already IS the rank: a badge would just echo
                           it. The rank badge only carries information when rows are

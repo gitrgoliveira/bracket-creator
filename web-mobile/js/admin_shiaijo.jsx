@@ -61,7 +61,7 @@ const COMPLETED_PREVIEW = 8;
 // A team encounter (vs an individual bout): team matches carry a lineup the
 // operator can set before the bout starts. Exported for unit tests (it gates
 // the "Enter lineup" affordance).
-export const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize || 0) > 0);
+export const isTeamMatch = (m) => !!m && (m.compKind === "team" || m.teamSize > 0);
 
 // (addMinuteHHMM and deferTimeFor removed: queue reordering now works by
 // swapping scheduledAt between adjacent rows via moveMatch, which calls

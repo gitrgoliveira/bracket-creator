@@ -36,6 +36,26 @@ func TestTeamResultFrom(t *testing.T) {
 		assert.Equal(t, &TeamResultLine{ShiroIV: 1, AkaIV: 0, ShiroPW: 2, AkaPW: 1}, got)
 	})
 
+	t.Run("only daihyosen placeholder returns nil", func(t *testing.T) {
+		// A slice containing ONLY the Position:-1 placeholder must return nil (no
+		// countable sub-bouts), not a non-nil all-zero TeamResultLine.
+		subs := []SubMatchResult{
+			{Position: -1, Winner: "TeamA", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{}},
+		}
+		assert.Nil(t, TeamResultFrom(subs, "TeamA", "TeamB"))
+	})
+
+	t.Run("placeholder plus real bout counts the real bout", func(t *testing.T) {
+		subs := []SubMatchResult{
+			{Position: -1, Winner: "TeamA", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{}},
+			{Position: 0, Winner: "TeamB", SideA: "P3", SideB: "P4", IpponsA: []string{}, IpponsB: []string{"K"}},
+		}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		// Placeholder skipped: shiroIV=1, akaIV=0, shiroPW=1, akaPW=0.
+		assert.Equal(t, &TeamResultLine{ShiroIV: 1, AkaIV: 0, ShiroPW: 1, AkaPW: 0}, got)
+	})
+
 	t.Run("draw contributes PW but no IV; sub-level side name fallback", func(t *testing.T) {
 		subs := []SubMatchResult{
 			{Position: 0, Winner: "", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{"M"}},

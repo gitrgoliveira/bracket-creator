@@ -64,9 +64,4 @@ describe('createTimerPool', () => {
     expect(pool.pendingCount()).toBe(0);
   });
 
-  it('schedule returns the timer id (parity with bare setTimeout callers)', () => {
-    const pool = createTimerPool();
-    const id = pool.schedule(() => {}, 10);
-    expect(id).toBeDefined();
-  });
 });

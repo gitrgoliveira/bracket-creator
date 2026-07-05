@@ -302,13 +302,13 @@ export function createTimerPool() {
         fn();
       }, delay);
       pending.add(id);
-      return id;
     },
     clearAll() {
       pending.forEach(clearTimeout);
       pending.clear();
     },
-    // pendingCount: test observability only; production code never reads it.
+    // pendingCount: pool-size observability. Currently read only by the
+    // timer_pool unit tests, which use it to assert the self-prune drains.
     pendingCount() {
       return pending.size;
     },

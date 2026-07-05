@@ -165,3 +165,53 @@ func TestChusenCandidates_AllDrawnNeedsChusen(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cands, 1, "an all-drawn daihyosen round leaves the order undetermined -> chusen")
 }
+
+// TestChusenCandidates_PartialTieWithoutCycleNeedsChusen: a 4-team tied group
+// whose daihyosen round has NO win/loss cycle anywhere (Alpha beats everyone
+// and loses to nobody), yet two teams still finish level on daihyosen wins
+// (Beta and Gamma draw each other and each beat Delta once: 1 win apiece).
+// groupNeedsChusen fires on any duplicate win count, not only a true cycle -
+// this pins that a plain partial tie also surfaces the chusen panel.
+func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
+	compID := "chusen-partial-tie"
+	teams := []string{"Alpha", "Beta", "Gamma", "Delta"}
+	// Fully tied 4-team pool (every match drawn) so all four share one tied
+	// group in standings.
+	matches := []state.MatchResult{
+		teamPoolMatch("Pool A-0", "A", "Alpha", "Beta", ""),
+		teamPoolMatch("Pool A-1", "A", "Alpha", "Gamma", ""),
+		teamPoolMatch("Pool A-2", "A", "Alpha", "Delta", ""),
+		teamPoolMatch("Pool A-3", "A", "Beta", "Gamma", ""),
+		teamPoolMatch("Pool A-4", "A", "Beta", "Delta", ""),
+		teamPoolMatch("Pool A-5", "A", "Gamma", "Delta", ""),
+	}
+	eng, store := setupTeamPool(t, compID, teams, matches)
+
+	injected, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, injected, 6, "expected the full 4-team DH round-robin")
+
+	winner := func(a, b string) string {
+		pair := map[string]bool{a: true, b: true}
+		switch {
+		case pair["Alpha"]:
+			return "Alpha" // beats every opponent, loses to nobody: no cycle involves Alpha
+		case pair["Beta"] && pair["Gamma"]:
+			return "" // draw: the source of the Beta/Gamma win-count tie
+		case pair["Beta"] && pair["Delta"]:
+			return "Beta"
+		case pair["Gamma"] && pair["Delta"]:
+			return "Gamma"
+		}
+		t.Fatalf("unexpected DH pair %s vs %s", a, b)
+		return ""
+	}
+	scoreInjectedDH(t, eng, store, compID, winner)
+	// Final daihyosen wins: Alpha=3, Beta=1, Gamma=1, Delta=0 - a duplicate at
+	// 1 with no cyclic relationship anywhere in the results.
+
+	cands, err := eng.ChusenCandidates(compID)
+	require.NoError(t, err)
+	require.Len(t, cands, 1, "Beta and Gamma tie on daihyosen wins with no cycle present -> still needs chusen")
+	assert.Len(t, cands[0].Teams, 4)
+}

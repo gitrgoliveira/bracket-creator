@@ -7,7 +7,8 @@ import (
 )
 
 // ChusenGroup is a consequential team-pool tie that the daihyosen could not
-// separate (equal representative-bout wins: a cycle or all-drawn), so the
+// separate: two or more members share the same daihyosen win count (a true
+// win/loss cycle, an all-drawn round, or any other tie in win counts), so the
 // finishing order is still undetermined. Per the rules (running_a_kendo_
 // tournament.md:181, EKC 6.2.5.1) the last resort is chusen (drawing lots): the
 // operator draws lots and records the order, which persists as a per-pool rank
@@ -28,9 +29,10 @@ type ChusenGroup struct {
 //
 // Returns false when: the operator has already ranked every member (chusen
 // recorded), no daihyosen bout among the group has been played yet, or the
-// played bouts produced a strictly-ordered win count. Returns true only when two
-// members share a daihyosen win count (a cycle / all-drawn) so the order is
-// undetermined.
+// played bouts produced a strictly-ordered win count. Returns true whenever two
+// or more members finish the completed round on the same daihyosen win count
+// (a true win/loss cycle, an all-drawn round, or any other partial tie) so the
+// order is undetermined.
 func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
 	if len(groupOverrides) > 0 {
 		allOverridden := true
@@ -66,10 +68,11 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	}
 	// Only judge the group once its FULL pairwise daihyosen round is complete
 	// (a round-robin = N*(N-1)/2 bouts). Mid-round, partial win counts look like
-	// a cycle (e.g. after the first of three bouts the counts are 1/0/0, whose
-	// two zeros are a spurious duplicate), which would surface the chusen panel
-	// before the remaining bouts are played. Once complete, a cycle OR an
-	// all-drawn round (every member on 0 wins) leaves the order undetermined; a
+	// a duplicate (e.g. after the first of three bouts the counts are 1/0/0,
+	// whose two zeros are a spurious tie), which would surface the chusen panel
+	// before the remaining bouts are played. Once complete, any duplicate win
+	// count - a true win/loss cycle, an all-drawn round (every member on 0
+	// wins), or any other partial tie - leaves the order undetermined; a
 	// strict win order (all distinct counts) does not.
 	n := len(group)
 	expected := n * (n - 1) / 2

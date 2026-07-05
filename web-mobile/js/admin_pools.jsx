@@ -266,7 +266,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     >
       <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
       <div className="league-tiebreak__desc">
-        The daihyosen ended level (a cycle). Draw lots and record each team&apos;s finishing position below.
+        The daihyosen didn&apos;t settle the order (two or more teams tied on daihyosen wins). Draw lots and record each team&apos;s finishing position below.
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;

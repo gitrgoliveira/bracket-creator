@@ -56,6 +56,18 @@ func TestTeamResultFrom(t *testing.T) {
 		assert.Equal(t, &TeamResultLine{ShiroIV: 1, AkaIV: 0, ShiroPW: 1, AkaPW: 0}, got)
 	})
 
+	t.Run("unfilled placeholder slots don't inflate PW", func(t *testing.T) {
+		// "•" is the UI's unfilled-slot placeholder (see
+		// engine.countScoringIppons); an in-progress bout scored on one side
+		// only must not count the other side's still-empty slots as points.
+		subs := []SubMatchResult{
+			{Position: 0, Winner: "", SideA: "P1", SideB: "P2", IpponsA: []string{"M", "•", ""}, IpponsB: []string{"•", "•"}},
+		}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, &TeamResultLine{ShiroIV: 0, AkaIV: 0, ShiroPW: 0, AkaPW: 1}, got)
+	})
+
 	t.Run("draw contributes PW but no IV; sub-level side name fallback", func(t *testing.T) {
 		subs := []SubMatchResult{
 			{Position: 0, Winner: "", SideA: "P1", SideB: "P2", IpponsA: []string{"M"}, IpponsB: []string{"M"}},

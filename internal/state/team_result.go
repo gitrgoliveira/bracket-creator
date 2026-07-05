@@ -14,15 +14,32 @@ type TeamResultLine struct {
 	AkaPW   int `json:"akaPW"`
 }
 
+// countScoringIppons counts real ippon marks in an ippons slice, ignoring
+// empty entries and the "•" placeholder the UI uses for an unfilled slot.
+// Mirrors engine.countScoringIppons (internal/engine/scoring.go): state
+// cannot import engine (engine already imports state), so this is a local
+// copy. Keep the two in sync if the placeholder semantics ever change.
+func countScoringIppons(ippons []string) int {
+	n := 0
+	for _, v := range ippons {
+		if v != "" && v != "•" {
+			n++
+		}
+	}
+	return n
+}
+
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
 // (Position < 0) is skipped so a re-validated tie does not double-count, IV
 // counts sub-bout winners via the same side-matching fallback as scoring
 // (winner may carry the match-level or sub-level side name), and PW counts every
-// ippon scored regardless of bout outcome (a drawn bout where both sides scored
-// still contributes). SideA is Aka, SideB is Shiro. Returns nil when there are
-// no countable sub-bouts (an individual match, or a slice containing only the
-// daihyosen placeholder with Position < 0). engine.ComputeTeamSummary delegates here.
+// scored ippon regardless of bout outcome (a drawn bout where both sides
+// scored still contributes), skipping unfilled "•" placeholder slots via
+// countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
+// are no countable sub-bouts (an individual match, or a slice containing
+// only the daihyosen placeholder with Position < 0). engine.ComputeTeamSummary
+// delegates here.
 func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *TeamResultLine {
 	if len(subResults) == 0 {
 		return nil
@@ -40,8 +57,8 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 		case sub.Winner == sideBName || (sub.SideB != "" && sub.Winner == sub.SideB):
 			line.ShiroIV++
 		}
-		line.AkaPW += len(sub.IpponsA)
-		line.ShiroPW += len(sub.IpponsB)
+		line.AkaPW += countScoringIppons(sub.IpponsA)
+		line.ShiroPW += countScoringIppons(sub.IpponsB)
 	}
 	if !hasBout {
 		return nil

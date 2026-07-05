@@ -60,6 +60,7 @@ describe('createTimerPool', () => {
     expect(fired).toHaveBeenCalledTimes(1);
 
     pool.clearAll();
+    expect(pool.pendingCount()).toBe(0);
     pool.clearAll();
     expect(pool.pendingCount()).toBe(0);
   });

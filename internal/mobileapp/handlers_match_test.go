@@ -2217,6 +2217,87 @@ func TestScoreHandler_RunningWriteCannotRevertCompleted(t *testing.T) {
 	assert.False(t, revPresent, "runningRevStore must have no entry after stale running write on completed match")
 }
 
+// TestScoreHandler_ScheduledWriteCannotRevertCompleted verifies the bracket
+// integrity guard: a "scheduled"-status write onto an already-completed match
+// must be silently no-op'd (HTTP 200 with {"stale":true}) and must not mutate
+// the stored completed result. This mirrors TestScoreHandler_RunningWriteCannotRevertCompleted
+// but for the scheduled status variant.
+func TestScoreHandler_ScheduledWriteCannotRevertCompleted(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "rv-sched-revert"
+	matchID := "PoolA-1"
+	matchKey := compID + ":" + matchID
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Courts: []string{"A"}}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: matchID, SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
+	}))
+
+	// Ensure the rev-store is clean for this key.
+	runningRevStore.Delete(matchKey)
+
+	// Step 1: finalize the match.
+	completedPayload, _ := json.Marshal(map[string]any{
+		"sideA":   "Alice",
+		"sideB":   "Bob",
+		"winner":  "Alice",
+		"ipponsA": []string{"M", "K"},
+		"ipponsB": []string{},
+		"status":  "completed",
+	})
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(completedPayload))
+	req1.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w1, req1)
+	require.Equal(t, http.StatusOK, w1.Code, "completed write must succeed")
+
+	// Verify the match is completed on disk.
+	loadMatch := func() state.MatchResult {
+		t.Helper()
+		ms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range ms {
+			if m.ID == matchID {
+				return m
+			}
+		}
+		t.Fatalf("match %s not found", matchID)
+		return state.MatchResult{}
+	}
+	before := loadMatch()
+	require.Equal(t, state.MatchStatusCompleted, before.Status, "match must be completed after step 1")
+	require.Equal(t, "Alice", before.Winner, "winner must be set after step 1")
+
+	// Step 2: attempt a scheduled-status write (simulating a stale requeue
+	// that raced with match completion).
+	scheduledPayload, _ := json.Marshal(map[string]any{
+		"sideA":   "Alice",
+		"sideB":   "Bob",
+		"ipponsA": []string{},
+		"ipponsB": []string{},
+		"status":  "scheduled",
+	})
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/"+matchID+"/score", bytes.NewBuffer(scheduledPayload))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+
+	// Step 3: the server must return 200 with stale=true.
+	assert.Equal(t, http.StatusOK, w2.Code, "stale scheduled write must return 200")
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &body))
+	stale, ok := body["stale"].(bool)
+	assert.True(t, ok && stale, "stale scheduled write must return {stale:true}")
+
+	// Step 4: match must still be completed with the original winner intact.
+	after := loadMatch()
+	assert.Equal(t, state.MatchStatusCompleted, after.Status, "scheduled write must not revert a completed match")
+	assert.Equal(t, "Alice", after.Winner, "winner must not be cleared by a stale scheduled write")
+}
+
 // TestSelfRunPolicy_NoRevMetadata verifies that an anonymous self-run write
 // has its Rev and RevSession zeroed by enforceSelfRunPolicy before the
 // rev-guard runs. This prevents a malicious participant from injecting a

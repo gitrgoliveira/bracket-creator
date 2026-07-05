@@ -1026,12 +1026,17 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						result.CorrectionReason = ""
 					}
 				}
-				// Bracket integrity: a running-status write must never revert an
-				// already-completed match (e.g. a stale autosave queued before
-				// Finish and flushed afterward). Applies to ALL callers (the
+				// Bracket integrity: a running- OR scheduled-status write must
+				// never revert an already-completed match (e.g. a stale autosave
+				// queued before Finish and flushed afterward, or a requeue write
+				// that raced with completion). Applies to ALL callers (the
 				// self-reported finalized guard above only covers anonymous mode).
+				// Empty-status writes are legitimate completions/corrections and
+				// are not caught here. The dedicated revert-to-queue endpoint is
+				// the only sanctioned path from completed back to scheduled, and
+				// it rejects completed matches at its own gate.
 				// No-op it as a stale write so the client's flush discards it.
-				if result.Status == state.MatchStatusRunning &&
+				if (result.Status == state.MatchStatusRunning || result.Status == state.MatchStatusScheduled) &&
 					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
 					staleAfterComplete = true
 					return nil

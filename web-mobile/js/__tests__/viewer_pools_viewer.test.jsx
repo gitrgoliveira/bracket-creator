@@ -200,6 +200,48 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     expect(drawPosTexts).toEqual(['1', '2', '3', '4']);
   });
 
+  // ------------------------------------------------------------------
+  // mp-dunx: leagues are rank-ordered (# = rank, no badge), matching the
+  // Overview summary; pools stay draw-ordered with a rank badge (above).
+  // ------------------------------------------------------------------
+  const leagueComp = { kind: 'individual', teamSize: 0, format: 'league', poolWinners: 2 };
+
+  it('leagues iterate in rank order (P3 1st before P1 2nd), not draw order', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings, poolMatches: [], tweaks, competition: leagueComp,
+    });
+    const text = collectText(tree);
+    // Standings order is P3, P1, P4, P2 → P3 must appear before P1.
+    expect(text.indexOf('P3')).toBeLessThan(text.indexOf('P1'));
+  });
+
+  it('leagues show rank in the # column (1..N) and no rank badge', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings, poolMatches: [], tweaks, competition: leagueComp,
+    });
+    const drawPosCells = findAll(tree, n => {
+      const cls = n.props?.className;
+      return n.type === 'td' && typeof cls === 'string' && cls.includes('pool-standings__draw-pos');
+    });
+    // Rank-ordered rows → the # column reads 1,2,3,4 top-down (the ranks).
+    expect(drawPosCells.map(collectText)).toEqual(['1', '2', '3', '4']);
+    // No rank badge for leagues; the rank lives in "#".
+    const badges = findAll(tree, n => {
+      const cls = n.props?.className;
+      return typeof cls === 'string' && cls.split(' ').includes('rank-badge');
+    });
+    expect(badges).toHaveLength(0);
+  });
+
+  it('league caption reads "Ranked by standings", not "Listed in draw order"', () => {
+    const tree = runtime.mount(PoolsViewer, {
+      pools: [pool], standings, poolMatches: [], tweaks, competition: leagueComp,
+    });
+    const text = collectText(tree);
+    expect(text).toContain('Ranked by standings');
+    expect(text).not.toContain('Listed in draw order');
+  });
+
   it('renders numbered match list when matches are present', () => {
     const matches = [
       { id: 'Pool A-0', sideA: { name: 'P1' }, sideB: { name: 'P2' }, status: 'scheduled' },

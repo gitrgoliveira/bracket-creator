@@ -524,13 +524,19 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           (s) => (s.wins || 0) + (s.losses || 0) + (s.draws || 0) > 0
         );
 
-        // Determine which players to iterate.
-        // Both pools and leagues use pool.players draw order so operators can read
-        // the fight-order chart alongside the standings. Fall back to rank-sorted
-        // standings order only when pool.players is empty (e.g. legacy payloads).
-        const drawOrderPlayers = (pool.players && pool.players.length)
-          ? pool.players
-          : (poolStandings ? poolStandings.map(s => s.player) : []);
+        // Determine iteration order.
+        // Pools list rows in draw (fight-order) position so operators can read the
+        // fight chart alongside the standings; the rank is surfaced by a badge.
+        // Leagues list rows in standings (rank) order - "#" IS the rank - matching
+        // the Overview league summary and the league/swiss convention. Each falls
+        // back to the other source when its primary is empty (legacy payloads).
+        const orderedPlayers = isLeague
+          ? (poolStandings && poolStandings.length
+              ? poolStandings.map(s => s.player)
+              : (pool.players || []))
+          : (pool.players && pool.players.length
+              ? pool.players
+              : (poolStandings ? poolStandings.map(s => s.player) : []));
 
         return (
           // A lone pool (every league has exactly one) must span the full grid
@@ -544,11 +550,13 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
               </div>
             </div>
 
-            {/* Standings table: rows in draw position order, rank looked up by player key (id or name||dojo) */}
+            {/* Standings table. Pools iterate in draw order (rank via badge);
+                leagues iterate in rank order ("#" is the rank). */}
             <table className={`pool__table${isTeam ? " pool__table--team" : ""}`}>
-              {/* Clarifies the "#" column (draw order, not rank) for every reader
-                  and doubles as the table's accessible caption. */}
-              <caption className="pool__table-caption">Listed in draw order; badge shows current rank</caption>
+              {/* Accessible caption whose wording matches the row ordering. */}
+              <caption className="pool__table-caption">
+                {isLeague ? "Ranked by standings" : "Listed in draw order; badge shows current rank"}
+              </caption>
               <thead>
                 {isEngi ? (
                   <tr><th scope="col">#</th><th scope="col">Pair</th><th className="num" scope="col"><abbr title="Victories (bouts won)">V</abbr></th><th className="num" scope="col"><abbr title="Total flags received">Flags</abbr></th></tr>
@@ -559,7 +567,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 )}
               </thead>
               <tbody>
-                {drawOrderPlayers.map((p, i) => {
+                {orderedPlayers.map((p, i) => {
                   const drawPos = i + 1;
                   // Look up by id first (stable), fall back to name||dojo composite for
                   // legacy fixtures without UUIDs. Mirrors the key used when building rankByPlayerKey.
@@ -576,10 +584,12 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
 
                   return (
                     <tr key={p.id || `${p.name}||${p.dojo || ""}` || drawPos} className={rowClasses || undefined}>
-                      {/* The "#" column is always the draw position. Both pools and
-                          leagues use pool.players draw order; rank is surfaced
-                          separately by the rank badge next to the name. */}
-                      <td className="pool-standings__draw-pos">{drawPos}</td>
+                      {/* Pools: "#" is the draw position (rank via the badge below).
+                          Leagues: "#" IS the authoritative standing rank (with the
+                          override "*"), matching the Overview summary; no badge. */}
+                      <td className={`pool-standings__draw-pos${isLeague && s && s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>
+                        {isLeague ? `${rank ?? drawPos}${s && s.isOverridden ? "*" : ""}` : drawPos}
+                      </td>
                       <td>
                         <div className="pool__player-name">
                           {p.number ? <span className="num-prefix">{p.number}</span> : null}
@@ -587,10 +597,10 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           {isTeam && dhWinnerNames.has(p.name) && (!isLeague || (rank || drawPos) <= 3) && (
                             <DHBadge />
                           )}
-                          {/* The rank badge shows for both pools and leagues: the "#"
-                              column is always draw position, so the badge is the
-                              authoritative standing rank signal for both formats. */}
-                          {poolHasResults && rank !== null ? (
+                          {/* Rank badge only for pools, where "#" is the draw position
+                              so the badge carries the rank. Leagues put the rank in
+                              "#" itself (rank-ordered rows), so no badge here. */}
+                          {!isLeague && poolHasResults && rank !== null ? (
                             <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
                               {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

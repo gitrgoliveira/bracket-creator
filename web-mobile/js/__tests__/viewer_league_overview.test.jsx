@@ -379,9 +379,10 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   });
 
   // mp-dunx: a team league resolved by daihyosen shows a DH badge on the
-  // podium (ranks 1-3) in the Overview summary, mirroring the full standings
-  // (PoolsViewer). Without it, a spectator on Overview sees identical rows with
-  // no hint a play-off settled the order. Off-podium rows (rank 4+) stay clean.
+  // Overview summary for any daihyosen winner, mirroring the full standings
+  // (PoolsViewer). Without it, a spectator on Overview sees identical rows
+  // with no hint a play-off settled the order. A row with no DH bout stays
+  // clean.
   function rowsWithBadge(container) {
     const out = [];
     (function walk(node) {
@@ -397,13 +398,13 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     return out;
   }
 
-  it('team league daihyosen: DH badge on podium (ranks 1-3), not rank 4', () => {
+  it('team league daihyosen: DH badge on every daihyosen winner, including rank 4', () => {
     const standings = { League: makeTeamStandings(4) }; // Team 1..4, rank = i+1
     const poolMatches = [
       ...completedMatches(6),
       { id: 'League-DH-0', status: 'completed', winner: 'Team 1' },
       { id: 'League-DH-1', status: 'completed', winner: 'Team 2' },
-      { id: 'League-DH-2', status: 'completed', winner: 'Team 3' },
+      { id: 'League-DH-2', status: 'completed', winner: 'Team 4' },
     ];
     const tree = runtime.mount(ViewerOverview, {
       ...baseProps,
@@ -418,8 +419,8 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(rows).toEqual([
       { rank: '1', hasBadge: true },
       { rank: '2', hasBadge: true },
-      { rank: '3', hasBadge: true },
-      { rank: '4', hasBadge: false },
+      { rank: '3', hasBadge: false },
+      { rank: '4', hasBadge: true },
     ]);
   });
 

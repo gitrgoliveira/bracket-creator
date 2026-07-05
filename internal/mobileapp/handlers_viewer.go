@@ -181,6 +181,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 	r.GET("/tournament", func(c *gin.Context) {
 		t, err := store.LoadTournament()
 		if err != nil {
+			// Recorded on the context (not returned to the caller) so the
+			// root cause is still visible in server logs.
+			_ = c.Error(err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}

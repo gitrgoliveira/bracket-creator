@@ -28,6 +28,9 @@ func RegisterPublicLeagueHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			case errors.As(err, &notFound):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			default:
+				// Recorded on the context (not returned to the caller) so the
+				// root cause is still visible in server logs.
+				_ = c.Error(err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			}
 			return

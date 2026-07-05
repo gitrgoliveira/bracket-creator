@@ -17,7 +17,7 @@ import { withNumber } from './match_scoreboard.jsx';
 import { matchParticipantIds, matchParticipantNames, isPlayerWatched } from './viewer_watchlist_core.jsx';
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
-const { useState } = React;
+const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
 
 // DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
@@ -194,7 +194,17 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Re-fetch whenever poolMatches length changes (SSE-driven) so the
+  // Signature of id:status:winner per match, not just the array length: an
+  // SSE-driven bout completion mutates status/winner in place without adding
+  // or removing a match, so a length-only dependency would miss it and leave
+  // standings stale until the match count itself changed. Same pattern as
+  // admin_pools.jsx's poolMatchesSig.
+  const poolMatchesSig = useMemo(
+    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${dhWinnerName(m)}`).join("|"),
+    [poolMatches]
+  );
+
+  // Re-fetch whenever the match signature changes (SSE-driven) so the
   // standings table reflects the latest state after each scored bout.
   React.useEffect(() => {
     let cancelled = false;
@@ -213,7 +223,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [c.id, (poolMatches || []).length]);
+  }, [c.id, poolMatchesSig]);
 
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
   const isEngi = !!(competition && competition.engi);

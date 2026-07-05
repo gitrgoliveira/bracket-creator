@@ -67,6 +67,9 @@ func RegisterSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 			case errors.As(err, &validation):
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			default:
+				// Recorded on the context (not returned to the caller) so the
+				// root cause is still visible in server logs.
+				_ = c.Error(err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			}
 			return
@@ -117,6 +120,9 @@ func RegisterPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			case errors.As(err, &notFound):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			default:
+				// Recorded on the context (not returned to the caller) so the
+				// root cause is still visible in server logs.
+				_ = c.Error(err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			}
 			return

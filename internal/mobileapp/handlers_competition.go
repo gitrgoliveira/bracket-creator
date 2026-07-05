@@ -1593,7 +1593,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
-			log.Printf("chusen-candidates(%s): %v", id, err)
+			// Recorded on the context (not returned to the caller) so the
+			// root cause is still visible in server logs, consistent with the
+			// other opaque-500 handlers in this PR.
+			_ = c.Error(err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}

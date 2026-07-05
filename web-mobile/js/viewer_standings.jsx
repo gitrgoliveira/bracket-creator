@@ -312,7 +312,8 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
             )}
           </tbody>
         </table>
-        {/* Numbered match list for all scored matches in the league */}
+        {/* Numbered match list for every league match (scheduled, running, or
+            completed), matching PoolsViewer's equivalent list below. */}
         {(poolMatches || []).length > 0 && (
           <>
             <div className="pool-match-section-label">Matches</div>

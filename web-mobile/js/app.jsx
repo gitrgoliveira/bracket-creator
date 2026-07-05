@@ -848,15 +848,23 @@ function App() {
   useE(() => { setCachedAuthConfig(authConfig); }, [authConfig]);
 
   useE(() => {
-    // Track every jittered timer so the cleanup can cancel them when
+    // Track every pending jittered timer so the cleanup can cancel them when
     // viewerCompId / mode changes. Without this, a timer queued for
     // viewerCompId="A" fires after the user switches to comp "B",
     // calls setSelectedCompData(data_for_A), and races the new
     // useEffect([viewerCompId]) fetch: whichever resolves last wins.
-    const pendingTimers = [];
+    // A fired timer removes itself from the set (mp-wng6): this effect can
+    // stay mounted for an entire tournament day on a display wall or a
+    // parked viewer tab, so retaining fired ids would grow the set by one
+    // or two entries per SSE event for the tab's lifetime. Same pattern as
+    // the timer sets in admin.jsx and admin_shiaijo.jsx.
+    const pendingTimers = new Set();
     const jitteredTimeout = (fn, delay) => {
-        const id = setTimeout(fn, delay);
-        pendingTimers.push(id);
+        const id = setTimeout(() => {
+            pendingTimers.delete(id);
+            fn();
+        }, delay);
+        pendingTimers.add(id);
         return id;
     };
 

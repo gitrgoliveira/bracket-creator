@@ -12,6 +12,8 @@
 // normalized in the admin console) filtered by court. The "Called" state is
 // local-only UI (per the brief; backend persistence is a follow-up).
 
+import { createTimerPool } from './timer_pool.jsx';
+
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh } = React;
 
 const AdminTopbar = window.AdminTopbar;
@@ -123,7 +125,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     useEffectSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
         let cancelled = false;
-        const timers = new Set();
+        const timerPool = createTimerPool();
         const refresh = () => {
             window.API.fetchCourtMatches(court)
                 .then(comps => { if (!cancelled && mountedRef.current) setCourtComps(comps); })
@@ -146,12 +148,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             ]);
             const off = window.API.subscribeToEvents((event) => {
                 if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
-                const id = setTimeout(() => { timers.delete(id); if (!cancelled) refresh(); }, 200 + Math.random() * 400);
-                timers.add(id);
+                timerPool.schedule(() => { if (!cancelled) refresh(); }, 200 + Math.random() * 400);
             });
             unsub = () => { if (typeof off === "function") off(); };
         }
-        return () => { cancelled = true; timers.forEach(clearTimeout); unsub(); };
+        return () => { cancelled = true; timerPool.clearAll(); unsub(); };
     }, [court]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop

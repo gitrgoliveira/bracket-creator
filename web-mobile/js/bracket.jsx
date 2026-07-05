@@ -168,6 +168,26 @@ function teamIVScore(m) {
   return `${ivB}–${ivA}`; // Shiro (B) – Aka (A)
 }
 
+// teamIVPWScore: the full team-match result, IV over PW on two lines
+// ("IV shiroIV–akaIV\nPW shiroPW–akaPW") so the two totals stay readable in the
+// narrow centre score cell. Score containers use white-space: pre-line to honour
+// the newline; single-line contexts (ippon letters) are unaffected.
+// PW (points won) is AUTHORITATIVE from the server: Go MatchResult.MarshalJSON
+// attaches m.teamResult {shiroIV, akaIV, shiroPW, akaPW} for every team match, so
+// the client never re-derives PW (single source of truth with the standings PW
+// column, via state.TeamResultFrom). Orientation: shiro = sideB, aka = sideA.
+// Legacy payloads that predate teamResult fall back to the client IV aggregate
+// (teamIVScore), IV only, since PW is not recoverable without the server field.
+// Returns null for non-team matches (no teamResult and no subResults).
+function teamIVPWScore(m) {
+  const tr = m && m.teamResult;
+  if (tr && typeof tr === "object") {
+    return `IV ${tr.shiroIV}–${tr.akaIV}\nPW ${tr.shiroPW}–${tr.akaPW}`;
+  }
+  const iv = teamIVScore(m); // legacy fallback: IV only, no server teamResult
+  return iv == null ? null : `IV ${iv}`;
+}
+
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD }) => {
   const isAka = side === "a";
   if (!player || isTBD) {
@@ -814,7 +834,7 @@ function BracketTreeLegacy({ rounds, variant = 1, showDojo = true, onMatchClick,
 // handles the ": " fallback).
 function matchScoreStr(m, ipponsB, ipponsA) {
   return engiFlagScore(m)
-    || teamIVScore(m)
+    || teamIVPWScore(m)
     || formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei);
 }
 
@@ -861,6 +881,7 @@ window.roundLabel = roundLabel;
 window.buildDisplayModel = buildDisplayModel;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
+window.teamIVPWScore = teamIVPWScore;
 window.engiFlagScore = engiFlagScore;
 window.matchScoreStr = matchScoreStr;
 window.matchStateCell = matchStateCell;
@@ -868,4 +889,4 @@ window.decisionSuffix = decisionSuffix;
 window.sideLabel = sideLabel;
 window.ipponsFromScore = ipponsFromScore;
 
-export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle };
+export { formatIpponsScore, decisionSuffix, sideLabel, roundLabel, ipponsFromScore, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle };

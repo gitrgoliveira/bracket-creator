@@ -76,16 +76,16 @@
          They keep their early position so the window globals they set are
          available to eval-time readers in later modules. -->
     <script type="module" src="/dist/api_serializers.jsx"></script>
-    <script type="module" src="/dist/api_client.js?v=5"></script>
+    <script type="module" src="/dist/api_client.js?v=7"></script>
     <script type="module" src="/dist/data.jsx"></script>
     <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js?v=5"></script>
-    <script type="module" src="/dist/bracket.js?v=5"></script>
+    <script type="module" src="/dist/bracket.js?v=6"></script>
     <script type="module" src="/dist/ui.js?v=5"></script>
     <!-- glossary_data.js is generated from internal/domain/glossary.go
          via `go generate` (runs as part of `make go/build`). glossary.jsx
          (compiled to dist/glossary.js) imports it via a relative path. -->
-    <script type="module" src="/dist/glossary.js?v=5"></script>
+    <script type="module" src="/dist/glossary.js?v=6"></script>
     <script type="module" src="/dist/reset.js?v=5"></script>
     <script type="module" src="/dist/registration.js?v=5"></script>
     <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
@@ -113,14 +113,14 @@
          It reads only window.pluralize (from ui.js, above) at module-eval; the
          viewer.jsx-owned deps it uses are read from window at render time. -->
     <script type="module" src="/dist/viewer_watchlist.js?v=5"></script>
-    <script type="module" src="/dist/viewer.js?v=5"></script>
+    <script type="module" src="/dist/viewer.js?v=14"></script>
     <script type="module" src="/dist/admin_helpers.jsx"></script>
     <script type="module" src="/dist/admin_shell.js?v=5"></script>
-    <script type="module" src="/dist/admin_scoring_modal.js?v=5"></script>
+    <script type="module" src="/dist/admin_scoring_modal.js?v=7"></script>
     <script type="module" src="/dist/admin_lineup.js?v=5"></script>
     <script type="module" src="/dist/admin_participants.js?v=5"></script>
-    <script type="module" src="/dist/admin_pools.js?v=5"></script>
-    <script type="module" src="/dist/admin_schedule.js?v=5"></script>
+    <script type="module" src="/dist/admin_pools.js?v=19"></script>
+    <script type="module" src="/dist/admin_schedule.js?v=6"></script>
     <!-- admin_competition.js (mp-hpe3 split) is the SOLE entry that imports the
          four section modules (overview/settings/bracket/swiss). Like the viewer_*
          split (mp-pxxc / mp-zd1v), those modules must NOT also have their own
@@ -142,7 +142,7 @@
     <script type="module" src="/dist/admin_setup.js?v=5"></script>
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
          admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->
-    <script type="module" src="/dist/admin_shiaijo.js?v=5"></script>
+    <script type="module" src="/dist/admin_shiaijo.js?v=8"></script>
     <!-- admin_registration_desk.js exports AdminRegistrationDeskPage to window.
          Must load before admin.js which reads window.AdminRegistrationDeskPage
          in its "registrationDesk" view branch (mp-25bk). -->

@@ -15,14 +15,14 @@ import { matchParticipantIds, isFollowedPlayer, isPlayerWatched, WATCHLIST_MAX, 
 import { computeSecondaryAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { AnnouncementCard, AnnouncementBanner } from './viewer_notifications.jsx';
 import { mymatchQueueLabel, MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer } from './viewer_standings.jsx';
+import { isSwissFinalStandings, swissStandingsHeading, LeagueMatrix, PoolNumberedMatchRow, PoolsViewer, LeagueStandingsViewer } from './viewer_standings.jsx';
 import { deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, AwardsView, FightingSpiritSection } from './viewer_awards.jsx';
 import { PlayerMultiFilter, applyFilters, matchHighlightedBy, buildPlayerMatchHighlight, buildWatchlistUpcoming } from './viewer_schedule.jsx';
 import { ViewerCompetition, ViewerOverview } from './viewer_competition.jsx';
 import { ViewerHome, shouldShowRegister } from './viewer_home.jsx';
 
 // --- ES re-export surface (kept identical to the pre-split viewer.jsx) ---
-export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, useWatchlist, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, computeSecondaryAlert, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, isPlayerWatched, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, ViewerHome, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection, matchParticipantIds, TermV, VSchedItem, addPlayerToWatchlist, poolLabel, WATCHLIST_MAX };
+export { PlayerMultiFilter, applyFilters, matchHighlightedBy, competitionKindLabel, compMatches, tournamentMatches, currentMatchOf, buildPlayerMatchHighlight, buildWatchlistUpcoming, useWatchlist, entryKey, normalizeWatchlistEntry, normalizeWatchlist, migrateWatchlistOnLoad, resolveEntryPlayerIds, resolveWatchedPlayers, effectivePrimaryKey, findPrimaryEntry, buildPrimaryNextMatch, computeSecondaryAlert, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, isPlayerWatched, deriveAwards, bracketHasDecidedFinal, resolveCompetitionAwards, buildRoster, MatchDetailCard, MatchViewerModal, AnnouncementCard, AnnouncementBanner, ViewerCompetition, ViewerOverview, ViewerHome, MyMatchAlertBanner, LeagueMatrix, PoolsViewer, LeagueStandingsViewer, PoolNumberedMatchRow, AwardsView, FightingSpiritSection, matchParticipantIds, TermV, VSchedItem, addPlayerToWatchlist, poolLabel, WATCHLIST_MAX };
 export { isHttpURL, linkBase, isNonPublicOrigin, TournamentInfo } from './viewer_utils.jsx';
 export { NOTIF_SYNC_EVENT, notifEnable, notifDisable, isFollowedMatchOnDeck } from './viewer_alerts.jsx';
 export { notificationSupported, AnnBellBtn } from './viewer_notifications.jsx';
@@ -52,6 +52,7 @@ if (typeof window !== 'undefined') {
     window.isNonPublicOrigin = isNonPublicOrigin;
     // Reused read-only on the shiaijo operator console (pool standings + results).
     window.PoolsViewer = PoolsViewer;
+    window.LeagueStandingsViewer = LeagueStandingsViewer;
 
     // Helpers consumed by viewer_watchlist.jsx (WatchlistPanel/BellIcon) at
     // render time. poolLabel is already exposed by viewer_utils.jsx.

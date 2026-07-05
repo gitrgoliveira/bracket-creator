@@ -1390,6 +1390,9 @@ a:hover {
   color: var(--ink-2);
   min-width: 16px;
   text-align: center;
+  /* Team IV/PW stacks (newline from teamIVPWScore); single-line scores unaffected. */
+  white-space: pre-line;
+  line-height: 1.3;
 }
 
 .bc-side--winner .bc-score {
@@ -1578,9 +1581,35 @@ a:hover {
   padding-right: 16px;
 }
 
+/* Caption: clarifies "#" = draw order (not rank) and names the table for AT. */
+.pool__table-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 8px 6px;
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.01em;
+}
+
 /* Uniform green advancing row (no ▲ arrow, no cut-border, tint + badge carry the signal) */
 .pool__table tr.advancing {
   background: #ecfdf5;
+}
+
+/* Team standings carry 8 numeric columns (W L T IV IL IT PW PL). On a phone
+   that collapses to unreadable ~28px cells, so below 480px drop the three
+   lowest-order tiebreakers (IL=child 7, IT=child 8, PL=child 10), keeping
+   # Team W L T IV PW. Header, body, and empty-placeholder rows share the
+   same column positions, so nth-child covers all of them. */
+@media (max-width: 480px) {
+  .pool__table--team th:nth-child(7),
+  .pool__table--team td:nth-child(7),
+  .pool__table--team th:nth-child(8),
+  .pool__table--team td:nth-child(8),
+  .pool__table--team th:nth-child(10),
+  .pool__table--team td:nth-child(10) {
+    display: none;
+  }
 }
 
 /* Rank badge inline after player name in the standings table */
@@ -1638,6 +1667,9 @@ a:hover {
   grid-template-columns: 20px 1fr auto 1fr;
   gap: 6px;
   align-items: center;
+  /* Tappable row on phones in a noisy hall: clear the 36px shared-surface
+     floor, and the 44px coarse-pointer target under touch. */
+  min-height: 36px;
   font-size: 13px;
   /* button-reset: keep visual identical to the old div, restore keyboard focus */
   appearance: none;
@@ -1675,7 +1707,6 @@ a:hover {
 .pool-match-numbered-row__side--aka {
   background: var(--red-soft, #fde7e8);
   justify-content: flex-end;
-  flex-direction: row-reverse;
   text-align: right;
   border-radius: 0 6px 6px 0;
 }
@@ -1713,6 +1744,18 @@ a:hover {
   min-width: 52px;
   text-align: center;
   letter-spacing: 0.04em;
+  line-height: 1.3;
+  /* Team summaries stack IV over PW (newline from teamIVPWScore); pre-line honours
+     it. Long values also wrap rather than starving the flanking name columns. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+/* Under a coarse (touch) pointer, lift the match row to the 44px target. */
+@media (pointer: coarse) {
+  .pool-match-numbered-row {
+    min-height: 44px;
+  }
 }
 
 /* ---------- Pool match results ---------- */
@@ -1841,6 +1884,9 @@ a:hover {
   font-weight: 700;
   font-size: 14px;
   color: var(--ink-2);
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 
 .sched-row__status {
@@ -2566,6 +2612,9 @@ a.vlist-item {
 .vsched-item__score {
   font-family: var(--font-mono);
   font-weight: 700;
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 /* Live (in-progress) score on a running match: accent-tinted so it reads as
    "current score, still climbing" rather than a settled final result. */
@@ -4489,6 +4538,9 @@ button.pool-match-row {
   align-items: center;
   justify-content: center;
   gap: 2px;
+  text-align: center;
+  white-space: pre-line; /* stack team IV/PW */
+  line-height: 1.3;
 }
 /* Symmetric foul gutters flanking the score (Shiro left, Aka right). Reserved
    even when empty so the centred score never shifts as a hansoku ▲ appears. */
@@ -8213,10 +8265,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-top: 2px;
 }
 
-/* Team encounter score in the queue row: always carries an IV label so a
-   bare figure is never shown out of context (a team number could read as
-   wins / points otherwise). */
-.shiaijo-row__teamscore { display: inline-flex; align-items: baseline; gap: 3px; white-space: nowrap; }
+/* Team encounter score in the queue row. The value self-labels ("IV s-a" over
+   "PW s-a") so a bare figure is never shown out of context; pre-line stacks the
+   two totals. */
+.shiaijo-row__teamscore { display: inline-block; text-align: center; white-space: pre-line; line-height: 1.25; }
 .shiaijo-row__iv {
   font-size: 9px;
   font-weight: 700;

@@ -4,9 +4,10 @@
 import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
-import { WinnerBadge, SwissStandingsViewer, PoolsViewer } from './viewer_standings.jsx';
+import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -16,8 +17,11 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
-// Pool daihyosen matches carry '-DH-' in their id.
-const isPoolDaihyosenID = id => id.includes('-DH-');
+// DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
+// (…-DH-N), daihyosen-specific, so a pool name containing "-DH-" can't
+// false-positive a regular match. Routing a bout to the individual (rep-bout)
+// editor uses isSupplementaryBout instead (a "-TB-" tiebreaker is also a rep
+// bout, just not a daihyosen for labelling).
 
 // mp-tidg: activeTab + onTabChange are controlled props: app.jsx owns the
 // tab state so browser back/forward across tabs works (each tab switch is a
@@ -29,10 +33,17 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     const out = [];
     if (pools) {
         pools.forEach((p) => {
-            const matches = poolMatches ? poolMatches.filter(m => m.id.startsWith(p.poolName + "-")) : [];
+            // Exact parsed pool name, not a raw prefix: startsWith("Pool A-")
+            // would also swallow "Pool A-East-…" ids. poolNameOf strips any
+            // DH/TB suffix (matches the backend equality rule in daihyosen.go).
+            const matches = poolMatches ? poolMatches.filter(m => poolNameOf(m.id) === p.poolName) : [];
             matches.forEach((m) => {
-                const isDH = isPoolDaihyosenID(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize });
+                // A daihyosen ('-DH-') or tiebreaker ('-TB-') is a single
+                // ippon-shobu rep bout even in a team comp: force compKind/teamSize
+                // so isTeam checks route it to the individual editor (mirrors
+                // enrichPoolMatchWithComp in admin_pools.jsx).
+                const isRepBout = isSupplementaryBout(m.id || "");
+                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize });
             });
         });
     }
@@ -154,7 +165,8 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const tabs = [
     { id: "overview", label: "Overview" },
     isSwiss ? { id: "swiss", label: "Standings" } : null,
-    hasPools && !isSwiss ? { id: "pools", label: isLeague ? "League" : "Pools" } : null,
+    isLeague && hasPools ? { id: "league", label: "League" } : null,
+    !isLeague && hasPools && !isSwiss ? { id: "pools", label: "Pools" } : null,
     hasBracket && !isSwiss ? { id: "bracket", label: "Bracket" } : null,
     c.status === "completed" ? { id: "results", label: "Awards" } : null,
   ].filter(Boolean);
@@ -347,8 +359,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               </div>
             </div>
           )}
-          {effectiveTab === "pools" && hasPools && (
+          {effectiveTab === "pools" && hasPools && !isLeague && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
+          )}
+          {effectiveTab === "league" && hasPools && isLeague && (
+            <LeagueStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
           )}
           {effectiveTab === "swiss" && isSwiss && (
             <SwissStandingsViewer competition={c} poolMatches={poolMatches} tweaks={tweaks} />
@@ -385,6 +400,17 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
     return all.length > 0 && all.every(m => m.status === "completed");
   })();
   const leagueWinner = allMatchesComplete && leagueStandings.length > 0 ? leagueStandings[0] : null;
+  // Teams that won a completed daihyosen play-off in the league. Mirrors the
+  // full standings (PoolsViewer): the play-off decides order within the tied
+  // group only, so the badge is the sole signal that a DH settled otherwise
+  // identical podium rows. Scope by exact pool name (poolNameOf), not a raw
+  // prefix, matching the backend equality rule in daihyosen.go.
+  const leagueDhWinnerNames = new Set(
+    (poolMatches || [])
+      .filter(m => poolNameOf(m.id) === leaguePoolName && isPoolDaihyosenBout(m.id) && m.status === "completed" && m.winner)
+      .map(m => matchWinnerName(m))
+      .filter(Boolean)
+  );
 
   // setup: no draw yet: plain "not started" message.
   if (!c.status || c.status === "setup") {
@@ -492,6 +518,12 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                     <div className="pool__player-name">
                       {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
                       {s.player?.name || ""}
+                      {/* DH badge for any daihyosen winner, matching PoolsViewer.
+                          The backend already gates daihyosen bouts to ties that
+                          affect advancement (tieAffectsAdvancement), so the badge
+                          is informational and applies to any DH winner, not just
+                          the top 3 podium places. */}
+                      {isTeam && leagueDhWinnerNames.has(s.player?.name) && <DHBadge />}
                       {/* No rank badge here: this summary is rank-sorted, so the
                           "#" column already IS the rank: a badge would just echo
                           it. The rank badge only carries information when rows are
@@ -528,7 +560,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           {onSwitchTab && (
             <button type="button"
               className="btn btn--link pool__view-all-btn"
-              onClick={() => onSwitchTab("pools")}
+              onClick={() => onSwitchTab(isLeague ? "league" : "pools")}
               data-testid="league-overview-view-all"
             >
               View full standings →

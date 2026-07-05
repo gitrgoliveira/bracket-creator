@@ -32,6 +32,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
   const realReact = global.React;
   let runtime;
   let ViewerOverview;
+  let DHBadge;
   const savedGlobals = {};
   const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'ipponsFromScore', 'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr'];
 
@@ -56,6 +57,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     global.window.queueLabelCompact = () => null;
     vi.resetModules();
     ({ ViewerOverview } = await import('../viewer.jsx'));
+    ({ DHBadge } = await import('../viewer_standings.jsx'));
   });
 
   afterEach(() => {
@@ -223,7 +225,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(text).not.toContain('Player 1');
   });
 
-  it('view-full-standings button calls onSwitchTab("pools")', () => {
+  it('view-full-standings button calls onSwitchTab("league")', () => {
     const onSwitchTab = vi.fn();
     const standings = { League: makeStandings(3) };
     const tree = runtime.mount(ViewerOverview, {
@@ -239,7 +241,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     );
     expect(btn).not.toBeNull();
     btn.props.onClick();
-    expect(onSwitchTab).toHaveBeenCalledWith('pools');
+    expect(onSwitchTab).toHaveBeenCalledWith('league');
   });
 
   it('team league shows correct column headers (W/L/T/IV/IL/PW/PL)', () => {
@@ -374,6 +376,66 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     const text = collectText(tree);
     expect(text).toContain('Member1-1');
     expect(text).toContain('Member2-1');
+  });
+
+  // mp-dunx: a team league resolved by daihyosen shows a DH badge on the
+  // Overview summary for any daihyosen winner, mirroring the full standings
+  // (PoolsViewer). Without it, a spectator on Overview sees identical rows
+  // with no hint a play-off settled the order. A row with no DH bout stays
+  // clean.
+  function rowsWithBadge(container) {
+    const out = [];
+    (function walk(node) {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (node.type === 'tr') {
+        const firstTd = [].concat(node.props?.children || []).filter(Boolean).find(k => k && k.type === 'td');
+        const hasBadge = !!findInTree(node, n => n?.type === DHBadge);
+        if (firstTd) out.push({ rank: collectText(firstTd), hasBadge });
+      }
+      walk(node.props?.children ?? node.children);
+    })(container);
+    return out;
+  }
+
+  it('team league daihyosen: DH badge on every daihyosen winner, including rank 4', () => {
+    const standings = { League: makeTeamStandings(4) }; // Team 1..4, rank = i+1
+    const poolMatches = [
+      ...completedMatches(6),
+      { id: 'League-DH-0', status: 'completed', winner: 'Team 1' },
+      { id: 'League-DH-1', status: 'completed', winner: 'Team 2' },
+      { id: 'League-DH-2', status: 'completed', winner: 'Team 4' },
+    ];
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: teamLeagueComp('completed'),
+      standings,
+      pools,
+      poolMatches,
+    });
+    const container = findInTree(tree, n => n?.props?.['data-testid'] === 'league-overview-standings');
+    expect(container).not.toBeNull();
+    const rows = rowsWithBadge(container);
+    expect(rows).toEqual([
+      { rank: '1', hasBadge: true },
+      { rank: '2', hasBadge: true },
+      { rank: '3', hasBadge: false },
+      { rank: '4', hasBadge: true },
+    ]);
+  });
+
+  it('team league with no daihyosen shows no DH badge', () => {
+    const standings = { League: makeTeamStandings(4) };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: teamLeagueComp('completed'),
+      standings,
+      pools,
+      poolMatches: completedMatches(6), // no -DH- matches
+    });
+    const container = findInTree(tree, n => n?.props?.['data-testid'] === 'league-overview-standings');
+    expect(container).not.toBeNull();
+    expect(rowsWithBadge(container).every(r => !r.hasBadge)).toBe(true);
   });
 
   it('non-engi league does NOT show Pair/Flags header', () => {

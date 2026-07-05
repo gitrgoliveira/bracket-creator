@@ -2623,3 +2623,46 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 }
+
+// ---------------------------------------------------------------------------
+// GET /competitions/:id/chusen-candidates
+// ---------------------------------------------------------------------------
+
+// TestChusenCandidates_EmptyOnNoTie verifies that a competition in the pools
+// stage with no unresolved chusen groups returns 200 and an empty candidates
+// array.
+func TestChusenCandidates_EmptyOnNoTie(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	comp := state.Competition{
+		ID:       "chusen-comp",
+		Name:     "Chusen Test",
+		Status:   state.CompStatusPools,
+		Kind:     "team",
+		TeamSize: 5,
+		Format:   state.CompFormatMixed,
+	}
+	require.NoError(t, store.SaveCompetition(&comp))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions/chusen-comp/chusen-candidates", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	cands, ok := body["candidates"].([]any)
+	require.True(t, ok, "candidates field must be a JSON array")
+	assert.Empty(t, cands)
+}
+
+// TestChusenCandidates_NotFound verifies that a missing competition returns 404.
+func TestChusenCandidates_NotFound(t *testing.T) {
+	r, _, _, _, _ := setupTestRouter(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions/no-such-comp/chusen-candidates", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}

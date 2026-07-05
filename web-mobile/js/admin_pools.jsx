@@ -1,56 +1,13 @@
-// Pools section of a competition: standings tables with rank-override inputs
-// and per-pool drill-down. See web-mobile/admin_split_plan.md.
+// Pools section of a competition: standings rendered via the shared public
+// PoolsViewer (draw order + rank/DH badges); matches open the score editor.
 
 // Canonical pool-id parser shared with the display surfaces (single source of
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
-import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
-const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
-// Canonical rank cap (admin_helpers.jsx): mirrors helper.MaxRankOverride
-// on the Go side. The override-rank handler ALSO validates against the
-// actual pool size; this cap is the absolute overflow guard.
-const MAX_RANK = window.MAX_RANK;
-const getScoreBtnClass = window.getScoreBtnClass;
 const ScoreEditorModal = window.ScoreEditorModal;
-
-// Pure decision logic for what RankInput.handleBlur should do, given the
-// state of its refs and props at blur time. Returned as a tagged action so
-// callers (handleBlur) just dispatch: no React state lives in here.
-//
-// Cases (in priority order):
-//   1. `cancelled` (Esc was pressed) → noop. The Esc handler already
-//      queued setV(String(initial)) for the visual revert.
-//   2. User focused but never typed (v === focusValue): if `initial`
-//      changed under them while focused (SSE update), sync to it;
-//      otherwise noop. This is the focus-without-edit TOCTOU guard:
-//      committing the stale focus-time value here would clobber a
-//      concurrent server update.
-//   3. Invalid input (not finite, ≤ 0, > MAX_RANK) → revert visually to
-//      String(initial) so the user doesn't see garbage persist as if
-//      accepted. MAX_RANK mirrors the server-side overflow cap
-//      (helper.MaxRankOverride); the backend ALSO rejects when the
-//      rank exceeds the actual pool size, which is the real semantic
-//      constraint: this cap is the overflow guard.
-//   4. Valid edit different from initial → commit String(parsed).
-//      Same value as initial (e.g. typed "02" when initial is 2,
-//      or no-op retype) → noop.
-//
-// Exported for vitest at __tests__/admin_pools.test.jsx.
-function decideRankCommit({ v, initial, focusValue, cancelled }) {
-  if (cancelled) return { action: "noop" };
-  if (v === focusValue) {
-    if (v !== String(initial)) return { action: "sync", value: String(initial) };
-    return { action: "noop" };
-  }
-  const next = parseInt(v);
-  if (!Number.isFinite(next) || next <= 0 || next > MAX_RANK) {
-    return { action: "revert", value: String(initial) };
-  }
-  if (String(next) !== String(initial)) return { action: "commit", value: String(next) };
-  return { action: "noop" };
-}
 
 // poolNameOf is imported above from ./pool_ids.jsx (the shared
 // pool-id parser; "PoolName-N" / "PoolName-DH-N" / "PoolName-TB-N" → pool name,
@@ -117,7 +74,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   // each team's roster so ScoreEditorModal can render the two rep-player
   // dropdowns. comp.players entries ARE the teams (member names live in
   // team.metadata via AdminLineupHelpers.rosterFor); config may nest players.
-  const isTeamComp = !!(comp && (comp.kind === "team" || (comp.teamSize || 0) > 0));
+  const isTeamComp = !!(comp && (comp.kind === "team" || comp.teamSize > 0));
   const repIsTeam = isSupplementary && isTeamComp;
   let repRosterA = [];
   let repRosterB = [];
@@ -148,119 +105,8 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
-// Rank inputs commit on blur / Enter rather than every keystroke. Typing
-// "10" used to fire two API calls (rank=1 then rank=10); the intermediate
-// rank=1 collided with whoever already held rank 1 and produced visible
-// swap-flicker until the second call landed.
-//
-// `focusedRef` suppresses the upstream-sync useEffect while the user is
-// mid-edit: otherwise an SSE-driven standings refresh (another admin
-// completing a match) would clobber the half-typed value.
-//
-// `focusValueRef` snapshots `v` at focus time so we can detect
-// focus-without-edit and avoid committing a stale value if `initial`
-// changed under the user while they were focused.
-//
-// `cancelRef` lets the Esc handler signal handleBlur to skip the commit.
-// Without it, the React-async-state hazard would let Esc actually commit
-// the typed value: setV(String(initial)) is queued, but blur() fires
-// handleBlur synchronously with the stale typed `v` still in the closure.
-function RankInput({ initial, className, onCommit, style }) {
-  const [v, setV] = useStateA(String(initial));
-  const focusedRef = useRefA(false);
-  const focusValueRef = useRefA(String(initial));
-  const cancelRef = useRefA(false);
-  useEffectA(() => {
-    if (!focusedRef.current) setV(String(initial));
-  }, [initial]);
-  const handleFocus = () => {
-    focusedRef.current = true;
-    focusValueRef.current = v;
-  };
-  const handleBlur = () => {
-    const result = decideRankCommit({
-      v,
-      initial,
-      focusValue: focusValueRef.current,
-      cancelled: cancelRef.current,
-    });
-    focusedRef.current = false;
-    if (cancelRef.current) cancelRef.current = false;
-    if (result.action === "commit") {
-      // Mirror the normalized value into local state so the input
-      // immediately reflects what's being saved. Without this, typing
-      // "5abc" then blurring would commit rank=5 to the server but
-      // leave the input displaying "5abc" until the SSE-driven prop
-      // refresh re-runs the upstream-sync useEffect: a confusing
-      // few-hundred-ms window where the visible value doesn't match
-      // what was sent.
-      setV(result.value);
-      onCommit(result.value);
-    } else if (result.action === "sync" || result.action === "revert") {
-      setV(result.value);
-    }
-    // "noop" → nothing.
-  };
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.currentTarget.blur();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      cancelRef.current = true;
-      setV(String(initial));
-      e.currentTarget.blur();
-    }
-  };
-  return (
-    <input
-      type="number"
-      min="1"
-      max={MAX_RANK}
-      className={className}
-      value={v}
-      onChange={(e) => setV(e.target.value)}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
-      onClick={(e) => e.stopPropagation()}
-      autoComplete="off"
-      style={style}
-    />
-  );
-}
-
-// poolDisplayLabel: returns the user-facing label for a pool heading.
-// League competitions use a single pool that spans the full roster; calling
-// it "Pool A" would be confusing, so we show "League table" instead.
-function poolDisplayLabel(pool, format) {
-  return window.leagueAwareLabel(format, pool.poolName);
-}
-
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
-  const resetOverrides = async () => {
-    if (!(await window.confirmDialog({ message: "Are you sure you want to reset ALL manual overrides (ranks and winners) for this competition?", confirmLabel: "Reset overrides", danger: true }))) return;
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
-    try {
-      await window.API.resetOverrides(c.id, password, admin);
-    } catch (e) {
-      alert("Failed to reset overrides: " + e.message);
-    }
-  };
-
-  const overrideRank = async (poolName, playerName, rank) => {
-    try {
-      const nextRank = parseInt(rank);
-      if (isNaN(nextRank) || nextRank <= 0) return;
-      await window.API.overridePoolRank(c.id, poolName, playerName, nextRank, password);
-    } catch (e) {
-      alert("Failed to override rank: " + e.message);
-    }
-  };
-
-  const [selectedPoolName, setSelectedPoolName] = useStateA(null);
   const [scoreOpenMatch, setScoreOpenMatch] = useStateA(null);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -277,6 +123,49 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // flight.
   const [tiebreakBusyAction, setTiebreakBusyAction] = useStateA(null);
   const [tiebreakErr, setTiebreakErr] = useStateA(null);
+
+  // Chusen (drawing lots) candidate state: team-pool ties the daihyosen
+  // could not settle (a cycle / all-drawn). Only fetched for team comps in
+  // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
+  const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
+  const [chusenCandidates, setChusenCandidates] = useStateA(null);
+  // Per-group input values: keys are "${poolName}::${teamName}" -> string.
+  const [chusenInputs, setChusenInputs] = useStateA({});
+  // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
+  // (a pool can hold more than one unresolved tied group).
+  const [chusenBusy, setChusenBusy] = useStateA({});
+  // Per-group error: keyed by the same "${poolName}::${minPosition}" -> string.
+  const [chusenGroupErr, setChusenGroupErr] = useStateA({});
+
+  // Lightweight signature so the effect re-runs when match results change.
+  // Memoized so typing into a chusen position input (local state) does not
+  // re-scan every pool match on each render.
+  const poolMatchesSig = useMemoA(
+    () => (poolMatches || []).map(m => `${m.id}:${m.status}:${typeof m.winner === "string" ? m.winner : (m.winner && m.winner.name) || ""}`).join("|"),
+    [poolMatches]
+  );
+  // Override-sensitive signature: a chusen result is a rank override, which the
+  // backend broadcasts as EventTournamentUpdated WITHOUT changing pool matches.
+  // Capturing rank + isOverridden lets the fetch effect refresh candidates after
+  // an override recorded elsewhere (another operator tab), not only after a bout.
+  const standingsSig = useMemoA(
+    () => Object.keys(standings || {}).sort().map(pn =>
+      (standings[pn] || []).map(s => `${(s.player && s.player.name) || ""}:${s.rank}:${s.isOverridden ? 1 : 0}`).join(",")
+    ).join("|"),
+    [standings]
+  );
+
+  useEffectA(() => {
+    if (!isTeamComp || !c || c.status !== "pools" || !window.API || typeof window.API.chusenCandidates !== "function") {
+      setChusenCandidates(null);
+      return;
+    }
+    let cancelled = false;
+    window.API.chusenCandidates(c.id, password)
+      .then(list => { if (!cancelled) setChusenCandidates(list); })
+      .catch(() => { if (!cancelled) setChusenCandidates(null); });
+    return () => { cancelled = true; };
+  }, [c && c.id, c && c.status, isTeamComp, poolMatchesSig, standingsSig, password]);
 
   // Fetch candidates whenever poolMatches changes (triggered by match_updated
   // SSE events, which the Go handler now broadcasts for AwaitingLeagueTiebreak).
@@ -367,6 +256,137 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     });
   };
 
+  // Chusen banner: shown when chusenCandidates is non-empty (team comp in
+  // pools stage, at least one DH cycle left unresolved).
+  const chusenBanner = chusenCandidates && chusenCandidates.length > 0 ? (
+    <div
+      className="alert alert--warn league-tiebreak"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="league-tiebreak__title">Chusen (drawing lots) required</div>
+      <div className="league-tiebreak__desc">
+        The daihyosen didn&apos;t settle the order (two or more teams tied on daihyosen wins). Draw lots and record each team&apos;s finishing position below.
+      </div>
+      {chusenCandidates.map((group) => {
+        const { poolName, teamNames, minPosition } = group;
+        // A pool can hold more than one unresolved tied group (e.g. a cycle at
+        // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
+        // so the React key and the busy/error maps never collide across groups.
+        const groupKey = `${poolName}::${minPosition}`;
+        const isBusy = !!chusenBusy[groupKey];
+        const groupErrMsg = chusenGroupErr[groupKey] || null;
+
+        // Effective value for a team's input: the operator's edit if present,
+        // else the displayed default (minPosition + its listed index). Both the
+        // validation and the submit read this so accepting the shown defaults
+        // (already a valid permutation) records without forcing a manual edit.
+        const effRank = (name) => {
+          const raw = chusenInputs[`${poolName}::${name}`];
+          return parseInt(raw !== undefined ? raw : String(minPosition + teamNames.indexOf(name)), 10);
+        };
+
+        const handleRecord = async () => {
+          // Validate: entered positions must be exactly the set
+          // {minPosition .. minPosition + teamNames.length - 1}.
+          const expected = new Set();
+          for (let i = 0; i < teamNames.length; i++) expected.add(minPosition + i);
+          const entered = new Set();
+          let valid = true;
+          for (const name of teamNames) {
+            const val = effRank(name);
+            if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
+            entered.add(val);
+          }
+          if (!valid) {
+            const lo = minPosition;
+            const hi = minPosition + teamNames.length - 1;
+            setChusenGroupErr(prev => ({ ...prev, [groupKey]: `Enter each of positions ${lo} to ${hi} exactly once` }));
+            return;
+          }
+          setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
+          setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
+          try {
+            for (const name of teamNames) {
+              await window.API.overridePoolRank(c.id, poolName, name, effRank(name), password);
+            }
+            // Optimistically hide THIS group only (a pool can hold several) - the
+            // effect re-fetches on the next update to reconcile.
+            setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
+            // Clear inputs for this group.
+            setChusenInputs(prev => {
+              const next = { ...prev };
+              for (const name of teamNames) delete next[`${poolName}::${name}`];
+              return next;
+            });
+          } catch (e) {
+            setChusenGroupErr(prev => ({ ...prev, [groupKey]: e.message || "Failed to record chusen result" }));
+            // The per-team overridePoolRank writes are sequential, so a mid-loop
+            // failure may have persisted some ranks but not others. overridePoolRank
+            // is idempotent per team (retrying re-sends every rank), and the group
+            // stays visible on failure so the operator can retry. Re-fetch the
+            // candidates so the banner reflects exactly which teams still need a
+            // rank, rather than waiting for the next SSE-driven refresh.
+            if (window.API && typeof window.API.chusenCandidates === "function") {
+              window.API.chusenCandidates(c.id, password)
+                .then(list => setChusenCandidates(list))
+                .catch(() => {});
+            }
+          } finally {
+            setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
+          }
+        };
+
+        return (
+          <div key={groupKey} className="league-tiebreak__group">
+            <div className="league-tiebreak__group-header">
+              <span className="league-tiebreak__pos">{poolName}</span>
+              <span className="league-tiebreak__teams">{teamNames.join(" · ")}</span>
+            </div>
+            <div className="league-tiebreak__desc" style={{ marginBottom: 8 }}>
+              Assign positions {minPosition} to {minPosition + teamNames.length - 1} (one per team):
+            </div>
+            {teamNames.map((name) => {
+              const inputKey = `${poolName}::${name}`;
+              const defaultVal = minPosition + teamNames.indexOf(name);
+              // Stable DOM id so the label is programmatically tied to its input.
+              const inputId = `chusen-${groupKey}-${teamNames.indexOf(name)}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+              return (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <label htmlFor={inputId} style={{ flex: 1 }}>{name}</label>
+                  <input
+                    id={inputId}
+                    type="number"
+                    min={minPosition}
+                    max={minPosition + teamNames.length - 1}
+                    style={{ width: 64 }}
+                    value={chusenInputs[inputKey] !== undefined ? chusenInputs[inputKey] : String(defaultVal)}
+                    onChange={e => setChusenInputs(prev => ({ ...prev, [inputKey]: e.target.value }))}
+                    disabled={isBusy}
+                  />
+                </div>
+              );
+            })}
+            <div className="league-tiebreak__actions" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                disabled={isBusy}
+                onClick={handleRecord}
+              >
+                {isBusy && <span className="spinner" />}
+                Record chusen result
+              </button>
+            </div>
+            {groupErrMsg && (
+              <div className="league-tiebreak__err">{groupErrMsg}</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+
   // Banner element: shown when there are consequential tied groups with no
   // tie-breaker matches yet, OR when tie-breaker matches have been generated.
   const leagueTiebreakBanner = isTeamLeague && c.status === "pools" && tiebreakCandidates && tiebreakCandidates.length > 0 ? (
@@ -445,35 +465,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     </div>
   ) : null;
 
-  // ScoreEditorModal reads comp-* metadata off the match (compId, compKind,
-  // teamSize, compName, phase, poolName). Pool-match objects from
-  // pools[i].matches carry only the MatchResult shape: no comp-level
-  // enrichment: so we wrap them at the modal boundary via the pure
-  // enrichPoolMatchWithComp helper. See its docstring for the rationale.
-  const enrichPoolMatch = (m, poolNameOverride) => enrichPoolMatchWithComp(m, c, poolNameOverride);
-
-  // pool.matches (helper.Match) only carries sideA/sideB: no id, status, or
-  // score data. poolMatches (state.MatchResult) has the full data including
-  // the id used by the score API endpoint. Use poolMatchesFor filtered by
-  // pool name for rendering match rows so Score/Edit buttons have the real id.
-  // See poolMatchesForPool's docstring for the full rationale.
-  //
-  // Precompute a Map<poolName, MatchResult[]> so poolMatchesFor is O(1) per
-  // lookup instead of O(pools × matches): each card in the grid called the
-  // old inline filter independently, scanning the full array per pool.
-  const poolMatchesMap = useMemoA(() => {
-    const map = new Map();
-    for (const m of (poolMatches || [])) {
-      const name = poolNameOf(m.id);
-      if (!name) continue;
-      const bucket = map.get(name);
-      if (bucket) { bucket.push(m); } else { map.set(name, [m]); }
-    }
-    return map;
-  }, [poolMatches]);
-  const poolMatchesFor = (poolName) => poolMatchesMap.get(poolName) ?? [];
-
-  // Modal rendered in both return paths (detail view and card list).
+  // Modal rendered alongside the PoolsViewer.
   const scoreModal = scoreOpenMatch ? (
     <ScoreEditorModal
       key={c.id + '-' + scoreOpenMatch.id}
@@ -498,272 +490,36 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     return <EmptyState icon="⏳" title={isLeague ? "League not drawn yet" : "Pools not drawn yet"} message={`Add participants and start the competition to ${isLeague ? "draw the league table" : "draw pools"}.`} />;
   }
 
-  const selectedPool = selectedPoolName ? pools.find(p => p.poolName === selectedPoolName) : null;
-
-  if (selectedPool) {
-    const poolStandings = standings ? standings[selectedPool.poolName] : null;
-    const court = c.courts[pools.indexOf(selectedPool) % c.courts.length];
-    return (
-      <>
-      <div className="pool-detail">
-        <div style={{ marginBottom: 16 }}>
-          <button type="button" className="btn btn--sm" onClick={() => setSelectedPoolName(null)}>← All pools</button>
-        </div>
-        <div className="card">
-          <div className="card__head">
-            <div>
-              <h2 className="page-head__title">{poolDisplayLabel(selectedPool, c.format)}</h2>
-              <div className="card__sub">Shiaijo {court} · {pluralize(selectedPool.players.length, "participant")}</div>
-            </div>
-            <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset rankings</button>
-          </div>
-
-          <div className="field__hint" style={{ marginBottom: 12 }}>
-            Rankings are calculated automatically based on wins, points, and sub-scores.
-            Enter a number in the "#" column to manually override the rank.
-          </div>
-
-          <table className="pool__table" style={{ fontSize: 14 }}>
-            <thead>
-              {c.kind === "team" || c.teamSize > 0 ? (
-                <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
-              ) : (
-                <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
-              )}
-            </thead>
-            <tbody>
-              {(poolStandings || selectedPool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
-                const isTeamComp = c.kind === "team" || c.teamSize > 0;
-                return (
-                  <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
-                    <td style={{ width: 60 }}>
-                      <RankInput
-                        initial={s.rank || i + 1}
-                        className="input"
-                        onCommit={(v) => overrideRank(selectedPool.poolName, s.player.name, v)}
-                        style={{
-                          width: 44,
-                          padding: "4px 8px",
-                          border: s.isOverridden ? "1px solid var(--accent)" : "1px solid var(--line)",
-                          background: s.isOverridden ? "var(--accent-soft)" : "transparent",
-                          textAlign: "center",
-                          fontWeight: s.isOverridden ? "700" : "400"
-                        }}
-                      />
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>
-                        {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                        {s.player.name}
-                      </div>
-                      {tweaks.showDojo && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
-                    </td>
-                    <td className="num">{s.wins}</td>
-                    <td className="num">{s.losses}</td>
-                    <td className="num">{s.draws || 0}</td>
-                    {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
-                    {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
-                    {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
-                    <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                    <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {/* Pool-daihyosen banner: shown when the backend has injected DH matches
-              for this pool (all regular matches complete but teams still tied). */}
-          {(() => {
-            const dhPrefix = selectedPool.poolName + '-DH-';
-            const dhMatches = (poolMatches || []).filter(m =>
-              (m.id || "").startsWith(dhPrefix)
-            );
-            if (dhMatches.length === 0) return null;
-            const pending = dhMatches.filter(m => m.status !== "completed" || !m.winner);
-            const label = pending.length > 0
-              ? `${pending.length} daihyosen bout${pending.length > 1 ? "s" : ""} pending: teams tied on all 8 criteria`
-              : "Daihyosen complete: standings updated";
-            const color = pending.length > 0 ? "var(--warn-bg, #fffbe6)" : "var(--ok-bg, #e8f5e9)";
-            const border = pending.length > 0 ? "1px solid var(--warn, #e6a817)" : "1px solid var(--ok, #4caf50)";
-            return (
-              <div style={{ marginTop: 16, padding: "10px 14px", background: color, border, borderRadius: 6, fontSize: 13 }}>
-                <strong>Representative bout (daihyosen):</strong> {label}
-                {pending.length > 0 && (
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 20 }}>
-                    {pending.map(m => {
-                      const a = m.sideA?.name || m.sideA || "";
-                      const b = m.sideB?.name || m.sideB || "";
-                      return <li key={m.id}>{a && b ? `${b} vs ${a}` : m.id}</li>;
-                    })}
-                  </ul>
-                )}
-              </div>
-            );
-          })()}
-
-          <div style={{ marginTop: 24 }}>
-            <h3 className="section-title">Match Results</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {poolMatchesFor(selectedPool.poolName).map(m => (
-                <div key={m.id} className="sched-row" style={{ gridTemplateColumns: "60px 1fr auto" }}>
-                  <div className="sched-row__court" style={{ height: 24, fontSize: 10 }}>#{m.id ? m.id.split('-').pop() : ""}</div>
-                  <div className="sched-row__players">
-                    {/* Global UI contract: SHIRO (sideB) on left, AKA (sideA) on right (mp-41o). */}
-                    <div className="sched-row__side" style={{ textAlign: "right" }}>
-                      <div className="name" style={{ fontSize: 13, display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
-                        <span className="bc-color-badge bc-color-badge--shiro">SHIRO</span>
-                        {m.sideB?.name || m.sideB}
-                      </div>
-                    </div>
-                    <div className="sched-row__vs">vs</div>
-                    <div className="sched-row__side">
-                      <div className="name" style={{ fontSize: 13, display: "flex", alignItems: "center" }}>
-                        <span className="bc-color-badge bc-color-badge--aka">AKA</span>
-                        {m.sideA?.name || m.sideA}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div className="sched-row__score" style={{ minWidth: 60, textAlign: "center" }}>
-                      {m.status === "completed" ? window.matchScoreStr(m, m.ipponsB, m.ipponsA) : m.status === "running" ? "● NOW" : "-"}
-                    </div>
-                    <button type="button" className={getScoreBtnClass(m.status)} onClick={() => setScoreOpenMatch(enrichPoolMatch(m, selectedPool.poolName))}>
-                      {m.status === "completed" ? "Correct" : "Score"}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-      {scoreModal}
-      </>
-    );
-  }
+  const PoolsViewer = window.PoolsViewer;
+  const LeagueStandingsViewer = window.LeagueStandingsViewer;
   return (
     <>
     <div>
+      {chusenBanner}
       {leagueTiebreakBanner}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>{isLeague ? "League" : pluralize(pools.length, "pool")}</div>
-        </div>
-        <button type="button" className="btn btn--sm btn--danger" onClick={resetOverrides}>Reset all overrides</button>
-      </div>
-      <div className="pools-grid">
-        {pools.map((pool) => {
-          const poolStandings = standings ? standings[pool.poolName] : null;
-          const court = c.courts[pools.indexOf(pool) % c.courts.length];
-          const pm = poolMatchesFor(pool.poolName);
-          // pool.matches (helper.Match) has no status field; use poolMatches-
-          // sourced pm entries which carry the full MatchResult including status.
-          const isDone = pm.length > 0 && pm.every(m => m.status === "completed");
-          return (
-            <div
-              key={pool.poolName}
-              className={`pool ${isDone ? "pool--done" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => setSelectedPoolName(pool.poolName)}
-              // Only fire when the card itself has focus, not a nested
-              // rank input or per-match Score button: those handle their
-              // own activation.
-              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSelectedPoolName(pool.poolName); } }}
-              style={{ cursor: "pointer" }}
-            >
-              <div className="pool__head">
-                <div style={{ display: "flex", justifyContent: "space-between", width: "100%", alignItems: "center" }}>
-                  <div className="pool__name">{poolDisplayLabel(pool, c.format)}</div>
-                  <div className="tag-badge" style={{ margin: 0 }}>SHIAIJO {court}</div>
-                </div>
-              </div>
-              <table className="pool__table">
-                <thead>
-                  {c.kind === "team" || c.teamSize > 0 ? (
-                    <tr><th>#</th><th>Team</th><th className="num">W</th><th className="num">L</th><th className="num">T</th><th className="num">IV</th><th className="num">IL</th><th className="num">IT</th><th className="num">PW</th><th className="num">PL</th></tr>
-                  ) : (
-                    <tr><th>#</th><th>Player</th><th className="num">W</th><th className="num">L</th><th className="num">D</th><th className="num">PW</th><th className="num">PL</th></tr>
-                  )}
-                </thead>
-                <tbody>
-                  {(poolStandings || pool.players.map((p) => ({ player: p, wins: 0, losses: 0, draws: 0, ipponsGiven: 0, ipponsTaken: 0 }))).map((s, i) => {
-                    const isTeamComp = c.kind === "team" || c.teamSize > 0;
-                    return (
-                      <tr key={s.player.name} className={s.tied ? "pool__row--tied" : undefined}>
-                        <td style={{ color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                          <RankInput
-                            initial={s.rank || i + 1}
-                            className="rank-input"
-                            onCommit={(v) => overrideRank(pool.poolName, s.player.name, v)}
-                            style={{
-                              width: 40,
-                              height: 36,
-                              padding: "0 4px",
-                              border: s.isOverridden ? "1px solid var(--accent)" : "1px solid transparent",
-                              background: s.isOverridden ? "var(--accent-soft)" : "transparent",
-                              borderRadius: 4,
-                              textAlign: "center",
-                              fontSize: 13,
-                              fontWeight: s.isOverridden ? "700" : "400"
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 500 }}>
-                            {s.player.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                            {s.player.name}
-                          </div>
-                          {tweaks.showDojo && <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.player.dojo}</div>}
-                        </td>
-                        <td className="num">{s.wins}</td>
-                        <td className="num">{s.losses}</td>
-                        <td className="num">{s.draws || 0}</td>
-                        {isTeamComp && <td className="num">{s.individualWins || 0}</td>}
-                        {isTeamComp && <td className="num">{s.individualLosses || 0}</td>}
-                        {isTeamComp && <td className="num">{s.individualDraws || 0}</td>}
-                        <td className="num">{isTeamComp ? (s.pointsWon || 0) : s.ipponsGiven}</td>
-                        <td className="num">{isTeamComp ? (s.pointsLost || 0) : s.ipponsTaken}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {pm.length > 0 && (
-                <div style={{ marginTop: 12, borderTop: "1px dashed var(--line)", paddingTop: 8 }}>
-                  <div className="overline" style={{ marginBottom: 6 }}>Matches</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {pm.map(m => (
-                      // Fixed grid columns keep the names from reflowing when a
-                      // score replaces ":" or the button label flips
-                      // Score→Correct (mp-p8n). Column order encodes the global
-                      // UI contract: SHIRO (sideB) on the left, AKA (sideA) on
-                      // the right (mp-41o).
-                      <div key={m.id} style={{ display: "grid", gridTemplateColumns: "26px minmax(0,1fr) 18px minmax(0,1fr) 56px 62px", gap: 6, fontSize: 12, alignItems: "center", padding: "2px 0" }}>
-                        <div style={{ fontWeight: 600, color: "var(--accent)" }}>{m.id ? m.id.split('-').pop() : ""}</div>
-                        <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                          <span className="bc-color-badge bc-color-badge--shiro">SHIRO</span>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sideB?.name || m.sideB}</span>
-                        </div>
-                        <span style={{ color: "var(--ink-4)", fontSize: 10, textAlign: "center" }}>vs</span>
-                        <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                          <span className="bc-color-badge bc-color-badge--aka">AKA</span>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.sideA?.name || m.sideA}</span>
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, textAlign: "right", whiteSpace: "nowrap" }}>
-                          {m.status === "completed" ? window.matchScoreStr(m, m.ipponsB, m.ipponsA) : m.status === "running" ? "● NOW" : "-"}
-                        </div>
-                        <button type="button" className={getScoreBtnClass(m.status)} style={{ minWidth: 0 }} onClick={(e) => { e.stopPropagation(); setScoreOpenMatch(enrichPoolMatch(m, pool.poolName)); }}>{m.status === "completed" ? "Correct" : "Score"}</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {isLeague ? (
+        LeagueStandingsViewer ? (
+          <LeagueStandingsViewer
+            competition={c}
+            poolMatches={poolMatches}
+            tweaks={tweaks}
+            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            highlightPlayers={[]}
+          />
+        ) : null
+      ) : (
+        PoolsViewer ? (
+          <PoolsViewer
+            pools={pools}
+            standings={standings}
+            poolMatches={poolMatches}
+            competition={c}
+            tweaks={tweaks}
+            onMatchClick={(m) => setScoreOpenMatch(enrichPoolMatchWithComp(m, c))}
+            highlightPlayers={[]}
+          />
+        ) : null
+      )}
     </div>
     {scoreModal}
     </>
@@ -772,18 +528,18 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
 
 window.AdminPools = AdminPools;
 
+// Expose enrichPoolMatchWithComp and isSupplementaryBout as window globals so
+// window-only modules (admin_shiaijo.jsx) can call them at render time without
+// ESM imports (which would double-eval those script-tagged modules). This is a
+// browser-only admin module (its components read window.* at render time); the
+// typeof guard exists only so the vitest suite can ES-import the pure helpers
+// above without the top-level assignment throwing when window is absent.
+if (typeof window !== "undefined") {
+  window.enrichPoolMatchWithComp = enrichPoolMatchWithComp;
+  window.isSupplementaryBout = isSupplementaryBout;
+  window.isPoolDaihyosenBout = isPoolDaihyosenBout;
+}
+
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-
-// Build a map of match id → MatchResult for O(1) running-state lookups.
-function buildRunningById(poolMatches) {
-  return Object.fromEntries((poolMatches || []).map(m => [m.id, m]));
-}
-
-// Returns true when rank inputs should be locked (competition is past the
-// pools phase: playoffs, completed, setup, invalid, or unknown status).
-function isRanksLocked(compStatus) {
-  return compStatus !== "pools";
-}
-
-export { decideRankCommit, enrichPoolMatchWithComp, poolMatchesForPool, buildRunningById, isRanksLocked };
+export { enrichPoolMatchWithComp, poolMatchesForPool };

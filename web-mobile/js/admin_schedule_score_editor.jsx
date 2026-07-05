@@ -213,7 +213,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   {m.status === "completed" ? "Correct" : "Score"}
                 </button>
                 {/* mp-bkg: show Lineup button only for team competitions */}
-                {(m.compKind === "team" || (m.teamSize || 0) > 0) && (
+                {(m.compKind === "team" || m.teamSize > 0) && (
                   <button type="button"
                     className="btn btn--ghost btn--sm"
                     style={{ fontSize: 11 }}
@@ -241,6 +241,14 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
       )}
 
       {openMatch && (() => {
+        // For pool daihyosen/tiebreaker bouts, enrich the match with rep-player
+        // roster data (repIsTeam / repRosterA / repRosterB) so ScoreEditorModal
+        // renders the representative-player pickers. Regular matches pass through.
+        // window.enrichPoolMatchWithComp is assigned by admin_pools.jsx at module
+        // evaluation time, before this component renders.
+        const enrichedOpenMatch = (window.isSupplementaryBout && window.isSupplementaryBout(openMatch.id) && window.enrichPoolMatchWithComp)
+          ? window.enrichPoolMatchWithComp(openMatch, tournament.competitions.find(cc => cc.id === openMatch.compId))
+          : openMatch;
         // Chained nav (Prev/Next/Finish+Start Next/←/→) must stay on the same
         // shiaijo. Operators run matches per-court; jumping courts mid-flow
         // skips the wrong matches. Unassigned matches scope to other
@@ -269,7 +277,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         return (
           <ScoreEditorModal
             key={openMatch.compId + '-' + openMatch.id}
-            match={openMatch}
+            match={enrichedOpenMatch}
             prevMatch={prevMatch}
             nextMatch={nextMatch}
             onPrev={() => setOpenMatch(prevMatch)}

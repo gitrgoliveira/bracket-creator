@@ -30,6 +30,12 @@ func TestIsPoolDaihyosenMatchID(t *testing.T) {
 		{"Pool A-DHx-0", false}, // wrong prefix
 		{"DH-0", false},         // no pool separator
 		{"", false},
+		// A pool literally named "Pool A-DH-East" produces regular match ids
+		// like "Pool A-DH-East-0". A plain strings.Contains(id, "-DH-") would
+		// misclassify these as daihyosen bouts; the suffix after the LAST
+		// "-DH-" here is "East-0", not all-digits, so it must be false.
+		{"Pool A-DH-East-0", false},
+		{"Pool A-DH-East-12", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {
@@ -135,7 +141,8 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 		Format:   state.CompFormatLeague,
 		Status:   state.CompStatusPools,
 		Courts:   []string{"A"},
-		TeamSize: 2, // 2-person teams keeps the SubResults simple
+		Kind:     "team", // pin the real team config (Kind AND TeamSize)
+		TeamSize: 2,      // 2-person teams keeps the SubResults simple
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{

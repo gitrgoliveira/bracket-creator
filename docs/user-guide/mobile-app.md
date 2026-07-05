@@ -151,7 +151,7 @@ actions, so that table staff who hold the main password can run matches and
 check-in without being able to destroy data. The gate covers:
 
 - Delete a competition; mark a competition invalid.
-- Discard a generated draw; reset rank/winner overrides.
+- Discard a generated draw; reset a competition's manual overrides (recorded chusen ranks and match winner overrides).
 - Add, edit, or replace participants; import competitions from a folder.
 
 It does **not** cover routine operations (scoring, decisions, check-in,
@@ -276,7 +276,7 @@ To prevent mistakes and allow manual inspection of the draw before matches are l
 
 ### Pools
 
-Once the competition has started, the **Pools** tab shows all pools and their current standings. Scorers can use the **Scores** tab or the dedicated score editor to record match results.
+Once the competition has started, the **Pools** tab shows all pools and their current standings. The operator sees the same standings as the public viewer: rows stay in draw (fight-order) position and each team's rank is shown as a badge. Ranks are computed automatically from results (there is no manual rank editing); a tie that decides who advances (or their seed) is settled by a daihyosen (see [Recording match decisions](#recording-match-decisions)), and the team that wins it carries a **DH** badge. Scorers can use the **Scores** tab or the dedicated score editor to record match results.
 
 ![Pools view: per-pool standings (W/L/D/PW/PL) with each pool's matches below, scored ones showing the waza result and unscored ones offering a Score button.](../screenshots/mobile-pool-standings.png)
 
@@ -302,7 +302,8 @@ Not every bout is decided on points. The score editor records the kendo outcomes
 
 - **Kiken** (withdrawal): **voluntary** (FIK Art. 31) is permanent, the competitor takes no further matches; **injury** (FIK Art. 30) can be **reinstated** later by the operator if the competitor recovers.
 - **Fusenpai** (a no-show default loss) and **fusensho** (a per-bout default win in team matches).
-- **Daihyosen** (a representative bout) to settle a tied team encounter in the knockout.
+- **Daihyosen** (a representative bout) to settle a tie: in the knockout when a team encounter is level, or in a team pool or league when two teams finish equal on every ranking criterion and the tie decides who advances (or their seed). It is a single-point ippon-shobu bout (no time limit) between one representative from each tied team, played to decide their relative order. A tie that does not affect advancement (for example two teams level below the qualifying places) is left as a shared rank with no extra bout. It appears on the shiaijo with a **DH** tag, and the score editor lets you pick the player each team fields from its roster. In the pool and league standings, the team that won its daihyosen carries a **DH** badge, regardless of its finishing rank; tap the badge for a definition.
+- **Chusen** (drawing lots) is the last resort when three or more tied teams play a round of daihyosen and it still doesn't produce a strict order (for example a cycle where each beats another, an all-drawn round, or two teams finishing level on daihyosen wins). The Pools tab then shows a **"Chusen (drawing lots) required"** panel listing the tied teams: draw lots and enter each team's finishing position, then record it to settle the order and let the competition advance. This is the only place ranks are set by hand, and only when the bouts cannot decide it.
 - **Hikiwake** (a draw) in pools.
 
 A kiken or fusenpai marks the competitor who withdrew or did not appear as ineligible for further matches, and the app blocks starting an ineligible competitor until they are reinstated, so a withdrawal cannot silently re-enter the draw.
@@ -320,7 +321,7 @@ Turn on **Engi (kata demonstration)** in a competition's Settings tab (locked on
 
 - **Scoring**: the score editor becomes a referee flag counter for each side. A bout's flags must total 1, 3, or 5 (an odd panel size), so a bout can never end in a draw.
 - **Standings**: pools and leagues rank pairs by total wins first, then by total flags accumulated across all bouts (both the winning and losing side's flags count toward their own tally).
-- Quick-score, manual winner overrides, and daihyosen are all kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
+- Quick-score, manual winner overrides, and daihyosen are kendo-scoring shortcuts and are disabled for Engi competitions; every result goes through the flag editor.
 
 ### Awards and winners
 

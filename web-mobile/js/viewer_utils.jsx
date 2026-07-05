@@ -7,6 +7,10 @@
 // index.html and imports this module: do NOT give it its own <script type="module">
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
+//
+// pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
+// here does not introduce a load-order dependency or a double-eval risk.
+import { isSupplementaryBout } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -48,9 +52,6 @@ if (typeof window !== 'undefined') {
 // a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
 
-// Private helper for compMatches below: detects pool-daihyosen match IDs.
-const isPoolDaihyosenID = id => id.includes('-DH-');
-
 export function compMatches(c) {
   const out = [];
 
@@ -62,16 +63,21 @@ export function compMatches(c) {
 
   const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
-  // Pool-daihyosen matches ("Pool X-DH-N") are representative bouts scored as
-  // individual matches even in team competitions: override compKind and teamSize
-  // so all isTeam checks (compKind === "team" || teamSize > 0) evaluate false,
-  // routing to the individual ScoreEditorModal and rendering individual match UI.
+  // Pool supplementary bouts (daihyosen "Pool X-DH-N" and tiebreaker
+  // "Pool X-TB-N") are representative bouts scored as individual matches even in
+  // team competitions: override compKind/teamSize/compEngi so all isTeam checks
+  // (compKind === "team" || teamSize > 0) evaluate false, routing to the
+  // individual ScoreEditorModal and rendering individual match UI.
   // Flat poolMatches from the viewer API don't carry phase/poolName; derive them
   // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
   rawPoolMatches.forEach(m => {
-    const isDH = isPoolDaihyosenID(m.id || "");
+    const isRepBout = isSupplementaryBout(m.id || "");
     const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
-    out.push({ phase: "pool", poolName: derivedPool, phaseName: derivedPool, ...m, compId: c.id, compName: c.name, compFormat: c.format, compKind: isDH ? "" : c.kind, teamSize: isDH ? 0 : c.teamSize, compEngi: isDH ? false : !!c.engi });
+    // Spread `...m` FIRST, then the derived fields: flat viewer-API poolMatches
+    // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
+    // clobber the derived pool name with undefined. derivedPool already prefers
+    // m.poolName when present, so putting it last is both safe and authoritative.
+    out.push({ ...m, phase: "pool", poolName: derivedPool, phaseName: derivedPool, compId: c.id, compName: c.name, compFormat: c.format, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : !!c.engi });
   });
 
   // mp-9dz: a preview bracket on a mixed source carries pool-origin

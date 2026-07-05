@@ -33,3 +33,16 @@ const SUPPLEMENTARY_BOUT_RE = /-(?:DH|TB)-\d+$/;
 export function isSupplementaryBout(id) {
     return typeof id === "string" && SUPPLEMENTARY_BOUT_RE.test(id);
 }
+
+// This regex constant is intentionally module-private: callers use the
+// exported isPoolDaihyosenBout() wrapper below, never the raw pattern.
+const DAIHYOSEN_BOUT_RE = /-DH-\d+$/;
+
+// isPoolDaihyosenBout: true ONLY for a pool daihyosen ("…-DH-N") rep bout, NOT a
+// tiebreaker ("…-TB-N"). Use this for DAIHYOSEN-specific labels/badges. For
+// ROUTING a bout to the individual editor use isSupplementaryBout instead (both
+// DH and TB are single ippon-shobu rep bouts); only the "DH" label is
+// daihyosen-specific, since a tiebreaker is not a daihyosen.
+export function isPoolDaihyosenBout(id) {
+    return typeof id === "string" && DAIHYOSEN_BOUT_RE.test(id);
+}

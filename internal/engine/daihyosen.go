@@ -107,6 +107,34 @@ func poolNameFromMatchID(id string) (string, bool) {
 	return "", false
 }
 
+// hasNumericSuffixAfter reports whether id ends with marker followed by one
+// or more digits and nothing else, e.g. hasNumericSuffixAfter("Pool A-DH-3",
+// "-DH-") is true. A plain strings.Contains(id, marker) would also match a
+// REGULAR pool match whose pool name happens to contain the marker, e.g. a
+// pool literally named "Pool A-DH-East" produces regular match ids like
+// "Pool A-DH-East-0"; that id contains "-DH-" but is not a daihyosen bout
+// (its numeric suffix follows a later, unmarked "-"). Anchoring the digits to
+// the LAST occurrence of marker rejects that case: the suffix after it is
+// "East-0", not all-digits, so it correctly reports false. Mirrors the JS
+// twin's anchored regex (pool_ids.jsx DAIHYOSEN_BOUT_RE / SUPPLEMENTARY_BOUT_RE,
+// both /-DH-\d+$/ style), which was already correctly suffix-anchored.
+func hasNumericSuffixAfter(id, marker string) bool {
+	i := strings.LastIndex(id, marker)
+	if i < 0 {
+		return false
+	}
+	suffix := id[i+len(marker):]
+	if suffix == "" {
+		return false
+	}
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // IsPoolDaihyosenMatchID reports whether a match ID is a pool-stage
 // daihyosen bout (IDs of the form "Pool X-DH-N"). These are generated
 // by InjectPoolDaihyosenMatches when all team-pool matches complete with
@@ -114,7 +142,7 @@ func poolNameFromMatchID(id string) (string, bool) {
 // but scored as individual (one representative per side) rather than as
 // full team bouts.
 func IsPoolDaihyosenMatchID(matchID string) bool {
-	return strings.Contains(matchID, "-DH-")
+	return hasNumericSuffixAfter(matchID, "-DH-")
 }
 
 // generatePoolDaihyosenMatches creates round-robin MatchResult entries for
@@ -167,6 +195,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	if comp == nil {
 		return nil, notFoundErrorf("competition %s not found", compID)
 	}
+
+	// A daihyosen is played only where the tie affects advancement/seeding
+	// (see tieAffectsAdvancement): the top poolWinners of each pool advance.
+	poolWinners := comp.EffectivePoolWinners()
 
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
@@ -233,6 +265,11 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
+			// Only break ties that affect who advances / their seed: a tie sitting
+			// entirely below the top-poolWinners cut shares its rank with no bout.
+			if !tieAffectsAdvancement(positions, poolWinners) {
+				continue
+			}
 			group := standingsAt(poolStandings, positions)
 			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)
@@ -288,28 +325,15 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 // Pass the names from the parent MatchResult.SideA / SideB so the
 // caller's view of "left team" / "right team" is canonical.
 func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName string) (TeamSummary, TeamSummary) {
-	var a, b TeamSummary
-	for _, sub := range subResults {
-		// Skip the daihyosen placeholder itself (Position == -1) so a
-		// previously-added daihyosen bout doesn't double-count when an
-		// operator re-validates the tie.
-		if sub.Position < 0 {
-			continue
-		}
-		sideAWin := isWinForSide(sub.Winner, sideAName, sub.SideA)
-		sideBWin := isWinForSide(sub.Winner, sideBName, sub.SideB)
-		switch {
-		case sideAWin:
-			a.IndividualWins++
-		case sideBWin:
-			b.IndividualWins++
-		}
-		// PW counts every ippon scored regardless of bout outcome,
-		// hikiwake bouts where both sides scored still contribute.
-		a.PointsWon += len(sub.IpponsA)
-		b.PointsWon += len(sub.IpponsB)
+	// Delegate to the single source of truth in state (the same computation
+	// feeds the wire teamResult the frontend renders), so tie-break math and
+	// the displayed IV/PW never drift. SideA is Aka, SideB is Shiro.
+	line := state.TeamResultFrom(subResults, sideAName, sideBName)
+	if line == nil {
+		return TeamSummary{}, TeamSummary{}
 	}
-	return a, b
+	return TeamSummary{IndividualWins: line.AkaIV, PointsWon: line.AkaPW},
+		TeamSummary{IndividualWins: line.ShiroIV, PointsWon: line.ShiroPW}
 }
 
 // AddDaihyosen validates the request to add a daihyosen bout to a team

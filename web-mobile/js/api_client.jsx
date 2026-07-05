@@ -1697,6 +1697,14 @@ const API = {
         }
         return res.json();
     },
+    async leagueStandings(compID) {
+        const res = await fetch(`/api/competitions/${compID}/league/standings`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load league standings");
+        }
+        return res.json();
+    },
     async toggleCheckIn(compID, pid, checkedIn, password) {
         const method = checkedIn ? 'PUT' : 'DELETE';
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}/checkin`, {
@@ -1857,6 +1865,25 @@ const API = {
             throw new Error(err.error || `Failed to load league tie-breaker candidates (${res.status})`);
         }
         return res.json();
+    },
+
+    // chusenCandidates: GET /competitions/:id/chusen-candidates
+    // Consequential team-pool ties the daihyosen could not settle; the operator
+    // resolves each by chusen (drawing lots), recorded via overridePoolRank.
+    async chusenCandidates(compID, password) {
+        // Lives in the admin-gated competition router, so it needs the
+        // tournament password header (unlike the public league candidates GET).
+        const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/chusen-candidates`, {
+            headers: { 'X-Tournament-Password': password || '' }
+        });
+        if (!res.ok) {
+            // Surface the server-provided error + status so auth/config failures
+            // are diagnosable from the admin UI, matching the other helpers.
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Failed to load chusen candidates (${res.status})`);
+        }
+        const data = await res.json();
+        return data.candidates || [];
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak

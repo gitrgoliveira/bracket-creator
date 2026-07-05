@@ -28,6 +28,10 @@ func TestIsTiebreakerMatchID(t *testing.T) {
 		{"Pool A-TBx-0", false}, // wrong prefix
 		{"TB-0", false},         // no pool name separator
 		{"", false},
+		// Same sibling scenario as IsPoolDaihyosenMatchID: a pool literally
+		// named "Pool A-TB-East" must not have its regular match ids
+		// misclassified as tiebreaker bouts.
+		{"Pool A-TB-East-0", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {
@@ -779,4 +783,54 @@ func TestComputeStandings_TBSecondarySort(t *testing.T) {
 	assert.Equal(t, "Alice", poolA[0].Player.Name, "Alice should be rank 1")
 	assert.Equal(t, "Bob", poolA[1].Player.Name, "Bob won TB match → rank 2")
 	assert.Equal(t, "Charlie", poolA[2].Player.Name, "Charlie lost TB match → rank 3")
+}
+
+// fourPlayerOneTiedPairTB builds a 4-player round-robin where Alice and Bob
+// finish distinct at the top and Carol & Dave tie for 3rd/4th (each loses to
+// Alice & Bob and draws the other). Mirrors the DH band-aware fixture.
+func fourPlayerOneTiedPairTB() []state.MatchResult {
+	return []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A"},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A"},
+		{ID: "Pool A-2", SideA: "Alice", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A"},
+		{ID: "Pool A-3", SideA: "Bob", SideB: "Carol", Status: state.MatchStatusCompleted, Winner: "Bob", Court: "A"},
+		{ID: "Pool A-4", SideA: "Bob", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Bob", Court: "A"},
+		{ID: "Pool A-5", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "",
+			Decision: string(domain.DecisionHikiwake), Court: "A"},
+	}
+}
+
+func setupIndividualPoolTB(t *testing.T, compID string, poolWinners int) (*Engine, *state.Store) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "TB band-aware", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"}, PoolWinners: poolWinners,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dave"},
+	}}}))
+	require.NoError(t, store.SavePoolMatches(compID, fourPlayerOneTiedPairTB()))
+	return eng, store
+}
+
+// TestInjectTiebreaker_BelowCutIsNonConsequential: a tie entirely below the
+// advancement cut (Carol/Dave at 3rd/4th with top-2 advancing) injects NO
+// tiebreaker matches; the two players simply share the rank.
+func TestInjectTiebreaker_BelowCutIsNonConsequential(t *testing.T) {
+	eng, _ := setupIndividualPoolTB(t, "tb-below-cut", 2)
+	injected, err := eng.InjectTiebreakerMatches("tb-below-cut")
+	require.NoError(t, err)
+	assert.Empty(t, injected, "a tie below the top-2 cut must not inject tiebreaker matches")
+}
+
+// TestInjectTiebreaker_ConsequentialWhenAllAdvance: the identical Carol/Dave tie
+// IS consequential when the cut is 4 (everyone advances, so the 3rd vs 4th seed
+// must be decided) - proving the difference is the band, not the standings.
+func TestInjectTiebreaker_ConsequentialWhenAllAdvance(t *testing.T) {
+	eng, _ := setupIndividualPoolTB(t, "tb-all-advance", 4)
+	injected, err := eng.InjectTiebreakerMatches("tb-all-advance")
+	require.NoError(t, err)
+	require.Len(t, injected, 1, "with all players advancing, the 3rd/4th seed tie needs one tiebreaker")
+	assert.True(t, IsTiebreakerMatchID(injected[0].ID))
 }

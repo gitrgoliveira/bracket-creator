@@ -63,7 +63,7 @@ const COMPLETED_PREVIEW = 8;
 // A team encounter (vs an individual bout): team matches carry a lineup the
 // operator can set before the bout starts. Exported for unit tests (it gates
 // the "Enter lineup" affordance).
-export const isTeamMatch = (m) => !!m && (m.compKind === "team" || (m.teamSize || 0) > 0);
+export const isTeamMatch = (m) => !!m && (m.compKind === "team" || m.teamSize > 0);
 
 // (addMinuteHHMM and deferTimeFor removed: queue reordering now works by
 // swapping scheduledAt between adjacent rows via moveMatch, which calls
@@ -86,7 +86,7 @@ export function shiaijoScoreCell(m) {
     if (flags) return { kind: "engi", flags };
     const isTeam = isTeamMatch(m);
     if (isTeam) {
-        const iv = window.teamIVScore ? window.teamIVScore(m) : null;
+        const iv = window.teamIVPWScore ? window.teamIVPWScore(m) : (window.teamIVScore ? window.teamIVScore(m) : null);
         return iv ? { kind: "team", iv } : { kind: "none" };
     }
     const ipponsA = m.ipponsA || (window.ipponsFromScore ? window.ipponsFromScore(m.scoreA) : []);
@@ -256,6 +256,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         [pickedKey, sorted]
     );
     const selectedMatch = useMemoSh(() => pickedMatch || running[0] || null, [pickedMatch, running]);
+
+    // For pool daihyosen/tiebreaker bouts, enrich the selected match with
+    // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
+    // (repIsTeam / repRosterA / repRosterB). Regular matches pass through
+    // unchanged. enrichPoolMatchWithComp is exposed by admin_pools.jsx via
+    // window.enrichPoolMatchWithComp; isSupplementaryBout via window.isSupplementaryBout.
+    // These globals are assigned at module evaluation time, so they are always
+    // present when admin_shiaijo.jsx executes (admin_pools.js loads first per
+    // the <script> order in index.html).
+    const editorMatch = useMemoSh(() => {
+        if (!selectedMatch) return selectedMatch;
+        if (window.isSupplementaryBout && window.isSupplementaryBout(selectedMatch.id) && window.enrichPoolMatchWithComp) {
+            const comp = courtCompetitions.find(c => c.id === selectedMatch.compId);
+            return window.enrichPoolMatchWithComp(selectedMatch, comp);
+        }
+        return selectedMatch;
+    }, [selectedMatch, courtCompetitions]);
 
     // Filtered to the selected competition (AC4).
     // Running matches are NEVER filtered: the panel must stay on the running
@@ -633,6 +650,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 : upNext.phase === "bracket" && upNext.matchNumber > 0
                                                 ? ` · Match ${upNext.matchNumber}`
                                                 : ""}
+                                            {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
+                                                (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"
+                                                tag gates on isPoolDaihyosenBout. Routing still uses
+                                                isSupplementaryBout (see editorMatch above). */}
+                                            {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(upNext.id) && (
+                                                <span className="tag-badge" style={{ marginLeft: 6 }}>
+                                                    {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                                                </span>
+                                            )}
                                         </div>
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
@@ -770,7 +796,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ScoreEditorModal
                                     key={`${matchKey(selectedMatch)}:${(selectedMatch.subResults || []).length}`}
                                     variant="inline"
-                                    match={selectedMatch}
+                                    match={editorMatch}
                                     onClose={() => {}}
                                     canClose={false}
                                     onSubmit={async (patch) => {
@@ -965,6 +991,12 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         : m.phase === "bracket" && m.matchNumber > 0
                         ? ` · Match ${m.matchNumber}`
                         : ""}
+                    {/* DH-only label (not "-TB-"): see the Up Next card note above. */}
+                    {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(m.id) && (
+                        <span className="tag-badge" style={{ marginLeft: 4 }}>
+                            {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                        </span>
+                    )}
                 </span>
                 <span className="shiaijo-qrow__state">
                     {isComplete && <span className="shiaijo-qrow__final">Final</span>}
@@ -988,7 +1020,8 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 names above. */}
             {isComplete && (scoreCell.kind === "ippon" || scoreCell.kind === "team" || scoreCell.kind === "engi") && (
                 <div className="shiaijo-qrow__result">
-                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Individual Victories">IV</abbr>{scoreCell.iv}</span>}
+                    {/* scoreCell.iv already self-labels ("IV s-a · PW s-a"), so no separate IV abbr prefix. */}
+                    {scoreCell.kind === "team" && <span className="shiaijo-row__teamscore">{scoreCell.iv}</span>}
                     {scoreCell.kind === "engi" && <span className="shiaijo-row__teamscore"><abbr className="shiaijo-row__iv" title="Total flags received">Flags</abbr>{scoreCell.flags}</span>}
                     {scoreCell.kind === "ippon" && scoreCell.ippon}
                 </div>

@@ -109,7 +109,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           // Go's formatScore doesn't get split into bogus ippon letters.
           const tIpponsA = m.ipponsA || window.ipponsFromScore(m.scoreA);
           const tIpponsB = m.ipponsB || window.ipponsFromScore(m.scoreB);
-          return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>{window.matchScoreStr(m, tIpponsB, tIpponsA)}</div>;
+          return <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{window.matchScoreStr(m, tIpponsB, tIpponsA)}</div>;
         })()}
         {/* No centre "●" dot: a running match is signalled by the row's
             .tw-match--running highlight (accent border + ring). The labelled

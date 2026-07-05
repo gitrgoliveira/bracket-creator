@@ -5,6 +5,11 @@
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
+// Leaf module (no side effects): safe to ES-import. The DH label is
+// daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
+// tiebreaker is also a rep bout, just not a daihyosen).
+import { isPoolDaihyosenBout } from './pool_ids.jsx';
+
 import {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -41,7 +46,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // teamSize set (compKind empty) must still route to TeamScoreEditorModal,
   // and pool-daihyosen rows (compMatches forces compKind="" AND teamSize=0)
   // correctly stay on the individual editor.
-  const isTeam = m.compKind === "team" || (m.teamSize || 0) > 0;
+  const isTeam = m.compKind === "team" || m.teamSize > 0;
   const teamSize = m.teamSize || 5;
 
   const seedAPts = m.ipponsA?.filter(x => x && x !== "•") || (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? m.score.ippons || [] : []);
@@ -530,7 +535,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 ? <span> · Match {m.matchNumber}</span>
                 : null}
               {enchoPeriodCount > 0 && <span className="editor-modal__eyebrow-encho">· (E) Overtime ×{enchoPeriodCount}</span>}
+              {isPoolDaihyosenBout(m.id) && (
+                <span className="tag-badge" style={{ marginLeft: 6 }}>
+                  {window.Term ? React.createElement(window.Term, { name: "daihyosen" }, "DH") : "DH"}
+                </span>
+              )}
             </div>
+            {isPoolDaihyosenBout(m.id) && (
+              <div style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 2 }}>
+                {window.Term
+                  ? <>{React.createElement(window.Term, { name: "daihyosen" }, "Daihyosen")} · representative tie-break bout</>
+                  : "Daihyosen · representative tie-break bout"}
+              </div>
+            )}
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
               {/* C2: sync status indicator: inline on the title line (no dedicated

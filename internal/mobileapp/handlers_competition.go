@@ -1575,6 +1575,42 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusOK)
 	})
 
+	// GET /competitions/:id/chusen-candidates
+	// Consequential team-pool ties the daihyosen left undetermined (a cycle /
+	// all-drawn); the operator settles each by chusen (drawing lots), recorded via
+	// the override-rank endpoint. Admin-gated: RegisterCompetitionHandlers is
+	// mounted under the authenticated router group, so callers must send the
+	// tournament password header (unlike the public league-tiebreak candidates).
+	r.GET("/competitions/:id/chusen-candidates", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		candidates, err := eng.ChusenCandidates(id)
+		if err != nil {
+			var notFound *engine.NotFoundError
+			if errors.As(err, &notFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			// Recorded on the context (not returned to the caller) so the
+			// root cause is still visible in server logs, consistent with the
+			// other opaque-500 handlers in this PR.
+			_ = c.Error(err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			return
+		}
+		out := make([]gin.H, 0, len(candidates))
+		for _, g := range candidates {
+			names := make([]string, len(g.Teams))
+			for i, t := range g.Teams {
+				names[i] = t.Player.Name
+			}
+			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "minPosition": g.MinPosition})
+		}
+		c.JSON(http.StatusOK, gin.H{"candidates": out})
+	})
+
 	r.PUT("/competitions/:id/schedule", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

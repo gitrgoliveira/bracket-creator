@@ -4,6 +4,7 @@
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup } from './lineup_resolver.jsx';
+import { isPoolDaihyosenBout } from './pool_ids.jsx';
 
 const { useEffect: useED, useMemo: useMD } = React;
 
@@ -120,6 +121,18 @@ function StreamingOverlay({ court, position, competitions }) {
     const dhPending = isTeamMatch && !currentSub && regularSubsOvl.length > 0
         && ovlIV.ivShiro === ovlIV.ivAka && ovlIV.pwShiro === ovlIV.pwAka
         && !ovlSubResults.some(s => s.position === -1);
+
+    // DH signal for the broadcast lower-third: the running match IS a daihyosen
+    // rep bout (a pool/league "…-DH-N" match), the team match is currently on
+    // its daihyosen sub-bout (position -1), or a daihyosen is pending (tied
+    // team match about to send its reps). Surfaced as a "DAIHYOSEN" chip so
+    // stream viewers know the tie-break bout is what's on court.
+    const runId = hasRunning ? (running.match.id || "") : "";
+    const isDHMatch = hasRunning && (
+        isPoolDaihyosenBout(runId)
+        || dhPending
+        || (currentSub && currentSub.position === -1)
+    );
 
     // Competitor for the current bout: pinned lineup name, else the per-bout
     // competitor stored on the sub (kachinuki), else the FIK POSITION label
@@ -282,7 +295,7 @@ function StreamingOverlay({ court, position, competitions }) {
                 </>
             )}
 
-            {compName && (
+            {(compName || isDHMatch) && (
                 <div style={{
                     position: 'absolute',
                     bottom: pos === 'top' ? 'auto' : '100%',
@@ -295,7 +308,23 @@ function StreamingOverlay({ court, position, competitions }) {
                     borderRadius: 4,
                     marginBottom: pos === 'top' ? 0 : 4,
                     marginTop: pos === 'top' ? 4 : 0,
-                }}>{compName}</div>
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6vw',
+                }}>
+                    {isDHMatch && (
+                        <span data-testid="overlay-dh-badge" style={{
+                            background: 'var(--warn-strong, #f59e0b)',
+                            color: '#1a1d24',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            fontSize: '1.4vh',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                        }}>DAIHYOSEN</span>
+                    )}
+                    {compName}
+                </div>
             )}
         </div>
     );

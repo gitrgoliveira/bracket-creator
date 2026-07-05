@@ -592,8 +592,11 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">
         <span className="sr-only">Aka: </span>
-        <span className="pool-match-numbered-row__name">{aName || "-"}</span>
+        {/* Aka is right-aligned, so the DH pill goes BEFORE the name to sit on
+            the inside edge (toward the centre score), mirroring the Shiro side
+            where the pill follows the name. */}
         {akaWonDH ? <DHBadge /> : null}
+        <span className="pool-match-numbered-row__name">{aName || "-"}</span>
         {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>

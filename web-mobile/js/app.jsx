@@ -286,6 +286,35 @@ export function diffAnnouncementSnapshot(seenRef, list) {
   return additions;
 }
 
+// createTimerPool: a self-pruning setTimeout pool for long-lived effects.
+// schedule() wraps the callback so a FIRED timer deletes its own id from the
+// pool; clearAll() cancels whatever is still pending. Without the self-prune,
+// an effect that stays mounted for an entire tournament day (a /display TV
+// wall, a viewer parked on one competition) accumulates one entry per
+// scheduled refetch, i.e. one or two per SSE event, for the tab's lifetime
+// (mp-wng6). Exported for unit tests.
+export function createTimerPool() {
+  const pending = new Set();
+  return {
+    schedule(fn, delay) {
+      const id = setTimeout(() => {
+        pending.delete(id);
+        fn();
+      }, delay);
+      pending.add(id);
+      return id;
+    },
+    clearAll() {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    },
+    // pendingCount: test observability only; production code never reads it.
+    pendingCount() {
+      return pending.size;
+    },
+  };
+}
+
 // parseCourtFromSearch: read the normalized display court from the URL query
 // string ('?court=A' → 'A', 'all' → 'ALL', default 'A'). Used by the display
 // consumer so the bridge re-scopes when the court param changes (mp-9ukk).
@@ -853,20 +882,12 @@ function App() {
     // viewerCompId="A" fires after the user switches to comp "B",
     // calls setSelectedCompData(data_for_A), and races the new
     // useEffect([viewerCompId]) fetch: whichever resolves last wins.
-    // A fired timer removes itself from the set (mp-wng6): this effect can
-    // stay mounted for an entire tournament day on a display wall or a
-    // parked viewer tab, so retaining fired ids would grow the set by one
-    // or two entries per SSE event for the tab's lifetime. Same pattern as
-    // the timer sets in admin.jsx and admin_shiaijo.jsx.
-    const pendingTimers = new Set();
-    const jitteredTimeout = (fn, delay) => {
-        const id = setTimeout(() => {
-            pendingTimers.delete(id);
-            fn();
-        }, delay);
-        pendingTimers.add(id);
-        return id;
-    };
+    // The pool self-prunes fired timers (mp-wng6): this effect can stay
+    // mounted for an entire tournament day on a display wall or a parked
+    // viewer tab, so retaining fired ids would grow the set by one or two
+    // entries per SSE event for the tab's lifetime.
+    const timerPool = createTimerPool();
+    const jitteredTimeout = timerPool.schedule;
 
     // maybeLoad gates the full-aggregate refetch. While the shiaijo operator
     // console is the active admin view, skip it: the console sources its
@@ -1123,7 +1144,7 @@ function App() {
         // render a reconnect indicator during disconnects.
         setSseConnected(status === 'open');
     });
-    return () => { unsub(); pendingTimers.forEach(clearTimeout); document.removeEventListener('visibilitychange', onVisibilityChange); };
+    return () => { unsub(); timerPool.clearAll(); document.removeEventListener('visibilitychange', onVisibilityChange); };
   }, [viewerCompId, mode]);
 
   const [selectedCompData, setSelectedCompData] = useS(null);

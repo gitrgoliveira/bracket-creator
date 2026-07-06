@@ -1416,6 +1416,17 @@ const API = {
         }
         return true;
     },
+    async revertMatchToQueue(compID, matchID, password) {
+        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/revert-to-queue`, {
+            method: 'POST',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to send match back to queue");
+        }
+        return true;
+    },
     async updateSchedule(compID, entries, password) {
         const res = await fetch(`/api/competitions/${compID}/schedule`, {
             method: 'PUT',

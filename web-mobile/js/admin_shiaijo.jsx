@@ -188,6 +188,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // independent of scoring, so the operator can set the lineup and close
     // without starting (or hit Start from inside the modal).
     const [lineupMatch, setLineupMatch] = useStateSh(null);
+    // Pending revert-to-queue confirmation. Set when the operator clicks
+    // "Send back to queue" on a running, unscored bout. Cleared on confirm or
+    // cancel. {compId, matchId, label}.
+    const [pendingRevert, setPendingRevert] = useStateSh(null);
+    const [reverting, setReverting] = useStateSh(false);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useStateSh(null);
@@ -509,6 +514,36 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 catch (_rb) { /* rollback also failed; the error toast below still fires */ }
             }
             if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
+        }
+    };
+
+    // Revert a running, unscored bout back to the queue. Gated behind a confirm
+    // dialog (same pattern as court reassignment) because discarding the running
+    // state is disruptive: viewers drop the match from "Now" and it reappears in
+    // the upcoming list. scoringStarted must be false before calling (the button
+    // is only shown when no score has been entered, matching the pickMatch defer
+    // path above).
+    const requestRevert = (m) => {
+        const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "this match";
+        setPendingRevert({ compId: m.compId, matchId: m.id, label });
+    };
+    const confirmRevert = async () => {
+        if (!pendingRevert || reverting) return;
+        if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
+        const { compId, matchId, label } = pendingRevert;
+        setReverting(true);
+        try {
+            await window.API.revertMatchToQueue(compId, matchId, password);
+            if (!mountedRef.current) return;
+            if (showToast) showToast(`${label} sent back to queue`);
+            setPendingRevert(null);
+            setPickedKey(null);
+        } catch (e) {
+            if (mountedRef.current) {
+                if (showToast) showToast((e && e.message) || "Could not send match back to queue", "error");
+            }
+        } finally {
+            if (mountedRef.current) setReverting(false);
         }
     };
 
@@ -834,6 +869,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
+                            {!allDone && selectedMatch && selectedMatch.status === "running" && !scoringStarted(selectedMatch) && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                                <div className="shiaijo-revert">
+                                    <button
+                                        type="button"
+                                        className="btn btn--sm btn--ghost"
+                                        onClick={() => requestRevert(selectedMatch)}
+                                        title="Return this match to the queue without recording a result"
+                                    >
+                                        Send back to queue
+                                    </button>
+                                </div>
+                            )}
+
                             {!allDone && !selectedMatch && (
                                 <div className="empty shiaijo__placeholder">
                                     <h3>Ready when you are</h3>
@@ -872,6 +920,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             </button>
                             <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
                                 {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {pendingRevert && (
+                <div className="modal-backdrop" onClick={() => !reverting && setPendingRevert(null)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true"
+                        aria-labelledby="shiaijo-revert-title" onClick={(e) => e.stopPropagation()}>
+                        <h3 id="shiaijo-revert-title" className="shiaijo-move-confirm__title">
+                            Send back to queue?
+                        </h3>
+                        <p className="shiaijo-move-confirm__body">
+                            <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
+                            No score has been entered, so nothing will be lost.
+                        </p>
+                        <div className="shiaijo-move-confirm__actions">
+                            <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>
+                                Cancel
+                            </button>
+                            <button type="button" className="btn btn--primary" onClick={confirmRevert} disabled={reverting}>
+                                {reverting ? "Sending…" : "Send back to queue"}
                             </button>
                         </div>
                     </div>

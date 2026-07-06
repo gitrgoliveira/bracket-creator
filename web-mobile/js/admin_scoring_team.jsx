@@ -851,7 +851,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // side's score controls (grouped, and aligned down the sheet),
             // not in the position column. Compute the per-side name props here
             // so they can ride on the rowSides entries below.
-            const matchStartedForLineup = m.status === "running" || m.status === "completed";
             const lineupPosKey = posKey5 || posKeyN;
             const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
             const teamIdA = teamIdForSide(m.sideA); // AKA = right

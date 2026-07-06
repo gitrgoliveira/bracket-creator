@@ -814,6 +814,63 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	})
 }
 
+func TestRevertMatchToQueueHandler(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "rev1", Status: "setup", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	t.Run("running pool match returns 200 and broadcasts", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches("rev1", []state.MatchResult{
+			{ID: "run-1", SideA: "P1", SideB: "P2", Status: state.MatchStatusRunning},
+		}))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/rev1/matches/run-1/revert-to-queue", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		// Verify state reverted
+		matches, err := store.LoadPoolMatches("rev1")
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, state.MatchStatusScheduled, matches[0].Status)
+
+		// Verify SSE broadcast
+		select {
+		case msg := <-ch:
+			var evt SSEEvent
+			require.NoError(t, json.Unmarshal([]byte(msg), &evt))
+			assert.Equal(t, EventMatchUpdated, evt.Type)
+		default:
+			t.Error("expected SSE broadcast but channel was empty")
+		}
+	})
+
+	t.Run("completed match returns 409", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches("rev1", []state.MatchResult{
+			{ID: "done-1", SideA: "P1", SideB: "P2",
+				Status: state.MatchStatusCompleted, Winner: "P1"},
+		}))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/rev1/matches/done-1/revert-to-queue", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusConflict, w.Code)
+	})
+
+	t.Run("unknown match returns 404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/rev1/matches/no-such/revert-to-queue", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
 // TestScoreHandler_CompletionBroadcastContract verifies that scoring the final
 // pool match emits EventCompetitionCompleted exactly once, and that scoring a
 // non-final match does not emit it.

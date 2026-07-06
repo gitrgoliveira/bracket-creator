@@ -543,6 +543,44 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		c.Status(http.StatusOK)
 	})
 
+	// POST /competitions/:id/matches/:mid/revert-to-queue
+	// Reverts a running match back to the scheduled (queued) state, discarding
+	// any partial score so the operator can restart the correct bout. Idempotent
+	// for already-scheduled matches. Completed matches return 409 (use the score
+	// editor to correct a recorded result); an unknown match id returns 404.
+	//
+	// Intentionally NOT in isSelfRunMainGatedConfigRoute: revert-to-queue is
+	// operational play (same as start-match), not organiser configuration, so it
+	// stays accessible to court operators in self-run mode.
+	r.POST("/competitions/:id/matches/:mid/revert-to-queue", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+
+		if err := eng.RevertMatchToQueue(id, mid); err != nil {
+			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			var notFoundErr *engine.NotFoundError
+			if errors.As(err, &notFoundErr) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+		})
+
+		c.Status(http.StatusOK)
+	})
+
 	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

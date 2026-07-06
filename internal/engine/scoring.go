@@ -26,6 +26,12 @@ var errMatchNotFound = errors.New("match not found")
 // Handlers map this to HTTP 409.
 var ErrMatchSideMismatch = errors.New("match side mismatch: score payload competitors differ from the stored pairing")
 
+// ErrMatchAlreadyCompleted is returned by RevertMatchToQueue when the target
+// match has already been completed. A completed bout has a recorded result
+// that the operator must correct via the score editor, not discarded by a
+// revert. Handlers map this to HTTP 409.
+var ErrMatchAlreadyCompleted = errors.New("match already completed: use the score editor to correct a completed bout")
+
 // reconcileSides folds the stored pairing into a score payload's result.
 // An empty payload side is backfilled from the stored side (e.g. a payload
 // that omits sides, or a not-yet-resolved bracket slot). A non-empty payload
@@ -1202,4 +1208,86 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
 		m.ScheduledAt = scheduledAt
 	})
+}
+
+// RevertMatchToQueue reverts a running match back to the scheduled (queued)
+// state, clearing any partial score so the bout can be restarted correctly.
+// It is idempotent for already-scheduled matches (no-op success). Completed
+// matches return ErrMatchAlreadyCompleted (HTTP 409); the operator must use
+// the score editor to correct a recorded result instead.
+//
+// Modelled on UpdateMatchCourt: pool-match first, bracket-match fallback,
+// using the same atomic withPoolMatch/withBracketMatch primitives so the
+// entire load+mutate+save runs under the per-competition lock.
+func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
+	var alreadyCompleted bool
+
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		switch r.Status {
+		case state.MatchStatusCompleted:
+			alreadyCompleted = true
+		case state.MatchStatusRunning:
+			r.Status = state.MatchStatusScheduled
+			r.Winner = ""
+			r.WinnerID = ""
+			r.IpponsA = nil
+			r.IpponsB = nil
+			r.HansokuA = 0
+			r.HansokuB = 0
+			r.Decision = ""
+			r.DecisionBy = ""
+			r.DecisionReason = ""
+			r.Encho = nil
+			r.SubResults = nil
+			r.FlagsA = 0
+			r.FlagsB = 0
+			r.DecidedByHantei = nil
+			// state.MatchStatusScheduled: already in queue, no-op
+		}
+	})
+	if err == nil {
+		if alreadyCompleted {
+			return ErrMatchAlreadyCompleted
+		}
+		return nil
+	}
+	if !errors.Is(err, errMatchNotFound) {
+		return err
+	}
+
+	// Pool match not found; try the elimination bracket.
+	alreadyCompleted = false
+	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+		switch m.Status {
+		case state.MatchStatusCompleted:
+			alreadyCompleted = true
+		case state.MatchStatusRunning:
+			m.Status = state.MatchStatusScheduled
+			m.Winner = ""
+			m.ScoreA = ""
+			m.ScoreB = ""
+			m.Decision = ""
+			m.DecisionBy = ""
+			m.DecisionReason = ""
+			m.Encho = nil
+			m.SubResults = nil
+			m.FlagsA = 0
+			m.FlagsB = 0
+			m.DecidedByHantei = false
+			m.IsOverridden = false
+			// state.MatchStatusScheduled: already in queue, no-op
+		}
+	}); err != nil {
+		// Neither pool nor bracket holds this match: surface a typed
+		// NotFoundError so the handler can answer 404 (a fabricated match id
+		// is a client error, not a server fault).
+		if errors.Is(err, errMatchNotFound) {
+			return notFoundErrorf("match %s not found in competition %s", matchId, compId)
+		}
+		return err
+	}
+	if alreadyCompleted {
+		return ErrMatchAlreadyCompleted
+	}
+	return nil
 }

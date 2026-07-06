@@ -1492,9 +1492,7 @@ const API = {
     // T129/T130: per-round team lineups (FR-040). GET returns the persisted
     // TeamLineup for (compId, teamId, round): 404 when no lineup has been
     // submitted yet, which the form treats as "blank, editable". PUT replaces
-    // the lineup; the server rejects with 409 (ErrLineupLocked) once the
-    // round's first match has gone running. DELETE clears the lineup so an
-    // operator can revise pre-lock.
+    // the lineup. DELETE clears it so an operator can revise.
     async fetchTeamLineup(compID, teamId, round) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/lineups/${round}`);
         if (res.status === 404) return null;
@@ -1538,7 +1536,7 @@ const API = {
                 );
                 return { queued: true };
             }
-            // 4xx: throw immediately (409 ErrLineupLocked, 400 validation, etc.).
+            // 4xx: throw immediately (400 validation, etc.).
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to save lineup");
         }
@@ -1557,10 +1555,8 @@ const API = {
     },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
-    // two teams each carry an independent, lockable lineup entry.
+    // two teams each carry an independent lineup entry.
     // 404 → null (no lineup saved yet; form treats as blank/editable).
-    // 409 ErrLineupLocked on PUT → the match is already running; surface
-    // as a clear error (same pattern as round-scoped PUT).
     async fetchMatchLineup(compID, teamId, matchId) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`);
         if (res.status === 404) return null;
@@ -1570,12 +1566,8 @@ const API = {
         }
         return res.json();
     },
-    async putMatchLineup(compID, teamId, matchId, positions, password, force = false, reason = "") {
-        if (force && !(reason && reason.trim())) {
-            throw new Error("A change reason is required to override the lineup lock.");
-        }
-        const matchLineupBody = { teamId, competitionId: compID, matchId, positions, force };
-        if (reason) matchLineupBody.changeReason = reason;
+    async putMatchLineup(compID, teamId, matchId, positions, password) {
+        const matchLineupBody = { teamId, competitionId: compID, matchId, positions };
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
         // F5: per-match lineup key: distinct from round-scoped lineups.
         const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
@@ -1607,7 +1599,7 @@ const API = {
                 );
                 return { queued: true };
             }
-            // 4xx: throw immediately (409 ErrLineupLocked, 400 validation, etc.).
+            // 4xx: throw immediately (400 validation, etc.).
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to save match lineup");
         }

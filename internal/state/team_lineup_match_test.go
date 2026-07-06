@@ -1,15 +1,12 @@
 // internal/state/team_lineup_match_test.go covers mp-825: match-scoped
 // team lineups. A team may field a different order/roster for each
 // encounter (e.g. successive pool matches), so a lineup keyed by MatchID
-// must lock independently of other matches and of the legacy
-// round-scoped sweep. The headline regression test is
-// TestMatchLineup_LockMatch1LeavesMatch2Editable, the exact behavior
-// the bug report asked for.
+// must be stored and loaded independently of other matches and of the
+// legacy round-scoped entries.
 package state
 
 import (
 	"testing"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +38,6 @@ func TestMatchLineup_RoundTrip(t *testing.T) {
 	require.True(t, ok, "lineup must be keyed by the match-scoped key")
 	assert.Equal(t, "P1", persisted.MatchID)
 	assert.Equal(t, compID, persisted.CompetitionID, "CompetitionID auto-stamped")
-	assert.Nil(t, persisted.LockedAt)
 }
 
 // TestMatchLineup_CoexistsWithRoundLineup: a match-scoped and a
@@ -60,45 +56,6 @@ func TestMatchLineup_CoexistsWithRoundLineup(t *testing.T) {
 	require.Len(t, got, 2, "round-scoped and match-scoped entries coexist")
 	assert.Contains(t, got, teamLineupKey("team-alpha", 0))
 	assert.Contains(t, got, teamLineupMatchKey("team-alpha", "P1"))
-}
-
-// TestMatchLineup_LockMatch1LeavesMatch2Editable is the headline mp-825
-// regression: in a pool a team plays several encounters. Starting (and
-// thereby locking) match 1 must NOT freeze the still-unstarted match-2
-// lineup. Under the old round-0 collapse this test would fail because
-// both lineups shared one round-0 key.
-func TestMatchLineup_LockMatch1LeavesMatch2Editable(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-isolation"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
-
-	// Two pool encounters for the same team, each with its own lineup.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
-
-	// Match 1 starts and is frozen.
-	require.NoError(t, store.LockTeamLineupForMatch(compID, "P1", time.Now().UTC()))
-
-	// Match 1 is now locked: editing it must be refused.
-	swapped1 := fiveStarterForMatch("team-alpha", "P1")
-	swapped1.Positions[domain.PosJiho] = "p2-sub"
-	require.ErrorIs(t, store.SetTeamLineup(compID, swapped1, 5), ErrLineupLocked,
-		"match 1 is locked, its lineup must be frozen")
-
-	// Match 2 is STILL editable; the whole point of the change.
-	swapped2 := fiveStarterForMatch("team-alpha", "P2")
-	swapped2.Positions[domain.PosJiho] = "p2-sub"
-	require.NoError(t, store.SetTeamLineup(compID, swapped2, 5),
-		"match 2 has not started, its lineup must remain editable after match 1 locks")
-
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.NotNil(t, got[teamLineupMatchKey("team-alpha", "P1")].LockedAt, "match 1 locked")
-	assert.Nil(t, got[teamLineupMatchKey("team-alpha", "P2")].LockedAt, "match 2 still open")
-	assert.Equal(t, "p2-sub", got[teamLineupMatchKey("team-alpha", "P2")].Positions[domain.PosJiho],
-		"match 2 edit must have persisted")
 }
 
 // TestMatchLineup_KeyNoHyphenCollision guards the Copilot-found bug
@@ -129,165 +86,7 @@ func TestMatchLineup_KeyNoHyphenCollision(t *testing.T) {
 		got[teamLineupMatchKey("a", "b-c")].Positions[domain.PosSenpo])
 }
 
-// TestMatchLineup_RoundLockSkipsMatchScoped: the legacy round-0 sweep
-// must NOT freeze match-scoped lineups (their Round defaults to 0).
-// Otherwise a live round-0 pool match would re-introduce the bug.
-func TestMatchLineup_RoundLockSkipsMatchScoped(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-roundsweep"
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
-
-	// Engine fires the legacy round-0 lock when some match starts.
-	require.NoError(t, store.LockTeamLineupsForRound(compID, 0, time.Now().UTC()))
-
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.Nil(t, got[teamLineupMatchKey("team-alpha", "P2")].LockedAt,
-		"round-0 sweep must NOT freeze a match-scoped lineup")
-}
-
-// TestMatchLineup_SetGuardedByOwnMatchStatus: SetTeamLineup for a
-// match-scoped lineup is only blocked when THAT match is running AND the write
-// changes an already-recorded position. A NEW lineup (no prior entry) can
-// always be saved, even while its match is running (live table entry).
-func TestMatchLineup_SetGuardedByOwnMatchStatus(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-toctou"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
-	// Pool match IDs are persisted as "PoolName-Idx" (pools.go), so the
-	// test must use that form for the ID to survive the CSV round-trip
-	// and be found by matchIsRunningOrCompletedLocked.
-	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
-		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
-		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
-	}))
-
-	// PoolA-0 is running but no prior lineup, NEW lineup must succeed.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
-		"saving a new match-scoped lineup while the match is running must succeed (live table entry)")
-
-	// PoolA-0 is running AND a lineup is recorded, CHANGING a position must be blocked.
-	changed := fiveStarterForMatch("team-alpha", "PoolA-0")
-	changed.Positions[domain.PosJiho] = "p2-substitute"
-	require.ErrorIs(t, store.SetTeamLineup(compID, changed, 5),
-		ErrLineupLocked, "changing a recorded position while the match is running must return ErrLineupLocked")
-
-	// PoolA-1 is only scheduled → its lineup is freely settable.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-1"), 5),
-		"scheduled match PoolA-1 must allow its lineup")
-}
-
-// TestSetTeamLineupForce_BypassesMatchFreeze: the operator override sets a
-// lineup on a running match, and preserves an existing LockedAt stamp so a
-// later non-force write (that changes a recorded position) still refuses.
-func TestSetTeamLineupForce_BypassesMatchFreeze(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-force"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
-	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
-		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
-	}))
-
-	// Normal path: NEW lineup while match is running, now SUCCEEDS.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
-		"new lineup while match is running must succeed (live table entry)")
-
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	require.Contains(t, got, teamLineupMatchKey("team-alpha", "PoolA-0"), "lineup persisted")
-
-	// Stamp a lock, then force again: it succeeds but preserves the stamp,
-	// so the next non-force write (that changes a recorded position) still refuses.
-	require.NoError(t, store.LockTeamLineupForMatch(compID, "PoolA-0", time.Now().UTC()))
-	require.NoError(t, store.SetTeamLineupForce(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5),
-		"force overrides a stamped LockedAt")
-	got, err = store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.NotNil(t, got[teamLineupMatchKey("team-alpha", "PoolA-0")].LockedAt,
-		"force preserves the existing LockedAt stamp")
-
-	// Non-force write that CHANGES a recorded position must still be refused.
-	changed := fiveStarterForMatch("team-alpha", "PoolA-0")
-	changed.Positions[domain.PosJiho] = "p2-substitute"
-	require.ErrorIs(t, store.SetTeamLineup(compID, changed, 5),
-		ErrLineupLocked, "non-force that changes a recorded position still refuses after a forced write")
-}
-
-// TestSetTeamLineup_InTxPendingForGuardsLiveMatch is the in-transaction twin
-// of TestMatchLineup_SetGuardedByOwnMatchStatus: when lineups.yaml is already
-// staged earlier in the SAME transaction (the pendingFor branch of
-// storeTx.setTeamLineup), a later non-force write that CHANGES a recorded
-// position while the match is running with no persisted LockedAt must still be
-// refused with ErrLineupLocked. Regression guard for the T128a TOCTOU: the
-// in-tx pendingFor path previously checked only LockedAt and skipped the
-// match-status re-check that Store.setTeamLineupLocked performs.
-func TestSetTeamLineup_InTxPendingForGuardsLiveMatch(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-tx-toctou"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
-	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
-		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
-		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamC", Status: MatchStatusScheduled},
-	}))
-
-	err := store.WithTransaction(compID, func(tx StoreTx) error {
-		// 1. NEW lineup on the running match, stages lineups.yaml, so every
-		//    subsequent write in this tx hits the pendingFor branch.
-		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5); e != nil {
-			return e
-		}
-		// 2. A scheduled match's lineup is still freely settable via pendingFor.
-		if e := tx.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-1"), 5); e != nil {
-			return e
-		}
-		// 3. CHANGING a recorded position on the RUNNING match must be refused,
-		//    even though no LockedAt is persisted (the match-status re-check).
-		changed := fiveStarterForMatch("team-alpha", "PoolA-0")
-		changed.Positions[domain.PosJiho] = "p2-substitute"
-		require.ErrorIs(t, tx.SetTeamLineup(compID, changed, 5), ErrLineupLocked,
-			"in-tx pendingFor change to a live match must refuse with ErrLineupLocked")
-		// 4. The same change via the FORCE twin bypasses the freeze.
-		return tx.SetTeamLineupForce(compID, changed, 5)
-	})
-	require.NoError(t, err)
-
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "p2-substitute",
-		got[teamLineupMatchKey("team-alpha", "PoolA-0")].Positions[domain.PosJiho],
-		"forced substitution must have persisted")
-}
-
-// TestLockTeamLineupForMatch_OnlyTargetMatch: locking match P1 stamps
-// every team's P1 lineup but leaves other matches untouched.
-func TestLockTeamLineupForMatch_OnlyTargetMatch(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-locktarget"
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P1"), 5))
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-beta", "P1"), 5))
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P3"), 5))
-
-	require.NoError(t, store.LockTeamLineupForMatch(compID, "P1", time.Now().UTC()))
-
-	got, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	assert.NotNil(t, got[teamLineupMatchKey("team-alpha", "P1")].LockedAt, "both P1 teams locked")
-	assert.NotNil(t, got[teamLineupMatchKey("team-beta", "P1")].LockedAt, "both P1 teams locked")
-	assert.Nil(t, got[teamLineupMatchKey("team-alpha", "P3")].LockedAt, "P3 untouched")
-}
-
-// TestDeleteTeamLineupForMatch: idempotent delete, and frozen entries
-// refuse deletion.
+// TestDeleteTeamLineupForMatch: idempotent delete and happy-path delete.
 func TestDeleteTeamLineupForMatch(t *testing.T) {
 	store, cleanup := newTestStore(t)
 	defer cleanup()
@@ -302,35 +101,4 @@ func TestDeleteTeamLineupForMatch(t *testing.T) {
 	got, err := store.LoadTeamLineups(compID)
 	require.NoError(t, err)
 	assert.Empty(t, got, "match lineup gone after delete")
-
-	// A locked entry refuses deletion.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "P2"), 5))
-	require.NoError(t, store.LockTeamLineupForMatch(compID, "P2", time.Now().UTC()))
-	require.ErrorIs(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "P2"), ErrLineupLocked,
-		"locked match lineup must refuse delete")
-}
-
-// TestDeleteTeamLineupForMatch_RefusesWhenMatchLive guards the
-// delete-side TOCTOU window (PR #197 review): even with no LockedAt
-// stamp yet, a running/completed match must block DELETE so it cannot
-// reopen a live encounter's lineup, mirroring SetTeamLineup's guard.
-func TestDeleteTeamLineupForMatch_RefusesWhenMatchLive(t *testing.T) {
-	store, cleanup := newTestStore(t)
-	defer cleanup()
-
-	const compID = "team-match-delete-live"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, TeamSize: 5}))
-	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
-		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusScheduled},
-	}))
-	// Set the lineup while the match is still scheduled.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarterForMatch("team-alpha", "PoolA-0"), 5))
-
-	// The match starts WITHOUT the lock stamp landing (the TOCTOU
-	// window). DELETE must still be refused.
-	require.NoError(t, store.SavePoolMatches(compID, []MatchResult{
-		{ID: "PoolA-0", SideA: "TeamA", SideB: "TeamB", Status: MatchStatusRunning},
-	}))
-	require.ErrorIs(t, store.DeleteTeamLineupForMatch(compID, "team-alpha", "PoolA-0"), ErrLineupLocked,
-		"DELETE must be refused once the match is running, even before the lock stamp lands")
 }

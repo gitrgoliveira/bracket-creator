@@ -3,9 +3,8 @@
 // (Slice 7.B / T127).
 //
 // GET returns the lineup for a (team, round) tuple, PUT sets/replaces
-// it, DELETE removes it. The lineup is mutable up until the round's
-// first match starts, once frozen, subsequent PUTs return 409 with
-// ErrLineupLocked (FR-040, FR-041, R4 / CHK012).
+// it, DELETE removes it. Lineups are always editable, including while
+// a match is running or completed (mp-q722).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -15,41 +14,21 @@
 package mobileapp
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// LineupRequest is the body for PUT /lineups/:round. We accept the
-// positions map as the only required field; teamID/round/compID are
-// pinned by the URL path, and LockedAt is server-managed (the engine
-// stamps it when the round's first match starts).
+// LineupRequest is the body for PUT /lineups/:round and the match-scoped
+// PUT /match-lineups/:matchId. We accept only the positions map; teamID,
+// round/matchID, and compID are pinned by the URL path.
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
-	// Force, on the match-scoped PUT only, bypasses the start-of-match
-	// freeze so an operator running behind can still set/correct a lineup
-	// after the match has started (officiated mode). Lineup validation
-	// still applies. Ignored by the round-scoped PUT.
-	Force bool `json:"force"`
-	// ChangeReason is mandatory when Force=true, it must be a non-empty
-	// audit justification in the format "<category>: <note>"
-	// (e.g. "Substitution: injury to jiho"). Omitted for pre-match
-	// lineup submissions.
-	ChangeReason string `json:"changeReason,omitempty"`
 }
-
-// matchLineupLockedMsg is the 409 body for the match-scoped endpoints.
-// state.ErrLineupLocked's own text says "round has started", which is
-// misleading here since these endpoints lock by match, so we surface a
-// match-accurate message at the boundary while still keeping the shared
-// sentinel for control flow (errors.Is).
-const matchLineupLockedMsg = "team lineup locked: match has started"
 
 // RegisterLineupHandlers wires the GET/PUT/DELETE lineup endpoints
 // under the admin group. Slice 7.B / T127.
@@ -168,13 +147,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 
 		// T156: load comp (for teamSize) + Set lineup + reload lineup (for
-		// the response) all run under one WithTransaction acquire. Before
-		// this migration the three calls each took their own per-comp
-		// lock; a concurrent admin "force-lock round" between Set and
-		// the reload could stamp LockedAt onto the response payload that
-		// wasn't on the actual saved record. Same atomicity argument the
-		// engine UpdatePoolMatchByID / UpdateBracket primitives already
-		// make for their own multi-step flows.
+		// the response) all run under one WithTransaction acquire. Same
+		// atomicity argument the engine UpdatePoolMatchByID / UpdateBracket
+		// primitives already make for their own multi-step flows.
 		//
 		// httpErr carries the (status, body) pair the response should
 		// emit; we set it from inside the tx and write the response
@@ -211,20 +186,10 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			}
 
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
-				switch {
-				case errors.Is(err, state.ErrLineupLocked):
-					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": err.Error()}}
-				case errors.Is(err, domain.ErrLineupMissingSenpo),
-					errors.Is(err, domain.ErrLineupMissingTaisho),
-					errors.Is(err, domain.ErrLineupTooManyMissing),
-					errors.Is(err, domain.ErrLineupTeamSizeInvalid):
-					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
-				default:
-					// Generic dynamic validation messages (e.g.
-					// "position X not allowed in N-person team") also map
-					// to 400; same surface as the sentinel path.
-					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
-				}
+				// All domain validation errors (missing senpo/taisho,
+				// too-many-missing, bad team size, dynamic position
+				// messages) map to 400.
+				respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			// Reload after write so the response carries the persisted
@@ -267,10 +232,6 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		if err := store.DeleteTeamLineup(compID, teamID, round); err != nil {
-			if errors.Is(err, state.ErrLineupLocked) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
-			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -323,59 +284,11 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				}
 				return nil
 			}
-			if req.Force && strings.TrimSpace(req.ChangeReason) == "" {
-				respErr = &httpErr{
-					status: http.StatusBadRequest,
-					body:   gin.H{"error": "changeReason is required when force=true"},
-				}
-				return nil
-			}
-			// Bound the audit free-text (same cap as every other reason field) so
-			// a 1MB changeReason can't land in the lineup YAML. Only force writes
-			// persist it (see below), so this only matters on the force path.
-			// Cap the TRIMMED value: the write persists strings.TrimSpace(...),
-			// so trailing/leading whitespace must not trip a false 400.
-			if req.Force {
-				if err := validateMaxLen("changeReason", strings.TrimSpace(req.ChangeReason), MaxLenChangeReason); err != nil {
-					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
-					return nil
-				}
-			}
-			// force is a mid-match override: only valid once the match has
-			// actually started (running or completed). Reject a pre-match force
-			// so a client can't use the override path, or persist an audit
-			// reason, on a normal pre-match lineup edit.
-			if req.Force {
-				status := lookupMatchStatusUnderTx(stx, compID, matchID)
-				if status != state.MatchStatusRunning && status != state.MatchStatusCompleted {
-					respErr = &httpErr{
-						status: http.StatusBadRequest,
-						body:   gin.H{"error": "force override is only allowed after the match has started"},
-					}
-					return nil
-				}
-			}
-			// ChangeReason is an audit justification for a mid-match override
-			// only. For a normal (force=false) pre-match save it carries no
-			// meaning, so don't persist a client-supplied value.
-			setLineup := stx.SetTeamLineup
-			if req.Force {
-				lineup.ChangeReason = strings.TrimSpace(req.ChangeReason)
-				setLineup = stx.SetTeamLineupForce
-			} else {
-				lineup.ChangeReason = ""
-			}
-			if err := setLineup(compID, lineup, teamSize); err != nil {
-				switch {
-				case errors.Is(err, state.ErrLineupLocked):
-					respErr = &httpErr{status: http.StatusConflict, body: gin.H{"error": matchLineupLockedMsg}}
-				default:
-					// All domain validation errors (missing senpo/taisho,
-					// too-many-missing, bad team size, dynamic position
-					// messages) map to 400, same surface as the
-					// round-scoped PUT.
-					respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
-				}
+			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
+				// All domain validation errors (missing senpo/taisho,
+				// too-many-missing, bad team size, dynamic position
+				// messages) map to 400.
+				respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			lineups, err := stx.LoadTeamLineups(compID)
@@ -410,10 +323,6 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
-			if errors.Is(err, state.ErrLineupLocked) {
-				c.JSON(http.StatusConflict, gin.H{"error": matchLineupLockedMsg})
-				return
-			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

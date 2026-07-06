@@ -124,11 +124,10 @@ func TestStripBracketAudit(t *testing.T) {
 	})
 }
 
-func TestLineupForPublic_StripsChangeReasonAndCopies(t *testing.T) {
-	orig := domain.TeamLineup{TeamID: "teamA", Round: 1, ChangeReason: "injury to jiho"}
+func TestLineupForPublic_Passthrough(t *testing.T) {
+	orig := domain.TeamLineup{TeamID: "teamA", Round: 1, Positions: map[domain.Position]string{domain.PosSenpo: "p1"}}
 	got := lineupForPublic(orig)
 
-	assert.Empty(t, got.ChangeReason)
 	assert.Equal(t, "teamA", got.TeamID)
-	assert.Equal(t, "injury to jiho", orig.ChangeReason, "caller's original untouched")
+	assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
 }

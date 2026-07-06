@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -301,7 +300,6 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
-	e.maybeLockTeamLineupsForRound(compId, result)
 	return nil
 }
 
@@ -407,63 +405,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 		return nil, nil
 	}
-	// T128, same lineup-lock side effect as RecordMatchResult above.
-	e.maybeLockTeamLineupsForRound(compId, result)
 	return status, nil
-}
-
-// maybeLockTeamLineupsForRound freezes any persisted team lineups for
-// the round this match belongs to, but only when this update marks
-// the match as live (running or completed). Side effect only, any
-// store error is logged and swallowed so the score-recording isn't
-// retried (which would double-record the score; same rationale as
-// recordIneligibilityFromDecision above).
-//
-// TODO(T128): round mapping. The match's "round" is currently always
-// treated as 0 because:
-//   - pool matches have no round field (every pool match is round 0
-//     by convention); and
-//   - bracket-round inference requires loading the bracket and
-//     scanning Rounds[] for matchId, which is overhead we don't
-//     pay until multi-round lineups are actually in use.
-//
-// Once team-pool-rotation or per-round elimination lineups land, this
-// helper grows the bracket-scan lookup. The store-side
-// roundHasRunningOrCompletedMatchLocked in state/team_lineup.go already
-// handles per-round bracket inspection, the gap is just the
-// matchId→round mapping here.
-//
-// FR-040.
-func (e *Engine) maybeLockTeamLineupsForRound(compId string, result *state.MatchResult) {
-	if result == nil {
-		return
-	}
-	// Only act on the running/completed transition, a "scheduled"
-	// update (e.g. time-only adjust) must NOT freeze lineups.
-	if result.Status != state.MatchStatusRunning && result.Status != state.MatchStatusCompleted {
-		return
-	}
-	// Cheap guard: skip the file write entirely for non-team
-	// competitions. A non-team comp can't have lineups, so calling
-	// LockTeamLineupsForRound would always be a no-op file read.
-	comp, err := e.store.LoadCompetition(compId)
-	if err != nil || comp == nil || comp.TeamSize <= 0 {
-		return
-	}
-	now := time.Now().UTC()
-	// Match-scoped freeze (mp-825): lock only THIS encounter's lineups,
-	// so a live pool match 1 does not freeze the match-2 lineup.
-	if result.ID != "" {
-		if err := e.store.LockTeamLineupForMatch(compId, result.ID, now); err != nil {
-			log.Printf("engine: LockTeamLineupForMatch compId=%s matchId=%s: %v", compId, result.ID, err)
-		}
-	}
-	// Round-scoped freeze (legacy): still applies to round-keyed lineups
-	// (bracket rounds, pre-mp-825 data). Skips match-scoped entries.
-	const round = 0
-	if err := e.store.LockTeamLineupsForRound(compId, round, now); err != nil {
-		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compId, round, err)
-	}
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {

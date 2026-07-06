@@ -27,7 +27,6 @@ import {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
-  LINEUP_PRESETS,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -329,7 +328,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Inline lineup select state: tracks whether a lineup-reason prompt is shown
   // for inline position changes mid-match, and which (teamId, positionKey, value)
   // is pending confirmation.
-  const [inlineLineupPrompt, setInlineLineupPrompt] = useStateA(null); // { teamId, posKey, value, lineup }
   const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);
 
   // Derive each team's roster from compMeta.players. rosterFor expects the
@@ -366,18 +364,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   // Submit an inline position change: builds the full positions map from the
-  // existing lineup + the changed key→value, then PUTs.
-  // force=true + reason only when the match is live AND we are changing an
-  // already-recorded player (a substitution). Adding to an empty slot saves
-  // directly with force=false: the backend now allows this at any time.
-  const submitInlineLineup = async (teamId, lineup, posKey, value, reason, force) => {
+  // existing lineup + the changed key→value, then PUTs. Lineups are always
+  // editable; no force/reason needed.
+  const submitInlineLineup = async (teamId, lineup, posKey, value) => {
     setInlineLineupSaving(true);
     try {
       const existing = lineup?.positions || {};
       const updated = { ...existing };
       if (value) updated[posKey] = value;
       else delete updated[posKey];
-      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, force, reason);
+      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password);
       // Refresh lineup state from the response is deferred: on next open the
       // modal re-fetches. For immediate feedback we do a partial reload of
       // lineup state for the affected side.
@@ -862,17 +858,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const rosterB = rosterForSide(m.sideB, lineupB);
             const rosterA = rosterForSide(m.sideA, lineupA);
             const pickPlayer = (teamId, lineup) => (value) => {
-              const prev = (lineup?.positions || {})[lineupPosKey] || "";
-              // A mid-match substitution (changing or clearing an already-recorded
-              // player) needs an audit reason + the force override. Adding a name to an
-              // empty slot: the normal live-entry case: and any pre-match edit save
-              // directly.
-              const isChange = prev !== "" && value !== prev;
-              if (matchStartedForLineup && isChange) {
-                setInlineLineupPrompt({ teamId, posKey: lineupPosKey, value, lineup });
-              } else {
-                submitInlineLineup(teamId, lineup, lineupPosKey, value, "", false);
-              }
+              submitInlineLineup(teamId, lineup, lineupPosKey, value);
             };
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
@@ -961,8 +947,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             SHIRO chip + a typeable picker (filter the roster as
                             you type, or write a name) so operators can set the
                             order live; falls back to a static name when there's
-                            no roster metadata. Mid-match changes gate through the
-                            audit ReasonPrompt; pre-match are saved direct. */}
+                            no roster metadata. Lineups are always editable. */}
                         <div className="tsm-name">
                           <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
                           {rs.roster && rs.roster.length > 0 ? (
@@ -1302,21 +1287,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}
               onSubmit={({ decisionBy, decisionReason }) => submitDecision(decisionPromptKind, { decisionBy, decisionReason })}
-            />
-          )}
-          {/* Inline lineup position change: requires an audit reason when
-              the match has already started (force=true on the API call). */}
-          {inlineLineupPrompt && (
-            <ReasonPrompt
-              label="Reason for lineup change"
-              presets={LINEUP_PRESETS}
-              submitting={inlineLineupSaving}
-              onConfirm={(r) => {
-                const { teamId, posKey, value, lineup } = inlineLineupPrompt;
-                setInlineLineupPrompt(null);
-                submitInlineLineup(teamId, lineup, posKey, value, r, true);
-              }}
-              onCancel={() => setInlineLineupPrompt(null)}
             />
           )}
           {withdrawnPlayer && (

@@ -9,18 +9,16 @@ import (
 // match and lineup data before it leaves the server on a PUBLIC
 // (unauthenticated) channel, the viewer REST endpoints and the SSE stream.
 //
-// CorrectionReason and DecisionReason (MatchResult/BracketMatch) and ChangeReason
-// (TeamLineup) are free-text fields an operator types to justify a score
-// correction, a kiken/fusenpai decision, or a forced mid-match lineup change; the
-// example copy ("Substitution: injury to jiho") shows they can name competitors
-// and carry medical detail (DecisionReason in particular records FIK Art. 30
-// kiken-injury notes). They exist solely for the admin audit trail, persisted to
-// disk (pool-matches.csv / bracket.json / lineup YAML), and no frontend ever
-// reads them back over the wire (the SPA only WRITES decisionReason; decisionBy,
-// an enum, is what drives viewer rendering and is deliberately preserved). They
-// must never reach spectators. This mirrors the existing redaction at
-// handlers_viewer.go where the tournament password is zeroed before public
-// serialization.
+// CorrectionReason and DecisionReason (MatchResult/BracketMatch) are free-text
+// fields an operator types to justify a score correction or a kiken/fusenpai
+// decision; the example copy ("Substitution: injury to jiho") shows they can name
+// competitors and carry medical detail (DecisionReason in particular records FIK
+// Art. 30 kiken-injury notes). They exist solely for the admin audit trail,
+// persisted to disk (pool-matches.csv / bracket.json), and no frontend ever reads
+// them back over the wire (the SPA only WRITES decisionReason; decisionBy, an
+// enum, is what drives viewer rendering and is deliberately preserved). They must
+// never reach spectators. This mirrors the existing redaction at handlers_viewer.go
+// where the tournament password is zeroed before public serialization.
 //
 // Two flavours, both safe against corrupting stored/cached state:
 //   - COPY helpers take the value by value and return a redacted copy:
@@ -102,11 +100,9 @@ func stripBracketAudit(b *state.Bracket) {
 	}
 }
 
-// lineupForPublic returns a copy of the lineup with the audit ChangeReason
-// cleared, for the public read endpoints. The map values returned by
-// LoadTeamLineups are already copies, but taking by value here keeps the
-// redaction explicit and independent of that.
+// lineupForPublic returns the lineup as-is for the public read endpoints.
+// The map values returned by LoadTeamLineups are already copies, so this
+// function exists as a clear hand-off point if future redaction is needed.
 func lineupForPublic(l domain.TeamLineup) domain.TeamLineup {
-	l.ChangeReason = ""
 	return l
 }

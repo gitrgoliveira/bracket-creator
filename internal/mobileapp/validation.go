@@ -70,10 +70,9 @@ const (
 	MaxLenMatchScheduledAt = 32
 
 	MaxLenDecisionReason = 200
-	// Operator audit free-text (correction note, lineup-change note) shares the
-	// same human-readable purpose and bound as DecisionReason.
+	// Operator audit free-text (correction note) shares the same human-readable
+	// purpose and bound as DecisionReason.
 	MaxLenCorrectionReason  = MaxLenDecisionReason
-	MaxLenChangeReason      = MaxLenDecisionReason
 	MaxLenEligibilityReason = 200
 	MaxLenEntityID          = 64 // matches state.ValidateCompetitionID cap
 	// MaxLenRevSession caps ScoreRequest.RevSession (an opaque session id, e.g.

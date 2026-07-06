@@ -97,19 +97,16 @@ func TestPublicLineupGET_NoAuthRequired(t *testing.T) {
 	})
 }
 
-// TestPublicLineupGET_RedactsChangeReason is the regression test for the
-// public-projection leak: ChangeReason is operator-only audit free-text (it can
-// name competitors / carry medical detail, e.g. "Substitution: injury to jiho")
-// and must never reach the unauthenticated GET endpoints. Both the round-scoped
-// and match-scoped reads must strip it; the field stays persisted for the audit
-// trail.
-func TestPublicLineupGET_RedactsChangeReason(t *testing.T) {
+// TestPublicLineupGET_PayloadIntact verifies that GET /lineups/:round and
+// GET /match-lineups/:matchId return the full lineup payload (teamID, positions)
+// to unauthenticated callers. Both round-scoped and match-scoped reads are
+// covered.
+func TestPublicLineupGET_PayloadIntact(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
-	const secret = "Substitution: injury to jiho"
 	positions := map[domain.Position]string{
 		domain.PosSenpo:   "p1",
 		domain.PosJiho:    "p2",
@@ -117,45 +114,29 @@ func TestPublicLineupGET_RedactsChangeReason(t *testing.T) {
 		domain.PosFukusho: "p4",
 		domain.PosTaisho:  "p5",
 	}
-	// Round-scoped lineup (drives /lineups/:round) and a match-scoped lineup
-	// (drives /match-lineups/:matchId), different storage keys. Force path is
-	// how production persists a ChangeReason.
-	require.NoError(t, store.SetTeamLineupForce("c1", domain.TeamLineup{
-		TeamID: "teamA", CompetitionID: "c1", Round: 1, ChangeReason: secret, Positions: positions,
+	require.NoError(t, store.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: "teamA", CompetitionID: "c1", Round: 1, Positions: positions,
 	}, 5))
-	require.NoError(t, store.SetTeamLineupForce("c1", domain.TeamLineup{
-		TeamID: "teamA", CompetitionID: "c1", Round: 1, MatchID: "Pool A-0", ChangeReason: secret, Positions: positions,
+	require.NoError(t, store.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: "teamA", CompetitionID: "c1", Round: 1, MatchID: "Pool A-0", Positions: positions,
 	}, 5))
 
-	// Sanity: both are persisted WITH the reason (so the GET strip, not a
-	// missing write, is what keeps it out of the response).
-	stored, err := store.LoadTeamLineups("c1")
-	require.NoError(t, err)
-	var withReason int
-	for _, l := range stored {
-		if l.ChangeReason == secret {
-			withReason++
-		}
-	}
-	require.Equal(t, 2, withReason, "both lineups should persist the audit reason")
-
-	for _, path := range []string{
-		"/api/competitions/c1/teams/teamA/lineups/1",
-		"/api/competitions/c1/teams/teamA/match-lineups/Pool%20A-0",
+	for _, tc := range []struct {
+		path string
+	}{
+		{"/api/competitions/c1/teams/teamA/lineups/1"},
+		{"/api/competitions/c1/teams/teamA/match-lineups/Pool%20A-0"},
 	} {
-		t.Run(path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
 			require.Equal(t, http.StatusOK, w.Code)
-			assert.NotContains(t, w.Body.String(), secret, "ChangeReason leaked to public GET")
-			assert.NotContains(t, w.Body.String(), "changeReason", "changeReason key present in public payload")
-
 			var got domain.TeamLineup
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
-			assert.Empty(t, got.ChangeReason)
-			assert.Equal(t, "teamA", got.TeamID) // payload otherwise intact
+			assert.Equal(t, "teamA", got.TeamID)
+			assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
 		})
 	}
 }

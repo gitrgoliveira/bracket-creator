@@ -884,40 +884,6 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 	}
 }
 
-// TestMaybeLockTeamLineupsForRound_TeamComp verifies that recording a
-// running/completed result for a team competition (TeamSize > 0) exercises
-// the maybeLockTeamLineupsForRound code path without panicking. We don't
-// assert lineup lock state because the lock is a best-effort write (no
-// LineupID known until Slice 7.C lands), so we just verify no error.
-func TestMaybeLockTeamLineupsForRound_TeamComp(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "team-lock-lineups"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:       compID,
-		Name:     "Team Lock",
-		Kind:     "team",
-		Format:   state.CompFormatMixed,
-		TeamSize: 3,
-		Status:   state.CompStatusPools,
-		Courts:   []string{"A"},
-	}))
-
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
-	}))
-
-	result := &state.MatchResult{
-		ID:     "P1-0",
-		SideA:  "TeamA",
-		SideB:  "TeamB",
-		Winner: "TeamA",
-		Status: state.MatchStatusCompleted,
-	}
-	err := eng.RecordMatchResult(compID, "P1-0", result)
-	assert.NoError(t, err)
-}
-
 func TestApplyHansokuIppons(t *testing.T) {
 	t.Run("nil result is a no-op", func(t *testing.T) {
 		applyHansokuIppons(nil) // must not panic

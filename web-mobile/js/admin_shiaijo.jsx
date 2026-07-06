@@ -517,15 +517,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
-    // Revert a running, unscored bout back to the queue. Gated behind a confirm
-    // dialog (same pattern as court reassignment) because discarding the running
-    // state is disruptive: viewers drop the match from "Now" and it reappears in
-    // the upcoming list. scoringStarted must be false before calling (the button
-    // is only shown when no score has been entered, matching the pickMatch defer
-    // path above).
+    // Revert a running bout back to the queue. Gated behind a confirm dialog
+    // (same pattern as court reassignment) because discarding the running state
+    // is disruptive: viewers drop the match from "Now" and it reappears in the
+    // upcoming list. Allowed even when a score has been entered (the operator may
+    // have started the wrong match after tapping a point); the confirm warns that
+    // any entered score will be discarded. `scored` drives that warning copy.
     const requestRevert = (m) => {
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "this match";
-        setPendingRevert({ compId: m.compId, matchId: m.id, label });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label, scored: scoringStarted(m) });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -869,7 +869,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 />
                             )}
 
-                            {!allDone && selectedMatch && selectedMatch.status === "running" && !scoringStarted(selectedMatch) && window.API && typeof window.API.revertMatchToQueue === "function" && (
+                            {!allDone && selectedMatch && selectedMatch.status === "running" && window.API && typeof window.API.revertMatchToQueue === "function" && (
                                 <div className="shiaijo-revert">
                                     <button
                                         type="button"
@@ -935,7 +935,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         </h3>
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            No score has been entered, so nothing will be lost.
+                            {pendingRevert.scored
+                                ? " Any score entered on this bout will be discarded."
+                                : " No score has been entered, so nothing will be lost."}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>

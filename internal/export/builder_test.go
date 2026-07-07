@@ -491,24 +491,26 @@ func TestBuildBracketMatchIndex(t *testing.T) {
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{
-				{ID: "M1", SideA: "A", SideB: "B"},
-				{ID: "M2", SideA: "C", SideB: "D"},
+				{ID: "M1", MatchNumber: 1, SideA: "A", SideB: "B"},
+				{ID: "M2", MatchNumber: 2, SideA: "C", SideB: "D"},
+				{ID: "bye", MatchNumber: 0, SideA: "X", SideB: ""}, // unnumbered: excluded
 			},
 		},
-		ThirdPlaceMatch: &state.BracketMatch{ID: "M3", SideA: "E", SideB: "F"},
+		ThirdPlaceMatch: &state.BracketMatch{ID: "M3", MatchNumber: 3, SideA: "E", SideB: "F"},
 	}
 	idx := buildBracketMatchIndex(bracket)
-	assert.Len(t, idx, 3)
-	assert.Contains(t, idx, "M1")
-	assert.Contains(t, idx, "M2")
-	assert.Contains(t, idx, "M3")
+	assert.Len(t, idx, 3, "the MatchNumber-0 bye must be excluded")
+	assert.Contains(t, idx, 1)
+	assert.Contains(t, idx, 2)
+	assert.Contains(t, idx, 3)
+	assert.NotContains(t, idx, 0)
 }
 
 func TestFindBracketMatchByNumber(t *testing.T) {
 	t.Parallel()
-	idx := map[string]state.BracketMatch{
-		"M1": {ID: "M1", MatchNumber: 1},
-		"M2": {ID: "M2", MatchNumber: 2},
+	idx := map[int]state.BracketMatch{
+		1: {ID: "M1", MatchNumber: 1},
+		2: {ID: "M2", MatchNumber: 2},
 	}
 	bm := findBracketMatchByNumber(idx, 2)
 	require.NotNil(t, bm)
@@ -520,6 +522,7 @@ func TestFindBracketMatchByNumber(t *testing.T) {
 
 func TestStandingMap(t *testing.T) {
 	t.Parallel()
+	// Legacy state without UUIDs: keyed by name.
 	standings := []state.PlayerStanding{
 		{Player: domain.Player{Name: "Alice"}, Rank: 1},
 		{Player: domain.Player{Name: "Bob"}, Rank: 2},
@@ -528,6 +531,51 @@ func TestStandingMap(t *testing.T) {
 	assert.Len(t, m, 2)
 	assert.Equal(t, 1, m["Alice"].Rank)
 	assert.Equal(t, 2, m["Bob"].Rank)
+}
+
+// TestStandingMap_SameNameKeyedByID is the regression test for standingMap
+// collapsing same-name participants: two "Sam"s in different dojos must remain
+// distinct standings entries because the map keys by participant UUID.
+func TestStandingMap_SameNameKeyedByID(t *testing.T) {
+	t.Parallel()
+	standings := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-1", Name: "Sam", Dojo: "North"}, Rank: 1},
+		{Player: domain.Player{ID: "id-2", Name: "Sam", Dojo: "South"}, Rank: 4},
+	}
+	m := standingMap(standings)
+	assert.Len(t, m, 2, "same-name players with distinct IDs must not collapse")
+	assert.Equal(t, 1, m["id-1"].Rank)
+	assert.Equal(t, 4, m["id-2"].Rank)
+	// standingKey prefers ID, falls back to name.
+	assert.Equal(t, "id-1", standingKey(helper.Player{ID: "id-1", Name: "Sam"}))
+	assert.Equal(t, "Legacy", standingKey(helper.Player{Name: "Legacy"}))
+}
+
+// TestAttachPoolMatches_SkipsUnresolvableSide is the regression test for the nil
+// dereference: a pool match whose side resolves to no pool member (e.g. a
+// participant removed after the match was recorded) must be SKIPPED, not stored as
+// a nil *Player that PrintPoolMatches would dereference and panic on.
+func TestAttachPoolMatches_SkipsUnresolvableSide(t *testing.T) {
+	t.Parallel()
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "id-1", Name: "Ann", Dojo: "North"},
+			{ID: "id-2", Name: "Bea", Dojo: "South"},
+		},
+	}}
+	results := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Ann", SideAID: "id-1", SideB: "Bea", SideBID: "id-2"},      // resolvable
+		{ID: "Pool A-1", SideA: "Ann", SideAID: "id-1", SideB: "Ghost", SideBID: "id-gone"}, // SideB gone
+	}
+
+	attachPoolMatches(pools, results)
+
+	require.Len(t, pools[0].Matches, 1, "the match with an unresolvable side must be skipped")
+	require.NotNil(t, pools[0].Matches[0].SideA)
+	require.NotNil(t, pools[0].Matches[0].SideB)
+	assert.Equal(t, "Ann", pools[0].Matches[0].SideA.Name)
+	assert.Equal(t, "Bea", pools[0].Matches[0].SideB.Name)
 }
 
 func TestSetIntCell_MissingKey(t *testing.T) {
@@ -1509,6 +1557,68 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"the played semifinal score must render even with the final unplayed")
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+}
+
+// TestBuildResultsWorkbook_TeamPlayoffsNames is the regression test for the team-
+// playoffs summary-name off-by-one in overlayPlayoffBracketNames. A no-pools team
+// playoffs repeats the entrant-name formulas on the summary row at
+// header+4+teamSize; the overlay must overwrite THAT row (clearing the broken ”!
+// formula) and leave the "Victories / Points" label at header+5+teamSize intact.
+// Before the fix it targeted header+5+teamSize, leaving a broken formula behind and
+// clobbering the label. This path (Playoffs + TeamSize>0, no pools) had no coverage.
+func TestBuildResultsWorkbook_TeamPlayoffsNames(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "team"
+	comp.TeamSize = 3
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Team A", Dojo: "D"}, {Name: "Team B", Dojo: "D"},
+		{Name: "Team C", Dojo: "D"}, {Name: "Team D", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	// Score the first round's encounters with 3 sub-bouts each.
+	for mi := range br.Rounds[0] {
+		m := &br.Rounds[0][mi]
+		if m.SideA == "" || m.SideB == "" {
+			continue
+		}
+		m.Winner = m.SideA
+		m.Status = state.MatchStatusCompleted
+		m.SubResults = []state.SubMatchResult{
+			{Position: 1, SideA: m.SideA, SideB: m.SideB, IpponsA: []string{"M", "K"}, Winner: m.SideA},
+			{Position: 2, SideA: m.SideA, SideB: m.SideB, IpponsB: []string{"M"}, Winner: m.SideB},
+			{Position: 3, SideA: m.SideA, SideB: m.SideB, IpponsA: []string{"D"}, Winner: m.SideA},
+		}
+	}
+	require.NoError(t, store.SaveBracket(compID, br))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	// The off-by-one left a broken ''! entrant-name formula on the summary row.
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	// The "Victories / Points" label sits one row below the summary-name row; the
+	// off-by-one clobbered it with a team name.
+	assert.True(t, sheetContainsCell(rows, "Victories / Points"),
+		"the team summary 'Victories / Points' label must survive the name overlay")
+	assert.True(t, sheetContainsCell(rows, "Team A"),
+		"a team entrant name must be written literally into the bracket")
 }
 
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.

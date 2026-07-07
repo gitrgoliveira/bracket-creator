@@ -163,8 +163,8 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 		// Overlay literal scores from the live bracket state.
 		if bracket != nil {
-			bracketByID := buildBracketMatchIndex(bracket)
-			if err := overlayBracketScores(f, bracketByID, comp.TeamSize, comp.Mirror); err != nil {
+			bracketByNum := buildBracketMatchIndex(bracket)
+			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
 			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
@@ -172,7 +172,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			// the stored bracket's literal names (empty for unresolved slots) so the
 			// sheet is a valid literal snapshot with no broken formulas.
 			if len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-				if err := overlayPlayoffBracketNames(f, bracketByID, comp.TeamSize, comp.Mirror); err != nil {
+				if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
 					return nil, fmt.Errorf("export: overlay playoff names: %w", err)
 				}
 			}
@@ -184,11 +184,19 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// the consumed template. This mirrors the CLI (cmd/create-pools.go) and,
 		// unlike the previous implementation, populates ALL pages for large brackets
 		// (>16 finalists) instead of leaving "Tree 2"+ blank.
-		numPages, _ := helper.TreePageLayout(len(finals), numCourts, false)
+		numPages, perr := helper.TreePageLayout(len(finals), numCourts, false)
+		if perr != nil {
+			return nil, fmt.Errorf("export: compute tree page layout: %w", perr)
+		}
 		subtrees := helper.SubdivideTree(tree, numPages)
 		treeTemplateIdx, terr := f.GetSheetIndex(helper.SheetTree)
 		if terr != nil {
 			return nil, fmt.Errorf("export: find tree template sheet: %w", terr)
+		}
+		// GetSheetIndex returns (-1, nil) for an absent sheet, so guard the index too
+		// rather than letting CopySheet later fail with a misleading error source.
+		if treeTemplateIdx < 0 {
+			return nil, fmt.Errorf("export: tree template sheet %q not found", helper.SheetTree)
 		}
 		for i, subtree := range subtrees {
 			pageSheet := fmt.Sprintf("Tree %d", i+1)
@@ -277,10 +285,17 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 
 		p.Matches = make([]helper.Match, 0, len(mine))
 		for _, ir := range mine {
-			p.Matches = append(p.Matches, helper.Match{
-				SideA: resolve(ir.mr.SideAID, ir.mr.SideA),
-				SideB: resolve(ir.mr.SideBID, ir.mr.SideB),
-			})
+			sideA := resolve(ir.mr.SideAID, ir.mr.SideA)
+			sideB := resolve(ir.mr.SideBID, ir.mr.SideB)
+			// A side that resolves to no pool member (e.g. a participant removed
+			// after the match was recorded, or partially-written state) would be a
+			// nil *Player, which PrintPoolMatches dereferences unconditionally and
+			// panics on. Skip the unresolvable match: the skeleton row is simply left
+			// without an overlaid score, consistent with the frozen-snapshot semantics.
+			if sideA == nil || sideB == nil {
+				continue
+			}
+			p.Matches = append(p.Matches, helper.Match{SideA: sideA, SideB: sideB})
 		}
 	}
 }
@@ -667,7 +682,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				if dataRowIdx >= len(rows) {
 					break
 				}
-				ps, ok := byName[player.Name]
+				ps, ok := byName[standingKey(player)]
 				if !ok {
 					continue
 				}
@@ -794,16 +809,15 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 			lCol := colNum(courtStartCol + 2)
 			tCol := colNum(courtStartCol + 3)
 			rankCol := colNum(courtStartCol + 6)
-			// Table 2 columns share startCol+1..+5 with different meanings.
-			ivCol := colNum(courtStartCol + 1)
-			ilCol := colNum(courtStartCol + 2)
-			itCol := colNum(courtStartCol + 3)
+			// Table 2 reuses startCol+1..+3 for IV/IL/IT (same physical columns as
+			// W/L/T, different meaning), then +4/+5 for PW/PL.
+			ivCol, ilCol, itCol := wCol, lCol, tCol
 			pwCol := colNum(courtStartCol + 4)
 			plCol := colNum(courtStartCol + 5)
 
 			nPlayers := len(pool.Players)
 			for i, player := range pool.Players {
-				ps, ok := byName[player.Name]
+				ps, ok := byName[standingKey(player)]
 				if !ok {
 					continue
 				}
@@ -835,9 +849,9 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // sheet by scanning for "Round N - Match N" header cells. For each completed
 // match found, the score cells in the row two rows below are overwritten with
 // literal values (ScoreA/ScoreB from the bracket JSON survive the round-trip).
-func overlayBracketScores(f *excelize.File, bracketByID map[string]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
 	if teamSize != 0 {
-		return overlayTeamBracketScores(f, bracketByID, teamSize, mirror)
+		return overlayTeamBracketScores(f, bracketByNum, teamSize, mirror)
 	}
 	sheetName := helper.SheetEliminationMatches
 
@@ -856,7 +870,7 @@ func overlayBracketScores(f *excelize.File, bracketByID map[string]state.Bracket
 				continue
 			}
 
-			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			bm := findBracketMatchByNumber(bracketByNum, matchNum)
 			if bm == nil || bm.Status != state.MatchStatusCompleted {
 				continue
 			}
@@ -912,7 +926,7 @@ func overlayBracketScores(f *excelize.File, bracketByID map[string]state.Bracket
 // left PW=startCol+2, right IV=startCol+5, right PW=startCol+4. The summary IV/PW
 // cells and per-player W/L/T standings are formula-driven (they tally the sub-match
 // rows) and collapse after a store round-trip, so we overwrite them with literals.
-func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
 	sheetName := helper.SheetEliminationMatches
 
 	rows, err := f.GetRows(sheetName)
@@ -930,7 +944,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 				continue
 			}
 
-			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			bm := findBracketMatchByNumber(bracketByNum, matchNum)
 			if bm == nil || bm.Status != state.MatchStatusCompleted {
 				continue
 			}
@@ -1002,9 +1016,10 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 // unresolved slot, which clears the broken formula) yields a valid snapshot.
 //
 // Name cells sit at the court's start column (left) and start+6 (right) on the
-// entrant row (header + 2). Team brackets repeat the names on the IV/PW summary
-// row (header + 5 + teamSize), so those are overwritten too.
-func overlayPlayoffBracketNames(f *excelize.File, bracketByID map[string]state.BracketMatch, teamSize int, mirror bool) error {
+// entrant row (header + 2). Team brackets repeat the entrant name formulas on the
+// summary row (header + 4 + teamSize, just above the "Victories / Points" row), so
+// those are overwritten too.
+func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
 	sheetName := helper.SheetEliminationMatches
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -1017,7 +1032,7 @@ func overlayPlayoffBracketNames(f *excelize.File, bracketByID map[string]state.B
 			if matchNum <= 0 {
 				continue
 			}
-			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			bm := findBracketMatchByNumber(bracketByNum, matchNum)
 			if bm == nil {
 				continue
 			}
@@ -1034,7 +1049,12 @@ func overlayPlayoffBracketNames(f *excelize.File, bracketByID map[string]state.B
 			setCellStr(f, sheetName, rightCol, entrantRow, rightName)
 
 			if teamSize > 0 {
-				summaryRow := rowIdx + 6 + teamSize // header + 5 + teamSize
+				// The repeated entrant-name formulas sit at header + 4 + teamSize
+				// (rowIdx+5+teamSize), one row ABOVE the "Victories / Points" text
+				// row. printSingleEliminationMatch: header + Red/White + entrant (H+2),
+				// teamSize sub-match rows (H+3..H+2+teamSize), then matchRow += 2 lands
+				// the summary name row at H+4+teamSize.
+				summaryRow := rowIdx + 5 + teamSize
 				setCellStr(f, sheetName, leftCol, summaryRow, leftName)
 				setCellStr(f, sheetName, rightCol, summaryRow, rightName)
 			}
@@ -1109,36 +1129,56 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 	return m
 }
 
+// standingMap keys standings by participant ID (falling back to name for legacy
+// state without UUIDs) so two same-name competitors in one pool don't collapse
+// onto a single entry. Look up with standingKey(player).
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
-		m[ps.Player.Name] = ps
+		m[standingKey(ps.Player)] = ps
 	}
 	return m
 }
 
+// standingKey returns the lookup key for standingMap: the player's UUID when
+// present, else the display name (legacy data). Mirrors the ID-first, name-
+// fallback resolution used by attachPoolMatches.
+func standingKey(p helper.Player) string {
+	if p.ID != "" {
+		return p.ID
+	}
+	return p.Name
+}
+
 // buildBracketMatchIndex indexes all bracket matches by ID.
-func buildBracketMatchIndex(bracket *state.Bracket) map[string]state.BracketMatch {
-	idx := make(map[string]state.BracketMatch)
+// buildBracketMatchIndex maps MatchNumber -> match for O(1) lookup by the printed
+// "Round N - Match N" number (the only way the overlays query it). Byes and other
+// unnumbered matches (MatchNumber 0) are skipped, both because overlays never look
+// up 0 and to avoid collapsing several of them onto a single key.
+func buildBracketMatchIndex(bracket *state.Bracket) map[int]state.BracketMatch {
+	idx := make(map[int]state.BracketMatch)
+	add := func(bm state.BracketMatch) {
+		if bm.MatchNumber > 0 {
+			idx[bm.MatchNumber] = bm
+		}
+	}
 	for _, round := range bracket.Rounds {
 		for _, bm := range round {
-			idx[bm.ID] = bm
+			add(bm)
 		}
 	}
 	if bracket.ThirdPlaceMatch != nil {
-		idx[bracket.ThirdPlaceMatch.ID] = *bracket.ThirdPlaceMatch
+		add(*bracket.ThirdPlaceMatch)
 	}
 	return idx
 }
 
-func findBracketMatchByNumber(idx map[string]state.BracketMatch, matchNum int) *state.BracketMatch {
-	for _, bm := range idx {
-		if bm.MatchNumber == matchNum {
-			bm2 := bm
-			return &bm2
-		}
+func findBracketMatchByNumber(idx map[int]state.BracketMatch, matchNum int) *state.BracketMatch {
+	bm, ok := idx[matchNum]
+	if !ok {
+		return nil
 	}
-	return nil
+	return &bm
 }
 
 // parseRoundMatchLabel parses "Round R - Match M" and returns the match number M

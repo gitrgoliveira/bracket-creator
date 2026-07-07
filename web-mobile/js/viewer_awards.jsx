@@ -124,13 +124,13 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     // Swiss competition resolves consequential ties with a tie-break MATCH
     // before it can complete (individual: InjectTiebreakerMatches; team:
     // daihyosen/chusen; both block completion until decided), so ranks are
-    // strictly sequential and the podium is simply ranks 1/2/3: a single 1st,
-    // 2nd, and 3rd, with NO 4th. This matches the standings table, honors the
-    // tie-break outcome, and satisfies the naginata single-3rd league
+    // sequential (1/2/3 → a single 1st, 2nd, and 3rd, with NO 4th) EXCEPT the
+    // sanctioned kendo joint 3rd: when LeagueTwoThirdPlaces is enabled the
+    // backend legitimately shares rank 3 between two genuinely-tied finishers
+    // (e.g. 3,3), and `place: rank` renders both as 3rd. This matches the
+    // standings table and honors the tie-break outcome / naginata single-3rd
     // convention, instead of the old index-based logic that relabeled the
-    // 4th-ranked finisher as a fabricated joint 3rd. If a backend ever assigns
-    // two rows the same rank (genuine shared place), `place: rank` renders them
-    // as joint places, so no legitimate joint result is lost.
+    // 4th-ranked finisher as a fabricated joint 3rd.
     const podium = [];
     list.forEach((s, i) => {
       const rank = s.rank || i + 1;

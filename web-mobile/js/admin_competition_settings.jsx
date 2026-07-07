@@ -747,23 +747,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 <button
                   className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
                   type="button"
+                  disabled={isDrawReady || isStarted}
                   onClick={() => update("leagueTiebreakTopN", 3)}
                 >Top 3</button>
                 <button
                   className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
                   type="button"
+                  disabled={isDrawReady || isStarted}
                   onClick={() => update("leagueTiebreakTopN", 4)}
                 >Top 4</button>
               </div>
-              <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.</div>
+              <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
             </div>
           )}
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.</div>
+            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
           </div>
         </div>
       )}

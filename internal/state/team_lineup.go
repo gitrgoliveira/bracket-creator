@@ -10,29 +10,19 @@
 // clobbering each other's work, same pattern competitor_status.go
 // uses.
 //
-// Locking is a hard requirement here, not a nicety: the FR-040 contract
-// says a lineup is mutable up until the round's first match starts,
-// then frozen. The "is this round live?" check has to happen INSIDE the
-// lock taken by SetTeamLineup (T128a) or two concurrent writers could
-// both pass an unlocked TOCTOU check and one would overwrite a lineup
-// that the other side had just legitimately frozen.
+// Lineups are always editable, including while a match is running or
+// completed. Scored bouts freeze fighter names in SubMatchResult.SideA/SideB
+// at score-time; the lineup is only read to populate the next unscored bout.
 package state
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"gopkg.in/yaml.v3"
 )
-
-// ErrLineupLocked is returned by SetTeamLineup when the team's lineup
-// for the given round is already frozen (the round's first match went
-// live). Mapped to HTTP 409 by the handler. FR-040.
-var ErrLineupLocked = errors.New("team lineup locked: round has started")
 
 // teamLineupFile is the on-disk YAML shape. Wire-stable: persisted as a
 // sorted slice so file contents are deterministic.
@@ -41,23 +31,6 @@ type teamLineupFile struct {
 }
 
 const teamLineupFilename = "lineups.yaml"
-
-// changesRecordedPosition reports whether `incoming` alters or removes any
-// position that `existing` has already filled (a substitution), as opposed
-// to only adding players to previously-empty positions. Adds are always
-// allowed; only changes to a recorded position are blocked once the round
-// has started (they go through the force path + audit reason).
-func changesRecordedPosition(existing, incoming domain.TeamLineup) bool {
-	for pos, who := range existing.Positions {
-		if who == "" {
-			continue
-		}
-		if nw, ok := incoming.Positions[pos]; !ok || nw != who {
-			return true
-		}
-	}
-	return false
-}
 
 // teamLineupKey is the in-memory map key for a ROUND-scoped lineup. Two
 // lineups for the same team in different rounds coexist (a 5-person team
@@ -166,13 +139,9 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 
 // SetTeamLineup validates and persists a lineup, replacing any prior
 // entry for the same (teamID, round). The caller MUST pass the
-// competition's team size, Validate() enforces the FIK back-fill rule
-// against it.
-//
-// Refuses with ErrLineupLocked when the prior entry has a non-nil
-// LockedAt (the round's first match has started). The check runs
-// INSIDE the per-comp write lock so a concurrent LockTeamLineupsForRound
-// can't race with this set (T128a).
+// competition's team size so ValidatePositions can enforce the FIK
+// position-key rules. Lineups are always editable, including while a
+// match is running or completed.
 //
 // FR-040, FR-041 / R4 / CHK012.
 func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize int) error {
@@ -185,39 +154,17 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-	return s.setTeamLineupLocked(compID, lineup, teamSize, false, s.directWrite)
+	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
 }
 
-// SetTeamLineupForce is SetTeamLineup with the start-of-match freeze bypassed.
-// It is the operator-override path (officiated mode): a table operator who is
-// running behind can still set or correct a team's lineup after the match has
-// started. Lineup validation (FIK position rules) still applies, only the
-// LockedAt / running-match refusal is skipped. Callers must be authenticated
-// operators (the HTTP layer already gates this on the admin password).
-func (s *Store) SetTeamLineupForce(compID string, lineup domain.TeamLineup, teamSize int) error {
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	if err := lineup.ValidatePositions(teamSize); err != nil {
-		return err
-	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-	return s.setTeamLineupLocked(compID, lineup, teamSize, true, s.directWrite)
-}
-
-// setTeamLineupLocked applies the freeze-check + load-mutate-save dance
-// WITHOUT acquiring the per-competition lock. Caller MUST already hold
-// it (typically via WithTransaction).
+// setTeamLineupLocked applies the load-mutate-save dance WITHOUT
+// acquiring the per-competition lock. Caller MUST already hold it
+// (typically via WithTransaction).
 //
-// ValidatePositions() is re-run here so the lock-free path is as safe as
-// the public method, transaction bodies don't have to remember to
-// validate first. (Only position KEYS are checked, not FIK completeness:
-// lineups are entered incrementally while bouts run, so a partial lineup
-// must stay persistable.) The write parameter routes the final save
-// (T211/T212).
-func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, force bool, write writeFn) error {
+// ValidatePositions() is re-run here so the lock-free path is as safe
+// as the public method; transaction bodies don't have to remember to
+// validate first. The write parameter routes the final save (T211/T212).
+func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, teamSize int, write writeFn) error {
 	if err := lineup.ValidatePositions(teamSize); err != nil {
 		return err
 	}
@@ -226,50 +173,6 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 		return err
 	}
 	key := lineupStorageKey(lineup)
-	// force bypasses the start-of-match freeze (operator override, officiated
-	// mode). Lineup validation above still ran, so a forced write can never
-	// persist a structurally invalid lineup.
-	if force {
-		lineup.CompetitionID = compID
-		// Preserve any existing LockedAt stamp so a later non-force write
-		// still refuses, the override is per-write, not a permanent unlock.
-		if existing, ok := current[key]; ok {
-			lineup.LockedAt = existing.LockedAt
-		}
-		current[key] = lineup
-		return s.saveTeamLineupsLocked(compID, current, write)
-	}
-	existing, hasExisting := current[key]
-	// Only a change to an already-recorded position is blocked once the round
-	// has started; adding players to empty slots is always allowed (operators
-	// enter the order at the table while bouts run).
-	if hasExisting && changesRecordedPosition(existing, lineup) {
-		if existing.LockedAt != nil {
-			return ErrLineupLocked
-		}
-		// T128a race-condition guard: a concurrent score-save could have
-		// transitioned this lineup's match to running BETWEEN the caller's
-		// last GET and this PUT, without the lineup file yet recording
-		// LockedAt (the engine wires that as a follow-up). Re-check the
-		// relevant match status inside this lock and refuse the write if it
-		// is no longer mutable. Cheap pure-disk reads, both keyed to the
-		// same compPath we already cleaned.
-		//
-		// Match-scoped (mp-825): check only THIS match's status, so a live
-		// pool match 1 does not block editing the match-2 lineup.
-		// Round-scoped: keep the legacy round-wide check.
-		if lineup.MatchID != "" {
-			if locked, err := s.matchIsRunningOrCompletedLocked(compID, lineup.MatchID); err != nil {
-				return err
-			} else if locked {
-				return ErrLineupLocked
-			}
-		} else if locked, err := s.roundHasRunningOrCompletedMatchLocked(compID, lineup.Round); err != nil {
-			return err
-		} else if locked {
-			return ErrLineupLocked
-		}
-	}
 	// Defensive: the persisted record carries CompetitionID so the file
 	// is self-describing even if the directory is moved.
 	lineup.CompetitionID = compID
@@ -277,99 +180,8 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 	return s.saveTeamLineupsLocked(compID, current, write)
 }
 
-// roundHasRunningOrCompletedMatchLocked is the T128a in-lock check: are
-// any matches for the given round currently running or completed?
-//
-// Caller MUST already hold the per-competition lock. Reads pool-matches
-// and bracket directly from disk (bypassing the cache) so a concurrent
-// engine writer that just released its lock can't leave us reading
-// stale snapshot data.
-//
-// Round mapping:
-//   - Bracket: round N maps to Rounds[N] (zero-indexed; round 0 == first
-//     elimination round).
-//   - Pool matches: there's no explicit round field in pool-matches.csv,
-//     so for now every pool match is treated as round 0. This matches
-//     the engine-side TODO at LockTeamLineupsForRound, multi-round
-//     lineups will need a richer mapping when team-pool-rotation
-//     lands.
-func (s *Store) roundHasRunningOrCompletedMatchLocked(compID string, round int) (bool, error) {
-	// Bracket round-N: scan only that round's slice for any running/
-	// completed match.
-	bracketParsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
-	if err != nil {
-		return false, err
-	}
-	if bracket, ok := bracketParsed.(*Bracket); ok && bracket != nil {
-		if round >= 0 && round < len(bracket.Rounds) {
-			for _, m := range bracket.Rounds[round] {
-				if m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted {
-					return true, nil
-				}
-			}
-		}
-	}
-	// Pool matches collapse to round 0, only check when round == 0.
-	if round == 0 {
-		poolParsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
-		if err != nil {
-			return false, err
-		}
-		poolMatches, _ := poolParsed.([]MatchResult)
-		for _, m := range poolMatches {
-			if m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
-}
-
-// matchIsRunningOrCompletedLocked is the match-scoped twin of
-// roundHasRunningOrCompletedMatchLocked (mp-825): is the single match
-// `matchID` currently running or completed? Used by SetTeamLineup for
-// match-scoped lineups so the freeze check is keyed to the exact match,
-// not the whole round.
-//
-// Caller MUST already hold the per-competition lock. Reads pool-matches
-// and bracket directly from disk (bypassing the cache) for the same
-// stale-snapshot reason as the round variant. A match ID not found in
-// either file is treated as not-yet-started (false), the lineup stays
-// editable until its match actually exists and starts.
-func (s *Store) matchIsRunningOrCompletedLocked(compID, matchID string) (bool, error) {
-	bracketParsed, err := parseBracketFile(s.compPath(compID, "bracket.json"))
-	if err != nil {
-		return false, err
-	}
-	if bracket, ok := bracketParsed.(*Bracket); ok && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, m := range round {
-				if m.ID == matchID {
-					return m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted, nil
-				}
-			}
-		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID == matchID {
-			return bm.Status == MatchStatusRunning || bm.Status == MatchStatusCompleted, nil
-		}
-	}
-	poolParsed, err := parsePoolMatchesFile(s.compPath(compID, "pool-matches.csv"))
-	if err != nil {
-		return false, err
-	}
-	poolMatches, _ := poolParsed.([]MatchResult)
-	for _, m := range poolMatches {
-		if m.ID == matchID {
-			return m.Status == MatchStatusRunning || m.Status == MatchStatusCompleted, nil
-		}
-	}
-	return false, nil
-}
-
 // DeleteTeamLineup removes the lineup for (teamID, round) if present.
-// Same lock-protected refusal as SetTeamLineup when the entry is
-// already locked: deleting a frozen lineup would re-open the round to
-// edits and break the freeze contract.
+// Lineups are always deletable, including while a match is running.
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
@@ -385,28 +197,16 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 		return err
 	}
 	key := teamLineupKey(teamID, round)
-	existing, ok := current[key]
-	if !ok {
+	if _, ok := current[key]; !ok {
 		return nil
-	}
-	if existing.LockedAt != nil {
-		return ErrLineupLocked
-	}
-	// Same TOCTOU guard as SetTeamLineup: refuse the delete if the round
-	// has started before the lock stamp landed, so DELETE can't reopen
-	// a live/completed round's lineup.
-	if running, err := s.roundHasRunningOrCompletedMatchLocked(compID, round); err != nil {
-		return err
-	} else if running {
-		return ErrLineupLocked
 	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
 // DeleteTeamLineupForMatch removes the match-scoped lineup for
-// (teamID, matchID) if present (mp-825). Same lock-protected refusal as
-// the round variant when the entry is already frozen.
+// (teamID, matchID) if present (mp-825). Lineups are always deletable,
+// including while a match is running.
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
@@ -422,134 +222,9 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 		return err
 	}
 	key := teamLineupMatchKey(teamID, matchID)
-	existing, ok := current[key]
-	if !ok {
+	if _, ok := current[key]; !ok {
 		return nil
-	}
-	if existing.LockedAt != nil {
-		return ErrLineupLocked
-	}
-	// Same TOCTOU guard as SetTeamLineup: a concurrent score-save could
-	// have transitioned this match to running/completed before the
-	// follow-up lock stamp landed. Re-check the match status inside the
-	// lock so DELETE can't reopen a live/completed match's lineup.
-	if running, err := s.matchIsRunningOrCompletedLocked(compID, matchID); err != nil {
-		return err
-	} else if running {
-		return ErrLineupLocked
 	}
 	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
-}
-
-// LockTeamLineupForMatch stamps LockedAt on every persisted match-scoped
-// lineup whose MatchID matches `matchID`, i.e. both teams' lineups for
-// that single encounter (mp-825). Round-scoped (legacy) lineups are
-// untouched; those are frozen by LockTeamLineupsForRound. Idempotent:
-// already-locked entries keep their original LockedAt.
-//
-// Called by the engine when a team match transitions to running, in
-// addition to LockTeamLineupsForRound (the two scopes are locked
-// independently during the transition window).
-func (s *Store) LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error {
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	return s.lockTeamLineupForMatchLocked(compID, matchID, lockedAt, s.directWrite)
-}
-
-// lockTeamLineupForMatchLocked is the lock-free body of
-// LockTeamLineupForMatch. Caller MUST already hold the per-comp write
-// lock (typically via WithTransaction). Mirrors
-// lockTeamLineupsForRoundLocked so the tx-aware score path can freeze
-// under the same lock acquire as the score write.
-func (s *Store) lockTeamLineupForMatchLocked(compID, matchID string, lockedAt time.Time, write writeFn) error {
-	if matchID == "" {
-		return nil
-	}
-	current, err := s.loadTeamLineupsLocked(compID)
-	if err != nil {
-		return err
-	}
-	changed := false
-	for k, l := range current {
-		if l.MatchID != matchID {
-			continue
-		}
-		if l.LockedAt != nil {
-			continue
-		}
-		t := lockedAt
-		l.LockedAt = &t
-		current[k] = l
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return s.saveTeamLineupsLocked(compID, current, write)
-}
-
-// LockTeamLineupsForRound stamps LockedAt on every persisted lineup
-// whose Round matches `round`. Idempotent: lineups already locked keep
-// their original LockedAt (the first-live-match time stays canonical;
-// re-running this method on the same round is a no-op for those
-// records).
-//
-// Called by the engine when a team match transitions to running (T128).
-// Returns nil when no lineups exist for this competition or this round.
-func (s *Store) LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error {
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	return s.lockTeamLineupsForRoundLocked(compID, round, lockedAt, s.directWrite)
-}
-
-// lockTeamLineupsForRoundLocked is the lock-free body of
-// LockTeamLineupsForRound. Caller MUST already hold the per-comp
-// write lock (typically via WithTransaction).
-//
-// Used by the tx-aware score / decision paths (T156) so the lineup
-// freeze runs under the same lock acquire as the score write, without
-// this variant the public LockTeamLineupsForRound would deadlock when
-// called from inside a WithTransaction closure (sync.RWMutex is
-// non-recursive). The write parameter routes the save (T211/T212).
-func (s *Store) lockTeamLineupsForRoundLocked(compID string, round int, lockedAt time.Time, write writeFn) error {
-	current, err := s.loadTeamLineupsLocked(compID)
-	if err != nil {
-		return err
-	}
-	changed := false
-	for k, l := range current {
-		// Match-scoped lineups (mp-825) are frozen per-match by
-		// LockTeamLineupForMatch, never by the round sweep, otherwise a
-		// live round-0 pool match would freeze every match-scoped pool
-		// lineup (Round defaults to 0 when unset), re-introducing the
-		// exact bug this change fixes.
-		if l.MatchID != "" {
-			continue
-		}
-		if l.Round != round {
-			continue
-		}
-		if l.LockedAt != nil {
-			continue
-		}
-		t := lockedAt
-		l.LockedAt = &t
-		current[k] = l
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return s.saveTeamLineupsLocked(compID, current, write)
 }

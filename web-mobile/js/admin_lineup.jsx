@@ -2,18 +2,15 @@
 //
 // Teams pick which player occupies each named position (Senpo, Jiho,
 // Chuken, Fukusho, Taisho for 5-person teams; numeric "1"..."N" for
-// other sizes) before the round's first match starts. Once the
-// server stamps LockedAt the form locks; a "Revise" affordance reopens
-// it locally as long as the current round is finished AND the next
-// round hasn't started yet.
+// other sizes). Lineups are always editable; operators can change them
+// at any time before or during a match.
 //
 // Wire shape (matches domain.TeamLineup):
 //   {
 //     teamId: "team-1",
 //     competitionId: "...",
 //     round: 0,
-//     positions: { senpo: "p_001", ... },
-//     lockedAt: null | ISO-string
+//     positions: { senpo: "p_001", ... }
 //   }
 //
 // The team's roster lives in the competition's player object: for team
@@ -97,27 +94,12 @@ function teamIdOf(team) {
   return team?.id || team?.ID || team?.name || team?.Name || "";
 }
 
-// "Revise" is enabled when the current round's matches are all completed
-// AND the next round hasn't started yet. Uses m.roundIndex (0-based
-// backend index stamped by compMatches) for precise round filtering.
-function canRevise(competition, round) {
-  if (!competition || !window.compMatches) return false;
-  const all = window.compMatches(competition);
-  const currentMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round);
-  const nextMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round + 1);
-  if (!currentMatches.length) return false;
-  const inProgressNext = nextMatches.some(m => m.status === "running" || m.status === "completed");
-  if (inProgressNext) return false;
-  return currentMatches.every(m => m.status === "completed");
-}
-
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
   const roster = useMemoA(() => rosterFor(team), [team]);
   const teamId = teamIdOf(team);
   const compId = comp?.id || "";
-  const reviseEligible = canRevise(comp, round);
 
   // Lineup state: { position-key -> player name (or member ID once
   // members are first-class). The backend stores player IDs but our
@@ -128,11 +110,9 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     positions.forEach(p => { init[p.key] = ""; });
     return init;
   });
-  const [lockedAt, setLockedAt] = useStateA(null);
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [error, setError] = useStateA("");
-  const [revising, setRevising] = useStateA(false);
 
   // Load any existing lineup for (compId, teamId, round). 404 → fresh
   // form (server returns 404 when no lineup has been submitted yet,
@@ -153,7 +133,6 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             next[p.key] = (lineup.positions || {})[p.key] || "";
           });
           setValues(next);
-          setLockedAt(lineup.lockedAt || null);
         }
       } catch (e) {
         if (!cancelled) setError(e?.message || "Failed to load lineup");
@@ -163,8 +142,6 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     })();
     return () => { cancelled = true; };
   }, [compId, teamId, round]);
-
-  const isLocked = !!lockedAt && !revising;
 
   // Autocomplete suggestions: the registered roster (if any) plus names already
   // typed into this lineup, so a name entered once is reusable across positions.
@@ -192,21 +169,12 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         if (typeof showToast === "function") showToast("Offline: lineup not saved yet, will retry");
         return;
       }
-      setLockedAt(updated.lockedAt || null);
-      setRevising(false);
       if (typeof showToast === "function") showToast("Lineup saved");
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
     } finally {
       setSaving(false);
     }
-  };
-
-  const onRevise = () => {
-    setError("");
-    // Local-only flip: the server will accept the next PUT only if
-    // the round's first match hasn't started yet (same 409 path).
-    setRevising(true);
   };
 
   if (loading) {
@@ -229,11 +197,6 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-          {isLocked && (
-            <span className="viewer__admin-pill" style={{ fontSize: 11, fontWeight: 700, background: "var(--bg-2, #fafafa)", border: "1px solid var(--line, #ddd)", padding: "2px 8px", borderRadius: 4 }}>
-              🔒 Locked
-            </span>
-          )}
           {onClose && (
             <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>✕ Close</button>
           )}
@@ -259,7 +222,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                 value={values[p.key] || ""}
                 roster={suggestions}
                 ariaLabel={`${p.label} player`}
-                disabled={isLocked || saving}
+                disabled={saving}
                 onSelect={(name) => setValues(v => ({ ...v, [p.key]: name }))}
               />
             </label>
@@ -272,26 +235,13 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
-          {isLocked ? (
-            <button type="button"
-              className="btn btn--primary"
-              onClick={onRevise}
-              disabled={!reviseEligible}
-              title={reviseEligible
-                ? "Revise lineup (allowed before the next round starts)"
-                : "Cannot revise: next round has already begun"}
-            >
-              Revise
-            </button>
-          ) : (
-            <button type="button"
-              className="btn btn--primary"
-              onClick={save}
-              disabled={saving}
-            >
-              {saving ? "Saving…" : "Save lineup"}
-            </button>
-          )}
+          <button type="button"
+            className="btn btn--primary"
+            onClick={save}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Save lineup"}
+          </button>
         </div>
       </div>
     </div>
@@ -375,7 +325,7 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf };
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf };

@@ -103,7 +103,6 @@ type StoreTx interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
-	SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 
 	// UpdatePoolMatchByID is the tx-aware twin of
@@ -111,22 +110,13 @@ type StoreTx interface {
 	// only difference is that it skips re-acquiring the per-comp lock
 	// (already held by WithTransaction). Score / decision handlers (T156)
 	// use this to keep their match-result write under the SAME lock
-	// acquire as the competitor-status + lineup-lock side effects.
+	// acquire as the competitor-status side effects.
 	UpdatePoolMatchByID(compID, matchID string, mutate func(*MatchResult)) (bool, error)
 	// UpdateBracket is the tx-aware twin of Store.UpdateBracket. The
 	// mutate closure may modify the bracket arbitrarily and signal "match
 	// not found" by returning an error (typically wrapping the engine's
 	// match-not-found sentinel, see engine.withBracketMatch).
 	UpdateBracket(compID string, mutate func(*Bracket) error) error
-	// LockTeamLineupsForRound is the tx-aware twin of
-	// Store.LockTeamLineupsForRound. Used by the score-path tx body
-	// (T128 / T156) so the lineup freeze happens under the same lock
-	// acquire as the score write.
-	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
-	// LockTeamLineupForMatch is the tx-aware twin of
-	// Store.LockTeamLineupForMatch (mp-825). Freezes the match-scoped
-	// lineups for a single encounter under the score-write lock.
-	LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error
 	// UpdateParticipant is the tx-aware twin of
 	// Store.updateParticipantNoLock. Applies transform to the target
 	// participant while the transaction lock is held, so the caller
@@ -520,17 +510,6 @@ func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, 
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
-	return t.setTeamLineup(compID, l, teamSize, false)
-}
-
-// SetTeamLineupForce is the in-tx twin of Store.SetTeamLineupForce: it bypasses
-// the start-of-match freeze (operator override, officiated mode) while still
-// validating the lineup. See that method for the rationale.
-func (t *storeTx) SetTeamLineupForce(compID string, l domain.TeamLineup, teamSize int) error {
-	return t.setTeamLineup(compID, l, teamSize, true)
-}
-
-func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int, force bool) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
@@ -549,45 +528,11 @@ func (t *storeTx) setTeamLineup(compID string, l domain.TeamLineup, teamSize int
 			return perr
 		}
 		key := lineupStorageKey(l)
-		if existing, present := current[key]; present {
-			if force {
-				// Preserve the stamp under a forced write so a later
-				// non-force write still refuses (per-write override).
-				l.LockedAt = existing.LockedAt
-			} else if changesRecordedPosition(existing, l) {
-				// A change to an already-recorded position is blocked once the
-				// match/round has gone live (adds to empty slots are always
-				// allowed). Mirrors Store.setTeamLineupLocked exactly.
-				if existing.LockedAt != nil {
-					return ErrLineupLocked
-				}
-				// T128a TOCTOU guard: a concurrent score-save could have
-				// transitioned this lineup's match to running BETWEEN the
-				// caller's GET and this write, before the engine persisted
-				// LockedAt. The handler checks match status upstream on the
-				// FORCE path only, the non-force path does not, so re-check
-				// here under the held per-comp lock and refuse if the match is
-				// no longer mutable. Match-scoped when MatchID is set (a live
-				// match must not block a sibling match's lineup), else
-				// round-scoped (legacy).
-				if l.MatchID != "" {
-					if locked, lerr := t.store.matchIsRunningOrCompletedLocked(compID, l.MatchID); lerr != nil {
-						return lerr
-					} else if locked {
-						return ErrLineupLocked
-					}
-				} else if locked, lerr := t.store.roundHasRunningOrCompletedMatchLocked(compID, l.Round); lerr != nil {
-					return lerr
-				} else if locked {
-					return ErrLineupLocked
-				}
-			}
-		}
 		l.CompetitionID = compID
 		current[key] = l
 		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize, force, t.txWriteFn())
+	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
 }
 
 func (t *storeTx) LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error) {
@@ -659,88 +604,4 @@ func (t *storeTx) UpdateBracket(compID string, mutate func(*Bracket) error) erro
 		return t.store.saveBracketLocked(compID, b, t.txWriteFn())
 	}
 	return t.store.updateBracketLocked(compID, mutate, t.txWriteFn())
-}
-
-// LockTeamLineupsForRound dispatches to the lock-free body of
-// Store.LockTeamLineupsForRound. Caller (WithTransaction) is
-// responsible for the per-comp lock.
-//
-// Read-your-own-writes: if lineups.yaml has been staged earlier in
-// this tx, this load + lock + save sees the staged version, not the
-// stale on-disk version.
-func (t *storeTx) LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error {
-	if err := t.checkCompID(compID); err != nil {
-		return err
-	}
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		current, perr := parseTeamLineupsBytes(pending)
-		if perr != nil {
-			return perr
-		}
-		changed := false
-		for k, l := range current {
-			// Skip match-scoped entries, see lockTeamLineupsForRoundLocked.
-			if l.MatchID != "" {
-				continue
-			}
-			if l.Round != round {
-				continue
-			}
-			if l.LockedAt != nil {
-				continue
-			}
-			ts := lockedAt
-			l.LockedAt = &ts
-			current[k] = l
-			changed = true
-		}
-		if !changed {
-			return nil
-		}
-		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
-	}
-	return t.store.lockTeamLineupsForRoundLocked(compID, round, lockedAt, t.txWriteFn())
-}
-
-// LockTeamLineupForMatch dispatches to the lock-free body of
-// Store.LockTeamLineupForMatch (mp-825). Caller (WithTransaction) holds
-// the per-comp lock. Read-your-own-writes: if lineups.yaml is staged in
-// this tx, this load + lock + save sees the staged version.
-func (t *storeTx) LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error {
-	if err := t.checkCompID(compID); err != nil {
-		return err
-	}
-	if err := ValidateCompetitionID(compID); err != nil {
-		return err
-	}
-	if matchID == "" {
-		return nil
-	}
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		current, perr := parseTeamLineupsBytes(pending)
-		if perr != nil {
-			return perr
-		}
-		changed := false
-		for k, l := range current {
-			if l.MatchID != matchID {
-				continue
-			}
-			if l.LockedAt != nil {
-				continue
-			}
-			ts := lockedAt
-			l.LockedAt = &ts
-			current[k] = l
-			changed = true
-		}
-		if !changed {
-			return nil
-		}
-		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
-	}
-	return t.store.lockTeamLineupForMatchLocked(compID, matchID, lockedAt, t.txWriteFn())
 }

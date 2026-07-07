@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -272,33 +271,6 @@ func TestUpdateTournamentChanged_ParseFailureFallback(t *testing.T) {
 	assert.True(t, sawDefault, "transform must receive default Tournament when front-matter is corrupt")
 }
 
-// TestSetTeamLineup_BracketParseErrorFromRoundCheck verifies that a malformed
-// bracket.json propagates as error from roundHasRunningOrCompletedMatchLocked
-// when the write CHANGES an already-recorded position (triggering the bracket
-// parse). A NEW lineup (no prior entry) skips the bracket check entirely.
-// the parse error is only triggered on a change-to-recorded path.
-func TestSetTeamLineup_BracketParseErrorFromRoundCheck(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-	compID := "lineup-bad-bracket"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	// Seed an initial (valid) lineup first, then corrupt the bracket.json.
-	require.NoError(t, store.SetTeamLineup(compID, fiveStarter("team-alpha", 0), 5))
-
-	// Write malformed bracket.json so parseBracketFile fails.
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "competitions", compID, "bracket.json"),
-		[]byte("{not valid json"), 0o600))
-
-	// Now try to CHANGE a recorded position, this triggers the bracket parse.
-	changed := fiveStarter("team-alpha", 0)
-	changed.Positions[domain.PosJiho] = "p2-changed"
-	err = store.SetTeamLineup(compID, changed, 5)
-	assert.Error(t, err, "malformed bracket.json must propagate as error when changing a recorded position")
-}
-
 // TestLoadTeamLineups_MalformedYAML covers the loadCached error path in
 // LoadTeamLineups by writing invalid YAML to the lineups file.
 func TestLoadTeamLineups_MalformedYAML(t *testing.T) {
@@ -313,23 +285,6 @@ func TestLoadTeamLineups_MalformedYAML(t *testing.T) {
 		[]byte(":\t:bad yaml:"), 0o600))
 
 	_, err = store.LoadTeamLineups(compID)
-	assert.Error(t, err)
-}
-
-// TestLockTeamLineupsForRound_MalformedLineupFile verifies that a malformed
-// lineups YAML file propagates an error from LockTeamLineupsForRound.
-func TestLockTeamLineupsForRound_MalformedLineupFile(t *testing.T) {
-	dir := t.TempDir()
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-	compID := "lock-bad"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
-
-	require.NoError(t, os.WriteFile(
-		filepath.Join(dir, "competitions", compID, teamLineupFilename),
-		[]byte(":\t:bad yaml:"), 0o600))
-
-	err = store.LockTeamLineupsForRound(compID, 0, time.Now())
 	assert.Error(t, err)
 }
 
@@ -369,15 +324,6 @@ func TestCopyTournament_Nil(t *testing.T) {
 	store, err := NewStore(t.TempDir())
 	require.NoError(t, err)
 	assert.Nil(t, store.copyTournament(nil))
-}
-
-// TestLockTeamLineupsForRound_InvalidCompID covers the ValidateCompetitionID
-// error branch in LockTeamLineupsForRound.
-func TestLockTeamLineupsForRound_InvalidCompID(t *testing.T) {
-	store, err := NewStore(t.TempDir())
-	require.NoError(t, err)
-	err = store.LockTeamLineupsForRound("", 0, time.Now())
-	assert.Error(t, err)
 }
 
 // TestLoadTeamLineups_InvalidCompID covers the ValidateCompetitionID error

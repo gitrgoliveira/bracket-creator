@@ -23,7 +23,7 @@ const isNonPublicOrigin = window.isNonPublicOrigin || (() => false);
 
 // Returns the final competition name, trimming the raw user input before
 // the empty-check so a whitespace-only string ("   ") falls through to the
-// kind/gender-based default instead of being treated as a valid name.
+// kind-based default instead of being treated as a valid name.
 //
 // The bug shape without this trim: `name || default` where name=" " is
 // truthy → creates a comp with name=" " → backend trims `comp.Name` on
@@ -34,12 +34,10 @@ const isNonPublicOrigin = window.isNonPublicOrigin || (() => false);
 //
 // Defaults match the labels users see in the dashboard's "team event" and
 // "individual event" pickers.
-function deriveCompetitionName(rawName, kind, gender) {
+function deriveCompetitionName(rawName, kind) {
   const trimmed = (rawName || "").trim();
   if (trimmed) return trimmed;
-  if (kind === "team") return gender === "F" ? "Women's Teams" : "Men's Teams";
-  if (gender === "F") return "Women's Individual";
-  if (gender === "M") return "Men's Individual";
+  if (kind === "team") return "Teams";
   return "Individual";
 }
 
@@ -661,7 +659,6 @@ const MIN_STACK_BLOCK_MIN = 30;
 function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
   const [kind, setKind] = useStateA("individual");
-  const [gender, setGender] = useStateA("M"); // for individual: M/F/X
   const [format, setFormat] = useStateA("playoffs");
   // FR-050 / T044: per-phase round-robin shape selector. Only meaningful
   // when the format runs pool play ("mixed", "league"); default
@@ -738,7 +735,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // never bypasses the default-fallback (truthy strings of spaces would
     // create a backend-trimmed empty name). See the helper at the top of
     // this file for the full rationale + tests.
-    const finalName = deriveCompetitionName(name, kind, gender);
+    const finalName = deriveCompetitionName(name, kind);
 
     const exists = (tournament.competitions || []).some(cc => cc.name.toLowerCase() === finalName.toLowerCase());
     if (exists) {
@@ -815,7 +812,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     const c = window.buildCompetition({
       id,
       name: finalName,
-      kind, gender,
+      kind,
       format,
       // New competitions start with an empty roster: participants (or a
       // sample roster) are added in the Participants view, not here.
@@ -888,16 +885,6 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <button className={`radio-pill ${kind === "individual" ? "is-active" : ""}`} type="button" onClick={() => setKind("individual")}>Individual</button>
               <button className={`radio-pill ${kind === "team" ? "is-active" : ""}`} type="button" onClick={() => setKind("team")}>Team</button>
             </div>
-          </div>
-
-          <div className="field">
-            <label className="field__label">Category (optional)</label>
-            <div className="radio-group">
-              <button className={`radio-pill ${gender === "M" ? "is-active" : ""}`} type="button" onClick={() => setGender("M")}>Men</button>
-              <button className={`radio-pill ${gender === "F" ? "is-active" : ""}`} type="button" onClick={() => setGender("F")}>Women</button>
-              <button className={`radio-pill ${gender === "X" ? "is-active" : ""}`} type="button" onClick={() => setGender("X")}>Mixed / Other</button>
-            </div>
-            <div className="field__hint">Used for the display label and in name suggestions. You can change later.</div>
           </div>
 
           <div className="row">

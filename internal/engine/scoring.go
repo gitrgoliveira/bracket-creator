@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -26,6 +25,12 @@ var errMatchNotFound = errors.New("match not found")
 // rows (a stored Pool E bout overwritten with competitors from other pools).
 // Handlers map this to HTTP 409.
 var ErrMatchSideMismatch = errors.New("match side mismatch: score payload competitors differ from the stored pairing")
+
+// ErrMatchAlreadyCompleted is returned by RevertMatchToQueue when the target
+// match has already been completed. A completed bout has a recorded result
+// that the operator must correct via the score editor, not discarded by a
+// revert. Handlers map this to HTTP 409.
+var ErrMatchAlreadyCompleted = errors.New("match already completed: use the score editor to correct a completed bout")
 
 // reconcileSides folds the stored pairing into a score payload's result.
 // An empty payload side is backfilled from the stored side (e.g. a payload
@@ -301,7 +306,6 @@ func (e *Engine) writeMatchResult(compId string, matchId string, result *state.M
 	if _, err := e.recordIneligibilityFromDecision(compId, matchId, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 	}
-	e.maybeLockTeamLineupsForRound(compId, result)
 	return nil
 }
 
@@ -407,63 +411,7 @@ func (e *Engine) RecordMatchResultWithIneligibility(compId string, matchId strin
 		log.Printf("engine: recordIneligibilityFromDecision compId=%s matchId=%s: %v", compId, matchId, err)
 		return nil, nil
 	}
-	// T128, same lineup-lock side effect as RecordMatchResult above.
-	e.maybeLockTeamLineupsForRound(compId, result)
 	return status, nil
-}
-
-// maybeLockTeamLineupsForRound freezes any persisted team lineups for
-// the round this match belongs to, but only when this update marks
-// the match as live (running or completed). Side effect only, any
-// store error is logged and swallowed so the score-recording isn't
-// retried (which would double-record the score; same rationale as
-// recordIneligibilityFromDecision above).
-//
-// TODO(T128): round mapping. The match's "round" is currently always
-// treated as 0 because:
-//   - pool matches have no round field (every pool match is round 0
-//     by convention); and
-//   - bracket-round inference requires loading the bracket and
-//     scanning Rounds[] for matchId, which is overhead we don't
-//     pay until multi-round lineups are actually in use.
-//
-// Once team-pool-rotation or per-round elimination lineups land, this
-// helper grows the bracket-scan lookup. The store-side
-// roundHasRunningOrCompletedMatchLocked in state/team_lineup.go already
-// handles per-round bracket inspection, the gap is just the
-// matchId→round mapping here.
-//
-// FR-040.
-func (e *Engine) maybeLockTeamLineupsForRound(compId string, result *state.MatchResult) {
-	if result == nil {
-		return
-	}
-	// Only act on the running/completed transition, a "scheduled"
-	// update (e.g. time-only adjust) must NOT freeze lineups.
-	if result.Status != state.MatchStatusRunning && result.Status != state.MatchStatusCompleted {
-		return
-	}
-	// Cheap guard: skip the file write entirely for non-team
-	// competitions. A non-team comp can't have lineups, so calling
-	// LockTeamLineupsForRound would always be a no-op file read.
-	comp, err := e.store.LoadCompetition(compId)
-	if err != nil || comp == nil || comp.TeamSize <= 0 {
-		return
-	}
-	now := time.Now().UTC()
-	// Match-scoped freeze (mp-825): lock only THIS encounter's lineups,
-	// so a live pool match 1 does not freeze the match-2 lineup.
-	if result.ID != "" {
-		if err := e.store.LockTeamLineupForMatch(compId, result.ID, now); err != nil {
-			log.Printf("engine: LockTeamLineupForMatch compId=%s matchId=%s: %v", compId, result.ID, err)
-		}
-	}
-	// Round-scoped freeze (legacy): still applies to round-keyed lineups
-	// (bracket rounds, pre-mp-825 data). Skips match-scoped entries.
-	const round = 0
-	if err := e.store.LockTeamLineupsForRound(compId, round, now); err != nil {
-		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compId, round, err)
-	}
 }
 
 func (e *Engine) CalculatePoolStandings(compId string) (map[string][]state.PlayerStanding, error) {
@@ -1292,4 +1240,98 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	return e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
 		m.ScheduledAt = scheduledAt
 	})
+}
+
+// RevertMatchToQueue reverts a running match back to the scheduled (queued)
+// state, clearing any partial score so the bout can be restarted correctly.
+// It is idempotent for already-scheduled matches (no-op success). Completed
+// matches return ErrMatchAlreadyCompleted (HTTP 409); the operator must use
+// the score editor to correct a recorded result instead.
+//
+// Modelled on UpdateMatchCourt: pool-match first, bracket-match fallback,
+// using the same atomic withPoolMatch/withBracketMatch primitives so the
+// entire load+mutate+save runs under the per-competition lock.
+func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
+	var alreadyCompleted bool
+
+	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
+		if r.Status == state.MatchStatusCompleted {
+			alreadyCompleted = true
+			return
+		}
+		// Any non-completed match (running, or an already-scheduled match that
+		// still carries stale score/audit metadata from an earlier partial
+		// write) is normalised to a CLEAN scheduled match. Idempotent: a
+		// pristine scheduled match is left effectively unchanged.
+		r.Status = state.MatchStatusScheduled
+		r.Winner = ""
+		r.WinnerID = ""
+		r.IpponsA = nil
+		r.IpponsB = nil
+		r.HansokuA = 0
+		r.HansokuB = 0
+		r.Decision = ""
+		r.DecisionBy = ""
+		r.DecisionReason = ""
+		r.Encho = nil
+		r.SubResults = nil
+		r.FlagsA = 0
+		r.FlagsB = 0
+		r.DecidedByHantei = nil
+		r.ResultSource = ""
+		r.CorrectionReason = ""
+		// Rep-bout nominations name who fought a pool/league daihyosen; they are
+		// result data for that supplementary bout, so a requeued match must not
+		// keep them (bracket matches have no rep fields).
+		r.RepPlayerA = ""
+		r.RepPlayerB = ""
+	})
+	if err == nil {
+		if alreadyCompleted {
+			return ErrMatchAlreadyCompleted
+		}
+		return nil
+	}
+	if !errors.Is(err, errMatchNotFound) {
+		return err
+	}
+
+	// Pool match not found; try the elimination bracket. alreadyCompleted is
+	// still false here (the pool closure never ran on the errMatchNotFound path).
+	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
+		if m.Status == state.MatchStatusCompleted {
+			alreadyCompleted = true
+			return
+		}
+		// Same contract as the pool path: normalise any non-completed match to
+		// a clean scheduled match, clearing stale score/provenance/audit fields
+		// even if it was already scheduled.
+		m.Status = state.MatchStatusScheduled
+		m.Winner = ""
+		m.ScoreA = ""
+		m.ScoreB = ""
+		m.Decision = ""
+		m.DecisionBy = ""
+		m.DecisionReason = ""
+		m.Encho = nil
+		m.SubResults = nil
+		m.FlagsA = 0
+		m.FlagsB = 0
+		m.DecidedByHantei = false
+		m.IsOverridden = false
+		m.ResultSource = ""
+		m.CorrectionReason = ""
+	}); err != nil {
+		// Neither pool nor bracket holds this match: surface a typed
+		// NotFoundError so the handler can answer 404 (a fabricated match id
+		// is a client error, not a server fault).
+		if errors.Is(err, errMatchNotFound) {
+			return notFoundErrorf("match %s not found in competition %s", matchId, compId)
+		}
+		return err
+	}
+	if alreadyCompleted {
+		return ErrMatchAlreadyCompleted
+	}
+	return nil
 }

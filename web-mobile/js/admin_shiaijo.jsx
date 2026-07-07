@@ -1163,24 +1163,42 @@ function MatchSides({ m, large }) {
     );
 }
 
+// Standings ordering is decided by competition FORMAT, not by surface
+// (mp-ahu6): leagues are always rank-ordered (window.LeagueStandingsViewer),
+// pools are always draw-ordered with rank as a badge (window.PoolsViewer) -
+// same split as the public viewer and admin Pools tab. Exported so the
+// format->viewer decision is independently testable and this invariant
+// cannot silently regress again.
+export function shiaijoStandingsKind(match) {
+    return match && match.compFormat === "league" ? "league" : "pool";
+}
+
 // Collapsible context for the match being scored:
-//   • pool phase  → live standings + results for the current pool (the shared
-//     read-only window.PoolsViewer), plus which pool is next on this court.
+//   • pool phase  → live standings + results for the current pool, routed by
+//     shiaijoStandingsKind. Pools also show which pool is next on this
+//     court; leagues have no "next pool" concept.
 //   • bracket phase → a bracket fragment with the current match highlighted.
 function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
     const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
-    const isLeagueComp = match.compFormat === "league";
+    const isLeagueComp = shiaijoStandingsKind(match) === "league";
     const phaseLabel = isPool
         ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
         : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
+    const LeagueStandingsViewer = window.LeagueStandingsViewer;
 
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
     // matches change (a scored bout), so standings stay current. poolSig is the
-    // change key; it's cheap and keyed only to this comp.
+    // change key; it's cheap and keyed only to this comp. Leagues skip this
+    // fetch entirely (Copilot, PR #333): LeagueStandingsViewer fetches its own
+    // standings via window.API.leagueStandings(c.id) and only needs
+    // `comp`/`comp.poolMatches`, both already on the court feed - waiting on
+    // fetchCompetitionDetails here would be an unneeded dependency that could
+    // stall or blank the league panel if that endpoint (unlike the dedicated
+    // league-standings one) has a transient failure.
     const poolSig = useMemoSh(() => {
         const pms = (comp && comp.poolMatches) || [];
         return pms.map((m) => `${m.id}:${m.status}:${m.scoreA || ""}:${m.scoreB || ""}`).join("|");
@@ -1188,7 +1206,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     const [detail, setDetail] = useStateSh(null);
     const [detailErr, setDetailErr] = useStateSh(false);
     useEffectSh(() => {
-        if (!isPool || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
+        if (!isPool || isLeagueComp || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
             setDetail(null);
             return;
         }
@@ -1198,7 +1216,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             .then((d) => { if (!cancelled) setDetail(d); })
             .catch(() => { if (!cancelled) { setDetail(null); setDetailErr(true); } });
         return () => { cancelled = true; };
-    }, [match.compId, isPool, poolSig]);
+    }, [match.compId, isPool, isLeagueComp, poolSig]);
 
     const currentPool = detail && Array.isArray(detail.pools)
         ? detail.pools.find((p) => p.poolName === match.poolName)
@@ -1212,21 +1230,16 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             {open && (
                 <div className="shiaijo-context__body">
                     {isPool ? (
-                        <>
-                            {!isLeagueComp && (
-                                <div className="shiaijo-context__next">
-                                    {nextPoolName
-                                        ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
-                                        : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
-                                </div>
-                            )}
-                            {PoolsViewer && currentPool ? (
+                        isLeagueComp ? (
+                            // Leagues are always RANK-ordered (mp-ahu6): never fall
+                            // through to the draw-order PoolsViewer here. Renders off
+                            // `comp` alone (see the poolSig effect above for why) -
+                            // LeagueStandingsViewer fetches its own standings.
+                            LeagueStandingsViewer && comp ? (
                                 <div className="shiaijo-context__pools">
-                                    <PoolsViewer
-                                        pools={[currentPool]}
-                                        standings={detail.standings}
-                                        poolMatches={detail.poolMatches}
-                                        competition={comp || detail}
+                                    <LeagueStandingsViewer
+                                        competition={comp}
+                                        poolMatches={comp.poolMatches}
                                         tweaks={tweaks || { showDojo: true }}
                                         onMatchClick={null}
                                         highlightPlayers={[]}
@@ -1234,12 +1247,37 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                 </div>
                             ) : (
                                 <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                                    {detailErr
-                                        ? "Couldn't load standings: they'll appear once the connection recovers."
-                                        : "Loading standings…"}
+                                    Loading standings…
                                 </p>
-                            )}
-                        </>
+                            )
+                        ) : (
+                            <>
+                                <div className="shiaijo-context__next">
+                                    {nextPoolName
+                                        ? <><span className="shiaijo-context__next-label">Next pool on Shiaijo {court}:</span> <strong>{nextPoolName}</strong></>
+                                        : <span className="shiaijo-context__next-label">Last pool on Shiaijo {court}.</span>}
+                                </div>
+                                {PoolsViewer && currentPool ? (
+                                    <div className="shiaijo-context__pools">
+                                        <PoolsViewer
+                                            pools={[currentPool]}
+                                            standings={detail.standings}
+                                            poolMatches={detail.poolMatches}
+                                            competition={comp || detail}
+                                            tweaks={tweaks || { showDojo: true }}
+                                            onMatchClick={null}
+                                            highlightPlayers={[]}
+                                        />
+                                    </div>
+                                ) : (
+                                    <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
+                                        {detailErr
+                                            ? "Couldn't load standings: they'll appear once the connection recovers."
+                                            : "Loading standings…"}
+                                    </p>
+                                )}
+                            </>
+                        )
                     ) : (match.phase === "bracket" && BracketTree && bracket && bracket.rounds) ? (
                         <div className="shiaijo-context__bracket">
                             <BracketTree rounds={bracket.rounds} highlightId={match.id} />

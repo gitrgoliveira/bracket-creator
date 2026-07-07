@@ -31,6 +31,14 @@ import (
 // be a 500 so a real failure is not misreported as a bad request. compID is
 // already validated upstream by requireValidCompID, so ValidateCompetitionID
 // cannot be the source here.
+//
+// CONTRACT: this classification relies on the "team_lineup:" prefix being at
+// position 0 of the message. The store path (SetTeamLineup -> setTeamLineupLocked
+// and the domain ValidatePositions in internal/domain/team_lineup.go) returns
+// these validation errors UNWRAPPED (plain sentinels / %q-%v fmt.Errorf, never
+// %w). Do NOT wrap a lineup validation error with added context before it reaches
+// here, or it would fall through to 500. If wrapping becomes necessary, switch
+// this to a typed error checked via errors.As instead of a prefix match.
 func lineupSetStatus(err error) int {
 	if strings.HasPrefix(err.Error(), "team_lineup:") {
 		return http.StatusBadRequest

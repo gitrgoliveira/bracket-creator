@@ -75,7 +75,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     global.window.compMatches = () => [];
     global.window.API = {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
-      putTeamLineup: vi.fn().mockResolvedValue({ lockedAt: null }),
+      putTeamLineup: vi.fn().mockResolvedValue({}),
     };
     // mergeRosterWithAssigned must be available for the suggestions computation
     // in AdminLineup (it reads window.AdminLineupHelpers only in admin_schedule_lineup;

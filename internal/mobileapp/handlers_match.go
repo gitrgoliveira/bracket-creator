@@ -1081,9 +1081,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// that raced with completion). Applies to ALL callers (the
 				// self-reported finalized guard above only covers anonymous mode).
 				// Empty-status writes are legitimate completions/corrections and
-				// are not caught here. The dedicated revert-to-queue endpoint is
-				// the only sanctioned path from completed back to scheduled, and
-				// it rejects completed matches at its own gate.
+				// are not caught here. There is no sanctioned way to send a
+				// COMPLETED match back to the queue: the revert-to-queue endpoint
+				// reverts only a running match and rejects a completed one (409).
+				// A finished result is corrected via the score editor, not requeued.
 				// No-op it as a stale write so the client's flush discards it.
 				if (result.Status == state.MatchStatusRunning || result.Status == state.MatchStatusScheduled) &&
 					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
@@ -1135,11 +1136,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if staleAfterComplete {
-			// The rev-guard above stored this running write's session+rev into
-			// runningRevStore (LoadOrStore) before we discovered, inside the
-			// transaction, that the match is already completed. Drop the entry now,
-			// no future running write can legitimately supersede a completed
-			// match, so retaining it would leak map memory.
+			// If this was a running-status write with a Rev/RevSession, the
+			// rev-guard above stored a high-water mark in runningRevStore
+			// (LoadOrStore) before we discovered, inside the transaction, that the
+			// match is already completed; drop it now. For a scheduled-status
+			// write the rev-guard never ran, so this Delete is a safe no-op
+			// (sync.Map Delete on a missing key does nothing). Either way, no
+			// future write can legitimately supersede a completed match, so
+			// retaining the entry would leak map memory.
 			runningRevStore.Delete(matchKey)
 			c.JSON(http.StatusOK, gin.H{"stale": true})
 			return

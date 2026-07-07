@@ -2139,6 +2139,72 @@ paths:
         '204':
           description: Lineup deleted.
 
+  /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}:
+    parameters:
+      - $ref: '#/components/parameters/CompetitionId'
+      - in: path
+        name: tid
+        required: true
+        schema:
+          type: string
+        description: Team ID.
+      - in: path
+        name: matchId
+        required: true
+        schema:
+          type: string
+        description: Match ID this lineup is fielded for.
+    get:
+      tags: [competitions]
+      summary: Get team lineup for a specific match
+      description: |
+        Match-scoped lineup (mp-825). A 404 lets the caller fall back to the
+        round-scoped endpoint.
+      security: []
+      responses:
+        '200':
+          description: Team lineup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamLineup'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [competitions]
+      summary: Save team lineup for a specific match
+      description: |
+        Lineups are always editable, including while the match is running or
+        completed (mp-q722); FIK shape rules are surfaced as a 400 rather than
+        blocking the save.
+      security:
+        - TournamentPassword: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TeamLineup'
+      responses:
+        '200':
+          description: Lineup saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamLineup'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [competitions]
+      summary: Delete team lineup for a specific match
+      security:
+        - TournamentPassword: []
+      responses:
+        '204':
+          description: Lineup deleted.
+
   /api/competitions/{id}/swiss/generate-round:
     parameters:
       - $ref: '#/components/parameters/CompetitionId'

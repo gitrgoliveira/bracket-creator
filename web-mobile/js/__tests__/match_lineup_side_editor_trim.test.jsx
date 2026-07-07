@@ -68,7 +68,7 @@ describe('MatchLineupSideEditor trims names before saving', () => {
     global.window.API = {
       fetchMatchLineup: vi.fn().mockResolvedValue(null),
       fetchTeamLineup: vi.fn().mockResolvedValue(null),
-      putMatchLineup: vi.fn().mockResolvedValue({ positions: {}, lockedAt: null }),
+      putMatchLineup: vi.fn().mockResolvedValue({ positions: {} }),
     };
 
     runtime = makeReactive();

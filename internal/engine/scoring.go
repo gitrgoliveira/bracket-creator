@@ -1264,8 +1264,8 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		return err
 	}
 
-	// Pool match not found; try the elimination bracket.
-	alreadyCompleted = false
+	// Pool match not found; try the elimination bracket. alreadyCompleted is
+	// still false here (the pool closure never ran on the errMatchNotFound path).
 	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
 		if m.Status == state.MatchStatusCompleted {
 			alreadyCompleted = true

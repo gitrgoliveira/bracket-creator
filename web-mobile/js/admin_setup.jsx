@@ -845,7 +845,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.swissRounds = swissRounds;
     }
     c.naginata = naginata;
-    // Engi (kata demonstration) is an individual PAIR paradigm; it is never a
+    // Engi (kata competition) is an individual PAIR paradigm; it is never a
     // team competition (ScoreEditorModal skips the team check for engi, and the
     // scoring backend treats engi as non-team). Force it off for non-individual
     // kinds even if the state lingered from a kind switch, so a team comp can't
@@ -1073,7 +1073,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           {kind === "individual" && (
             <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> Engi (kata demonstration)</label>
+              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> Engi (kata competition)</label>
               <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.</div>
             </div>
           )}

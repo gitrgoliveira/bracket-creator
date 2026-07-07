@@ -1,4 +1,4 @@
-// Engi-Kyogi (kata demonstration) score editor.
+// Engi-Kyogi (kata competition) score editor.
 // Engi matches are scored by flag count: each judge raises a flag for the side
 // they prefer. FIK rule: total flags must be ODD (1, 3, or 5) so no draw is
 // possible. flagsA = sideA = Aka (right/red), flagsB = sideB = Shiro

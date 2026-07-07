@@ -341,7 +341,7 @@ type Competition struct {
 	// in addition to the standard M/K/D/T/H set. Default false = Kendo.
 	Naginata bool `yaml:"naginata,omitempty" json:"naginata"`
 
-	// Engi selects flag-scoring (Engi-kyogi / kata demonstration) mode for this
+	// Engi selects flag-scoring (Engi-kyogi / kata competition) mode for this
 	// competition. When true, bouts are decided by referee flag counts
 	// (FlagsA/FlagsB) instead of ippon waza letters, and standings rank by
 	// wins then accumulated own-side flags. Independent of the Naginata flag;

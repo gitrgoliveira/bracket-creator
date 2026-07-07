@@ -14,7 +14,7 @@ and both locked once the draw is generated:
 | Switch | What it does | Available for |
 |--------|--------------|---------------|
 | **Naginata competition** | Adds the Sune ippon and the 3rd-place playoff | Individual and team |
-| **Engi (kata demonstration)** | Replaces ippon scoring with flag counting | Individual only |
+| **Engi (kata competition)** | Replaces ippon scoring with flag counting | Individual only |
 
 You can turn on either one alone, or both together for a naginata kata division.
 
@@ -58,7 +58,7 @@ choreographed forms, judged by a panel of referees who each raise a flag for the
 side they judge superior. It is scored entirely differently from a combat (shiai)
 bout: there are no ippon, no time on the clock, and no draws.
 
-Turn on **Engi (kata demonstration)** on an individual competition's Settings
+Turn on **Engi (kata competition)** on an individual competition's Settings
 tab to switch its score editor to flag counting. You can combine it with the
 **Naginata competition** switch for a naginata kata division.
 

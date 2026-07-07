@@ -727,7 +727,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || local.kind === "team"} /> Engi (kata demonstration)</label>
+          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || local.kind === "team"} /> Engi (kata competition)</label>
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>{local.kind === "team" ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Participant CSV uses: Name 1, Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>

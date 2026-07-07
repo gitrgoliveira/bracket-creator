@@ -754,7 +754,6 @@ if (typeof window !== "undefined") {
   window.competitionNextSteps = competitionNextSteps;
   window.overviewViewMode = overviewViewMode;
   window.overviewResultsSection = overviewResultsSection;
-  window.hasBracketRounds = hasBracketRounds;
 }
 
 export { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds };

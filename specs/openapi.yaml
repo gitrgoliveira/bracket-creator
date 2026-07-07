@@ -2140,6 +2140,10 @@ paths:
       responses:
         '204':
           description: Lineup deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/teams/{tid}/match-lineups/{matchId}:
     parameters:
@@ -2207,6 +2211,10 @@ paths:
       responses:
         '204':
           description: Lineup deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}/swiss/generate-round:
     parameters:
@@ -3623,7 +3631,10 @@ components:
 
     TeamLineup:
       type: object
-      description: Per-round lineup assigning team members to positions.
+      description: >
+        Lineup assigning team members to positions. Round-scoped by default;
+        when matchId is present the lineup is keyed to a specific match/encounter
+        (mp-825), overriding the round lineup for that bout.
       required: [teamId, competitionId, round, positions]
       properties:
         teamId:
@@ -3632,6 +3643,11 @@ components:
           type: string
         round:
           type: integer
+        matchId:
+          type: string
+          description: >
+            When present, keys this lineup to a specific match/encounter rather
+            than the whole round. Omitted for round-scoped lineups.
         positions:
           type: object
           additionalProperties:

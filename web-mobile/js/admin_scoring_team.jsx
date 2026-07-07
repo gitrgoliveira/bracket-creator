@@ -325,9 +325,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const isKnockoutPhase = m.phase === "bracket"
     || ((compFormat === "playoffs" || compFormat === "mixed") && m.phase !== "pool");
 
-  // Inline lineup select state: tracks whether a lineup-reason prompt is shown
-  // for inline position changes mid-match, and which (teamId, positionKey, value)
-  // is pending confirmation.
+  // Whether an inline position PUT is in flight (prevents double-submit).
   const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);
 
   // Derive each team's roster from compMeta.players. rosterFor expects the

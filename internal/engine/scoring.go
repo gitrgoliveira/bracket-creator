@@ -711,18 +711,50 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			})
 		}
 
+		poolHasOverrides := overrides != nil && overrides.PoolRanks[p.PoolName] != nil
 		for i := range sorted {
 			sorted[i].Rank = i + 1
-			if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
+			if poolHasOverrides {
 				if _, ok := overrides.PoolRanks[p.PoolName][sorted[i].Player.Name]; ok {
 					sorted[i].IsOverridden = true
 				}
 			}
 		}
+
+		applyJointThirdRanks(comp, sorted, poolHasOverrides)
 		allStandings[p.PoolName] = sorted
 	}
 
 	return allStandings, nil
+}
+
+// applyJointThirdRanks implements the kendo joint-3rd convention. When a league
+// has LeagueTwoThirdPlaces enabled, a genuine Points-tie whose best finishing
+// position is 3rd or lower is given a SHARED rank (the group's best 1-based
+// position) so both the standings table and the closing-ceremony podium show two
+// (or more) equal 3rd places instead of relabeling the 4th finisher. Ranks 1 and
+// 2 are always kept distinct: a top-two tie is decided by a tie-breaker, never
+// shared. It is a no-op for non-leagues, when the setting is off, or when the
+// pool carries manual rank overrides (the operator's explicit order wins).
+// Scoping to leagues keeps mixed/playoffs knockout seeding strictly sequential;
+// naginata leagues leave the setting off and so keep a single 3rd.
+//
+// Mutates sorted in place. Callers pass a Points-sorted slice that already has
+// sequential ranks assigned, so detectPoolTies groups by adjacent Points
+// equality exactly as it does for the amber-tie highlight.
+func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, poolHasOverrides bool) {
+	if comp == nil || comp.Format != state.CompFormatLeague || !comp.LeagueTwoThirdPlaces || poolHasOverrides {
+		return
+	}
+	for _, positions := range detectPoolTies(sorted) {
+		minRank := positions[0] + 1
+		if minRank < 3 {
+			continue
+		}
+		for _, idx := range positions {
+			sorted[idx].Rank = minRank
+		}
+	}
 }
 
 // markTiedStandings sets Tied=true on standings rows that are genuinely tied

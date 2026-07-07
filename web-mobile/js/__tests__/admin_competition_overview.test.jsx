@@ -2,7 +2,32 @@
 // The function is unit-testable without mounting any component: it takes
 // a plain competition object and returns a step array.
 import { describe, it, expect } from 'vitest';
-import { competitionNextSteps, overviewViewMode, overviewResultsSection } from '../admin_competition_overview.jsx';
+import { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds } from '../admin_competition_overview.jsx';
+
+// ---------------------------------------------------------------------------
+// hasBracketRounds: never-nil LoadBracket contract
+// ---------------------------------------------------------------------------
+// Regression guard: internal/state/bracket.go's LoadBracket never returns nil
+// - a competition with no bracket.json (every league) loads as
+// &Bracket{Rounds: []}, a truthy object. A bare `!!bracket` check is therefore
+// ALWAYS true and silently misroutes "View podium"/"Results" (via
+// overviewResultsSection) to the empty AdminBracket view for any bracket-less
+// format. Found live: clicking "View podium" on a completed league landed on
+// the bracket tab's "Pick a match" empty state instead of league standings.
+describe('hasBracketRounds; never-nil bracket contract', () => {
+  it('is false for the never-nil empty-rounds default (no bracket.json)', () => {
+    expect(hasBracketRounds({ rounds: [] })).toBe(false);
+  });
+
+  it('is false for a missing bracket', () => {
+    expect(hasBracketRounds(null)).toBe(false);
+    expect(hasBracketRounds(undefined)).toBe(false);
+  });
+
+  it('is true once the bracket has at least one real round', () => {
+    expect(hasBracketRounds({ rounds: [[{ id: 'r1-m1' }]] })).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // overviewResultsSection: format → results/standings section

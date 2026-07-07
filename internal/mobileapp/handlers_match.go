@@ -670,7 +670,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt))
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			// Map engine client-errors to their proper status so the offline
+			// terminal-write replay never treats a permanent 4xx (unknown match,
+			// or a feeder not yet finished) as a retryable failure and wedge sync
+			// (mp-y3nk). Mirrors the RevertMatchToQueue mapping above.
+			var notFoundErr *engine.NotFoundError
+			var validationErr *engine.ValidationError
+			switch {
+			case errors.As(err, &notFoundErr):
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			case errors.As(err, &validationErr):
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			}
 			return
 		}
 

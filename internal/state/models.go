@@ -709,9 +709,10 @@ type MatchResult struct {
 	// never overwrites a newer one (timestamp last-write-wins); the
 	// completed-never-reverted guard stays on top. Unlike Rev (wire-only), this
 	// IS persisted (append-only pool-matches.csv column + bracket.json) so the
-	// comparison survives a restart. 0 (absent/legacy) means "unversioned" and
-	// always loses to a stamped write, so old files and un-stamped clients behave
-	// exactly as before.
+	// comparison survives a restart. 0 (absent/legacy) means "unstamped": it is
+	// treated as arrival-order and still APPLIES (it does NOT lose to a stamped
+	// write), so old files and un-stamped clients behave exactly as before rather
+	// than having a legitimate change silently dropped. See domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
 }
 
@@ -861,7 +862,8 @@ type BracketMatch struct {
 	// ModifiedAt mirrors MatchResult.ModifiedAt (mp-y3nk): the server-relative
 	// unix-millis timestamp of the last change to this bracket match's result,
 	// persisted in bracket.json so timestamp reconciliation survives a restart.
-	// 0 = unversioned/legacy (always loses to a stamped write).
+	// 0 = unstamped/legacy: arrival-order, still applies (never dropped). See
+	// domain.ApplyByTimestamp.
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 }
 

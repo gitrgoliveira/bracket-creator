@@ -814,6 +814,45 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	})
 }
 
+// TestOverrideWinner_ErrorStatusMapping pins that the override-winner handler
+// maps engine CLIENT errors to their proper status instead of a blanket 500
+// (Copilot mp-y3nk): an unknown match id -> 404 (engine.NotFoundError) and a
+// not-yet-ready match (unresolved feeder side) -> 400 (engine.ValidationError).
+// Before the mapping both returned 500, which made the offline terminal-write
+// replay treat a permanent client error as retryable and wedge sync status.
+func TestOverrideWinner_ErrorStatusMapping(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	comp := state.Competition{ID: "ovm", Status: "setup", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	// b-ready is playable; b-notready has an unresolved (empty) side so
+	// bracketMatchPlayable is false and the engine returns a ValidationError.
+	require.NoError(t, store.SaveBracket("ovm", &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "b-notready", SideA: "P1", SideB: ""}},
+		},
+	}))
+
+	t.Run("unknown match returns 404", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/does-not-exist/override-winner", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code, "unknown match must be 404, not 500; body: %s", w.Body.String())
+	})
+
+	t.Run("not-ready match returns 400", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/b-notready/override-winner", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "not-ready match must be 400, not 500; body: %s", w.Body.String())
+	})
+}
+
 func TestRevertMatchToQueueHandler(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

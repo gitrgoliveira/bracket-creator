@@ -1,0 +1,111 @@
+// Package export builds results-populated XLSX workbooks from live mobile-app
+// tournament state. It is a SEPARATE path from the blank-template export in
+// internal/engine/export.go; the existing ExportCompetitionXlsx and
+// GET /api/competitions/:id/export endpoint are not modified.
+//
+// The single public entry point is BuildResultsWorkbook. Follow-up agents
+// (CLI command + HTTP handler) call it to get the xlsx bytes.
+package export
+
+import (
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+)
+
+// DecisionSuffix returns the display suffix for a match decision, encho, and
+// hantei flag. It is a direct Go port of the canonical JS decisionSuffix()
+// function in web-mobile/js/bracket.jsx (around line 52), including the "Ht"
+// suffix mandated by the "Excel + viewer parity" comment there (FIK 7-5 / 29-6).
+//
+// Composition order (mirrors JS exactly):
+//  1. Base decision label: kiken variants -> "Kiken"; fusenpai/fusensho -> "Fus."; daihyosen -> "DH".
+//  2. If enchoOn -> append " (E)".
+//  3. If hanteiOn -> append " Ht".
+//
+// A zero/nil Encho (or PeriodCount == 0) is treated as no encho.
+// Returns "" when no suffix applies.
+func DecisionSuffix(decision string, encho *state.EnchoMetadata, decidedByHantei bool) string {
+	enchoOn := encho != nil && encho.PeriodCount > 0
+
+	var suffix string
+	switch {
+	case domain.IsKikenDecisionStr(decision):
+		suffix = "Kiken"
+	case decision == string(domain.DecisionFusenpai), decision == string(domain.DecisionFusensho):
+		suffix = "Fus."
+	case decision == string(domain.DecisionDaihyosen):
+		suffix = "DH"
+	}
+
+	if enchoOn {
+		if suffix != "" {
+			suffix += " (E)"
+		} else {
+			suffix = "(E)"
+		}
+	}
+
+	if decidedByHantei {
+		if suffix != "" {
+			suffix += " Ht"
+		} else {
+			suffix = "Ht"
+		}
+	}
+
+	return suffix
+}
+
+// IpponsScore formats an ippon slice as a readable score string: ["M","K"] ->
+// "MK", nil/empty -> "". Mirrors the character-join behaviour in
+// formatIpponsScore (bracket.jsx) without the full display logic (bye/hikiwake
+// special cases live in the caller).
+func IpponsScore(ippons []string) string {
+	result := ""
+	for _, s := range ippons {
+		if s != "" && s != "•" {
+			result += s
+		}
+	}
+	return result
+}
+
+// FormatMatchScore builds the score string for one side of a match result,
+// composing ippon letters with the decision suffix. Returns a combined
+// "AScore-BScore suffix" cell value suitable for writing into a pool match
+// or elimination cell.
+//
+// For individual matches: "leftIppons-rightIppons suffix" (e.g. "MK-M Kiken (E) Ht").
+// For hikiwake (draw): "X suffix" if no ippons; or "leftIppons-rightIppons suffix" if scored.
+//
+// This is used to write literal score values (never formulas) into result cells.
+func FormatMatchScore(ipponsA, ipponsB []string, decision string, encho *state.EnchoMetadata, decidedByHantei bool) string {
+	sfx := DecisionSuffix(decision, encho, decidedByHantei)
+	aStr := IpponsScore(ipponsA)
+	bStr := IpponsScore(ipponsB)
+
+	isDraw := decision == string(domain.DecisionHikiwake) || decision == state.DecisionDraw
+	var score string
+	if isDraw {
+		if aStr == "" && bStr == "" {
+			score = "X"
+		} else {
+			a := aStr
+			if a == "" {
+				a = "·"
+			}
+			b := bStr
+			if b == "" {
+				b = "·"
+			}
+			score = a + "-" + b
+		}
+	} else {
+		score = aStr + "-" + bStr
+	}
+
+	if sfx != "" {
+		return score + " " + sfx
+	}
+	return score
+}

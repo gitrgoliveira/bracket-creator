@@ -940,47 +940,6 @@ func TestStoreTx_SetTeamLineup(t *testing.T) {
 	assert.NotEmpty(t, lineups)
 }
 
-func TestStoreTx_LockTeamLineupsForRound(t *testing.T) {
-	dir, err := os.MkdirTemp("", "tx-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "tx-locklineup"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "TX Lock Lineup", Kind: "team", TeamSize: 5}))
-
-	// First set a lineup so there's something to lock
-	lineup := domain.TeamLineup{
-		TeamID:        "TeamA",
-		Round:         1,
-		CompetitionID: compID,
-		Positions: map[domain.Position]string{
-			domain.PosSenpo:   "Alice",
-			domain.PosJiho:    "Bob",
-			domain.PosChuken:  "Carol",
-			domain.PosFukusho: "Dave",
-			domain.PosTaisho:  "Eve",
-		},
-	}
-	require.NoError(t, store.SetTeamLineup(compID, lineup, 5))
-
-	lockedAt := time.Now()
-	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
-		return tx.LockTeamLineupsForRound(compID, 1, lockedAt)
-	})
-	require.NoError(t, txErr)
-
-	lineups, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	for _, l := range lineups {
-		if l.TeamID == "TeamA" && l.Round == 1 {
-			assert.NotNil(t, l.LockedAt)
-		}
-	}
-}
-
 func TestStoreTx_LoadCompetition_ReadYourOwnWrites(t *testing.T) {
 	dir, err := os.MkdirTemp("", "tx-test-*")
 	require.NoError(t, err)
@@ -1095,41 +1054,6 @@ func TestStoreTx_SetTeamLineup_ReadYourOwnWrites(t *testing.T) {
 			assert.Equal(t, "Alice2", l.Positions[domain.PosSenpo])
 		}
 	}
-}
-
-func TestStoreTx_LockTeamLineupsForRound_ReadYourOwnWrites(t *testing.T) {
-	dir, err := os.MkdirTemp("", "tx-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	store, err := NewStore(dir)
-	require.NoError(t, err)
-
-	compID := "tx-lock-royw"
-	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Lock ROYW", Kind: "team", TeamSize: 5}))
-
-	basePositions := map[domain.Position]string{
-		domain.PosSenpo:   "Alice",
-		domain.PosJiho:    "Bob",
-		domain.PosChuken:  "Carol",
-		domain.PosFukusho: "Dave",
-		domain.PosTaisho:  "Eve",
-	}
-
-	lockedAt := time.Now()
-	txErr := store.WithTransaction(compID, func(tx StoreTx) error {
-		// Set lineup within tx (stages to WAL)
-		lineup := domain.TeamLineup{
-			TeamID: "TeamB", Round: 2, CompetitionID: compID,
-			Positions: basePositions,
-		}
-		if err := tx.SetTeamLineup(compID, lineup, 5); err != nil {
-			return err
-		}
-		// Lock the round, reads from staged WAL (pending path)
-		return tx.LockTeamLineupsForRound(compID, 2, lockedAt)
-	})
-	require.NoError(t, txErr)
 }
 
 // TestStoreTx_SetCompetitorStatus_DoubleWrite exercises the
@@ -1323,9 +1247,6 @@ func TestStoreTx_CheckCompIDMismatch(t *testing.T) {
 	runInTx("UpdateBracket", func(tx StoreTx) error {
 		return tx.UpdateBracket(wrongID, func(*Bracket) error { return nil })
 	})
-	runInTx("LockTeamLineupsForRound", func(tx StoreTx) error {
-		return tx.LockTeamLineupsForRound(wrongID, 0, time.Now())
-	})
 }
 
 // TestStoreTx_ValidateCompetitionID covers the ValidateCompetitionID error
@@ -1359,9 +1280,6 @@ func TestStoreTx_ValidateCompetitionID(t *testing.T) {
 
 	err = tx.UpdateBracket(badID, func(*Bracket) error { return nil })
 	assert.Error(t, err, "UpdateBracket: invalid compID must error")
-
-	err = tx.LockTeamLineupsForRound(badID, 0, time.Now())
-	assert.Error(t, err, "LockTeamLineupsForRound: invalid compID must error")
 }
 
 // TestStoreTx_PendingPaths exercises the "read-your-own-writes" branches inside
@@ -1532,66 +1450,6 @@ func TestStoreTx_PendingPaths(t *testing.T) {
 			})
 		})
 		require.NoError(t, err)
-	})
-
-	t.Run("LockTeamLineupsForRound from staged lineups.yaml", func(t *testing.T) {
-		cid := "pp-lock-staged"
-		newComp(cid)
-		err := store.WithTransaction(cid, func(tx StoreTx) error {
-			l := fiveStarter("team-lock-staged", 0)
-			if err := tx.SetTeamLineup(cid, l, 5); err != nil {
-				return err
-			}
-			return tx.LockTeamLineupsForRound(cid, 0, time.Now().UTC())
-		})
-		require.NoError(t, err)
-
-		lineups, err := store.LoadTeamLineups(cid)
-		require.NoError(t, err)
-		entry := lineups[teamLineupKey("team-lock-staged", 0)]
-		assert.NotNil(t, entry.LockedAt, "lineup staged then locked in tx must have LockedAt set")
-	})
-
-	t.Run("LockTeamLineupsForRound no-change in staged bytes (already locked)", func(t *testing.T) {
-		// Stage a round-1 lineup, then ask to lock round 0, no round-0 lineups
-		// exist in staged bytes so changed stays false (the !changed path).
-		cid := "pp-lock-nochange"
-		newComp(cid)
-		err := store.WithTransaction(cid, func(tx StoreTx) error {
-			l := fiveStarter("team-r1", 1)
-			if err := tx.SetTeamLineup(cid, l, 5); err != nil {
-				return err
-			}
-			// Lock round 0; staged bytes only have round 1 → nothing changes.
-			return tx.LockTeamLineupsForRound(cid, 0, time.Now().UTC())
-		})
-		require.NoError(t, err)
-	})
-
-	t.Run("SetTeamLineup pending-path: locked entry in staged bytes", func(t *testing.T) {
-		// Stage a lineup, lock it in the same tx, then attempt to overwrite it,
-		// must return ErrLineupLocked from the pending-path lock check.
-		cid := "pp-lineup-locked-pending"
-		newComp(cid)
-
-		var gotErr error
-		err := store.WithTransaction(cid, func(tx StoreTx) error {
-			l1 := fiveStarter("team-X", 0)
-			if err := tx.SetTeamLineup(cid, l1, 5); err != nil {
-				return err
-			}
-			if err := tx.LockTeamLineupsForRound(cid, 0, time.Now().UTC()); err != nil {
-				return err
-			}
-			// Same (teamID, round) key is now locked in staged bytes.
-			l2 := fiveStarter("team-X", 0)
-			l2.Positions[domain.PosJiho] = "sub"
-			gotErr = tx.SetTeamLineup(cid, l2, 5)
-			return nil // don't abort tx; we captured the error above
-		})
-		require.NoError(t, err)
-		require.ErrorIs(t, gotErr, ErrLineupLocked,
-			"SetTeamLineup for a locked entry in staged bytes must return ErrLineupLocked")
 	})
 
 	t.Run("SetTeamLineup pending-path: validate error", func(t *testing.T) {

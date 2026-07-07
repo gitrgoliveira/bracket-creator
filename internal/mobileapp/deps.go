@@ -16,8 +16,6 @@
 package mobileapp
 
 import (
-	"time"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -141,8 +139,7 @@ type EligibilityEngine interface {
 
 // TeamLineupStore is the consumer-boundary view of state.Store used by
 // handlers_lineup.go (Slice 7.B / T127). Mirrors the LoadTeamLineups /
-// SetTeamLineup / DeleteTeamLineup / LockTeamLineupsForRound methods
-// on *state.Store.
+// SetTeamLineup / DeleteTeamLineup methods on *state.Store.
 //
 // The handler also needs the competition's TeamSize to drive
 // TeamLineup.Validate, so it composes this interface with
@@ -153,11 +150,9 @@ type TeamLineupStore interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize int) error
 	DeleteTeamLineup(compID, teamID string, round int) error
-	LockTeamLineupsForRound(compID string, round int, lockedAt time.Time) error
-	// DeleteTeamLineupForMatch / LockTeamLineupForMatch are the
-	// match-scoped twins added for per-match lineups (mp-825).
+	// DeleteTeamLineupForMatch is the match-scoped twin added for
+	// per-match lineups (mp-825).
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
-	LockTeamLineupForMatch(compID, matchID string, lockedAt time.Time) error
 }
 
 // Broadcaster is the consumer-boundary view of *Hub used by handlers

@@ -2,7 +2,6 @@ package mobileapp
 
 import (
 	"testing"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -121,15 +120,7 @@ func (stubTeamLineupStore) DeleteTeamLineup(string, string, int) error {
 	return nil
 }
 
-func (stubTeamLineupStore) LockTeamLineupsForRound(string, int, time.Time) error {
-	return nil
-}
-
 func (stubTeamLineupStore) DeleteTeamLineupForMatch(string, string, string) error {
-	return nil
-}
-
-func (stubTeamLineupStore) LockTeamLineupForMatch(string, string, time.Time) error {
 	return nil
 }
 

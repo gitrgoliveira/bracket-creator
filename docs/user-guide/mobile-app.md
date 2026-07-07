@@ -222,7 +222,7 @@ The **Registration desk** (opened from the dashboard) is a cross-competition che
 
 ### Shiai-jo court console
 
-Each court has a dedicated operator console at `/admin/shiaijo/<court>` (linked from the dashboard's **Shiaijo operator views**). It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court, and nudges the operator to switch to whichever competition next needs the court.
+Each court has a dedicated operator console at `/admin/shiaijo/<court>` (linked from the dashboard's **Shiaijo operator views**). It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court, and nudges the operator to switch to whichever competition next needs the court. If you start the wrong bout, use **Send back to queue** on the running match to return it to the Upcoming list; it clears any partial score and drops the match from the live view so the correct one can start (a completed, scored match is not affected, correct that from its competition view instead).
 
 ### Set up a competition
 
@@ -294,7 +294,7 @@ For large individual tournaments using the **Swiss** format:
 
 ### Team lineups
 
-In team competitions you set each team's **fighting order** across the positions Senpo, Jiho, Chuken, Fukusho, and Taisho (or fewer for smaller team sizes). A lineup is set **per team match**, and you can reuse the previous round's order with **Copy from previous match**. The app applies the FIK rules for an incomplete team: Senpo and Taisho must always be filled; a single vacancy must be Jiho, two vacancies must be Jiho and Fukusho, and three or more empty positions disqualify the team. Because lineups are often filled in as the round runs, the app flags a lineup that breaks these rules as a warning rather than blocking the save, so you can complete it as you go. Lineups appear on the viewer, the court display, and the streaming overlay.
+In team competitions you set each team's **fighting order** across the positions Senpo, Jiho, Chuken, Fukusho, and Taisho (or fewer for smaller team sizes). A lineup is set **per team match**, and you can reuse the previous round's order with **Copy from previous match**. The app applies the FIK rules for an incomplete team: Senpo and Taisho must always be filled; a single vacancy must be Jiho, two vacancies must be Jiho and Fukusho, and three or more empty positions disqualify the team. Because lineups are often filled in as the round runs, the app flags a lineup that breaks these rules as a warning rather than blocking the save, so you can complete it as you go. A lineup stays editable at any time, including after its match has started, so you can correct a fielding mistake mid-round. Lineups appear on the viewer, the court display, and the streaming overlay.
 
 ### Recording match decisions
 
@@ -318,7 +318,9 @@ it.
 
 ### Awards and winners
 
-When a competition finishes, the public viewer shows its **podium**. Kendo competitions follow the convention of **1st, 2nd, and two equal 3rd places** (there is no bronze-medal match); naginata competitions instead show a single 3rd place, decided by the 3rd-place playoff. For a mixed competition still in its pool phase, it shows a provisional cross-pool ranking until the knockout decides the final places. Operators also get an **all-competition winners** view that gathers every result in one place, and each competition can carry optional **fighting-spirit (敢闘賞) awards**, free-text individual honours that also appear to viewers.
+When a competition finishes, the public viewer shows its **podium**. Kendo knockout competitions follow the convention of **1st, 2nd, and two equal 3rd places** (there is no bronze-medal match); naginata knockout competitions instead show a single 3rd place, decided by the 3rd-place playoff. For a mixed competition still in its pool phase, it shows a provisional cross-pool ranking until the knockout decides the final places. Operators also get an **all-competition winners** view that gathers every result in one place, and each competition can carry optional **fighting-spirit (敢闘賞) awards**, free-text individual honours that also appear to viewers.
+
+For **league** competitions the podium comes from the final standings, and a league earns its placements the same way a knockout does: when two competitors finish level on every ranking criterion for a top place, the competition holds a short ippon-shobu tie-breaker to decide the order before it can finish, so it never completes with an unearned tie. The one exception is 3rd place: with **Award two joint 3rd places** enabled (the default for kendo) two competitors genuinely tied for 3rd share bronze with no decider. A naginata league leaves the option off, so a 3rd-place tie is settled by the tie-breaker and a single 3rd is awarded. When the finishers are not tied, the podium shows a single 3rd and no 4th place. Set the option when you create the competition, or later under competition settings before the competition starts.
 
 ### Export & print
 

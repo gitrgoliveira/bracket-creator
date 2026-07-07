@@ -884,40 +884,6 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 	}
 }
 
-// TestMaybeLockTeamLineupsForRound_TeamComp verifies that recording a
-// running/completed result for a team competition (TeamSize > 0) exercises
-// the maybeLockTeamLineupsForRound code path without panicking. We don't
-// assert lineup lock state because the lock is a best-effort write (no
-// LineupID known until Slice 7.C lands), so we just verify no error.
-func TestMaybeLockTeamLineupsForRound_TeamComp(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "team-lock-lineups"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:       compID,
-		Name:     "Team Lock",
-		Kind:     "team",
-		Format:   state.CompFormatMixed,
-		TeamSize: 3,
-		Status:   state.CompStatusPools,
-		Courts:   []string{"A"},
-	}))
-
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "P1-0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled},
-	}))
-
-	result := &state.MatchResult{
-		ID:     "P1-0",
-		SideA:  "TeamA",
-		SideB:  "TeamB",
-		Winner: "TeamA",
-		Status: state.MatchStatusCompleted,
-	}
-	err := eng.RecordMatchResult(compID, "P1-0", result)
-	assert.NoError(t, err)
-}
-
 func TestApplyHansokuIppons(t *testing.T) {
 	t.Run("nil result is a no-op", func(t *testing.T) {
 		applyHansokuIppons(nil) // must not panic
@@ -1509,5 +1475,160 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 		backfillMatchIdentity(&result, stored)
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
+	})
+}
+
+func TestRevertMatchToQueue(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-revert-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "revert-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Revert Test"}))
+
+	t.Run("running pool match reverts to scheduled", func(t *testing.T) {
+		matches := []state.MatchResult{
+			{
+				ID: "P1-run", SideA: "Alice", SideB: "Bob",
+				Status:           state.MatchStatusRunning,
+				IpponsA:          []string{"M"},
+				HansokuB:         1,
+				Decision:         "fought",
+				ResultSource:     "admin",
+				CorrectionReason: "Scoring error: wrong waza",
+				RepPlayerA:       "Alice-rep",
+				RepPlayerB:       "Bob-rep",
+			},
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		err := eng.RevertMatchToQueue(compID, "P1-run")
+		require.NoError(t, err)
+
+		updated, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.Len(t, updated, 1)
+		assert.Equal(t, state.MatchStatusScheduled, updated[0].Status)
+		assert.Empty(t, updated[0].Winner)
+		assert.Nil(t, updated[0].IpponsA)
+		assert.Equal(t, 0, updated[0].HansokuB)
+		assert.Empty(t, updated[0].Decision)
+		// Provenance/audit fields must be cleared so a requeued match carries
+		// no misleading result metadata.
+		assert.Empty(t, updated[0].ResultSource)
+		assert.Empty(t, updated[0].CorrectionReason)
+		assert.Empty(t, updated[0].RepPlayerA)
+		assert.Empty(t, updated[0].RepPlayerB)
+		// Identity fields must be preserved
+		assert.Equal(t, "Alice", updated[0].SideA)
+		assert.Equal(t, "Bob", updated[0].SideB)
+	})
+
+	t.Run("already-scheduled match with stale metadata is cleaned", func(t *testing.T) {
+		// A scheduled match that still carries stale score/audit data from an
+		// earlier partial write must be normalised to a clean scheduled match,
+		// not left as-is.
+		matches := []state.MatchResult{
+			{
+				ID: "P1-stale", SideA: "Ivan", SideB: "Judy",
+				Status:       state.MatchStatusScheduled,
+				IpponsA:      []string{"K"},
+				Winner:       "Ivan",
+				Decision:     "fought",
+				ResultSource: "self-reported",
+			},
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		err := eng.RevertMatchToQueue(compID, "P1-stale")
+		require.NoError(t, err)
+
+		updated, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		var m state.MatchResult
+		for _, mm := range updated {
+			if mm.ID == "P1-stale" {
+				m = mm
+			}
+		}
+		assert.Equal(t, state.MatchStatusScheduled, m.Status)
+		assert.Empty(t, m.Winner)
+		assert.Nil(t, m.IpponsA)
+		assert.Empty(t, m.Decision)
+		assert.Empty(t, m.ResultSource)
+		assert.Equal(t, "Ivan", m.SideA) // identity preserved
+	})
+
+	t.Run("running bracket match reverts to scheduled, downstream untouched", func(t *testing.T) {
+		bracket := &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{
+					{ID: "B-run", SideA: "Carol", SideB: "Dave",
+						Status: state.MatchStatusRunning, ScoreA: "M", Decision: "fought"},
+					{ID: "B-other", SideA: "Eve", SideB: "Frank",
+						Status: state.MatchStatusScheduled},
+				},
+			},
+		}
+		require.NoError(t, store.SaveBracket(compID, bracket))
+
+		err := eng.RevertMatchToQueue(compID, "B-run")
+		require.NoError(t, err)
+
+		updated, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, state.MatchStatusScheduled, updated.Rounds[0][0].Status)
+		assert.Empty(t, updated.Rounds[0][0].Winner)
+		assert.Empty(t, updated.Rounds[0][0].ScoreA)
+		assert.Empty(t, updated.Rounds[0][0].Decision)
+		assert.Equal(t, "Carol", updated.Rounds[0][0].SideA)
+		assert.Equal(t, "Dave", updated.Rounds[0][0].SideB)
+		// Downstream match must be untouched
+		assert.Equal(t, state.MatchStatusScheduled, updated.Rounds[0][1].Status)
+		assert.Equal(t, "Eve", updated.Rounds[0][1].SideA)
+	})
+
+	t.Run("completed match returns ErrMatchAlreadyCompleted", func(t *testing.T) {
+		matches := []state.MatchResult{
+			{ID: "P1-done", SideA: "Alice", SideB: "Bob",
+				Status: state.MatchStatusCompleted, Winner: "Alice"},
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		err := eng.RevertMatchToQueue(compID, "P1-done")
+		assert.ErrorIs(t, err, ErrMatchAlreadyCompleted)
+	})
+
+	t.Run("scheduled match is idempotent no-op", func(t *testing.T) {
+		matches := []state.MatchResult{
+			{ID: "P1-sched", SideA: "Grace", SideB: "Heidi",
+				Status: state.MatchStatusScheduled},
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		err := eng.RevertMatchToQueue(compID, "P1-sched")
+		require.NoError(t, err)
+
+		updated, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		found := false
+		for _, m := range updated {
+			if m.ID == "P1-sched" {
+				found = true
+				assert.Equal(t, state.MatchStatusScheduled, m.Status)
+				assert.Equal(t, "Grace", m.SideA)
+			}
+		}
+		assert.True(t, found, "scheduled match should still exist")
+	})
+
+	t.Run("not-found match returns error", func(t *testing.T) {
+		err := eng.RevertMatchToQueue(compID, "no-such-match")
+		require.Error(t, err)
+		assert.NotErrorIs(t, err, ErrMatchAlreadyCompleted)
 	})
 }

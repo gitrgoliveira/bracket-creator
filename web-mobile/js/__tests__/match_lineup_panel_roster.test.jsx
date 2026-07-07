@@ -95,7 +95,6 @@ describe('MatchLineupPanel roster resolution (mp-bkg)', () => {
         return [];
       },
       teamIdOf: (team) => team?.id || team?.ID || team?.name || team?.Name || '',
-      canRevise: () => false,
     };
 
     global.window.compMatches = () => [];

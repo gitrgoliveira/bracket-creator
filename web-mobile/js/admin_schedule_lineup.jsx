@@ -74,7 +74,7 @@ export function pickCopySource(allMatches, currentMatchId, teamId, savedLineups)
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
 // does not matter (safe in test/bundler contexts too).
-export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, allowDuringMatch = false }) {
+export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -110,7 +110,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
     ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
     : roster;
-  const [lockedAt, setLockedAt] = useStateA(null);
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
@@ -118,10 +117,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
-  // Audit reason for in-match lineup changes (allowDuringMatch=true + started).
-  // pendingPositions holds the positions map while the ReasonPrompt is open.
-  const [showLineupReasonPrompt, setShowLineupReasonPrompt] = useStateA(false);
-  const [pendingPositions, setPendingPositions] = useStateA(null);
 
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {
@@ -140,7 +135,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
             next[p.key] = (matchLineup.positions || {})[p.key] || "";
           });
           setValues(next);
-          setLockedAt(matchLineup.lockedAt || null);
           setIsMatchOverride(true);
         } else {
           // No per-match entry: reflect the round default (fetch-and-show,
@@ -168,50 +162,27 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     return () => { cancelled = true; };
   }, [compId, teamId, matchId]);
 
-  // Locked when this side's lineup carries a lockedAt OR the match itself is
-  // already running/finished: the backend locks the whole match once it starts
-  // (LockTeamLineupForMatch), so a side with no saved lineup yet must also
-  // read as locked rather than show an editable form that 409s on save.
-  const matchStarted = match?.status === "running" || match?.status === "completed";
-  // allowDuringMatch is the operator override (officiated mode): a table
-  // operator running behind can edit the lineup even after the match starts.
-  // The save then sends force=true so the backend bypasses the same freeze.
-  const isLocked = !allowDuringMatch && (!!lockedAt || matchStarted);
-
-  const doSave = async (positionsOut, reason, successMsg = "Match lineup saved") => {
+  const doSave = async (positionsOut, successMsg = "Match lineup saved") => {
     setError("");
     setSaving(true);
     try {
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password, (allowDuringMatch && matchStarted), reason);
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
       // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
-      // the form from updated.positions (which is absent → would clear every
+      // the form from updated.positions (which is absent, would clear every
       // field) or show success; keep the operator's entered values and report
       // pending. The write is durable and will retry.
       if (updated && updated.queued) {
         if (typeof showToast === "function") showToast("Offline: match lineup not saved yet, will retry");
         return;
       }
-      // Reflect exactly what was persisted. This is also what applies the
-      // copy-from-previous mid-match values: that path defers setValues until
-      // this confirmed save, so a cancelled ReasonPrompt never leaves stale
-      // copied values on screen.
+      // Reflect exactly what was persisted.
       const next = {};
       positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
       setValues(next);
-      setLockedAt(updated.lockedAt || null);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast(successMsg);
     } catch (e) {
-      // A 409 ErrLineupLocked means the match already started and the backend
-      // froze the lineup. Surface the operator-friendly explanation rather than
-      // the raw error string. Covers both save() and copyFromPrevious, which
-      // both persist through doSave.
-      const msg = e?.message || "Failed to save lineup";
-      if (/ErrLineupLocked|lineup.*locked|locked/i.test(msg)) {
-        setError("This match is in progress: lineup is locked and cannot be changed.");
-      } else {
-        setError(msg);
-      }
+      setError(e?.message || "Failed to save lineup");
     } finally {
       setSaving(false);
     }
@@ -229,12 +200,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const v = (values[p.key] || "").trim();
       if (v) positionsOut[p.key] = v;
     });
-    if (allowDuringMatch && matchStarted) {
-      setPendingPositions(positionsOut);
-      setShowLineupReasonPrompt(true);
-    } else {
-      doSave(positionsOut, "");
-    }
+    doSave(positionsOut);
   };
 
   const hasSiblings = allMatches.some(m => m.id !== matchId && matchInvolvesTeam(m));
@@ -272,18 +238,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const next = {};
       positions.forEach(p => { const v = (sourceLineup.positions || {})[p.key]; if (v) next[p.key] = v; });
 
-      if (allowDuringMatch && matchStarted) {
-        // Defer setValues until the save is confirmed so a cancelled
-        // ReasonPrompt doesn't leave partially-copied values on screen.
-        setPendingPositions(next);
-        setShowLineupReasonPrompt(true);
-      } else {
-        // doSave applies the copied values from the persisted server response on
-        // success, so we deliberately do NOT setValues eagerly here: a failed
-        // save must not leave unpersisted copied values on screen. Pass the
-        // distinct copy toast to preserve the pre-split confirmation.
-        await doSave(next, "", "Lineup copied from previous match");
-      }
+      // doSave applies the copied values from the persisted server response on
+      // success, so we deliberately do NOT setValues eagerly here: a failed
+      // save must not leave unpersisted copied values on screen.
+      await doSave(next, "Lineup copied from previous match");
     } catch (e) {
       setError(e?.message || "Failed to copy lineup");
     } finally {
@@ -303,11 +261,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           ? <span style={{ fontSize: 11, color: "var(--accent, #1d73d5)", fontWeight: 600 }}>Override for this match</span>
           : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Inheriting round default</span>
         }
-        {isLocked && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", background: "var(--bg-2, #fafafa)", border: "1px solid var(--line, #ddd)", padding: "1px 6px", borderRadius: 3 }}>
-            🔒 Locked
-          </span>
-        )}
       </div>
 
       {error && (
@@ -324,7 +277,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               value={values[p.key] || ""}
               roster={suggestions}
               ariaLabel={`${p.label} player`}
-              disabled={isLocked || saving || copying}
+              disabled={saving || copying}
               onSelect={(name) => setValues(v => ({ ...v, [p.key]: (name || "").trim() }))}
             />
           </label>
@@ -336,35 +289,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         )}
       </div>
 
-      {/* Audit reason prompt for in-match lineup changes.
-          Shown when allowDuringMatch=true and the match has started.
-          Confirms a reason before calling doSave with force=true. */}
-      {showLineupReasonPrompt && (
-        <window.ReasonPrompt
-          label="Reason for lineup change"
-          presets={window.LINEUP_PRESETS || ["Late lineup", "Substitution", "Correction", "Other"]}
-          submitting={saving}
-          onConfirm={(r) => {
-            setShowLineupReasonPrompt(false);
-            doSave(pendingPositions || {}, r);
-          }}
-          onCancel={() => { setShowLineupReasonPrompt(false); setPendingPositions(null); }}
-        />
-      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {!isLocked && (
-          <button type="button"
-            className="btn btn--primary btn--sm"
-            onClick={save}
-            disabled={saving || copying}
-          >
-            {saving ? "Saving…" : "Save lineup"}
-          </button>
-        )}
+        <button type="button"
+          className="btn btn--primary btn--sm"
+          onClick={save}
+          disabled={saving || copying}
+        >
+          {saving ? "Saving…" : "Save lineup"}
+        </button>
         <button type="button"
           className="btn btn--sm"
           onClick={copyFromPrevious}
-          disabled={!hasSiblings || copying || saving || isLocked}
+          disabled={!hasSiblings || copying || saving}
           title={hasSiblings
             ? "Find and copy the lineup from the most recent previous match"
             : "No other matches for this team"}
@@ -379,7 +315,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 // MatchLineupPanel: modal overlay for per-match lineup editing. Renders
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
-export function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal", allowDuringMatch = false }) {
+export function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal" }) {
   const m = match;
   // Find the competition this match belongs to so we can access teamSize,
   // players (roster), etc.
@@ -423,9 +359,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
             </div>
             <h2 style={{ margin: "4px 0 0", fontSize: 20, fontWeight: 700 }}>Lineup for this match</h2>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-              {allowDuringMatch
-                ? "Set who fights each position. You can change this even after the match has started."
-                : "Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then."}
+              Set per-match lineups below. Changes take effect when you save; the round-default lineup is used as a fallback until then.
             </div>
           </div>
           <button type="button" className="btn btn--ghost btn--sm" onClick={onClose}>{variant === "inline" ? "Done" : "✕ Close"}</button>
@@ -445,7 +379,6 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
-                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
@@ -464,7 +397,6 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
-                allowDuringMatch={allowDuringMatch}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>

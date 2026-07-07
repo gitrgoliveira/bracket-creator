@@ -139,6 +139,34 @@ func tieAffectsAdvancement(positions []int, poolWinners int) bool {
 	return positions[0]+1 <= poolWinners
 }
 
+// tieNeedsIndividualBreak decides whether InjectTiebreakerMatches should hold an
+// ippon-shobu bout for a tied group in an INDIVIDUAL competition.
+//
+//   - League: a final placement must be EARNED, exactly like a bracket/playoff,
+//     so every tie inside the tie-break band [1..effectiveTopN] is broken. The
+//     one sanctioned exception is the kendo joint-3rd convention: when
+//     LeagueTwoThirdPlaces is enabled and the group sits entirely at 3rd or
+//     below, the tie is allowed to stand as a shared bronze (isConsequentialTie
+//     returns false). This mirrors the team-league LeagueTiebreakCandidates gate
+//     so an individual league never completes with an unearned tied position.
+//   - Non-league (mixed pools feeding a knockout): only ties that change who
+//     advances or their seed warrant a bout; a tie entirely below the qualifying
+//     cut shares its rank with no bout.
+func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []state.PlayerStanding, poolWinners int) bool {
+	if len(positions) == 0 {
+		return false
+	}
+	if comp != nil && comp.Format == state.CompFormatLeague {
+		g := TiedGroup{
+			Teams:       group,
+			MinPosition: positions[0] + 1,
+			MaxPosition: positions[len(positions)-1] + 1,
+		}
+		return isConsequentialTie(g, comp)
+	}
+	return tieAffectsAdvancement(positions, poolWinners)
+}
+
 // tiebreakerPairKey returns a canonical (order-independent) key for a
 // pair of player names, used to detect already-existing TB matches.
 func tiebreakerPairKey(a, b string) string {
@@ -259,12 +287,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
-			// Only break ties that affect who advances / their seed: a tie sitting
-			// entirely below the top-poolWinners cut shares its rank with no bout.
-			if !tieAffectsAdvancement(positions, poolWinners) {
+			group := standingsAt(poolStandings, positions)
+			if !tieNeedsIndividualBreak(comp, positions, group, poolWinners) {
 				continue
 			}
-			group := standingsAt(poolStandings, positions)
 			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)

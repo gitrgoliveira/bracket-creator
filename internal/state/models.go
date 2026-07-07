@@ -362,10 +362,14 @@ type Competition struct {
 
 	FightingSpiritAwards []FightingSpiritAward `yaml:"fighting_spirit_awards,omitempty" json:"fightingSpiritAwards,omitempty"`
 
-	// LeagueTiebreakTopN is the highest finishing position (rank) that warrants
-	// an operator-initiated tie-breaker when teams are tied at the end of league
-	// play. Meaningful only for team-league competitions (Format == "league" &&
-	// TeamSize > 0). Allowed values are 3 (default) and 4.
+	// LeagueTiebreakTopN is the highest finishing position (rank) whose ties must
+	// be broken before league play can finish, so a league earns its top
+	// placements like a bracket instead of completing with an unearned tie. It is
+	// operator-settable (3 or 4) only for TEAM leagues; INDIVIDUAL leagues are not
+	// given the control and use the default band (3) via effectiveTopN. Team
+	// leagues break ties with a daihyosen (LeagueTiebreakCandidates); individual
+	// leagues break them with an ippon-shobu bout (tieNeedsIndividualBreak ->
+	// InjectTiebreakerMatches). Allowed explicit values are 3 (default) and 4.
 	//
 	// A "consequential" tied group is one whose position range intersects the
 	// band [1..LeagueTiebreakTopN]; i.e. its best (lowest-numbered) position is
@@ -384,18 +388,24 @@ type Competition struct {
 	// && Kind == "team") at draw time.
 	LeagueTiebreakTopN int `yaml:"league_tiebreak_top_n,omitempty" json:"leagueTiebreakTopN,omitempty"`
 
-	// LeagueTwoThirdPlaces controls whether two joint 3rd places are awarded
-	// when multiple teams tie at the 3rd-position boundary. Meaningful only for
-	// team-league competitions.
+	// LeagueTwoThirdPlaces controls whether two (or more) joint 3rd places are
+	// awarded when competitors tie at the 3rd-position boundary. Applies to ALL
+	// leagues (team AND individual); the standard kendo convention enables it,
+	// naginata leaves it off (single 3rd).
 	//
-	// When true, a tied group whose ENTIRE position range falls at position ≥ 3
-	// (i.e. all tied teams are at 3rd place or below) is treated as
-	// non-consequential; both receive 3rd place and no tie-breaker is required.
-	// This implements the standard kendo convention where there is no bronze
-	// match; two teams can share 3rd.
+	// Two effects:
+	//   - Standings rank (all leagues): a genuine tied group whose best position
+	//     is 3rd or lower is given a SHARED rank (e.g. 3,3) rather than arbitrary
+	//     sequential ranks, so the standings table and the closing-ceremony podium
+	//     show joint 3rd places instead of relabeling the 4th finisher. See
+	//     CalculatePoolStandings (engine/scoring.go).
+	//   - Team-league tie-breaker gating: a tied group whose ENTIRE position range
+	//     falls at position ≥ 3 is treated as non-consequential (both receive 3rd
+	//     place, no bronze decider). See isConsequentialTie (engine).
 	//
 	// When false (default), all ties within [1..LeagueTiebreakTopN] are
-	// consequential and may require a tie-breaker.
+	// consequential and may require a tie-breaker, and the podium shows a single
+	// 3rd place.
 	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
 
 	// LeagueTiebreakFinalized is set to true by the operator via

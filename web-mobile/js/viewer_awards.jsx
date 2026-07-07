@@ -109,9 +109,9 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
   // Standings-based fallback. Two payload shapes are supported:
   //   - Swiss/`/swiss/standings`: a flat array of standings rows.
   //   - Pools/league: an object keyed by poolName → array of rows.
-  // We take the top four from the (single) leaderboard; for pools-only with
-  // multiple pools we use the first pool (consistent with PoolsViewer's
-  // leagueWinner pick).
+  // We render the top three by rank from the (single) leaderboard; for
+  // pools-only with multiple pools we use the first pool (consistent with
+  // PoolsViewer's leagueWinner pick).
   let list = null;
   if (Array.isArray(standings)) {
     list = standings;
@@ -119,12 +119,26 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     list = standings[pools[0].poolName] || [];
   }
   if (list && list.length > 0) {
-    const slice = list.slice(0, 4).map((s, i) => ({
-      place: i < 3 ? i + 1 : 3,
-      name: s.player?.name || "",
-      dojo: s.player?.dojo || "",
-    }));
-    return slice.filter((e) => e.name);
+    // Place finishers by the backend's authoritative rank (the same s.rank the
+    // standings table renders), NOT the array index. A completed league/pool/
+    // Swiss competition resolves consequential ties with a tie-break MATCH
+    // before it can complete (individual: InjectTiebreakerMatches; team:
+    // daihyosen/chusen; both block completion until decided), so ranks are
+    // sequential (1/2/3 → a single 1st, 2nd, and 3rd, with NO 4th) EXCEPT the
+    // sanctioned kendo joint 3rd: when LeagueTwoThirdPlaces is enabled the
+    // backend legitimately shares rank 3 between two genuinely-tied finishers
+    // (e.g. 3,3), and `place: rank` renders both as 3rd. This matches the
+    // standings table and honors the tie-break outcome / naginata single-3rd
+    // convention, instead of the old index-based logic that relabeled the
+    // 4th-ranked finisher as a fabricated joint 3rd.
+    const podium = [];
+    list.forEach((s, i) => {
+      const rank = s.rank || i + 1;
+      if (rank > 3) return;
+      const name = s.player?.name || "";
+      if (name) podium.push({ place: rank, name, dojo: s.player?.dojo || "" });
+    });
+    return podium;
   }
 
   return [];

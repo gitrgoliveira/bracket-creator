@@ -172,14 +172,14 @@ describe('resolveCompetitionAwards', () => {
   });
 
   // ── league (standings-based) → final ─────────────────────────────────────
-  it('league comp → state "final", standings-based podium', async () => {
+  it('league comp → state "final", rank-based podium (single 3rd, no 4th)', async () => {
     const comp = { id: 'league-1', format: 'league' };
     const standings = {
       'Pool A': [
-        { player: { name: 'Alice', dojo: 'Aoyama' } },
-        { player: { name: 'Bob', dojo: 'Bunkyo' } },
-        { player: { name: 'Carol', dojo: 'Chiba' } },
-        { player: { name: 'Dan', dojo: 'Denenchofu' } },
+        { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+        { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+        { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+        { rank: 4, player: { name: 'Dan', dojo: 'Denenchofu' } },
       ],
     };
     const fetchers = {
@@ -190,9 +190,10 @@ describe('resolveCompetitionAwards', () => {
     const result = await resolveCompetitionAwards(comp, fetchers);
 
     expect(result.state).toBe('final');
-    expect(result.podium).toHaveLength(4);
+    // The 4th-ranked Dan is NOT relabeled a joint 3rd: podium is ranks 1/2/3.
+    expect(result.podium).toHaveLength(3);
     expect(result.podium[0]).toMatchObject({ place: 1, name: 'Alice' });
-    expect(result.podium[3]).toMatchObject({ place: 3, name: 'Dan' });
+    expect(result.podium[2]).toMatchObject({ place: 3, name: 'Carol' });
   });
 
   // ── swiss (standings via dedicated endpoint) → final ─────────────────────

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"time"
 )
 
 // Position names a slot in a team lineup. For 5-person teams the named
@@ -27,19 +26,16 @@ const (
 func PositionNumbered(n int) Position { return Position(strconv.Itoa(n)) }
 
 // TeamLineup pins which player occupies each Position for a team in a
-// given round OR for a specific match. The lineup is replaceable up
-// until its match (match-scoped) or its round's first match
-// (round-scoped) starts, at which point LockedAt is set and further
-// PUT/PATCH operations are rejected.
+// given round OR for a specific match. The lineup is always editable,
+// including while a match is running or completed.
 //
 // Keying (mp-825): when MatchID is non-empty the lineup is
 // match-scoped, a team may field a different order/roster for each
-// encounter (e.g. successive pool matches), and each entry locks
-// independently when its own match starts. When MatchID is empty the
+// encounter (e.g. successive pool matches). When MatchID is empty the
 // lineup is round-scoped (the legacy behavior, still used by bracket
-// rounds and pre-mp-825 data): one lineup per (team, round), frozen
-// when the round's first match starts. The two scopes coexist; a
-// match-scoped entry shadows the round-scoped fallback for that match.
+// rounds and pre-mp-825 data): one lineup per (team, round). The two
+// scopes coexist; a match-scoped entry shadows the round-scoped
+// fallback for that match.
 //
 // FR-040, data-model §4.
 type TeamLineup struct {
@@ -48,12 +44,6 @@ type TeamLineup struct {
 	Round         int                 `json:"round" yaml:"round"`
 	MatchID       string              `json:"matchId,omitempty" yaml:"matchId,omitempty"`
 	Positions     map[Position]string `json:"positions" yaml:"positions"`
-	LockedAt      *time.Time          `json:"lockedAt,omitempty" yaml:"lockedAt,omitempty"`
-	// ChangeReason is a mandatory audit justification when an operator
-	// edits a lineup after the match has started (force=true). Format:
-	// "<category>: <note>" (e.g. "Substitution: injury to jiho").
-	// Omitted for pre-match lineup submissions.
-	ChangeReason string `json:"changeReason,omitempty" yaml:"changeReason,omitempty"`
 }
 
 var (

@@ -856,10 +856,6 @@ function ReasonPrompt({ label = "Reason for change", presets = [], onConfirm, on
 window.ReasonPrompt = ReasonPrompt;
 
 const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "Other"];
-const LINEUP_PRESETS = ["Late lineup", "Substitution", "Correction", "Other"];
-// Export for consumers loaded after admin_scoring_modal.jsx
-// (e.g. admin_schedule.jsx which cannot use cross-file ES imports).
-window.LINEUP_PRESETS = LINEUP_PRESETS;
 
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
@@ -896,5 +892,4 @@ export {
   LineupNameInput,
   ReasonPrompt,
   CORRECTION_PRESETS,
-  LINEUP_PRESETS,
 };

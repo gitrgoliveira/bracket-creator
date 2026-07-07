@@ -144,10 +144,10 @@ describe('buildAllWinners', () => {
 
   it('returns podium for a pool/standings competition (league format)', async () => {
     const standings = [
-      { player: { name: 'Alice', dojo: 'Aoyama' } },
-      { player: { name: 'Bob', dojo: 'Bunkyo' } },
-      { player: { name: 'Carol', dojo: 'Chiba' } },
-      { player: { name: 'Dan', dojo: 'Denenchofu' } },
+      { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+      { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+      { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+      { rank: 4, player: { name: 'Dan', dojo: 'Denenchofu' } },
     ];
     const comp = { id: 'league-1', name: 'League', format: 'league', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings, pools: [{ poolName: 'Pool A' }], config: comp, players: [] });
@@ -158,11 +158,12 @@ describe('buildAllWinners', () => {
     });
 
     expect(results).toHaveLength(1);
+    // Rank-based podium: single 3rd (Carol), the 4th finisher is not shown.
     const podium = results[0].podium;
+    expect(podium).toHaveLength(3);
     expect(podium[0].name).toBe('Alice');
     expect(podium[1].name).toBe('Bob');
-    expect(podium[2].place).toBe(3);
-    expect(podium[3].place).toBe(3);
+    expect(podium[2]).toMatchObject({ place: 3, name: 'Carol' });
   });
 
   it('excludes non-completed competitions (caller is responsible for pre-filtering)', async () => {

@@ -23,10 +23,7 @@ export function TermV(props) {
 }
 
 export function competitionKindLabel(c) {
-  const base = c.kind === "team" ? "Teams" : "Individual";
-  if (c.gender === "M") return `${base} · Men`;
-  if (c.gender === "F") return `${base} · Women`;
-  return base;
+  return c.kind === "team" ? "Teams" : "Individual";
 }
 
 // leagueAwareLabel: the single source of truth for the pool-vs-league heading.

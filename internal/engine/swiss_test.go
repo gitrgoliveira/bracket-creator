@@ -783,39 +783,3 @@ func TestGenerateSwissRound_TeamSizeDefaultApplied(t *testing.T) {
 			gap, times[i-1], times[i])
 	}
 }
-
-// TestMaybeLockTeamLineupsForRoundViaRecordResult exercises the non-tx
-// variant of maybeLockTeamLineupsForRound through RecordMatchResult on
-// a team competition.
-func TestMaybeLockTeamLineupsForRoundViaRecordResult(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mlttr-nonteam-team"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, TeamSize: 5, Format: "mixed",
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusScheduled},
-	}))
-	// Save a lineup so LockTeamLineupsForRound has something to lock.
-	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
-		TeamID: "RedTeam", Round: 0,
-		Positions: map[domain.Position]string{
-			domain.PosSenpo:   "p1",
-			domain.PosJiho:    "p2",
-			domain.PosChuken:  "p3",
-			domain.PosFukusho: "p4",
-			domain.PosTaisho:  "p5",
-		},
-	}, 5))
-
-	// RecordMatchResult with Running status triggers maybeLockTeamLineupsForRound.
-	err := eng.RecordMatchResult(compID, "Pool A-0", &state.MatchResult{
-		SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusRunning,
-	})
-	require.NoError(t, err)
-
-	lineups, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	got := lineups["RedTeam-0"]
-	assert.NotNil(t, got.LockedAt, "lineup must be locked after RecordMatchResult with Running status")
-}

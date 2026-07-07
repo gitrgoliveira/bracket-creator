@@ -1,20 +1,18 @@
 // Package engine, scoring_tx.go owns the tx-aware twins of
 // RecordMatchResult / RecordMatchResultWithIneligibility /
-// recordBracketMatchResult / recordIneligibilityFromDecision /
-// maybeLockTeamLineupsForRound. They accept a state.StoreTx instead of
-// reaching at e.store directly, so a caller (typically a HTTP handler)
-// can run them inside a single Store.WithTransaction acquire of the
-// per-comp write lock.
+// recordBracketMatchResult / recordIneligibilityFromDecision.
+// They accept a state.StoreTx instead of reaching at e.store directly,
+// so a caller (typically a HTTP handler) can run them inside a single
+// Store.WithTransaction acquire of the per-comp write lock.
 //
 // Why these exist. Pre-T156 the score and decision handlers called
 // engine methods that each acquired their own per-comp lock via
-// UpdatePoolMatchByID / UpdateBracket / SetCompetitorStatus /
-// LockTeamLineupsForRound. The handler's logical "score this match"
-// operation translated to 3-5 separate lock acquires, with concurrent
-// writers free to land mutations in the gaps. The tx-aware twins
-// collapse all of those into ONE acquire so the entire
-// match-write + ineligibility-write + lineup-freeze sequence is
-// indivisible.
+// UpdatePoolMatchByID / UpdateBracket / SetCompetitorStatus.
+// The handler's logical "score this match" operation translated to
+// 3-5 separate lock acquires, with concurrent writers free to land
+// mutations in the gaps. The tx-aware twins collapse all of those into
+// ONE acquire so the entire match-write + ineligibility-write sequence
+// is indivisible.
 //
 // Constraint. Methods here MUST call only the tx parameter, NEVER
 // e.store directly. The per-comp lock is non-reentrant (sync.RWMutex
@@ -207,35 +205,6 @@ func (e *Engine) recordIneligibilityFromDecisionTx(tx state.StoreTx, compID, mat
 	return &status, nil
 }
 
-// maybeLockTeamLineupsForRoundTx is the tx-aware twin of
-// maybeLockTeamLineupsForRound. Same gating logic, same "log and
-// swallow" failure mode, the score-write has already landed and we
-// don't want to fail the request on a side-effect failure.
-func (e *Engine) maybeLockTeamLineupsForRoundTx(tx state.StoreTx, compID string, result *state.MatchResult) {
-	if result == nil {
-		return
-	}
-	if result.Status != state.MatchStatusRunning && result.Status != state.MatchStatusCompleted {
-		return
-	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil || comp == nil || comp.TeamSize <= 0 {
-		return
-	}
-	now := time.Now().UTC()
-	// Match-scoped freeze (mp-825): lock only this encounter's lineups.
-	if result.ID != "" {
-		if err := tx.LockTeamLineupForMatch(compID, result.ID, now); err != nil {
-			log.Printf("engine: LockTeamLineupForMatch compId=%s matchId=%s: %v", compID, result.ID, err)
-		}
-	}
-	// Round-scoped freeze (legacy): round-keyed lineups only.
-	const round = 0
-	if err := tx.LockTeamLineupsForRound(compID, round, now); err != nil {
-		log.Printf("engine: LockTeamLineupsForRound compId=%s round=%d: %v", compID, round, err)
-	}
-}
-
 // RecordMatchResultWithIneligibilityTx is the tx-aware twin of
 // RecordMatchResultWithIneligibility. The K3/CHK047 partial-write
 // rollback path replays the prior result via the same tx so the
@@ -415,7 +384,6 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
 		return nil, nil
 	}
-	e.maybeLockTeamLineupsForRoundTx(tx, compID, result)
 	return status, nil
 }
 
@@ -481,7 +449,6 @@ func (e *Engine) recordMatchResultTx(tx state.StoreTx, compID, matchID string, r
 	if _, err := e.recordIneligibilityFromDecisionTx(tx, compID, matchID, result); err != nil {
 		log.Printf("engine: recordIneligibilityFromDecisionTx compId=%s matchId=%s: %v", compID, matchID, err)
 	}
-	e.maybeLockTeamLineupsForRoundTx(tx, compID, result)
 	return nil
 }
 

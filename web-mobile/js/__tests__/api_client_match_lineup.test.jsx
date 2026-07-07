@@ -1,6 +1,6 @@
-// mp-bkg: tests for the three new matchId-keyed lineup API helpers
-// (fetchMatchLineup, putMatchLineup, deleteMatchLineup) added to api_client.jsx.
-// These mirror the round-scoped helpers; same 404/409/error handling, just
+// mp-bkg: tests for the three matchId-keyed lineup API helpers
+// (fetchMatchLineup, putMatchLineup, deleteMatchLineup) in api_client.jsx.
+// These mirror the round-scoped helpers; same 404/error handling, just
 // targeting a different endpoint path (/match-lineups/:matchId vs /lineups/:round).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -54,7 +54,7 @@ describe('API.putMatchLineup', () => {
   afterEach(() => { global.fetch = originalFetch; });
 
   it('sends PUT to the correct /match-lineups/:matchId URL', async () => {
-    const saved = { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' }, lockedAt: null };
+    const saved = { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } };
     global.fetch = mockFetch(200, saved);
     const result = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw');
     const [url, opts] = global.fetch.mock.calls[0];
@@ -63,12 +63,6 @@ describe('API.putMatchLineup', () => {
     expect(opts.headers['X-Tournament-Password']).toBe('pw');
     expect(JSON.parse(opts.body)).toMatchObject({ teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } });
     expect(result).toEqual(saved);
-  });
-
-  it('throws on 409 ErrLineupLocked with server message', async () => {
-    global.fetch = mockFetch(409, { error: 'ErrLineupLocked: match is running' });
-    await expect(API.putMatchLineup('c1', 't1', 'm1', {}, 'pw'))
-      .rejects.toThrow('ErrLineupLocked');
   });
 
   it('throws on 400 with server message', async () => {
@@ -99,15 +93,15 @@ describe('API.deleteMatchLineup', () => {
     expect(result).toBe(true);
   });
 
-  it('throws on 409 (locked)', async () => {
+  it('throws on non-404 error responses', async () => {
     global.fetch = vi.fn(() =>
       Promise.resolve({
         ok: false,
-        status: 409,
-        json: () => Promise.resolve({ error: 'lineup locked' }),
+        status: 500,
+        json: () => Promise.resolve({ error: 'internal error' }),
       })
     );
     await expect(API.deleteMatchLineup('c1', 't1', 'm1', 'pw'))
-      .rejects.toThrow('lineup locked');
+      .rejects.toThrow('internal error');
   });
 });

@@ -543,6 +543,55 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		c.Status(http.StatusOK)
 	})
 
+	// POST /competitions/:id/matches/:mid/revert-to-queue
+	// Reverts a running match back to the scheduled (queued) state, discarding
+	// any partial score so the operator can restart the correct bout. Idempotent
+	// for already-scheduled matches. Completed matches return 409 (use the score
+	// editor to correct a recorded result); an unknown match id returns 404.
+	//
+	// Intentionally NOT in isSelfRunMainGatedConfigRoute: revert-to-queue is
+	// operational play (same as start-match), not organiser configuration, so it
+	// stays accessible to court operators in self-run mode.
+	r.POST("/competitions/:id/matches/:mid/revert-to-queue", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := eng.RevertMatchToQueue(id, mid); err != nil {
+			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			var notFoundErr *engine.NotFoundError
+			if errors.As(err, &notFoundErr) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		// The match just left the running state, so its rev-guard high-water
+		// mark is dead. Drop it (mirrors the score handler's `!isRunning`
+		// cleanup) so a later re-start of this match, whose client may reuse the
+		// same RevSession or reset its rev counter, is not wrongly dropped as
+		// stale against a leftover mark.
+		runningRevStore.Delete(id + ":" + mid)
+
+		hub.Broadcast(EventMatchUpdated, gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+		})
+
+		c.Status(http.StatusOK)
+	})
+
 	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -1026,12 +1075,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						result.CorrectionReason = ""
 					}
 				}
-				// Bracket integrity: a running-status write must never revert an
-				// already-completed match (e.g. a stale autosave queued before
-				// Finish and flushed afterward). Applies to ALL callers (the
+				// Bracket integrity: a running- OR scheduled-status write must
+				// never revert an already-completed match (e.g. a stale autosave
+				// queued before Finish and flushed afterward, or a requeue write
+				// that raced with completion). Applies to ALL callers (the
 				// self-reported finalized guard above only covers anonymous mode).
+				// Empty-status writes are legitimate completions/corrections and
+				// are not caught here. There is no sanctioned way to send a
+				// COMPLETED match back to the queue: the revert-to-queue endpoint
+				// reverts only a running match and rejects a completed one (409).
+				// A finished result is corrected via the score editor, not requeued.
 				// No-op it as a stale write so the client's flush discards it.
-				if result.Status == state.MatchStatusRunning &&
+				if (result.Status == state.MatchStatusRunning || result.Status == state.MatchStatusScheduled) &&
 					lookupMatchStatusUnderTx(stx, id, mid) == state.MatchStatusCompleted {
 					staleAfterComplete = true
 					return nil
@@ -1081,11 +1136,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if staleAfterComplete {
-			// The rev-guard above stored this running write's session+rev into
-			// runningRevStore (LoadOrStore) before we discovered, inside the
-			// transaction, that the match is already completed. Drop the entry now,
-			// no future running write can legitimately supersede a completed
-			// match, so retaining it would leak map memory.
+			// If this was a running-status write with a Rev/RevSession, the
+			// rev-guard above stored a high-water mark in runningRevStore
+			// (LoadOrStore) before we discovered, inside the transaction, that the
+			// match is already completed; drop it now. For a scheduled-status
+			// write the rev-guard never ran, so this Delete is a safe no-op
+			// (sync.Map Delete on a missing key does nothing). Either way, no
+			// future write can legitimately supersede a completed match, so
+			// retaining the entry would leak map memory.
 			runningRevStore.Delete(matchKey)
 			c.JSON(http.StatusOK, gin.H{"stale": true})
 			return

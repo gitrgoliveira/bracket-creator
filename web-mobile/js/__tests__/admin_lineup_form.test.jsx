@@ -109,7 +109,6 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
         return extras.length ? [...arr, ...extras] : arr;
       },
       teamIdOf: (team) => team?.id || team?.ID || team?.name || team?.Name || '',
-      canRevise: () => false,
     };
     // useClickOutside is needed by LineupNameInput (called via window.useClickOutside).
     // ui.jsx is loaded by vitest.setup.js, which sets window.useClickOutside.

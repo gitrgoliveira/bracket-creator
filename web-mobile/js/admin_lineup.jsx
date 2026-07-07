@@ -94,20 +94,6 @@ function teamIdOf(team) {
   return team?.id || team?.ID || team?.name || team?.Name || "";
 }
 
-// "Revise" is enabled when the current round's matches are all completed
-// AND the next round hasn't started yet. Uses m.roundIndex (0-based
-// backend index stamped by compMatches) for precise round filtering.
-function canRevise(competition, round) {
-  if (!competition || !window.compMatches) return false;
-  const all = window.compMatches(competition);
-  const currentMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round);
-  const nextMatches = all.filter(m => m.phase === "bracket" && m.roundIndex === round + 1);
-  if (!currentMatches.length) return false;
-  const inProgressNext = nextMatches.some(m => m.status === "running" || m.status === "completed");
-  if (inProgressNext) return false;
-  return currentMatches.every(m => m.status === "completed");
-}
-
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
@@ -339,7 +325,7 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
+  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf };
 }
 
-export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf, canRevise };
+export { AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf };

@@ -1,7 +1,6 @@
 package mobileapp
 
 import (
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -22,8 +21,8 @@ import (
 //
 // Two flavours, both safe against corrupting stored/cached state:
 //   - COPY helpers take the value by value and return a redacted copy:
-//     matchForBroadcast, matchPtrForBroadcast, matchesForBroadcast,
-//     lineupForPublic. Use these for SSE payloads built from a caller's local.
+//     matchForBroadcast, matchPtrForBroadcast, matchesForBroadcast. Use these
+//     for SSE payloads built from a caller's local.
 //   - IN-PLACE helpers clear fields on the passed slice/pointer:
 //     stripMatchesAudit, stripBracketAudit. Pass the deep copies returned by
 //     store.Load* (LoadPoolMatches/LoadBracket already copy), so the on-disk /
@@ -98,11 +97,4 @@ func stripBracketAudit(b *state.Bracket) {
 		b.ThirdPlaceMatch.CorrectionReason = ""
 		b.ThirdPlaceMatch.DecisionReason = ""
 	}
-}
-
-// lineupForPublic returns the lineup as-is for the public read endpoints.
-// The map values returned by LoadTeamLineups are already copies, so this
-// function exists as a clear hand-off point if future redaction is needed.
-func lineupForPublic(l domain.TeamLineup) domain.TeamLineup {
-	return l
 }

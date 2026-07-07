@@ -432,19 +432,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 if (showToast) showToast("Finish or correct the bout in progress first", "error");
                 return;
             }
-            // Unscored current bout: un-start it back to scheduled. moveMatch
-            // only reorders scheduled rows (it no-ops on a running bout), so a
-            // real defer here means clearing the running status: otherwise the
-            // pick below would leave the court with two running bouts. The shape
-            // mirrors buildPatch("scheduled") in the scoring modal. If the
-            // defer write fails (surfaced via toast) we must NOT start the pick.
-            // Reset to scheduled. scoringStarted (above) guarantees this bout has
-            // no entered state, but clear every scoring field: ippons, fouls AND
-            // team subResults: so no partially-entered data can be stranded on the
-            // now-scheduled match.
+            // Unscored current bout: un-start it back to scheduled, otherwise the
+            // pick below would leave the court with two running bouts. Route
+            // through the dedicated revert-to-queue endpoint (not a scheduled
+            // /score write): it clears every score field server-side AND skips the
+            // StartMatchTx eligibility gate, so a stale cross-match ineligibility
+            // can't silently 409 the defer. scoringStarted (above) already
+            // guarantees this bout has no entered state. If the revert fails we
+            // surface a toast and must NOT start the pick.
+            if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
             try {
-                await onEditScore(cur.compId, cur.id, { status: "scheduled", winner: null, score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, subResults: [] }, cur);
-            } catch (_e) {
+                await window.API.revertMatchToQueue(cur.compId, cur.id, password);
+            } catch (e) {
+                if (showToast) showToast((e && e.message) || "Could not defer the current bout", "error");
                 return;
             }
             if (!mountedRef.current) return;

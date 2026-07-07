@@ -1500,6 +1500,8 @@ func TestRevertMatchToQueue(t *testing.T) {
 				Decision:         "fought",
 				ResultSource:     "admin",
 				CorrectionReason: "Scoring error: wrong waza",
+				RepPlayerA:       "Alice-rep",
+				RepPlayerB:       "Bob-rep",
 			},
 		}
 		require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1519,6 +1521,8 @@ func TestRevertMatchToQueue(t *testing.T) {
 		// no misleading result metadata.
 		assert.Empty(t, updated[0].ResultSource)
 		assert.Empty(t, updated[0].CorrectionReason)
+		assert.Empty(t, updated[0].RepPlayerA)
+		assert.Empty(t, updated[0].RepPlayerB)
 		// Identity fields must be preserved
 		assert.Equal(t, "Alice", updated[0].SideA)
 		assert.Equal(t, "Bob", updated[0].SideB)

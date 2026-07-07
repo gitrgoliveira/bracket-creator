@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"testing"
 
-	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,12 +121,4 @@ func TestStripBracketAudit(t *testing.T) {
 		assert.Equal(t, "m-bronze", b.ThirdPlaceMatch.ID, "ThirdPlaceMatch.ID must be preserved")
 		assert.Equal(t, "aka", b.ThirdPlaceMatch.DecisionBy, "ThirdPlaceMatch.DecisionBy (not audit) must be preserved")
 	})
-}
-
-func TestLineupForPublic_Passthrough(t *testing.T) {
-	orig := domain.TeamLineup{TeamID: "teamA", Round: 1, Positions: map[domain.Position]string{domain.PosSenpo: "p1"}}
-	got := lineupForPublic(orig)
-
-	assert.Equal(t, "teamA", got.TeamID)
-	assert.Equal(t, "p1", got.Positions[domain.PosSenpo])
 }

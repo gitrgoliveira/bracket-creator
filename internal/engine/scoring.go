@@ -1248,6 +1248,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		r.DecidedByHantei = nil
 		r.ResultSource = ""
 		r.CorrectionReason = ""
+		// Rep-bout nominations name who fought a pool/league daihyosen; they are
+		// result data for that supplementary bout, so a requeued match must not
+		// keep them (bracket matches have no rep fields).
+		r.RepPlayerA = ""
+		r.RepPlayerB = ""
 	})
 	if err == nil {
 		if alreadyCompleted {

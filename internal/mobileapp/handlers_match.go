@@ -558,6 +558,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
 		if err := eng.RevertMatchToQueue(id, mid); err != nil {
 			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {

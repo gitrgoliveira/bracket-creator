@@ -34,7 +34,9 @@ export function AdminExport({ c, t, password, showToast }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(dlUrl);
+      // Delay revoke so the browser initiates the download before the blob URL is
+      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
       notify("Results workbook downloaded.");
     } catch (err) {
       notify("Results export failed: " + (err?.message || err), "error");
@@ -121,7 +123,9 @@ export function AdminExport({ c, t, password, showToast }) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.URL.revokeObjectURL(dlUrl);
+      // Delay revoke so the browser initiates the download before the blob URL is
+      // torn down (matches admin_shell.jsx); guard the timer against jsdom teardown.
+      setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
     } catch (err) {
       alert("Export failed: " + err.message);
     }

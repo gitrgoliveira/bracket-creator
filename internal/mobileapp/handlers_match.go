@@ -551,6 +551,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		mid := c.Param("mid")
 		var req struct {
 			WinnerName string `json:"winnerName"`
+			// ModifiedAt is the client's server-relative timestamp for
+			// last-write-wins reconciliation (mp-y3nk); 0 when unstamped.
+			ModifiedAt int64 `json:"modifiedAt"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -591,7 +594,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		if err := eng.OverrideBracketWinner(id, mid, winnerName); err != nil {
+		if err := eng.OverrideBracketWinner(id, mid, winnerName, req.ModifiedAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

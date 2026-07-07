@@ -1,8 +1,12 @@
-package mobileapp
+package domain_test
 
-import "testing"
+import (
+	"testing"
 
-// applyByTimestamp is the core of mp-y3nk timestamp reconciliation: a write only
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+)
+
+// ApplyByTimestamp is the core of mp-y3nk timestamp reconciliation: a write only
 // overwrites the stored value when it is not older, under server-relative
 // timestamps. Unstamped writes (0) keep the previous arrival-order behavior so
 // the rollout is backward compatible.
@@ -21,8 +25,8 @@ func TestApplyByTimestamp(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := applyByTimestamp(tc.incoming, tc.stored); got != tc.want {
-				t.Fatalf("applyByTimestamp(%d, %d) = %v, want %v", tc.incoming, tc.stored, got, tc.want)
+			if got := domain.ApplyByTimestamp(tc.incoming, tc.stored); got != tc.want {
+				t.Fatalf("ApplyByTimestamp(%d, %d) = %v, want %v", tc.incoming, tc.stored, got, tc.want)
 			}
 		})
 	}

@@ -38,7 +38,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, bracket))
 
 	// Override M1 winner to Alice
-	err = eng.OverrideBracketWinner(compID, "M1", "Alice")
+	err = eng.OverrideBracketWinner(compID, "M1", "Alice", 0)
 	require.NoError(t, err)
 
 	// Verify bracket updated and propagated
@@ -49,7 +49,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	assert.Equal(t, "Alice", updated.Rounds[1][0].SideA)
 
 	// Override M2 winner to Charlie
-	err = eng.OverrideBracketWinner(compID, "M2", "Charlie")
+	err = eng.OverrideBracketWinner(compID, "M2", "Charlie", 0)
 	require.NoError(t, err)
 
 	updated, err = store.LoadBracket(compID)
@@ -57,7 +57,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	assert.Equal(t, "Charlie", updated.Rounds[1][0].SideB)
 
 	// Test non-existent match
-	err = eng.OverrideBracketWinner(compID, "M99", "Nobody")
+	err = eng.OverrideBracketWinner(compID, "M99", "Nobody", 0)
 	assert.Error(t, err)
 }
 
@@ -1373,7 +1373,7 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 	})
 
 	t.Run("OverrideBracketWinner rejected (not ready)", func(t *testing.T) {
-		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st")
+		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not ready to override")
 	})

@@ -71,6 +71,11 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 					if reconcileSides(result, m.SideA, m.SideB) {
 						return ErrMatchSideMismatch
 					}
+					// Timestamp last-write-wins (mp-y3nk); see recordBracketMatchResult.
+					if !domain.ApplyByTimestamp(result.ModifiedAt, m.ModifiedAt) {
+						found = true
+						break
+					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					status := result.Status
@@ -78,6 +83,9 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 						status = state.MatchStatusCompleted
 					}
 					bracket.Rounds[rIdx][mIdx].Status = status
+					if result.ModifiedAt != 0 {
+						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
+					}
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
 					bracket.Rounds[rIdx][mIdx].Decision = result.Decision

@@ -433,6 +433,35 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
     });
 });
 
+// mp-y3nk Phase C: writes carry a server-relative modifiedAt so the backend can
+// reconcile a reconnecting offline court's changes by timestamp (last-write-wins
+// on conflict). The offset defaults to 0 in tests (no /api/time learned), so the
+// stamp is ~local time: the contract under test is only that the field is present
+// and numeric.
+describe('client stamping: score/override writes carry a numeric modifiedAt', () => {
+    it('overrideBracketWinner body includes winnerName and a numeric modifiedAt', async () => {
+        let sentBody = null;
+        global.fetch = vi.fn().mockImplementation((url, opts) => {
+            if (String(url).includes('/override-winner')) sentBody = JSON.parse(opts.body);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        });
+        await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        expect(sentBody).toMatchObject({ winnerName: 'Alice' });
+        expect(typeof sentBody.modifiedAt).toBe('number');
+    });
+
+    it('recordScore payload includes a numeric modifiedAt', async () => {
+        let sentBody = null;
+        global.fetch = vi.fn().mockImplementation((url, opts) => {
+            if (String(url).includes('/matches/') && String(url).includes('/score')) sentBody = JSON.parse(opts.body);
+            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        });
+        await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        expect(sentBody).not.toBeNull();
+        expect(typeof sentBody.modifiedAt).toBe('number');
+    });
+});
+
 describe('window.online event flushes the queue', () => {
     it('triggers a flush when the queue is non-empty', async () => {
         // Put something in the queue (first attempt fails).

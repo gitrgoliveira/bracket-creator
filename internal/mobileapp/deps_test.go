@@ -75,7 +75,7 @@ func (stubScoringEngine) UpdateMatchCourt(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) OverrideBracketWinner(string, string, string) error {
+func (stubScoringEngine) OverrideBracketWinner(string, string, string, int64) error {
 	return nil
 }
 

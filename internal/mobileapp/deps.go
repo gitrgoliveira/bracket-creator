@@ -109,9 +109,11 @@ type ScoringEngine interface {
 	// engine.Engine.UpdateMatchCourt.
 	UpdateMatchCourt(compID string, matchID string, newCourt string) error
 	// OverrideBracketWinner sets the winner of a bracket match by
-	// participant name (used by the admin "manual winner" flow). Mirrors
-	// engine.Engine.OverrideBracketWinner.
-	OverrideBracketWinner(compID string, matchID string, winnerName string) error
+	// participant name (used by the admin "manual winner" flow and the
+	// offline force-start feeder assertion). modifiedAt is the
+	// server-relative timestamp for last-write-wins reconciliation (0 =
+	// unstamped). Mirrors engine.Engine.OverrideBracketWinner.
+	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64) error
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error

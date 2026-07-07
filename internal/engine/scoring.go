@@ -893,6 +893,16 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 					if reconcileSides(result, m.SideA, m.SideB) {
 						return ErrMatchSideMismatch
 					}
+					// Timestamp last-write-wins (mp-y3nk): drop a write that is
+					// strictly older than the stored result (both stamped in
+					// server-relative time). This is what lets a reconnecting
+					// offline court's stale change lose to a newer one recorded
+					// elsewhere. Unstamped writes bypass it (arrival-order, as
+					// before); the completed-never-reverted guard stays on top.
+					if !domain.ApplyByTimestamp(result.ModifiedAt, m.ModifiedAt) {
+						found = true
+						break
+					}
 					deriveDaihyosenWinner(result)
 					bracket.Rounds[rIdx][mIdx].Winner = result.Winner
 					// Preserve incoming Status, pre-fix this was
@@ -909,6 +919,13 @@ func (e *Engine) recordBracketMatchResult(compId string, matchId string, result 
 						status = state.MatchStatusCompleted
 					}
 					bracket.Rounds[rIdx][mIdx].Status = status
+					// Stamp the applied write's server-relative time so the next
+					// write is compared against it (mp-y3nk). Preserve a prior stamp
+					// when this write is unstamped, so an un-stamped correction does
+					// not reset the field to 0 and reopen the match to stale writes.
+					if result.ModifiedAt != 0 {
+						bracket.Rounds[rIdx][mIdx].ModifiedAt = result.ModifiedAt
+					}
 					bracket.Rounds[rIdx][mIdx].ScoreA = formatScore(result.IpponsA, result.HansokuA)
 					bracket.Rounds[rIdx][mIdx].ScoreB = formatScore(result.IpponsB, result.HansokuB)
 					bracket.Rounds[rIdx][mIdx].Decision = result.Decision
@@ -1199,7 +1216,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 //
 // Uses the same UpdateBracket atomic primitive as the rest of the
 // scoring path to avoid the LoadBracket + mutate + Save TOCTOU window.
-func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string) error {
+func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64) error {
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)
@@ -1211,9 +1228,18 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					if !bracketMatchPlayable(m) {
 						return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
 					}
+					// Timestamp last-write-wins (mp-y3nk): a reconnecting offline
+					// feeder assertion older than a newer stored result is dropped
+					// as a no-op, so it never clobbers a fresher outcome.
+					if !domain.ApplyByTimestamp(modifiedAt, m.ModifiedAt) {
+						return nil
+					}
 					m.Winner = winnerName
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
+					if modifiedAt != 0 {
+						m.ModifiedAt = modifiedAt
+					}
 					e.propagateBracketWinner(bracket, rIdx, mIdx)
 					return nil
 				}
@@ -1226,9 +1252,15 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			if !bracketMatchPlayable(bm) {
 				return validationErrorf("knockout match %s is not ready to override: a feeder pool or match has not finished", matchId)
 			}
+			if !domain.ApplyByTimestamp(modifiedAt, bm.ModifiedAt) {
+				return nil
+			}
 			bm.Winner = winnerName
 			bm.IsOverridden = true
 			bm.Status = state.MatchStatusCompleted
+			if modifiedAt != 0 {
+				bm.ModifiedAt = modifiedAt
+			}
 			return nil
 		}
 		return notFoundErrorf("bracket match %s not found", matchId)

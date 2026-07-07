@@ -84,6 +84,38 @@ function normalizeViewerCompItem(item) {
 /** Composite key for per-(compID, matchID) maps. Prevents collisions across competitions. */
 function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 
+// ---------------------------------------------------------------------------
+// mp-y3nk: server-clock offset for timestamp reconciliation.
+//
+// Writes (score / override-winner) are stamped in SERVER-RELATIVE time so an
+// offline court's changes reconcile against other courts by ONE clock, not each
+// tablet's local clock. The offset is learned from GET /api/time and refreshed
+// on reconnect. Until the first successful learn, the offset is 0 (writes carry
+// approximately local time); the server treats an unstamped/legacy 0 as
+// arrival-order, and a small offset error only matters for genuinely concurrent
+// same-field edits, so the degradation is graceful.
+// ---------------------------------------------------------------------------
+let _serverClockOffsetMs = 0;
+async function _learnServerClockOffset() {
+    try {
+        const t0 = Date.now();
+        const res = await fetchWithTimeout('/api/time', {}, 5000);
+        if (!res.ok) return;
+        const body = await res.json();
+        const t1 = Date.now();
+        if (typeof body.nowMs !== 'number') return;
+        // Net out the round-trip: estimate the server clock at the response
+        // arrival by adding half the RTT to the reported time.
+        _serverClockOffsetMs = (body.nowMs + Math.round((t1 - t0) / 2)) - t1;
+    } catch (_e) {
+        // Offline / timeout: keep the last known offset (0 on first ever call).
+    }
+}
+// _serverNowMs returns the current time in the server's clock frame. Never
+// negative-guarded: callers only compare relative order, so a monotonic-ish
+// value is what matters.
+function _serverNowMs() { return Date.now() + _serverClockOffsetMs; }
+
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
     const key = _revKey(compID, matchID);
@@ -506,6 +538,11 @@ if (typeof window !== 'undefined') {
 // has network. All localStorage access is wrapped in try/catch for
 // private-browsing / quota safety.
 // ---------------------------------------------------------------------------
+
+// mp-y3nk: learn the server-clock offset at load so the first writes are already
+// stamped in the server's frame (refreshed again on each SSE (re)connect).
+if (typeof fetch === 'function') { _learnServerClockOffset(); }
+
 ;(function _rehydrateQueue() {
     try {
         const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
@@ -664,6 +701,9 @@ function _ensureConnected() {
         // F3: a successful open resets the backoff counter so the next error
         // reconnects fast (starting from 1 s) rather than inheriting a long delay.
         _reconnectAttempt = 0;
+        // mp-y3nk: (re)learn the server-clock offset on every connect so writes
+        // stamped after a reconnect stay in the server's frame.
+        _learnServerClockOffset();
         _fanOutStatus('open');
     };
 
@@ -1062,6 +1102,8 @@ const API = {
     },
     async recordScore(compID, matchID, result, password, match) {
         const payload = toBackendMatchResult(result, match || result);
+        // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
+        payload.modifiedAt = _serverNowMs();
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can drop out-of-order deliveries (e.g. from reconnect flush).
@@ -1318,7 +1360,8 @@ const API = {
     },
     async overrideBracketWinner(compID, matchID, winnerName, password) {
         const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
-        const payload = { winnerName };
+        // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
+        const payload = { winnerName, modifiedAt: _serverNowMs() };
         let res;
         try {
             // fetchWithTimeout so a stalled request is treated as offline rather

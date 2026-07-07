@@ -61,7 +61,7 @@ describe('shiaijoStandingsKind; standings viewer routing follows format (mp-ahu6
     expect(shiaijoStandingsKind({ compFormat: 'league' })).toBe('league');
   });
 
-  it('routes mixed and pure-pool matches to the draw-order viewer', () => {
+  it('routes mixed and playoffs matches to the draw-order viewer', () => {
     expect(shiaijoStandingsKind({ compFormat: 'mixed' })).toBe('pool');
     expect(shiaijoStandingsKind({ compFormat: 'playoffs' })).toBe('pool');
   });

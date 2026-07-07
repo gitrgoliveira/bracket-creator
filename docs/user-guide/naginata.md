@@ -1,22 +1,26 @@
 # Naginata competitions
 
-Naginata tournaments run on the same tools as kendo (pools, brackets, Swiss, and
-the live scoring console), with a few rule differences the app handles for you:
+Naginata competitions run on the same tools as kendo (pools, brackets, Swiss, and
+the live scoring console), with naginata-specific rules the app handles for you.
+Naginata has two competition forms:
 
-- An extra scoring target, Sune (a strike to the shin).
-- A single 3rd place decided by a playoff, instead of kendo's two joint 3rds.
-- Engi-kyogi, a separate kata competition scored by referee flags rather than
-  ippon.
+- **Combat** (shiai): armoured matches scored by ippon, with one extra target,
+  Sune (a strike to the shin), and a single 3rd place decided by a playoff
+  instead of kendo's two joint 3rds.
+- **Engi-kyogi**: the kata form, in which a pair perform choreographed forms
+  scored by referee flags rather than ippon.
 
-There are two independent switches on a competition, both on its **Settings** tab
-and both locked once the draw is generated:
+You pick the form with two checkboxes on a competition's **Settings** tab, both
+locked once the draw is generated:
 
-| Switch | What it does | Available for |
+| Checkbox | What it does | Available for |
 |--------|--------------|---------------|
-| **Naginata competition** | Adds the Sune ippon and the 3rd-place playoff | Individual and team |
-| **Engi (kata competition)** | Replaces ippon scoring with flag counting | Individual only |
+| **Naginata competition** | Turns on the combat rules: the Sune ippon and the 3rd-place playoff | Individual and team |
+| **Engi (kata competition)** | Selects the Engi-kyogi kata form: flag-count scoring | Individual only |
 
-You can turn on either one alone, or both together for a naginata kata division.
+Because Engi-kyogi is itself a naginata competition, a kata division usually has
+both on: **Engi** for the flag scoring and **Naginata competition** for the
+single 3rd place.
 
 ## Sune ippon
 
@@ -53,14 +57,15 @@ for the full podium behaviour.
 
 ## Engi-kyogi (kata competition)
 
-Engi-kyogi is a kata competition: a pair of competitors perform a set of
-choreographed forms, judged by a panel of referees who each raise a flag for the
-side they judge superior. It is scored entirely differently from a combat (shiai)
-bout: there are no ippon, no time on the clock, and no draws.
+Engi-kyogi is the kata form of naginata competition: a pair of competitors
+perform a set of choreographed forms, judged by a panel of referees who each
+raise a flag for the side they judge superior. It is scored entirely differently
+from a combat (shiai) bout: there are no ippon, no time on the clock, and no
+draws.
 
 Turn on **Engi (kata competition)** on an individual competition's Settings
-tab to switch its score editor to flag counting. You can combine it with the
-**Naginata competition** switch for a naginata kata division.
+tab to switch its score editor to flag counting. Combine it with **Naginata
+competition** so the kata division also gets the single 3rd-place playoff.
 
 !!! note "Quick-score and overrides are off for Engi"
     Because every Engi result comes from the flag editor, the kendo shortcuts,

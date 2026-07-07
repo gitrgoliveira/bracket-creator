@@ -524,7 +524,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // have started the wrong match after tapping a point); the confirm warns that
     // any entered score will be discarded. `scored` drives that warning copy.
     const requestRevert = (m) => {
-        const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "this match";
+        // Name BOTH competitors so the confirm identifies the match, not just
+        // one side. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
+        const shiro = (m.sideB && m.sideB.name) || "";
+        const aka = (m.sideA && m.sideA.name) || "";
+        const label = (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
         setPendingRevert({ compId: m.compId, matchId: m.id, label, scored: scoringStarted(m) });
     };
     const confirmRevert = async () => {

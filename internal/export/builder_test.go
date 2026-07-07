@@ -868,6 +868,119 @@ func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
 		"standings W column must contain literal '2' for the pool winner")
 }
 
+// TestBuildResultsWorkbook_PlayoffsBracket covers the pure-knockout format, which
+// has NO pools: the elimination skeleton must be seeded from the participants (as
+// engine.generatePlayoffs does) so the stored bracket renders and its scores overlay.
+func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "P1", Dojo: "D"}, {Name: "P2", Dojo: "D"}, {Name: "P3", Dojo: "D"}, {Name: "P4", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	// Complete the generated bracket's real matches.
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	for ri := range br.Rounds {
+		for mi := range br.Rounds[ri] {
+			m := &br.Rounds[ri][mi]
+			if m.SideA != "" && m.SideB != "" {
+				m.Winner = m.SideA
+				m.Status = state.MatchStatusCompleted
+				m.ScoreA = "MK"
+				m.Decision = "fought"
+			}
+		}
+	}
+	require.NoError(t, store.SaveBracket(compID, br))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "MK"),
+		"playoffs (no pools) must render the bracket with its literal score 'MK'")
+}
+
+// TestBuildResultsWorkbook_SwissUnsupported covers the Swiss format, which has no
+// static bracket: the builder must fail with the documented sentinel rather than
+// emit an empty workbook.
+func TestBuildResultsWorkbook_SwissUnsupported(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatSwiss
+	comp.SwissRounds = 2
+	require.NoError(t, store.SaveCompetition(comp))
+
+	_, err = BuildResultsWorkbook(store, eng, compID)
+	assert.ErrorIs(t, err, ErrSwissExportUnsupported)
+}
+
+// TestBuildResultsWorkbook_MixedEndToEnd covers the pools+knockout format through
+// the real engine: two pools are generated and scored, then the export must render
+// the pool grid with literal scores.
+func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatMixed
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 1
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "M1", Dojo: "D"}, {Name: "M2", Dojo: "D"}, {Name: "M3", Dojo: "D"},
+		{Name: "M4", Dojo: "D"}, {Name: "M5", Dojo: "D"}, {Name: "M6", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	for _, m := range matches {
+		res := m
+		res.IpponsA = []string{"M", "K"}
+		res.IpponsB = nil
+		res.Winner = m.SideA
+		res.Decision = "fought"
+		res.Status = state.MatchStatusCompleted
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &res))
+	}
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "MK"),
+		"mixed pool grid must show the literal ippon score 'MK'")
+}
+
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.
 func makeTeamPools() []helper.Pool {
 	rA := makePlayer("Red A")

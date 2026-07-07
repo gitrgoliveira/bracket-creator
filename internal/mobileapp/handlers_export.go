@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -30,6 +31,12 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 
 		data, err := export.BuildResultsWorkbook(store, eng, id)
 		if err != nil {
+			// Swiss has no static bracket to export; surface a clear 422 rather
+			// than a generic 500 so the UI can explain it.
+			if errors.Is(err, export.ErrSwissExportUnsupported) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

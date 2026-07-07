@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -14,6 +15,11 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// ErrSwissExportUnsupported is returned by BuildResultsWorkbook for Swiss-format
+// competitions, which have no static bracket to render. Callers should surface a
+// clear message and point operators at the live Swiss standings instead.
+var ErrSwissExportUnsupported = errors.New("results export is not supported for Swiss competitions; use the live standings view")
 
 // BuildResultsWorkbook reads live tournament state and produces a results-
 // populated XLSX workbook for the given competition. Both pool results (scores
@@ -32,6 +38,15 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 	if comp == nil {
 		return nil, fmt.Errorf("export: competition %s not found", compID)
+	}
+
+	// Swiss has no pools and no static bracket (results are per-round pairings and
+	// a running standings table), so there is nothing to render into the pool/tree
+	// layout this builder produces. Block it explicitly, matching the blank-template
+	// export, rather than emitting an empty workbook. A dedicated Swiss sheet is
+	// tracked as follow-up work.
+	if comp.Format == state.CompFormatSwiss {
+		return nil, ErrSwissExportUnsupported
 	}
 
 	pools, err := store.LoadPools(compID)
@@ -104,7 +119,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// 4. Elimination Matches + Tree sheets.
 	//    Only when there are actually pool winners advancing to a bracket.
+	// Elimination skeleton leaves: pool winners for pools-based formats, or seeded
+	// participants for a pure playoffs bracket (no pools). The latter mirrors
+	// engine.generatePlayoffs so the rendered tree matches the stored bracket that
+	// overlayBracketScores fills in.
 	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
+	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+		finals = playoffFinalsFromParticipants(store, comp)
+	}
 	if len(finals) > 0 {
 		tree := helper.CreateBalancedTree(finals)
 		depth := helper.CalculateDepth(tree)
@@ -200,6 +222,34 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 			})
 		}
 	}
+}
+
+// playoffFinalsFromParticipants seeds the competition's participants exactly as
+// engine.generatePlayoffs does (ApplySeeds → optional numbering → StandardSeeding),
+// returning the seeded names to feed the elimination-tree skeleton. Used for pure
+// playoffs competitions, which have no pools to derive finalists from. Returns nil
+// when participants can't be loaded, in which case no elimination sheet is rendered.
+func playoffFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
+	players, err := store.LoadParticipants(comp.ID, comp.WithZekkenName)
+	if err != nil || len(players) == 0 {
+		return nil
+	}
+	if seeds, serr := store.LoadSeeds(comp.ID); serr == nil && len(seeds) > 0 {
+		if aerr := helper.ApplySeeds(players, seeds); aerr != nil {
+			// An unmatched seed name is non-fatal for a read-only export; the
+			// bracket still renders, just unseeded. Mirror the file's warn pattern.
+			fmt.Printf("export: warning: apply seeds for playoffs skeleton: %v\n", aerr)
+		}
+	}
+	if comp.NumberPrefix != "" {
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	}
+	seeded := helper.StandardSeeding(players)
+	names := make([]string, len(seeded))
+	for i, p := range seeded {
+		names[i] = p.Name
+	}
+	return names
 }
 
 // ---------- pool score overlay ----------

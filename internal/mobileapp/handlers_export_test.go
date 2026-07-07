@@ -172,6 +172,38 @@ func TestExportResultsHandler_ScoredContent(t *testing.T) {
 	assert.True(t, found, "downloaded workbook must contain the literal ippon score 'MK' from the scored matches")
 }
 
+// TestExportResultsHandler_SwissUnprocessable verifies a Swiss competition (no
+// static bracket) returns 422 with a clear message rather than a 500 or an empty file.
+func TestExportResultsHandler_SwissUnprocessable(t *testing.T) {
+	dir, err := os.MkdirTemp("", "export-handler-swiss-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "sw", Name: "SW", Kind: "individual", Format: state.CompFormatSwiss,
+		SwissRounds: 2, Courts: []string{"A"}, Status: "setup",
+	}))
+
+	eng := engine.New(store)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	admin.Use(MaxBodyBytes(DefaultMaxBodyBytes))
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterExportResultsHandlers(admin, store, eng)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/sw/export-results", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	assert.Contains(t, w.Body.String(), "Swiss")
+}
+
 // TestExportResultsHandler_InvalidID rejects a malformed competition ID with 400.
 func TestExportResultsHandler_InvalidID(t *testing.T) {
 	r := setupExportTestRouter(t)

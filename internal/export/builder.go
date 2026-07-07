@@ -133,7 +133,17 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// overlayBracketScores fills in.
 	finals := helper.GenerateFinals(pools, comp.EffectivePoolWinners())
 	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-		finals = playoffFinalsFromParticipants(store, comp)
+		// Prefer the frozen bracket's own leaf order (see playoffLeavesFromBracket).
+		// Recomputing from participants+seeds at export time can desync the skeleton
+		// numbering from the stored bracket if seeds.csv drifted since generation
+		// (e.g. a seeded participant was replaced), which would silently write scores
+		// into the wrong match blocks. Fall back to participant seeding only when no
+		// bracket exists yet (pre-start; there is nothing to overlay anyway).
+		if leaves := playoffLeavesFromBracket(bracket); len(leaves) > 0 {
+			finals = leaves
+		} else {
+			finals = playoffFinalsFromParticipants(store, comp)
+		}
 	}
 	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
@@ -273,11 +283,35 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 	}
 }
 
+// playoffLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
+// build a pure-playoffs bracket, read straight from the frozen bracket's first
+// round: each round-1 match contributes SideA then SideB, in order, with "" for a
+// bye. Feeding THIS order to the export skeleton guarantees its printed
+// "Round N - Match N" numbering matches the stored bracket's MatchNumber (the two
+// numbering walks are equal-by-contract, engine.assignBracketMatchNumbers vs
+// helper.AssignMatchNumbers), so overlayBracketScores writes each score into the
+// right block even when seeds.csv has drifted. Returns nil for a nil/empty bracket
+// (e.g. a playoffs competition not yet started).
+func playoffLeavesFromBracket(bracket *state.Bracket) []string {
+	if bracket == nil || len(bracket.Rounds) == 0 {
+		return nil
+	}
+	first := bracket.Rounds[0]
+	leaves := make([]string, 0, len(first)*2)
+	for _, m := range first {
+		leaves = append(leaves, m.SideA, m.SideB)
+	}
+	return leaves
+}
+
 // playoffFinalsFromParticipants seeds the competition's participants exactly as
 // engine.generatePlayoffs does (ApplySeeds → optional numbering → StandardSeeding),
-// returning the seeded names to feed the elimination-tree skeleton. Used for pure
-// playoffs competitions, which have no pools to derive finalists from. Returns nil
-// when participants can't be loaded, in which case no elimination sheet is rendered.
+// returning the seeded names to feed the elimination-tree skeleton. This is the
+// PRE-START fallback only: once a bracket exists, playoffLeavesFromBracket is used
+// instead because it cannot desync from the frozen bracket. Since there is no
+// bracket to overlay when this runs, a best-effort (possibly unseeded) order is
+// acceptable. Returns nil when participants can't be loaded, in which case no
+// elimination sheet is rendered.
 func playoffFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
 	players, err := store.LoadParticipants(comp.ID, comp.WithZekkenName)
 	if err != nil || len(players) == 0 {

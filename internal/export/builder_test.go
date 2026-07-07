@@ -1060,6 +1060,89 @@ func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
 // TestBuildResultsWorkbook_PlayoffsBracket covers the pure-knockout format, which
 // has NO pools: the elimination skeleton must be seeded from the participants (as
 // engine.generatePlayoffs does) so the stored bracket renders and its scores overlay.
+// TestPlayoffLeavesFromBracket unit-tests the leaf-order reconstruction: each
+// round-1 match contributes SideA then SideB in order, byes included as "".
+func TestPlayoffLeavesFromBracket(t *testing.T) {
+	t.Parallel()
+	assert.Nil(t, playoffLeavesFromBracket(nil))
+	assert.Nil(t, playoffLeavesFromBracket(&state.Bracket{}))
+
+	br := &state.Bracket{Rounds: [][]state.BracketMatch{
+		{
+			{SideA: "Alice", SideB: "Dave"},
+			{SideA: "Carol", SideB: ""}, // bye
+		},
+		{{SideA: "Winner of r1-m0", SideB: "Winner of r1-m1"}},
+	}}
+	assert.Equal(t, []string{"Alice", "Dave", "Carol", ""}, playoffLeavesFromBracket(br))
+}
+
+// TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket is the regression
+// test proving the export skeleton is derived from the FROZEN bracket, not
+// recomputed from participants. For a non-power-of-two roster the engine pads the
+// bracket to the next pow2 with byes (buildBracketFromLeaves), so a 6-entry
+// playoffs is stored as an 8-leaf (7-node) tree. The previous implementation
+// recomputed an UNPADDED 6-leaf (5-node) tree at export time, a different topology
+// and match numbering than the stored bracket, which misplaces overlaid scores.
+// The export's rendered match-block count must equal the stored bracket's node
+// count (7), not the recomputed 5.
+func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	players := make([]domain.Player, 6) // non-power-of-two -> 2 byes when padded to 8
+	for i := range players {
+		players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "D"}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	for ri := range br.Rounds {
+		for mi := range br.Rounds[ri] {
+			m := &br.Rounds[ri][mi]
+			if m.SideA != "" && m.SideB != "" {
+				m.Winner, m.Status, m.ScoreA, m.Decision = m.SideA, state.MatchStatusCompleted, "MK", "fought"
+			}
+		}
+	}
+	require.NoError(t, store.SaveBracket(compID, br))
+
+	// Total match nodes in the stored (pow2-padded) bracket.
+	bracketNodes := 0
+	for _, round := range br.Rounds {
+		bracketNodes += len(round)
+	}
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	headers := 0
+	for _, row := range rows {
+		for _, cell := range row {
+			if parseRoundMatchLabel(cell) > 0 {
+				headers++
+			}
+		}
+	}
+	assert.Equal(t, bracketNodes, headers,
+		"export match-block count must equal the stored bracket's node count (topology derived from the frozen bracket, not recomputed unpadded)")
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+}
+
 func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)

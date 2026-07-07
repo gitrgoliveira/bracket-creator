@@ -58,8 +58,7 @@ describe('Viewer Utils', () => {
 
   describe('competitionKindLabel', () => {
     it('should return correct label for individual', () => {
-      expect(competitionKindLabel({ kind: 'individual', gender: 'M' })).toBe('Individual · Men');
-      expect(competitionKindLabel({ kind: 'individual', gender: 'F' })).toBe('Individual · Women');
+      expect(competitionKindLabel({ kind: 'individual' })).toBe('Individual');
     });
     it('should return correct label for teams', () => {
       expect(competitionKindLabel({ kind: 'team' })).toBe('Teams');

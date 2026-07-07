@@ -1114,7 +1114,13 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     // Pools/standings aren't on the console's competition list payload: fetch
     // the competition detail on demand. Refetch whenever this comp's pool
     // matches change (a scored bout), so standings stay current. poolSig is the
-    // change key; it's cheap and keyed only to this comp.
+    // change key; it's cheap and keyed only to this comp. Leagues skip this
+    // fetch entirely (Copilot, PR #333): LeagueStandingsViewer fetches its own
+    // standings via window.API.leagueStandings(c.id) and only needs
+    // `comp`/`comp.poolMatches`, both already on the court feed - waiting on
+    // fetchCompetitionDetails here would be an unneeded dependency that could
+    // stall or blank the league panel if that endpoint (unlike the dedicated
+    // league-standings one) has a transient failure.
     const poolSig = useMemoSh(() => {
         const pms = (comp && comp.poolMatches) || [];
         return pms.map((m) => `${m.id}:${m.status}:${m.scoreA || ""}:${m.scoreB || ""}`).join("|");
@@ -1122,7 +1128,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     const [detail, setDetail] = useStateSh(null);
     const [detailErr, setDetailErr] = useStateSh(false);
     useEffectSh(() => {
-        if (!isPool || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
+        if (!isPool || isLeagueComp || !match.compId || !window.API || typeof window.API.fetchCompetitionDetails !== "function") {
             setDetail(null);
             return;
         }
@@ -1132,7 +1138,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
             .then((d) => { if (!cancelled) setDetail(d); })
             .catch(() => { if (!cancelled) { setDetail(null); setDetailErr(true); } });
         return () => { cancelled = true; };
-    }, [match.compId, isPool, poolSig]);
+    }, [match.compId, isPool, isLeagueComp, poolSig]);
 
     const currentPool = detail && Array.isArray(detail.pools)
         ? detail.pools.find((p) => p.poolName === match.poolName)
@@ -1148,12 +1154,14 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                     {isPool ? (
                         isLeagueComp ? (
                             // Leagues are always RANK-ordered (mp-ahu6): never fall
-                            // through to the draw-order PoolsViewer here.
-                            LeagueStandingsViewer && detail ? (
+                            // through to the draw-order PoolsViewer here. Renders off
+                            // `comp` alone (see the poolSig effect above for why) -
+                            // LeagueStandingsViewer fetches its own standings.
+                            LeagueStandingsViewer && comp ? (
                                 <div className="shiaijo-context__pools">
                                     <LeagueStandingsViewer
-                                        competition={comp || detail}
-                                        poolMatches={detail.poolMatches}
+                                        competition={comp}
+                                        poolMatches={comp.poolMatches}
                                         tweaks={tweaks || { showDojo: true }}
                                         onMatchClick={null}
                                         highlightPlayers={[]}
@@ -1161,9 +1169,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
                                 </div>
                             ) : (
                                 <p style={{ fontSize: 12, color: "var(--ink-3)", margin: 0 }}>
-                                    {detailErr
-                                        ? "Couldn't load standings: they'll appear once the connection recovers."
-                                        : "Loading standings…"}
+                                    Loading standings…
                                 </p>
                             )
                         ) : (

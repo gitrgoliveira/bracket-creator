@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"testing"
 
@@ -979,6 +980,167 @@ func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"mixed pool grid must show the literal ippon score 'MK'")
+}
+
+// TestBuildResultsWorkbook_IncompleteAllFormats exports every format immediately
+// after StartCompetition, with ZERO matches scored. A real tournament exports
+// mid-run, so an incomplete competition must still yield a valid workbook (or, for
+// Swiss, the documented 422) and never crash.
+func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		format       string
+		players      int
+		poolSize     int
+		poolWinners  int
+		wantSwissErr bool
+	}{
+		{"league incomplete", state.CompFormatLeague, 4, 4, 1, false},
+		{"mixed incomplete", state.CompFormatMixed, 6, 3, 1, false},
+		{"playoffs incomplete", state.CompFormatPlayoffs, 4, 0, 0, false},
+		{"swiss incomplete", state.CompFormatSwiss, 4, 0, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir, store, eng, compID := testSetup(t)
+			defer os.RemoveAll(dir)
+
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			comp.Kind = "individual"
+			comp.Format = tc.format
+			comp.Status = "setup"
+			if tc.poolSize > 0 {
+				comp.PoolSize = tc.poolSize
+				comp.PoolSizeMode = "min"
+			}
+			if tc.poolWinners > 0 {
+				comp.PoolWinners = tc.poolWinners
+			}
+			if tc.format == state.CompFormatLeague {
+				comp.RoundRobin = true
+			}
+			if tc.format == state.CompFormatSwiss {
+				comp.SwissRounds = 2
+			}
+			require.NoError(t, store.SaveCompetition(comp))
+
+			players := make([]domain.Player, tc.players)
+			for i := range players {
+				players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "D"}
+			}
+			require.NoError(t, store.SaveParticipants(compID, players))
+			require.NoError(t, eng.StartCompetition(compID))
+
+			// Deliberately score nothing: export the incomplete competition.
+			data, err := BuildResultsWorkbook(store, eng, compID)
+			if tc.wantSwissErr {
+				assert.ErrorIs(t, err, ErrSwissExportUnsupported)
+				return
+			}
+			require.NoError(t, err, "incomplete %s export must not error", tc.format)
+			f, err := excelize.OpenReader(bytes.NewReader(data))
+			require.NoError(t, err, "incomplete %s export must be a valid xlsx", tc.format)
+			defer f.Close()
+			assert.Contains(t, f.GetSheetList(), helper.SheetPoolMatches)
+		})
+	}
+}
+
+// TestBuildResultsWorkbook_PartialPoolScoring scores only SOME pool matches. The
+// export must show the scored ones and leave the rest blank, without error.
+func TestBuildResultsWorkbook_PartialPoolScoring(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatLeague
+	comp.PoolSize = 4
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 1
+	comp.RoundRobin = true
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "A", Dojo: "D"}, {Name: "B", Dojo: "D"}, {Name: "C", Dojo: "D"}, {Name: "D", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Greater(t, len(matches), 1, "round-robin of 4 has multiple matches")
+
+	// Score ONLY the first match; leave the rest scheduled.
+	first := matches[0]
+	res := first
+	res.IpponsA = []string{"M", "K"}
+	res.IpponsB = nil
+	res.Winner = first.SideA
+	res.Decision = "fought"
+	res.Status = state.MatchStatusCompleted
+	require.NoError(t, eng.RecordMatchResult(compID, first.ID, &res))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "MK"),
+		"the one scored match must appear even though the pool is incomplete")
+}
+
+// TestBuildResultsWorkbook_PlayoffsPartialBracket scores only the first bracket
+// round (e.g. semifinals) and leaves later rounds unplayed. The export must render
+// the played scores and leave the rest blank, without error.
+func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "P1", Dojo: "D"}, {Name: "P2", Dojo: "D"}, {Name: "P3", Dojo: "D"}, {Name: "P4", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	require.GreaterOrEqual(t, len(br.Rounds), 2, "4 entrants → semifinal + final")
+
+	// Score ONLY the first round (semifinals); leave the final unplayed.
+	for mi := range br.Rounds[0] {
+		m := &br.Rounds[0][mi]
+		if m.SideA != "" && m.SideB != "" {
+			m.Winner = m.SideA
+			m.Status = state.MatchStatusCompleted
+			m.ScoreA = "MK"
+			m.Decision = "fought"
+		}
+	}
+	require.NoError(t, store.SaveBracket(compID, br))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "MK"),
+		"the played semifinal score must render even with the final unplayed")
 }
 
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.

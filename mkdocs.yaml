@@ -81,6 +81,7 @@ nav:
       - Input format: user-guide/input-format.md
       - Web UI: user-guide/web-ui.md
       - Mobile / live tournament app: user-guide/mobile-app.md
+      - Naginata competitions: user-guide/naginata.md
       - Host the live app: user-guide/hosting.md
       - Commands:
           - create-pools: user-guide/commands/create-pools.md

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -553,5 +553,82 @@ describe('isTeamMatch; gates the "Enter lineup" affordance', () => {
     expect(isTeamMatch({ compKind: 'individual', teamSize: 0 })).toBe(false);
     expect(isTeamMatch({})).toBe(false);
     expect(isTeamMatch(null)).toBe(false);
+  });
+});
+
+// applyBronzeLoserLocal mirrors the Go engine's bronze-seeding rule: when a
+// SEMIFINAL completes (R === rounds.length - 2) and a thirdPlaceMatch exists,
+// the loser is placed in thirdPlaceMatch.sideA (M even) or sideB (M odd).
+// This is the client-side mirror used by applyLocalBracketWin so an offline
+// court running both semifinals can start the bronze bout without a server
+// round-trip. Pure + immutable: returns a new thirdPlaceMatch object or null.
+describe('applyBronzeLoserLocal; offline bronze-match seeding from semifinal loser', () => {
+  // 4-player bracket: rounds[0] = 2 semifinals (R=0), rounds[1] = final (R=1).
+  // rounds.length - 2 = 0, so rounds[0] is the semifinal round.
+  const makeBracket = () => ({
+    rounds: [
+      [
+        { id: 'sf-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'sf-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'final', status: 'pending', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ],
+    thirdPlaceMatch: {
+      id: 'bronze',
+      status: 'pending',
+      sideA: { id: '', name: 'Winner of r2-m0' },
+      sideB: { id: '', name: 'Winner of r2-m1' },
+    },
+  });
+
+  it('[CONFIRMING] seeds the loser into thirdPlaceMatch.sideA when M is even (sf-0)', () => {
+    // sf-0 is M=0 (even): Alice wins → Bob (loser) goes to bronze.sideA
+    const { rounds, thirdPlaceMatch } = makeBracket();
+    const newBronze = applyBronzeLoserLocal(rounds, 'sf-0', 'Alice', thirdPlaceMatch);
+    expect(newBronze).not.toBeNull();
+    expect(newBronze.sideA).toMatchObject({ id: 'b', name: 'Bob' });
+    expect(newBronze.sideB).toMatchObject({ name: 'Winner of r2-m1' }); // untouched
+  });
+
+  it('seeds the loser into thirdPlaceMatch.sideB when M is odd (sf-1)', () => {
+    // sf-1 is M=1 (odd): Carol wins → Dan (loser) goes to bronze.sideB
+    const { rounds, thirdPlaceMatch } = makeBracket();
+    const newBronze = applyBronzeLoserLocal(rounds, 'sf-1', 'Carol', thirdPlaceMatch);
+    expect(newBronze).not.toBeNull();
+    expect(newBronze.sideB).toMatchObject({ id: 'd', name: 'Dan' });
+    expect(newBronze.sideA).toMatchObject({ name: 'Winner of r2-m0' }); // untouched
+  });
+
+  it('returns null (no-op) when the scored match is not a semifinal (final round)', () => {
+    const b = makeBracket();
+    b.rounds[1][0].sideA = { id: 'a', name: 'Alice' };
+    b.rounds[1][0].sideB = { id: 'c', name: 'Carol' };
+    const result = applyBronzeLoserLocal(b.rounds, 'final', 'Alice', b.thirdPlaceMatch);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when thirdPlaceMatch is absent', () => {
+    const { rounds } = makeBracket();
+    expect(applyBronzeLoserLocal(rounds, 'sf-0', 'Alice', null)).toBeNull();
+    expect(applyBronzeLoserLocal(rounds, 'sf-0', 'Alice', undefined)).toBeNull();
+  });
+
+  it('does not assign a placeholder "Winner of …" loser to the bronze', () => {
+    // If sideA of the semifinal is itself an unresolved placeholder, the
+    // "loser" would be a placeholder name — must be rejected.
+    const b = makeBracket();
+    b.rounds[0][0].sideA = { id: '', name: 'Winner of r3-m0' };
+    // Bob wins against an unresolved sideA; loser is the placeholder — no assignment
+    const result = applyBronzeLoserLocal(b.rounds, 'sf-0', 'Bob', b.thirdPlaceMatch);
+    expect(result).toBeNull();
+  });
+
+  it('is immutable: does not mutate the input thirdPlaceMatch', () => {
+    const { rounds, thirdPlaceMatch } = makeBracket();
+    const origSideA = thirdPlaceMatch.sideA;
+    applyBronzeLoserLocal(rounds, 'sf-0', 'Alice', thirdPlaceMatch);
+    expect(thirdPlaceMatch.sideA).toBe(origSideA);
   });
 });

@@ -150,6 +150,46 @@ export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
     return next;
 }
 
+// applyBronzeLoserLocal places the LOSER of a completed semifinal into the
+// client-side thirdPlaceMatch, mirroring the Go engine's bronze-seeding rule
+// (naginata only). Only acts when the scored match is in the SEMIFINAL round
+// (R === rounds.length - 2) and a thirdPlaceMatch object is provided. Assigns
+// to thirdPlaceMatch.sideA when M is even, sideB when M is odd. Returns an
+// immutably cloned thirdPlaceMatch, or null when conditions are not met (not a
+// semifinal, no thirdPlaceMatch, unresolved/placeholder loser). Pure + immutable:
+// caller merges the result into the bracket; this function never mutates inputs.
+export function applyBronzeLoserLocal(rounds, matchId, winnerName, thirdPlaceMatch) {
+    if (!thirdPlaceMatch || !Array.isArray(rounds) || !matchId) return null;
+    let R = -1, M = -1;
+    for (let r = 0; r < rounds.length; r++) {
+        const idx = (rounds[r] || []).findIndex((x) => x && x.id === matchId);
+        if (idx >= 0) { R = r; M = idx; break; }
+    }
+    // Only act for the semifinal round (one step before the final).
+    if (R < 0 || R !== rounds.length - 2) return null;
+    const match = rounds[R][M];
+    const aName = _bracketSideName(match.sideA);
+    const bName = _bracketSideName(match.sideB);
+    // Derive the loser side object (carrying id + name, not just the name).
+    let loserSide;
+    if (winnerName === aName) {
+        loserSide = match.sideB;
+    } else if (winnerName === bName) {
+        loserSide = match.sideA;
+    } else {
+        return null; // winner doesn't match either side → no-op
+    }
+    const loserName = _bracketSideName(loserSide);
+    // Reject empty or still-placeholder losers: a "Winner of rX-mY" loser means
+    // the semifinal side itself was unresolved and should not be seeded.
+    if (!loserName || _WINNER_OF_RE.test(loserName)) return null;
+    // Immutably assign the loser to the correct bronze side.
+    if (M % 2 === 0) {
+        return { ...thirdPlaceMatch, sideA: loserSide };
+    }
+    return { ...thirdPlaceMatch, sideB: loserSide };
+}
+
 // makeReconnectRefetcher builds an SSE onStatus handler that fires onReconnect()
 // only on an 'open' that FOLLOWS an 'error' (a genuine reconnect), never on the
 // first connect (mp-y3nk Phase 2). A court whose tablet dropped offline can miss
@@ -217,7 +257,7 @@ export function shiaijoScoreCell(m) {
 // real feeder result arrives later it re-propagates over the assertion.
 function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOptimisticResolve, showToast }) {
     const rounds = (comp && comp.bracket && comp.bracket.rounds) || [];
-    const slots = React.useMemo(() => pendingFeederSlots(match, rounds), [match, rounds]);
+    const slots = useMemoSh(() => pendingFeederSlots(match, rounds), [match, rounds]);
     const resolvable = slots.filter(s => s.resolvable);
     const blocked = slots.filter(s => !s.resolvable);
     // feeder id → asserted winner name.
@@ -371,9 +411,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             const next = base.map((c) => {
                 if (c.id !== compId || !c.bracket || !Array.isArray(c.bracket.rounds)) return c;
                 const rounds = propagateBracketWinnerLocal(c.bracket.rounds, feederId, winnerName);
-                if (rounds === c.bracket.rounds) return c;
+                const thirdPlaceMatch = applyBronzeLoserLocal(
+                    c.bracket.rounds, feederId, winnerName, c.bracket.thirdPlaceMatch || null
+                );
+                if (rounds === c.bracket.rounds && thirdPlaceMatch === null) return c;
                 changed = true;
-                return { ...c, bracket: { ...c.bracket, rounds } };
+                return {
+                    ...c,
+                    bracket: {
+                        ...c.bracket,
+                        rounds,
+                        ...(thirdPlaceMatch !== null ? { thirdPlaceMatch } : {}),
+                    },
+                };
             });
             return changed ? next : prev;
         });

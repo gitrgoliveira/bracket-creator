@@ -401,7 +401,8 @@ func TestBronze_OverrideBracketWinnerOnBronze(t *testing.T) {
 	bronzeWinner := bracket.ThirdPlaceMatch.SideA
 
 	// Override the bronze match winner.
-	require.NoError(t, eng.OverrideBracketWinner(compID, "m-bronze", bronzeWinner, 0))
+	_, err = eng.OverrideBracketWinner(compID, "m-bronze", bronzeWinner, 0)
+	require.NoError(t, err)
 
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -480,6 +481,6 @@ func TestBronze_OverrideBracketWinnerNotReadyRejected(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
 
-	err := eng.OverrideBracketWinner(compID, "m-bronze", "Alice", 0)
+	_, err := eng.OverrideBracketWinner(compID, "m-bronze", "Alice", 0)
 	assert.Error(t, err, "overriding an unresolved bronze match must return an error")
 }

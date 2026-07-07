@@ -8,12 +8,34 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// modifiedAtMaxSkewMs bounds how far into the future a client-supplied
+// server-relative ModifiedAt may be before it is clamped to 0. A legitimate
+// write is stamped at action time (at or before "now" in the server frame), so
+// 2 seconds covers normal stamp-to-evaluate network jitter while still
+// rejecting a buggy or hostile far-future value that would freeze a match by
+// making every subsequent legitimate write look "older" and be dropped.
+const modifiedAtMaxSkewMs = 2 * 1000
+
+// clampClientModifiedAt sanitises a client-supplied ModifiedAt for the
+// timestamp last-write-wins guard (mp-y3nk). A negative value, or one more
+// than modifiedAtMaxSkewMs into the future, is untrustworthy: honouring it
+// would let a client FREEZE a match by making every subsequent legitimate
+// write look "older" and be dropped. Such values fall back to 0, which the
+// guard treats as unstamped (arrival-order) and is always safe.
+func clampClientModifiedAt(v int64) int64 {
+	if v < 0 || v > time.Now().UnixMilli()+modifiedAtMaxSkewMs {
+		return 0
+	}
+	return v
+}
 
 // annotateQueuePositions fills in MatchResult.QueuePosition for each
 // element of matches in-place, delegating to state.DeriveQueuePositions
@@ -646,13 +668,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		if err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt)); err != nil {
+		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		hub.Broadcast(EventTournamentUpdated, nil)
-		c.Status(http.StatusOK)
+		if applied {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
+		c.JSON(http.StatusOK, gin.H{"applied": applied})
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {

@@ -111,7 +111,7 @@ type ScoringEngine interface {
 	// offline force-start feeder assertion). modifiedAt is the
 	// server-relative timestamp for last-write-wins reconciliation (0 =
 	// unstamped). Mirrors engine.Engine.OverrideBracketWinner.
-	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64) error
+	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64) (bool, error)
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error

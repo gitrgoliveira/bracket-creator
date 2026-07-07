@@ -36,17 +36,3 @@ func TestTimeHandler_ReturnsServerNowMillis(t *testing.T) {
 	assert.GreaterOrEqual(t, resp.NowMs, before, "nowMs must be >= the time just before the request")
 	assert.LessOrEqual(t, resp.NowMs, after, "nowMs must be <= the time just after the request")
 }
-
-// clampClientModifiedAt rejects hostile/buggy client timestamps that would
-// otherwise freeze a match against later legitimate writes (mp-y3nk, tri-review
-// finding 4). Negative and far-future values fall back to 0 (unstamped ->
-// arrival-order); a plausible value passes through unchanged.
-func TestClampClientModifiedAt(t *testing.T) {
-	now := time.Now().UnixMilli()
-	assert.Equal(t, int64(0), clampClientModifiedAt(-1), "negative must clamp to 0")
-	assert.Equal(t, int64(0), clampClientModifiedAt(now+modifiedAtMaxSkewMs+60_000), "far-future must clamp to 0")
-	assert.Equal(t, int64(0), clampClientModifiedAt(0), "zero (unstamped) passes through as 0")
-	assert.Equal(t, now-1000, clampClientModifiedAt(now-1000), "a recent past timestamp passes through")
-	// A value inside the skew window is trusted (small legitimate clock drift).
-	assert.Equal(t, now+1000, clampClientModifiedAt(now+1000), "a slightly-future value inside the skew window passes through")
-}

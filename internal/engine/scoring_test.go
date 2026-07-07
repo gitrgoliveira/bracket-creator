@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, bracket))
 
 	// Override M1 winner to Alice
-	err = eng.OverrideBracketWinner(compID, "M1", "Alice", 0)
+	_, err = eng.OverrideBracketWinner(compID, "M1", "Alice", 0)
 	require.NoError(t, err)
 
 	// Verify bracket updated and propagated
@@ -49,7 +50,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	assert.Equal(t, "Alice", updated.Rounds[1][0].SideA)
 
 	// Override M2 winner to Charlie
-	err = eng.OverrideBracketWinner(compID, "M2", "Charlie", 0)
+	_, err = eng.OverrideBracketWinner(compID, "M2", "Charlie", 0)
 	require.NoError(t, err)
 
 	updated, err = store.LoadBracket(compID)
@@ -57,7 +58,7 @@ func TestScoring_OverrideBracketWinner(t *testing.T) {
 	assert.Equal(t, "Charlie", updated.Rounds[1][0].SideB)
 
 	// Test non-existent match
-	err = eng.OverrideBracketWinner(compID, "M99", "Nobody", 0)
+	_, err = eng.OverrideBracketWinner(compID, "M99", "Nobody", 0)
 	assert.Error(t, err)
 }
 
@@ -1339,7 +1340,7 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 	})
 
 	t.Run("OverrideBracketWinner rejected (not ready)", func(t *testing.T) {
-		err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st", 0)
+		_, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Pool A-1st", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not ready to override")
 	})
@@ -1631,4 +1632,69 @@ func TestRevertMatchToQueue(t *testing.T) {
 		require.Error(t, err)
 		assert.NotErrorIs(t, err, ErrMatchAlreadyCompleted)
 	})
+}
+
+// TestRevertBracketMatch_StaleWriteFenced confirms that RevertMatchToQueue
+// stamps a ModifiedAt "revert fence" so a queued stale offline write
+// (timestamped before the revert) cannot re-score the deliberately-reverted
+// match. Without the fix, m.ModifiedAt survives the revert; a stale write
+// with modifiedAt >= stored passes ApplyByTimestamp and re-completes the match.
+// With the fix, the revert sets m.ModifiedAt = now(), making every pre-revert
+// write appear stale and causing ApplyByTimestamp to drop it.
+//
+// The scenario uses Status=Running (not Completed) because RevertMatchToQueue
+// blocks reverts of already-completed bracket matches (ErrMatchAlreadyCompleted).
+// A running match can carry a non-zero ModifiedAt (stamped when the "start tap"
+// write landed), which is exactly the stale-fence scenario.
+func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "revert-fence"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Revert Fence Test", Status: state.CompStatusPlayoffs,
+	}))
+
+	tStart := time.Now().UnixMilli() - 10_000 // 10s ago
+
+	// Seed the bracket with a RUNNING match that already carries a ModifiedAt
+	// stamp (simulating the "Start" tap that sets status=running + modifiedAt).
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "BF-1", SideA: "Alice", SideB: "Bob",
+				Status: state.MatchStatusRunning, ModifiedAt: tStart},
+		}},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	// Precondition: match is running with the stamped ModifiedAt.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.MatchStatusRunning, b.Rounds[0][0].Status, "precondition: match must be running")
+	require.Equal(t, tStart, b.Rounds[0][0].ModifiedAt, "precondition: ModifiedAt must be tStart")
+
+	// Revert the running match back to scheduled.
+	require.NoError(t, eng.RevertMatchToQueue(compID, "BF-1"))
+
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.MatchStatusScheduled, b.Rounds[0][0].Status, "precondition: match must be reverted to scheduled")
+
+	// Replay a stale write stamped AFTER tStart but well before now
+	// (simulating an offline client that queued the result before the revert).
+	// tStale > tStart: without the fix ApplyByTimestamp(tStale, tStart) = true
+	// and the match is incorrectly re-completed.
+	tStale := tStart + 5_000
+	require.NoError(t, eng.RecordMatchResult(compID, "BF-1", &state.MatchResult{
+		ID: "BF-1", SideA: "Alice", SideB: "Bob",
+		Winner: "Bob", Status: state.MatchStatusCompleted, ModifiedAt: tStale,
+	}))
+
+	// With the fix the revert fence (m.ModifiedAt = now()) is higher than tStale,
+	// so the replay is dropped and the match stays scheduled.
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[0][0].Status,
+		"revert fence: stale replay must NOT re-complete the match")
+	assert.Empty(t, b.Rounds[0][0].Winner,
+		"revert fence: stale replay must NOT set a winner")
 }

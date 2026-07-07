@@ -2429,3 +2429,23 @@ func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 	}
 	// (If not present at all, the guard skipped storage, also correct.)
 }
+
+// TestClampClientModifiedAt verifies that clampClientModifiedAt rejects
+// hostile/buggy client timestamps that would otherwise freeze a match against
+// later legitimate writes (mp-y3nk, tri-review finding 3). Negative and
+// far-future values fall back to 0 (unstamped -> arrival-order); a plausible
+// value passes through unchanged. The 2s skew window is narrow by design:
+// clients stamp in server-relative time, so only genuine jitter from
+// stamp-to-evaluate latency is allowed.
+func TestClampClientModifiedAt(t *testing.T) {
+	now := time.Now().UnixMilli()
+	assert.Equal(t, int64(0), clampClientModifiedAt(-1), "negative must clamp to 0")
+	assert.Equal(t, int64(0), clampClientModifiedAt(now+modifiedAtMaxSkewMs+60_000), "far-future must clamp to 0")
+	assert.Equal(t, int64(0), clampClientModifiedAt(0), "zero (unstamped) passes through as 0")
+	assert.Equal(t, now-1000, clampClientModifiedAt(now-1000), "a recent past timestamp passes through")
+	// A value inside the 2s skew window is trusted (genuine stamp-to-evaluate jitter).
+	assert.Equal(t, now+1000, clampClientModifiedAt(now+1000), "a slightly-future value inside the skew window passes through")
+	// 60s into the future is far beyond the 2s jitter window: must clamp to 0.
+	// (Bug: old 5-minute window accepted this, allowing match-freeze attacks.)
+	assert.Equal(t, int64(0), clampClientModifiedAt(now+60_000), "60s future is outside 2s skew window: must clamp to 0")
+}

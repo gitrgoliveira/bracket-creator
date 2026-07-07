@@ -22,23 +22,3 @@ func RegisterTimeHandlers(r *gin.RouterGroup) {
 		c.JSON(http.StatusOK, gin.H{"nowMs": time.Now().UnixMilli()})
 	})
 }
-
-// modifiedAtMaxSkewMs bounds how far into the future a client-supplied
-// server-relative ModifiedAt may be before it is rejected. A legitimate offline
-// write is stamped at action time (at or before "now" in the server frame), so
-// any far-future value is a buggy or hostile clock. 5 minutes comfortably covers
-// real client-clock drift.
-const modifiedAtMaxSkewMs = 5 * 60 * 1000
-
-// clampClientModifiedAt sanitises a client-supplied ModifiedAt for the timestamp
-// last-write-wins guard (mp-y3nk). A negative value, or one more than
-// modifiedAtMaxSkewMs into the future, is untrustworthy: honouring it would let a
-// client FREEZE a match by making every subsequent legitimate write look
-// "older" and be dropped. Such values fall back to 0, which the guard treats as
-// unstamped (arrival-order) and is always safe.
-func clampClientModifiedAt(v int64) int64 {
-	if v < 0 || v > time.Now().UnixMilli()+modifiedAtMaxSkewMs {
-		return 0
-	}
-	return v
-}

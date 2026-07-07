@@ -209,11 +209,11 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 // names - excelize's GetRows does NOT evaluate these formulas, so we cannot
 // match by player names. Instead we use ordinal position.
 //
-// Individual pools render as a COMPACT block: one "White ... vs ... Red" header
+// Individual pools render as a COMPACT block: one "Red ... vs ... White" header
 // per pool, immediately followed by one row per round-robin match (in pool.Matches
 // order). So the N-th header in a court column is the N-th pool assigned to that
-// court, and match i sits at header row + 1 + i. SideA is Red (right), SideB is
-// White (left); mirror swaps the two score columns.
+// court, and match i sits at header row + 1 + i. By default SideA (Red) is the
+// left column and SideB (White) the right; mirror swaps the two score columns.
 func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, teamSize int, mirror bool, numCourts int) error {
 	if len(pools) == 0 {
 		return nil
@@ -709,62 +709,58 @@ func overlayBracketScores(f *excelize.File, bracketByID map[string]state.Bracket
 		return fmt.Errorf("overlayBracketScores: get rows: %w", err)
 	}
 
+	// Courts are laid out side-by-side (one 8-column band each), so a single row
+	// can carry a "Round N - Match N" header at EACH court's start column. Process
+	// every header in the row, not just the first.
 	for rowIdx, row := range rows {
-		headerCol := -1
-		matchNum := 0
-		for colIdx, cell := range row {
-			_, m := parseRoundMatchLabel(cell)
-			if m > 0 {
-				headerCol = colIdx
-				matchNum = m
-				break
+		for headerCol, cell := range row {
+			_, matchNum := parseRoundMatchLabel(cell)
+			if matchNum <= 0 {
+				continue
 			}
-		}
-		if headerCol < 0 || matchNum <= 0 {
-			continue
-		}
 
-		bm := findBracketMatchByNumber(bracketByID, matchNum)
-		if bm == nil || bm.Status != state.MatchStatusCompleted {
-			continue
-		}
+			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			if bm == nil || bm.Status != state.MatchStatusCompleted {
+				continue
+			}
 
-		// Score row is 2 rows below the header:
-		//   header+1 = Red/White label row
-		//   header+2 = player/score row
-		scoreRowIdx := rowIdx + 2
-		if scoreRowIdx >= len(rows) {
-			continue
-		}
+			// Score row is 2 rows below the header:
+			//   header+1 = Red/White label row
+			//   header+2 = player/score row
+			scoreRowIdx := rowIdx + 2
+			if scoreRowIdx >= len(rows) {
+				continue
+			}
 
-		excelRow := scoreRowIdx + 1 // 1-based
+			excelRow := scoreRowIdx + 1 // 1-based
 
-		// headerCol is 0-based. The court start col (1-based) = headerCol+1.
-		courtStartCol := headerCol + 1
-		lVCol := colNum(courtStartCol + 1)
-		middleCol := colNum(courtStartCol + 3)
-		rVCol := colNum(courtStartCol + 5)
+			// headerCol is 0-based. The court start col (1-based) = headerCol+1.
+			courtStartCol := headerCol + 1
+			lVCol := colNum(courtStartCol + 1)
+			middleCol := colNum(courtStartCol + 3)
+			rVCol := colNum(courtStartCol + 5)
 
-		leftScore := bm.ScoreA
-		rightScore := bm.ScoreB
-		if mirror {
-			leftScore, rightScore = rightScore, leftScore
-		}
+			leftScore := bm.ScoreA
+			rightScore := bm.ScoreB
+			if mirror {
+				leftScore, rightScore = rightScore, leftScore
+			}
 
-		sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
+			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
 
-		setCellStr(f, sheetName, lVCol, excelRow, leftScore)
-		setCellStr(f, sheetName, rVCol, excelRow, rightScore)
+			setCellStr(f, sheetName, lVCol, excelRow, leftScore)
+			setCellStr(f, sheetName, rVCol, excelRow, rightScore)
 
-		if bm.Decision == state.DecisionDraw {
-			setCellStr(f, sheetName, middleCol, excelRow, "X")
-		}
-		if sfx != "" {
-			setCellStr(f, sheetName, middleCol, excelRow, sfx)
-		}
+			if bm.Decision == state.DecisionDraw {
+				setCellStr(f, sheetName, middleCol, excelRow, "X")
+			}
+			if sfx != "" {
+				setCellStr(f, sheetName, middleCol, excelRow, sfx)
+			}
 
-		if bm.Winner != "" {
-			writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)
+			if bm.Winner != "" {
+				writeWinnerCell(f, sheetName, rows, scoreRowIdx, headerCol, bm.Winner)
+			}
 		}
 	}
 	return nil
@@ -790,85 +786,82 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 		return fmt.Errorf("overlayTeamBracketScores: get rows: %w", err)
 	}
 
+	// Courts are laid out side-by-side (one 8-column band each), so a single row
+	// can carry a "Round N - Match N" header at EACH court's start column. Process
+	// every header in the row, not just the first.
 	for rowIdx, row := range rows {
-		headerCol := -1
-		matchNum := 0
-		for colIdx, cell := range row {
-			if _, m := parseRoundMatchLabel(cell); m > 0 {
-				headerCol = colIdx
-				matchNum = m
-				break
+		for headerCol, cell := range row {
+			_, matchNum := parseRoundMatchLabel(cell)
+			if matchNum <= 0 {
+				continue
 			}
-		}
-		if headerCol < 0 || matchNum <= 0 {
-			continue
-		}
 
-		bm := findBracketMatchByNumber(bracketByID, matchNum)
-		if bm == nil || bm.Status != state.MatchStatusCompleted {
-			continue
-		}
+			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			if bm == nil || bm.Status != state.MatchStatusCompleted {
+				continue
+			}
 
-		courtStartCol := headerCol + 1 // 1-based
-		lVCol := colNum(courtStartCol + 1)
-		lPCol := colNum(courtStartCol + 2)
-		middleCol := colNum(courtStartCol + 3)
-		rPCol := colNum(courtStartCol + 4)
-		rVCol := colNum(courtStartCol + 5)
+			courtStartCol := headerCol + 1 // 1-based
+			lVCol := colNum(courtStartCol + 1)
+			lPCol := colNum(courtStartCol + 2)
+			middleCol := colNum(courtStartCol + 3)
+			rPCol := colNum(courtStartCol + 4)
+			rVCol := colNum(courtStartCol + 5)
 
-		headerExcelRow := rowIdx + 1 // H (1-based)
+			headerExcelRow := rowIdx + 1 // H (1-based)
 
-		// Sub-match ippon letters: Position p sits at H+2+p.
-		for _, sub := range bm.SubResults {
-			if sub.Position <= 0 || sub.Position > teamSize {
-				continue // daihyosen placeholder / out-of-range
+			// Sub-match ippon letters: Position p sits at H+2+p.
+			for _, sub := range bm.SubResults {
+				if sub.Position <= 0 || sub.Position > teamSize {
+					continue // daihyosen placeholder / out-of-range
+				}
+				excelRow := headerExcelRow + 2 + sub.Position
+				leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
+				if mirror {
+					leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
+				}
+				if s := IpponsScore(leftIppons); s != "" {
+					setCellStr(f, sheetName, lVCol, excelRow, s)
+				}
+				if s := IpponsScore(rightIppons); s != "" {
+					setCellStr(f, sheetName, rVCol, excelRow, s)
+				}
+				subSfx := DecisionSuffix(sub.Decision, sub.Encho, sub.DecidedByHantei)
+				if sub.Decision == state.DecisionDraw {
+					setCellStr(f, sheetName, middleCol, excelRow, "X")
+				}
+				if subSfx != "" {
+					setCellStr(f, sheetName, middleCol, excelRow, subSfx)
+				}
 			}
-			excelRow := headerExcelRow + 2 + sub.Position
-			leftIppons, rightIppons := sub.IpponsA, sub.IpponsB
-			if mirror {
-				leftIppons, rightIppons = sub.IpponsB, sub.IpponsA
-			}
-			if s := IpponsScore(leftIppons); s != "" {
-				setCellStr(f, sheetName, lVCol, excelRow, s)
-			}
-			if s := IpponsScore(rightIppons); s != "" {
-				setCellStr(f, sheetName, rVCol, excelRow, s)
-			}
-			subSfx := DecisionSuffix(sub.Decision, sub.Encho, sub.DecidedByHantei)
-			if sub.Decision == state.DecisionDraw {
-				setCellStr(f, sheetName, middleCol, excelRow, "X")
-			}
-			if subSfx != "" {
-				setCellStr(f, sheetName, middleCol, excelRow, subSfx)
-			}
-		}
 
-		// IV/PW summary row = H + 5 + teamSize.
-		summaryExcelRow := headerExcelRow + 5 + teamSize
-		if line := state.TeamResultFrom(bm.SubResults, bm.SideA, bm.SideB); line != nil {
-			leftIV, leftPW := line.AkaIV, line.AkaPW
-			rightIV, rightPW := line.ShiroIV, line.ShiroPW
-			if mirror {
-				leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
+			// IV/PW summary row = H + 5 + teamSize.
+			summaryExcelRow := headerExcelRow + 5 + teamSize
+			if line := state.TeamResultFrom(bm.SubResults, bm.SideA, bm.SideB); line != nil {
+				leftIV, leftPW := line.AkaIV, line.AkaPW
+				rightIV, rightPW := line.ShiroIV, line.ShiroPW
+				if mirror {
+					leftIV, leftPW, rightIV, rightPW = rightIV, rightPW, leftIV, leftPW
+				}
+				setIntCellDirect(f, sheetName, lVCol, summaryExcelRow, leftIV)
+				setIntCellDirect(f, sheetName, lPCol, summaryExcelRow, leftPW)
+				setIntCellDirect(f, sheetName, rVCol, summaryExcelRow, rightIV)
+				setIntCellDirect(f, sheetName, rPCol, summaryExcelRow, rightPW)
 			}
-			setIntCellDirect(f, sheetName, lVCol, summaryExcelRow, leftIV)
-			setIntCellDirect(f, sheetName, lPCol, summaryExcelRow, leftPW)
-			setIntCellDirect(f, sheetName, rVCol, summaryExcelRow, rightIV)
-			setIntCellDirect(f, sheetName, rPCol, summaryExcelRow, rightPW)
-		}
 
-		sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
-		if bm.Decision == state.DecisionDraw {
-			setCellStr(f, sheetName, middleCol, summaryExcelRow, "X")
-		}
-		if sfx != "" {
-			setCellStr(f, sheetName, middleCol, summaryExcelRow, sfx)
-		}
+			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
+			if bm.Decision == state.DecisionDraw {
+				setCellStr(f, sheetName, middleCol, summaryExcelRow, "X")
+			}
+			if sfx != "" {
+				setCellStr(f, sheetName, middleCol, summaryExcelRow, sfx)
+			}
 
-		// Winner marker: the "1." row is 3 rows below the summary row; reuse the
-		// individual writer, which scans forward for the "1." ordinal.
-		if bm.Winner != "" {
-			writeWinnerCell(f, sheetName, rows, summaryExcelRow-1, headerCol, bm.Winner)
+			// Winner marker: the "1." row is 3 rows below the summary row; reuse the
+			// individual writer, which scans forward for the "1." ordinal.
+			if bm.Winner != "" {
+				writeWinnerCell(f, sheetName, rows, summaryExcelRow-1, headerCol, bm.Winner)
+			}
 		}
 	}
 	return nil
@@ -999,26 +992,4 @@ func writeWinnerCell(f *excelize.File, sheetName string, rows [][]string, scoreR
 			return
 		}
 	}
-}
-
-// isOrdinalLabel checks whether a string ends with a period (e.g. "1.", "2.").
-func isOrdinalLabel(s string) bool {
-	return len(s) > 0 && s[len(s)-1] == '.'
-}
-
-// findPoolByNames returns the first pool that contains any of the given player names.
-// Returns nil when no pool matches. This is a convenience utility used in tests.
-func findPoolByNames(pools []helper.Pool, names []string) *helper.Pool {
-	nameSet := make(map[string]bool, len(names))
-	for _, n := range names {
-		nameSet[n] = true
-	}
-	for i := range pools {
-		for _, p := range pools[i].Players {
-			if nameSet[p.Name] {
-				return &pools[i]
-			}
-		}
-	}
-	return nil
 }

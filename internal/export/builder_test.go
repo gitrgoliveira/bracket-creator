@@ -458,15 +458,6 @@ func TestFindBracketMatchByNumber(t *testing.T) {
 	assert.Nil(t, missing)
 }
 
-func TestIsOrdinalLabel(t *testing.T) {
-	t.Parallel()
-	assert.True(t, isOrdinalLabel("1."))
-	assert.True(t, isOrdinalLabel("2."))
-	assert.False(t, isOrdinalLabel("Alice"))
-	assert.False(t, isOrdinalLabel(""))
-	assert.True(t, isOrdinalLabel("."))
-}
-
 func TestStandingMap(t *testing.T) {
 	t.Parallel()
 	standings := []state.PlayerStanding{
@@ -477,25 +468,6 @@ func TestStandingMap(t *testing.T) {
 	assert.Len(t, m, 2)
 	assert.Equal(t, 1, m["Alice"].Rank)
 	assert.Equal(t, 2, m["Bob"].Rank)
-}
-
-func TestFindPoolByNames(t *testing.T) {
-	t.Parallel()
-	pools := makePools()
-
-	// Should find Pool A when searching for Alice.
-	p := findPoolByNames(pools, []string{"Alice"})
-	require.NotNil(t, p)
-	assert.Equal(t, "Pool A", p.PoolName)
-
-	// Should find Pool B when searching for Charlie.
-	p2 := findPoolByNames(pools, []string{"Charlie"})
-	require.NotNil(t, p2)
-	assert.Equal(t, "Pool B", p2.PoolName)
-
-	// Unknown name.
-	p3 := findPoolByNames(pools, []string{"Unknown"})
-	assert.Nil(t, p3)
 }
 
 func TestSetIntCell_MissingKey(t *testing.T) {
@@ -592,6 +564,62 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 		}
 	}
 	assert.True(t, foundM, "Pool C ippon 'M' must be present in two-court workbook")
+}
+
+// TestBuildResultsWorkbook_BracketTwoCourts guards the multi-court bracket
+// overlay: courts are laid out side-by-side, so two "Round N - Match N" headers
+// can share a row at different column bands. The overlay must fill BOTH, not
+// just the left-most court's match (Copilot review of PR #336).
+func TestBuildResultsWorkbook_BracketTwoCourts(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Courts = []string{"A", "B"}
+	comp.PoolWinners = 1
+	require.NoError(t, store.SaveCompetition(comp))
+
+	makeP := func(name, a, b string) helper.Pool {
+		p1, p2 := makePlayer(a), makePlayer(b)
+		return helper.Pool{PoolName: name, Players: []helper.Player{p1, p2}, Matches: []helper.Match{{SideA: &p1, SideB: &p2}}}
+	}
+	// 4 pools (2 per court) → 4 finalists → a semifinal round of 2 matches, one
+	// per court, rendered side-by-side on the same rows.
+	pools := []helper.Pool{
+		makeP("Pool A", "Alice", "Bob"),
+		makeP("Pool B", "Charlie", "Dave"),
+		makeP("Pool C", "Eve", "Frank"),
+		makeP("Pool D", "Grace", "Hank"),
+	}
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	// Two completed semifinals with distinct scores: match 1 (left court) "MK",
+	// match 2 (right court) "DT". Both must appear if every header on the row is
+	// processed.
+	bracket := &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "sf1", SideA: "Alice", SideB: "Charlie", Winner: "Alice", Status: state.MatchStatusCompleted, ScoreA: "MK", ScoreB: "", Decision: "fought", MatchNumber: 1},
+				{ID: "sf2", SideA: "Eve", SideB: "Grace", Winner: "Eve", Status: state.MatchStatusCompleted, ScoreA: "DT", ScoreB: "", Decision: "fought", MatchNumber: 2},
+			},
+		},
+	}
+	require.NoError(t, store.SaveBracket(compID, bracket))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "MK"), "left-court semifinal score 'MK' must be overlaid")
+	assert.True(t, sheetContainsCell(rows, "DT"), "right-court semifinal score 'DT' must be overlaid (multi-court)")
 }
 
 func TestBuildResultsWorkbook_BracketScoresWithWinner(t *testing.T) {

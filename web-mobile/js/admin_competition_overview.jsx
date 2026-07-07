@@ -143,6 +143,20 @@ function overviewViewMode(status) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure helper: hasBracketRounds
+// ---------------------------------------------------------------------------
+// True only when a bracket has at least one real round of matches.
+// internal/state/bracket.go's LoadBracket has a never-nil contract: a
+// competition with no bracket.json (every league, which has no knockout
+// phase) still loads as &Bracket{Rounds: []}, a truthy object with zero
+// rounds. Plain `!!bracket` is therefore ALWAYS true and cannot distinguish
+// "has a real bracket" from "has no bracket at all" - callers must check
+// rounds.length. Pure + exported so this never-nil footgun is unit-tested.
+function hasBracketRounds(bracket) {
+  return !!(bracket && bracket.rounds && bracket.rounds.length);
+}
+
+// ---------------------------------------------------------------------------
 // Pure helper: overviewResultsSection
 // ---------------------------------------------------------------------------
 // The section that holds standings/results for a given competition format.
@@ -151,6 +165,9 @@ function overviewViewMode(status) {
 // pools/bracket would strand the operator on an empty/hidden view. Route swiss
 // to "swiss"; otherwise prefer the bracket when one exists, else pools.
 // Pure + exported so the swiss routing is unit-tested (Copilot review #312).
+// `hasBracket` must come from hasBracketRounds, not raw truthiness (mp-ahu6
+// follow-up): see that helper's doc for why a bare bracket object always
+// passes a truthy check even with zero rounds.
 function overviewResultsSection(format, hasBracket) {
   if (format === "swiss") return "swiss";
   return hasBracket ? "bracket" : "pools";
@@ -260,8 +277,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // for boxes that hold textual or formatted values ("2 pools", "3h 10m").
   const vClass = (val) => (val === "n/a" ? "v" : "v v--sm");
 
-  // Standings/results target for this competition's format (see helper above).
-  const resultsSection = overviewResultsSection(c.format, !!effectiveBracket);
+  // Standings/results target for this competition's format (see helpers above).
+  const resultsSection = overviewResultsSection(c.format, hasBracketRounds(effectiveBracket));
 
   // ---------------------------------------------------------------------------
   // Render helpers
@@ -737,6 +754,7 @@ if (typeof window !== "undefined") {
   window.competitionNextSteps = competitionNextSteps;
   window.overviewViewMode = overviewViewMode;
   window.overviewResultsSection = overviewResultsSection;
+  window.hasBracketRounds = hasBracketRounds;
 }
 
-export { competitionNextSteps, overviewViewMode, overviewResultsSection };
+export { competitionNextSteps, overviewViewMode, overviewResultsSection, hasBracketRounds };

@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -100,6 +102,74 @@ func TestExportResultsHandler_Success(t *testing.T) {
 	require.NotEmpty(t, body)
 	_, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	assert.NoError(t, err, "response body must be a valid XLSX (zip) file")
+}
+
+// TestExportResultsHandler_ScoredContent is an end-to-end API test: it starts a
+// league competition and scores every match through the engine (the real path),
+// then GETs /export-results and asserts the DOWNLOADED workbook carries literal
+// results, not a blank/collapsed template.
+func TestExportResultsHandler_ScoredContent(t *testing.T) {
+	dir, err := os.MkdirTemp("", "export-handler-e2e-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Courts: []string{"A"}}))
+
+	compID := "e2e"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "E2E", Kind: "individual", Format: state.CompFormatLeague,
+		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 1, RoundRobin: true,
+		Courts: []string{"A"}, Status: "setup",
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Ann", Dojo: "D"}, {Name: "Bea", Dojo: "D"}, {Name: "Cody", Dojo: "D"},
+	}))
+
+	eng := engine.New(store)
+	require.NoError(t, eng.StartCompetition(compID))
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	for _, m := range matches {
+		res := m
+		res.IpponsA = []string{"M", "K"}
+		res.IpponsB = nil
+		res.Winner = m.SideA
+		res.Decision = "fought"
+		res.Status = state.MatchStatusCompleted
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &res))
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	admin.Use(MaxBodyBytes(DefaultMaxBodyBytes))
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterExportResultsHandlers(admin, store, eng)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/e2e/export-results", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	f, err := excelize.OpenReader(bytes.NewReader(w.Body.Bytes()))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	found := false
+	for _, row := range rows {
+		for _, cell := range row {
+			if cell == "MK" {
+				found = true
+			}
+		}
+	}
+	assert.True(t, found, "downloaded workbook must contain the literal ippon score 'MK' from the scored matches")
 }
 
 // TestExportResultsHandler_InvalidID rejects a malformed competition ID with 400.

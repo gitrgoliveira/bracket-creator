@@ -787,6 +787,87 @@ func TestBuildResultsWorkbook_GridFromResultsWithoutPoolMatches(t *testing.T) {
 	}
 }
 
+// columnHasValueUnderHeader reports whether any data row below a cell equal to
+// header (in the same column) holds want. Used to assert literal standings.
+func columnHasValueUnderHeader(rows [][]string, header, want string) bool {
+	for rowIdx, row := range rows {
+		for colIdx, cell := range row {
+			if cell != header {
+				continue
+			}
+			for off := 1; off <= 8 && rowIdx+off < len(rows); off++ {
+				r := rows[rowIdx+off]
+				if colIdx < len(r) && r[colIdx] == want {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// TestBuildResultsWorkbook_EndToEndEngineScored drives the REAL path end to end:
+// StartCompetition generates the pool + matches (so pool.Matches is absent on the
+// reloaded helper.Pool, exactly as in the mobile-app), then each match is scored
+// through eng.RecordMatchResult (not hand-saved state). The export must then show
+// literal per-match ippon scores AND literal standings. This is the automated
+// analog of the browser UAT that first exposed the empty-grid bug.
+func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatLeague // single round-robin pool
+	comp.PoolSize = 3
+	comp.PoolSizeMode = "min"
+	comp.PoolWinners = 1
+	comp.RoundRobin = true
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Ann", Dojo: "D"}, {Name: "Bea", Dojo: "D"}, {Name: "Cody", Dojo: "D"},
+	}))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	generated, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, generated, "StartCompetition must generate pool matches")
+
+	// Score every generated match: SideA wins 2-0 (M, K) through the engine.
+	for _, m := range generated {
+		res := m
+		res.IpponsA = []string{"M", "K"}
+		res.IpponsB = nil
+		res.Winner = m.SideA
+		res.Decision = "fought"
+		res.Status = state.MatchStatusCompleted
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &res))
+	}
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	// Grid scores overlaid onto the engine-generated (no .Matches) pool.
+	assert.True(t, sheetContainsCell(rows, "MK"),
+		"engine-scored pool grid must show the literal ippon score 'MK'")
+	// Standings overlaid: the round-robin winner has 2 wins (a literal, not a
+	// collapsed formula 0).
+	assert.True(t, columnHasValueUnderHeader(rows, "W", "2"),
+		"standings W column must contain literal '2' for the pool winner")
+}
+
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.
 func makeTeamPools() []helper.Pool {
 	rA := makePlayer("Red A")

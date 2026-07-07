@@ -2176,9 +2176,10 @@ paths:
       tags: [competitions]
       summary: Save team lineup for a specific match
       description: |
-        Lineups are always editable, including while the match is running or
-        completed (mp-q722); FIK shape rules are surfaced as a 400 rather than
-        blocking the save.
+        Lineups are always editable regardless of match state, including while
+        the match is running or completed (mp-q722). Match state never blocks a
+        save; a structurally invalid payload (FIK shape rules) is still rejected
+        with a 400.
       security:
         - TournamentPassword: []
       requestBody:

@@ -2130,6 +2130,8 @@ paths:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
     delete:
       tags: [competitions]
       summary: Delete team lineup for round

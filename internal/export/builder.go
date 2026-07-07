@@ -21,6 +21,11 @@ import (
 // clear message and point operators at the live Swiss standings instead.
 var ErrSwissExportUnsupported = errors.New("results export is not supported for Swiss competitions; use the live standings view")
 
+// ErrCompetitionNotFound is returned by BuildResultsWorkbook when the competition
+// ID does not exist, so the handler can map it to HTTP 404 (matching every other
+// competition endpoint) rather than an opaque 500.
+var ErrCompetitionNotFound = errors.New("competition not found")
+
 // BuildResultsWorkbook reads live tournament state and produces a results-
 // populated XLSX workbook for the given competition. Both pool results (scores
 // + standings) and elimination bracket results are included as literal values,
@@ -37,7 +42,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: load competition %s: %w", compID, err)
 	}
 	if comp == nil {
-		return nil, fmt.Errorf("export: competition %s not found", compID)
+		return nil, fmt.Errorf("export: competition %s: %w", compID, ErrCompetitionNotFound)
 	}
 
 	// Swiss has no pools and no static bracket (results are per-round pairings and
@@ -118,7 +123,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}
 
 	// 4. Elimination Matches + Tree sheets.
-	//    Only when there are actually pool winners advancing to a bracket.
+	//    Only for formats that actually have a knockout phase (Playoffs, Mixed).
+	// A League is a single round-robin with no bracket, yet GenerateFinals still
+	// returns placeholder "Pool A-1st" finalist labels for it; without the format
+	// gate that would emit a phantom Elimination/Tree bracket with no real scores.
 	// Elimination skeleton leaves: pool winners for pools-based formats, or seeded
 	// participants for a pure playoffs bracket (no pools). The latter mirrors
 	// engine.generatePlayoffs so the rendered tree matches the stored bracket that
@@ -127,7 +135,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	if len(finals) == 0 && len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
 		finals = playoffFinalsFromParticipants(store, comp)
 	}
-	if len(finals) > 0 {
+	if len(finals) > 0 && comp.IsPlayoffEnabled() {
 		tree := helper.CreateBalancedTree(finals)
 		depth := helper.CalculateDepth(tree)
 
@@ -310,16 +318,12 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 		return nil
 	}
 	if teamSize != 0 {
-		return overlayTeamPoolScores(f, pools, resultByID, mirror, numCourts)
+		return overlayTeamPoolScores(f, pools, resultByID, teamSize, mirror, numCourts)
 	}
 
 	sheetName := helper.SheetPoolMatches
 
-	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
+	poolsByCourt := computePoolsByCourt(pools, numCourts)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -357,6 +361,11 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			rVCol := colNum(courtStartCol + 5)
 
 			for i := range pool.Matches {
+				// The N-th grid match maps to result ID "<Pool>-<N>". This relies on
+				// numeric pool-match suffixes being contiguous 0..N-1, which
+				// engine.generatePools guarantees (it stamps the loop index) and
+				// attachPoolMatches preserves (it sorts by suffix and skips the
+				// non-numeric -DH-/-TB- IDs). A missing result is simply left blank.
 				matchID := fmt.Sprintf("%s-%d", pool.PoolName, i)
 				mr, found := resultByID[matchID]
 				if !found || mr.Status != state.MatchStatusCompleted {
@@ -397,7 +406,7 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 // It uses the same ordinal-position matching as the individual path: the N-th
 // "Red" header in a court's column band corresponds to the N-th match across
 // that court's pools, in pool order.
-func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, mirror bool, numCourts int) error {
+func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[string]state.MatchResult, teamSize int, mirror bool, numCourts int) error {
 	sheetName := helper.SheetPoolMatches
 
 	courtMatches := buildCourtMatchJobs(pools, numCourts)
@@ -427,6 +436,9 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 			courtMatchIdx[c]++
 
 			pool := pools[job.poolIdx]
+			// job.matchIdx is the ordinal into pool.Matches, which equals the numeric
+			// suffix of result ID "<Pool>-<N>" because engine.generatePools writes
+			// those suffixes contiguously (see the note in overlayPoolScores).
 			matchID := fmt.Sprintf("%s-%d", pool.PoolName, job.matchIdx)
 			mr, found := resultByID[matchID]
 			if !found || mr.Status != state.MatchStatusCompleted {
@@ -440,22 +452,30 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 
 			// Sub-match rows start two rows below the Red header (1-based).
 			subStartExcelRow := rowIdx + 3
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, mirror)
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror)
 		}
 	}
 
 	return nil
 }
 
-// buildCourtMatchJobs returns, per court, the ordered list of (poolIdx, matchIdx)
-// jobs in the row order PrintPoolMatches lays them out (pool 0 matches, then pool
-// 1 matches, ...). Shared by the individual and team pool-score overlays.
-func buildCourtMatchJobs(pools []helper.Pool, numCourts int) [][]matchJob {
+// computePoolsByCourt groups pool indices by the court each is assigned to, using
+// the same AssignPoolsToCourts distribution PrintPoolMatches lays out. Returned
+// slice is indexed by court; each entry lists that court's pool indices in order.
+func computePoolsByCourt(pools []helper.Pool, numCourts int) [][]int {
 	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
 	poolsByCourt := make([][]int, numCourts)
 	for i, c := range courtAssignments {
 		poolsByCourt[c] = append(poolsByCourt[c], i)
 	}
+	return poolsByCourt
+}
+
+// buildCourtMatchJobs returns, per court, the ordered list of (poolIdx, matchIdx)
+// jobs in the row order PrintPoolMatches lays them out (pool 0 matches, then pool
+// 1 matches, ...). Shared by the individual and team pool-score overlays.
+func buildCourtMatchJobs(pools []helper.Pool, numCourts int) [][]matchJob {
+	poolsByCourt := computePoolsByCourt(pools, numCourts)
 	courtMatches := make([][]matchJob, numCourts)
 	for c := 0; c < numCourts; c++ {
 		for _, pi := range poolsByCourt[c] {
@@ -508,14 +528,17 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 // sub-match rows. Left ippons -> lVCol (startCol+1), right -> rVCol (startCol+5),
 // middle "vs" -> tie marker / suffix. subResults are keyed by Position (1-based);
 // the daihyosen placeholder (Position < 0) is skipped so its blank row stays clean.
-func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, mirror bool) {
+// teamSize bounds the number of sub-match rows the grid actually has; a Position
+// outside [1, teamSize] (corrupted state) is skipped rather than writing into the
+// next encounter's cells (mirrors the guard in overlayTeamBracketScores).
+func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool) {
 	lVCol := colNum(courtStartCol + 1)
 	middleCol := colNum(courtStartCol + 3)
 	rVCol := colNum(courtStartCol + 5)
 
 	for _, sub := range subResults {
-		if sub.Position <= 0 {
-			continue // skip daihyosen placeholder / unpositioned rows
+		if sub.Position <= 0 || sub.Position > teamSize {
+			continue // skip daihyosen placeholder / unpositioned / out-of-range rows
 		}
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
@@ -561,11 +584,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 
 	sheetName := helper.SheetPoolMatches
 
-	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
+	poolsByCourt := computePoolsByCourt(pools, numCourts)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -635,11 +654,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 // overlayRankingSections replaces the IFERROR/INDEX/MATCH formula cells in the
 // "Ranking" sections with literal player names from the engine-ordered standings.
 func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int) error {
-	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
+	poolsByCourt := computePoolsByCourt(pools, numCourts)
 
 	courtRankIdx := make([]int, numCourts)
 
@@ -707,11 +722,7 @@ func overlayRankingSections(f *excelize.File, sheetName string, rows [][]string,
 func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings map[string][]state.PlayerStanding, numCourts int) error {
 	sheetName := helper.SheetPoolMatches
 
-	courtAssignments, _ := helper.AssignPoolsToCourts(len(pools), numCourts)
-	poolsByCourt := make([][]int, numCourts)
-	for i, c := range courtAssignments {
-		poolsByCourt[c] = append(poolsByCourt[c], i)
-	}
+	poolsByCourt := computePoolsByCourt(pools, numCourts)
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -804,7 +815,7 @@ func overlayBracketScores(f *excelize.File, bracketByID map[string]state.Bracket
 	// every header in the row, not just the first.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
-			_, matchNum := parseRoundMatchLabel(cell)
+			matchNum := parseRoundMatchLabel(cell)
 			if matchNum <= 0 {
 				continue
 			}
@@ -878,7 +889,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 	// every header in the row, not just the first.
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
-			_, matchNum := parseRoundMatchLabel(cell)
+			matchNum := parseRoundMatchLabel(cell)
 			if matchNum <= 0 {
 				continue
 			}
@@ -966,7 +977,7 @@ func overlayPlayoffBracketNames(f *excelize.File, bracketByID map[string]state.B
 
 	for rowIdx, row := range rows {
 		for headerCol, cell := range row {
-			_, matchNum := parseRoundMatchLabel(cell)
+			matchNum := parseRoundMatchLabel(cell)
 			if matchNum <= 0 {
 				continue
 			}
@@ -1062,19 +1073,6 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 	return m
 }
 
-// buildColumnMap returns header label -> 0-based column index for all non-empty cells.
-func buildColumnMap(headerRow []string) map[string]int {
-	m := make(map[string]int, len(headerRow))
-	for i, cell := range headerRow {
-		if cell != "" {
-			if _, exists := m[cell]; !exists {
-				m[cell] = i
-			}
-		}
-	}
-	return m
-}
-
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
@@ -1107,17 +1105,18 @@ func findBracketMatchByNumber(idx map[string]state.BracketMatch, matchNum int) *
 	return nil
 }
 
-// parseRoundMatchLabel parses "Round R - Match M" and returns (R, M).
-// Returns (0, 0) when the string does not match that pattern.
-func parseRoundMatchLabel(s string) (round, match int) {
+// parseRoundMatchLabel parses "Round R - Match M" and returns the match number M
+// (the round is not needed by any overlay: matches are looked up by their global
+// match number). Returns 0 when the string does not match that pattern.
+func parseRoundMatchLabel(s string) int {
 	if !strings.Contains(s, "Round") || !strings.Contains(s, "Match") {
-		return 0, 0
+		return 0
 	}
-	_, err := fmt.Sscanf(s, "Round %d - Match %d", &round, &match)
-	if err != nil {
-		return 0, 0
+	var round, match int
+	if _, err := fmt.Sscanf(s, "Round %d - Match %d", &round, &match); err != nil {
+		return 0
 	}
-	return round, match
+	return match
 }
 
 // writeWinnerCell scans nearby rows for a "1." label and writes the winner

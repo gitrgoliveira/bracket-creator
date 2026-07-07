@@ -37,6 +37,11 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 				return
 			}
+			// Unknown competition -> 404, matching every other competition endpoint.
+			if errors.Is(err, export.ErrCompetitionNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

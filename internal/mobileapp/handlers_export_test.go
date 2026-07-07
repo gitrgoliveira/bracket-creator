@@ -215,3 +215,17 @@ func TestExportResultsHandler_InvalidID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+// TestExportResultsHandler_NotFound maps a well-formed but nonexistent competition
+// ID to HTTP 404 (not a generic 500), matching every other competition endpoint.
+func TestExportResultsHandler_NotFound(t *testing.T) {
+	r := setupExportTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/competitions/does-not-exist/export-results", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "not found")
+}

@@ -43,6 +43,17 @@ func testSetup(t *testing.T) (dir string, store *state.Store, eng *engine.Engine
 	return
 }
 
+// setCompFormat loads the competition, sets its Format, and saves it. Bracket
+// tests that build pools + a knockout must use a knockout-enabled format (Mixed),
+// since the export only emits Elimination/Tree sheets when comp.IsPlayoffEnabled().
+func setCompFormat(t *testing.T, store *state.Store, compID, format string) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = format
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
 // makePools builds two pools of two players each with one match.
 func makePools() []helper.Pool {
 	p1 := makePlayer("Alice")
@@ -429,18 +440,16 @@ func TestParseRoundMatchLabel(t *testing.T) {
 
 	tests := []struct {
 		label string
-		wantR int
 		wantM int
 	}{
-		{"Round 1 - Match 1", 1, 1},
-		{"Round 2 - Match 3", 2, 3},
-		{"", 0, 0},
-		{"Random text", 0, 0},
-		{"Round 1", 0, 0},
+		{"Round 1 - Match 1", 1},
+		{"Round 2 - Match 3", 3},
+		{"", 0},
+		{"Random text", 0},
+		{"Round 1", 0},
 	}
 	for _, tc := range tests {
-		r, m := parseRoundMatchLabel(tc.label)
-		assert.Equal(t, tc.wantR, r, "round: label=%q", tc.label)
+		m := parseRoundMatchLabel(tc.label)
 		assert.Equal(t, tc.wantM, m, "match: label=%q", tc.label)
 	}
 }
@@ -457,16 +466,24 @@ func TestColNum(t *testing.T) {
 	assert.NotEmpty(t, fallback)
 }
 
-func TestBuildColumnMap(t *testing.T) {
+func TestBuildCourtColumnMap(t *testing.T) {
 	t.Parallel()
+	// startColIdx 0 makes this equivalent to a whole-row map for a single court.
 	row := []string{"Name", "W", "L", "T", "PW", "PL", "Rank"}
-	m := buildColumnMap(row)
+	m := buildCourtColumnMap(row, 0)
 	assert.Equal(t, 0, m["Name"])
 	assert.Equal(t, 1, m["W"])
 	assert.Equal(t, 6, m["Rank"])
 	// Missing key
 	_, ok := m["Missing"]
 	assert.False(t, ok)
+
+	// Band scoping: a second court's headers past the 8-column band are excluded,
+	// and the returned indices are ABSOLUTE. Court B starts at index 8.
+	twoCourt := []string{"Name", "W", "L", "", "", "", "", "", "Name", "W", "L"}
+	courtB := buildCourtColumnMap(twoCourt, helper.CourtsColumnsPerCourt)
+	assert.Equal(t, 9, courtB["W"], "court B's W must resolve to its own absolute column, not court A's")
+	assert.Equal(t, 8, courtB["Name"])
 }
 
 func TestBuildBracketMatchIndex(t *testing.T) {
@@ -520,7 +537,7 @@ func TestSetIntCell_MissingKey(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
 
-	colMap := buildColumnMap([]string{"W", "L", "T"})
+	colMap := buildCourtColumnMap([]string{"W", "L", "T"}, 0)
 	// "Rank" is NOT in the map - should be a no-op.
 	setIntCell(f, "Sheet1", 1, colMap, "Rank", 42)
 	// "W" IS in the map - should write without error.
@@ -632,6 +649,50 @@ func columnContains(rows [][]string, col int, want string) bool {
 	return false
 }
 
+// TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
+// phantom-bracket bug: GenerateFinals returns placeholder "Pool A-1st" finalist
+// labels even for a League (which has no knockout phase), so without the
+// IsPlayoffEnabled() gate the export emitted an Elimination Matches sheet full of
+// "Round N - Match N" headers and finalist placeholders, plus "Tree 1" pages,
+// implying a knockout that does not exist.
+func TestBuildResultsWorkbook_LeagueNoPhantomBracket(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatLeague
+	comp.PoolWinners = 1
+	comp.RoundRobin = true
+	require.NoError(t, store.SaveCompetition(comp))
+
+	pools := makePools() // Pool A, Pool B
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	// The Elimination Matches sheet still EXISTS (NewFileFromScratch creates it) but
+	// must be empty: no round headers and no "Pool A-1st" finalist placeholders.
+	elim, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	for _, row := range elim {
+		for _, cell := range row {
+			assert.NotContains(t, cell, "Round ", "league export must not render a phantom bracket header")
+			assert.NotContains(t, cell, "-1st", "league export must not render phantom finalist labels")
+		}
+	}
+	// No Tree pages either (the whole knockout block is skipped for league).
+	assert.NotContains(t, f.GetSheetList(), "Tree 1",
+		"league export must not create Tree bracket pages")
+}
+
 // TestBuildResultsWorkbook_MultiCourtStandingsColumns is the regression test for
 // the multi-court standings column-map bug: overlayPoolStandings built its
 // header map from the WHOLE row, and buildColumnMap keeps only the first
@@ -703,6 +764,7 @@ func TestBuildResultsWorkbook_BracketTwoCourts(t *testing.T) {
 	require.NoError(t, err)
 	comp.Courts = []string{"A", "B"}
 	comp.PoolWinners = 1
+	comp.Format = state.CompFormatMixed
 	require.NoError(t, store.SaveCompetition(comp))
 
 	makeP := func(name, a, b string) helper.Pool {
@@ -752,6 +814,7 @@ func TestBuildResultsWorkbook_BracketScoresWithWinner(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
+	setCompFormat(t, store, compID, state.CompFormatMixed)
 
 	pools := makePools()
 	require.NoError(t, store.SavePools(compID, pools))
@@ -818,6 +881,7 @@ func TestBuildResultsWorkbook_BracketKiken(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
+	setCompFormat(t, store, compID, state.CompFormatMixed)
 
 	pools := makePools()
 	require.NoError(t, store.SavePools(compID, pools))
@@ -1401,6 +1465,7 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 	require.NoError(t, err)
 	comp.Kind = "team"
 	comp.TeamSize = 3
+	comp.Format = state.CompFormatMixed
 	require.NoError(t, store.SaveCompetition(comp))
 
 	pools := makeTeamPools()
@@ -1574,6 +1639,36 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 
 	assert.Greater(t, formulaCellCount(t, f, "Tree 2"), 1,
 		"second tree page must be populated (styled copy + rendered leaves), not blank")
+}
+
+// TestWriteTeamSubMatchScores_OutOfRangePositionSkipped verifies the upper-bound
+// guard: a corrupted sub.Position beyond teamSize must be skipped rather than
+// writing ippon letters into the row of the NEXT encounter's block.
+func TestWriteTeamSubMatchScores_OutOfRangePositionSkipped(t *testing.T) {
+	t.Parallel()
+	f := excelize.NewFile()
+	defer f.Close()
+	sheet := helper.SheetPoolMatches
+	f.NewSheet(sheet)
+
+	const teamSize = 3
+	const courtStartCol = 1 // column A band
+	const subStartRow = 5
+	subs := []state.SubMatchResult{
+		{Position: 1, IpponsA: []string{"M"}},
+		{Position: 3, IpponsA: []string{"K"}},
+		{Position: 9, IpponsA: []string{"D"}}, // corrupted: > teamSize
+	}
+	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false)
+
+	// Position 1 -> row 5, Position 3 -> row 7 (both written).
+	v1, _ := f.GetCellValue(sheet, "B5")
+	v3, _ := f.GetCellValue(sheet, "B7")
+	assert.Equal(t, "M", v1)
+	assert.Equal(t, "K", v3)
+	// Position 9 would land at row subStartRow+8 = 13; it must NOT be written.
+	v9, _ := f.GetCellValue(sheet, "B13")
+	assert.Empty(t, v9, "an out-of-range sub.Position must be skipped, not written into a neighbouring block")
 }
 
 // TestAttachPoolMatches_PrefersSideIDs is the regression test for the same-name

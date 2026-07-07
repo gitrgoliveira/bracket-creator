@@ -691,6 +691,18 @@ type MatchResult struct {
 	// over rather than being dropped as stale against a high-water mark left
 	// by a prior session. Same wire-only persistence guarantees as Rev.
 	RevSession string `json:"revSession,omitempty" yaml:"-"`
+	// ModifiedAt is the SERVER-RELATIVE unix-millis timestamp of the last change
+	// to this match's result-bearing fields (mp-y3nk timestamp reconciliation).
+	// Clients stamp each score/override write with server-relative time (learned
+	// via GET /api/time). The write handler drops a write whose ModifiedAt is
+	// older than the stored value, so a reconnecting offline court's stale change
+	// never overwrites a newer one (timestamp last-write-wins); the
+	// completed-never-reverted guard stays on top. Unlike Rev (wire-only), this
+	// IS persisted (append-only pool-matches.csv column + bracket.json) so the
+	// comparison survives a restart. 0 (absent/legacy) means "unversioned" and
+	// always loses to a stamped write, so old files and un-stamped clients behave
+	// exactly as before.
+	ModifiedAt int64 `json:"modifiedAt,omitempty" yaml:"-"`
 }
 
 // HanteiPtr returns &b when b is true, nil otherwise. Use on READ paths
@@ -836,6 +848,11 @@ type BracketMatch struct {
 	DisplayRound int      `json:"displayRound,omitempty"`
 	Hidden       bool     `json:"hidden,omitempty"`
 	Feeders      []string `json:"feeders,omitempty"`
+	// ModifiedAt mirrors MatchResult.ModifiedAt (mp-y3nk): the server-relative
+	// unix-millis timestamp of the last change to this bracket match's result,
+	// persisted in bracket.json so timestamp reconciliation survives a restart.
+	// 0 = unversioned/legacy (always loses to a stamped write).
+	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 }
 
 type Bracket struct {

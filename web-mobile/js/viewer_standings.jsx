@@ -640,7 +640,7 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
 export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition, onMatchClick, highlightPlayers }) {
   const isTeam = competition && (competition.kind === "team" || competition.teamSize > 0);
-  // Engi-Kyogi (kata demonstration): flag-count scoring. Standings show
+  // Engi-Kyogi (kata competition): flag-count scoring. Standings show
   // Victories (V) and total Flags columns only.
   const isEngi = !!(competition && competition.engi);
   // FR-050 / FR-051: league competitions render Final standings instead of

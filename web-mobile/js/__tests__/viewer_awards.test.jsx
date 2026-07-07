@@ -139,7 +139,29 @@ describe('deriveAwards (bracket-based)', () => {
 });
 
 describe('deriveAwards (standings-based)', () => {
-  it('falls back to the top 4 of the first pool when no bracket exists', () => {
+  it('renders the top three by rank from the first pool (single 3rd, no 4th)', () => {
+    const pools = [{ poolName: 'Pool A' }];
+    // A completed league/pool exposes strictly sequential backend ranks (ties
+    // are settled by a tie-break match before completion). The podium follows
+    // s.rank: places 1/2/3 only, so the 4th finisher is NOT relabeled 3rd.
+    const standings = {
+      'Pool A': [
+        { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+        { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+        { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+        { rank: 4, player: { name: 'Dan', dojo: 'Denenchofu' } },
+        { rank: 5, player: { name: 'Eve', dojo: 'Edogawa' } },
+      ],
+    };
+    const awards = deriveAwards(null, standings, pools, new Map());
+    expect(awards).toEqual([
+      { place: 1, name: 'Alice', dojo: 'Aoyama' },
+      { place: 2, name: 'Bob', dojo: 'Bunkyo' },
+      { place: 3, name: 'Carol', dojo: 'Chiba' },
+    ]);
+  });
+
+  it('falls back to array position for rank when s.rank is absent (legacy payload)', () => {
     const pools = [{ poolName: 'Pool A' }];
     const standings = {
       'Pool A': [
@@ -147,7 +169,28 @@ describe('deriveAwards (standings-based)', () => {
         { player: { name: 'Bob', dojo: 'Bunkyo' } },
         { player: { name: 'Carol', dojo: 'Chiba' } },
         { player: { name: 'Dan', dojo: 'Denenchofu' } },
-        { player: { name: 'Eve', dojo: 'Edogawa' } },
+      ],
+    };
+    const awards = deriveAwards(null, standings, pools, new Map());
+    expect(awards).toEqual([
+      { place: 1, name: 'Alice', dojo: 'Aoyama' },
+      { place: 2, name: 'Bob', dojo: 'Bunkyo' },
+      { place: 3, name: 'Carol', dojo: 'Chiba' },
+    ]);
+  });
+
+  it('honors genuine backend joint places (two rank-3 rows render as two 3rds)', () => {
+    // Defensive/future-proofing: today the backend never emits duplicate ranks
+    // (a consequential tie is resolved by a tie-break match), but if it ever
+    // assigns a genuine shared rank, the podium must render it faithfully
+    // rather than fabricate placements from array position.
+    const pools = [{ poolName: 'Pool A' }];
+    const standings = {
+      'Pool A': [
+        { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+        { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+        { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+        { rank: 3, player: { name: 'Dan', dojo: 'Denenchofu' } },
       ],
     };
     const awards = deriveAwards(null, standings, pools, new Map());
@@ -170,17 +213,16 @@ describe('deriveAwards (standings-based)', () => {
 
   it('accepts a flat Swiss-shape standings array (no pool key)', () => {
     const standings = [
-      { player: { name: 'Alice', dojo: 'Aoyama' } },
-      { player: { name: 'Bob', dojo: 'Bunkyo' } },
-      { player: { name: 'Carol', dojo: 'Chiba' } },
-      { player: { name: 'Dan', dojo: 'Denenchofu' } },
+      { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+      { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+      { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+      { rank: 4, player: { name: 'Dan', dojo: 'Denenchofu' } },
     ];
     const awards = deriveAwards(null, standings, null, new Map());
     expect(awards).toEqual([
       { place: 1, name: 'Alice', dojo: 'Aoyama' },
       { place: 2, name: 'Bob', dojo: 'Bunkyo' },
       { place: 3, name: 'Carol', dojo: 'Chiba' },
-      { place: 3, name: 'Dan', dojo: 'Denenchofu' },
     ]);
   });
 
@@ -200,15 +242,15 @@ describe('deriveAwards (standings-based)', () => {
     const pools = [{ poolName: 'Pool A' }];
     const standings = {
       'Pool A': [
-        { player: { name: 'Alice', dojo: 'Aoyama' } },
-        { player: { name: 'Bob', dojo: 'Bunkyo' } },
-        { player: { name: 'Carol', dojo: 'Chiba' } },
-        { player: { name: 'Dan', dojo: 'Denenchofu' } },
+        { rank: 1, player: { name: 'Alice', dojo: 'Aoyama' } },
+        { rank: 2, player: { name: 'Bob', dojo: 'Bunkyo' } },
+        { rank: 3, player: { name: 'Carol', dojo: 'Chiba' } },
+        { rank: 4, player: { name: 'Dan', dojo: 'Denenchofu' } },
       ],
     };
     const awards = deriveAwards(bracket, standings, pools, new Map());
-    expect(awards.map((a) => a.name)).toEqual(['Alice', 'Bob', 'Carol', 'Dan']);
-    expect(awards.map((a) => a.place)).toEqual([1, 2, 3, 3]);
+    expect(awards.map((a) => a.name)).toEqual(['Alice', 'Bob', 'Carol']);
+    expect(awards.map((a) => a.place)).toEqual([1, 2, 3]);
   });
 });
 

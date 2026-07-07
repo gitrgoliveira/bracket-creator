@@ -682,6 +682,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [numberPrefix, setNumberPrefix] = useStateA("");
   const [withZekken, setWithZekken] = useStateA(false);
   const [naginata, setNaginata] = useStateA(false);
+  // League joint-3rd convention: kendo awards two joint 3rd places, naginata a
+  // single 3rd. Defaults by discipline (kendo on, naginata off) and re-syncs
+  // when the naginata toggle flips; the operator can still override per league.
+  const [leagueTwoThirdPlaces, setLeagueTwoThirdPlaces] = useStateA(true);
   const [engi, setEngi] = useStateA(false);
   const [checkInEnabled, setCheckInEnabled] = useStateA(false);
   const safeCourts = window.normalizeCourts(tournament.courts);
@@ -832,6 +836,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (format === "mixed" || format === "league") {
       c.poolFormat = poolFormat;
     }
+    // League joint-3rd convention (kendo two joint 3rds vs naginata single 3rd).
+    // Emit only for leagues; the backend uses `omitempty` so it stays invisible
+    // on other formats. Same post-construction pattern as poolFormat above.
+    if (format === "league") {
+      c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
+    }
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
     // post-construction pattern as poolFormat above: buildCompetition
     // doesn't know about this field; setting it on the result object
@@ -952,6 +962,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
+          {format === "league" && (
+            <div className="field">
+              <label className="checkbox"><input type="checkbox" checked={leagueTwoThirdPlaces} onChange={(e) => setLeagueTwoThirdPlaces(e.target.checked)} /> Award two joint 3rd places</label>
+              <div className="field__hint" style={{ marginTop: 4 }}>When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.</div>
+            </div>
+          )}
+
           {/* T190 (FR-050a): Swiss rounds input. Only rendered for */}
           {/* format=swiss: keeps the create form uncluttered for other */}
           {/* formats. Same NaN-as-"" + decideNumericUpdate pattern as */}
@@ -1054,7 +1071,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => setNaginata(e.target.checked)} /> Naginata competition</label>
+            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> Naginata competition</label>
             <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
           </div>
 

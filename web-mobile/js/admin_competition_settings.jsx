@@ -735,31 +735,37 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
         </div>
       </div>
-      {/* Phase 3b (mp-8rc9): league tie-breaker settings. Only for team leagues. */}
-      {local.format === "league" && (local.teamSize > 0 || local.kind === "team") && (
+      {/* League standings settings. The joint-3rd convention applies to ALL
+          leagues (team + individual); the "Break ties for top" band is a
+          team-league tie-breaker knob and stays team-only. */}
+      {local.format === "league" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-          <div className="field">
-            <label className="field__label">Break ties for top</label>
-            <div className="radio-group">
-              <button
-                className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
-                type="button"
-                onClick={() => update("leagueTiebreakTopN", 3)}
-              >Top 3</button>
-              <button
-                className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
-                type="button"
-                onClick={() => update("leagueTiebreakTopN", 4)}
-              >Top 4</button>
+          {(local.teamSize > 0 || local.kind === "team") && (
+            <div className="field">
+              <label className="field__label">Break ties for top</label>
+              <div className="radio-group">
+                <button
+                  className={`radio-pill ${(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3 ? "is-active" : ""}`}
+                  type="button"
+                  disabled={isDrawReady || isStarted}
+                  onClick={() => update("leagueTiebreakTopN", 3)}
+                >Top 3</button>
+                <button
+                  className={`radio-pill ${local.leagueTiebreakTopN === 4 ? "is-active" : ""}`}
+                  type="button"
+                  disabled={isDrawReady || isStarted}
+                  onClick={() => update("leagueTiebreakTopN", 4)}
+                >Top 4</button>
+              </div>
+              <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
             </div>
-            <div className="field__hint">Tied teams within this finishing band require an operator-run tie-breaker before standings are finalised.</div>
-          </div>
+          )}
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}Award two joint 3rd places
             </label>
-            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, teams tied entirely at 3rd place share bronze. No 3rd-vs-4th tie-breaker is needed. Standard kendo convention.</div>
+            <div className="field__hint" style={{ fontSize: 11, paddingLeft: 22 }}>When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
           </div>
         </div>
       )}

@@ -5,8 +5,8 @@ the live scoring console), with a few rule differences the app handles for you:
 
 - An extra scoring target, Sune (a strike to the shin).
 - A single 3rd place decided by a playoff, instead of kendo's two joint 3rds.
-- Engi-kyogi, a separate kata-demonstration format scored by referee flags
-  rather than ippon.
+- Engi-kyogi, a separate kata competition scored by referee flags rather than
+  ippon.
 
 There are two independent switches on a competition, both on its **Settings** tab
 and both locked once the draw is generated:
@@ -51,12 +51,12 @@ The public podium reflects this automatically: a naginata competition shows a
 single 3rd place. Refer to [Awards and winners](mobile-app.md#awards-and-winners)
 for the full podium behaviour.
 
-## Engi-kyogi (kata demonstration)
+## Engi-kyogi (kata competition)
 
-Engi-kyogi is a choreographed demonstration performed by a pair of competitors,
-judged by a panel of referees who each raise a flag for the side they judge
-superior. It is scored entirely differently from a combat (shiai) bout: there are
-no ippon, no time on the clock, and no draws.
+Engi-kyogi is a kata competition: a pair of competitors perform a set of
+choreographed forms, judged by a panel of referees who each raise a flag for the
+side they judge superior. It is scored entirely differently from a combat (shiai)
+bout: there are no ippon, no time on the clock, and no draws.
 
 Turn on **Engi (kata demonstration)** on an individual competition's Settings
 tab to switch its score editor to flag counting. You can combine it with the

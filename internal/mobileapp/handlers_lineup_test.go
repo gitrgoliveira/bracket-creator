@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +15,20 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestLineupSetStatus pins the SetTeamLineup error classification: a domain
+// lineup validation error (team_lineup: prefix) is a 400, while a YAML/disk
+// fault is a 500 (not misreported as a bad request).
+func TestLineupSetStatus(t *testing.T) {
+	assert.Equal(t, http.StatusBadRequest,
+		lineupSetStatus(domain.ErrLineupMissingSenpo), "validation sentinel -> 400")
+	assert.Equal(t, http.StatusBadRequest,
+		lineupSetStatus(errors.New("team_lineup: position \"x\" not allowed in 5-person team")), "validation error -> 400")
+	assert.Equal(t, http.StatusInternalServerError,
+		lineupSetStatus(errors.New("open lineups.yaml: permission denied")), "I/O error -> 500")
+	assert.Equal(t, http.StatusInternalServerError,
+		lineupSetStatus(errors.New("yaml: line 3: mapping values are not allowed")), "YAML parse error -> 500")
+}
 
 // setupLineupTestRouter builds a router that mirrors the production server.go
 // layout: GET is on the public api group (no auth), PUT/DELETE are on the

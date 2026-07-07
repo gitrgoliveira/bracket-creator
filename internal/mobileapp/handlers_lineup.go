@@ -17,11 +17,26 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// lineupSetStatus maps a SetTeamLineup error to the right HTTP status. Domain
+// lineup validation failures (bad positions, missing senpo/taisho, disqualifying
+// vacancies, bad team size) all carry the "team_lineup:" prefix and are client
+// errors (400). Anything else is a server fault (YAML parse / disk I/O) and must
+// be a 500 so a real failure is not misreported as a bad request. compID is
+// already validated upstream by requireValidCompID, so ValidateCompetitionID
+// cannot be the source here.
+func lineupSetStatus(err error) int {
+	if strings.HasPrefix(err.Error(), "team_lineup:") {
+		return http.StatusBadRequest
+	}
+	return http.StatusInternalServerError
+}
 
 // LineupRequest is the body for PUT /lineups/:round and the match-scoped
 // PUT /match-lineups/:matchId. We accept only the positions map; teamID,
@@ -186,10 +201,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			}
 
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
-				// All domain validation errors (missing senpo/taisho,
-				// too-many-missing, bad team size, dynamic position
-				// messages) map to 400.
-				respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+				// Domain validation errors ("team_lineup:" prefix) are 400; a
+				// YAML/disk fault is a 500 (see lineupSetStatus).
+				respErr = &httpErr{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			// Reload after write so the response carries the persisted
@@ -285,10 +299,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				return nil
 			}
 			if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
-				// All domain validation errors (missing senpo/taisho,
-				// too-many-missing, bad team size, dynamic position
-				// messages) map to 400.
-				respErr = &httpErr{status: http.StatusBadRequest, body: gin.H{"error": err.Error()}}
+				// Domain validation errors ("team_lineup:" prefix) are 400; a
+				// YAML/disk fault is a 500 (see lineupSetStatus).
+				respErr = &httpErr{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 				return nil
 			}
 			lineups, err := stx.LoadTeamLineups(compID)

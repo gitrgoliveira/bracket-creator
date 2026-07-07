@@ -125,7 +125,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  */
 
 /**
- * @typedef {'score'|'decision'|'lineup'} WriteKind
+ * @typedef {'score'|'decision'|'lineup'|'override'} WriteKind
  */
 
 /**
@@ -1317,14 +1317,34 @@ const API = {
         return true;
     },
     async overrideBracketWinner(compID, matchID, winnerName, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/override-winner`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ winnerName })
-        });
+        const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
+        const payload = { winnerName };
+        let res;
+        try {
+            // fetchWithTimeout so a stalled request is treated as offline rather
+            // than hanging the "Run now" flow.
+            res = await fetchWithTimeout(url, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Tournament-Password': password
+                },
+                body: JSON.stringify(payload)
+            });
+        } catch (_networkErr) {
+            // mp-y3nk Phase 4: offline / timeout. An operator's feeder-winner
+            // assertion (the "Run now" recovery) must survive an update outage
+            // like a score does, so queue it as a terminal write. It replays on
+            // reconnect; the server then propagates it into the dependent final's
+            // sides. Keyed distinctly from score writes ("override:…") so an
+            // assertion and a score for the same match id never collide under the
+            // queue's last-write-wins-per-key rule. On a later non-retryable 4xx
+            // (e.g. the feeder resolved differently server-side) _flushQueue
+            // surfaces it via the terminal-write-failed channel rather than
+            // silently applying, preserving bracket integrity.
+            _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
+            return { queued: true };
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to override winner");

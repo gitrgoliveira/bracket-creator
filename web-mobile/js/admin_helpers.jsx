@@ -59,6 +59,28 @@ function hasPoolOriginPlaceholder(m) {
   return POOL_ORIGIN_PLACEHOLDER_RE.test(a) || POOL_ORIGIN_PLACEHOLDER_RE.test(b);
 }
 
+// isPendingBracketMatch reports whether a match is a scheduled knockout bout
+// still waiting on a "Winner of rX-mY" feeder (mp-y3nk). Such matches are
+// excluded from the actionable shiaijo queue by hasBothSides (you can't call
+// "Winner of r2-m0" to the court), which leaves a court whose only remaining
+// bout is a downstream final showing a falsely-empty Upcoming list. The shiaijo
+// queue uses this to surface them as clearly non-actionable "later" rows.
+//
+// Deliberately narrow, and intentionally NOT the inverse of hasBothSides:
+//   - only status "scheduled" (running/completed are handled by their own paths);
+//   - at least one side is a bracket feeder placeholder ("Winner of rX-mY");
+//   - NEVER pool-origin ("Pool A-1st") placeholders: those belong to the
+//     mixed-comp knockout-seeding flow and are surfaced by the separate
+//     "Knockout filling in" banner, not the queue.
+function isPendingBracketMatch(m) {
+  if (!m || m.status !== "scheduled") return false;
+  if (hasBothSides(m)) return false; // resolved → normal actionable row
+  if (hasPoolOriginPlaceholder(m)) return false; // mixed-comp seeding path, not ours
+  const a = sideName(m.sideA);
+  const b = sideName(m.sideB);
+  return BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b);
+}
+
 // Returns { total, done, running } match counts for a single competition object.
 // Accepts either:
 //   - flat `poolMatches` array from GET /api/viewer/competitions (list endpoint)
@@ -379,6 +401,7 @@ if (typeof window !== "undefined") {
   window.sideName = sideName;
   window.hasBothSides = hasBothSides;
   window.hasPoolOriginPlaceholder = hasPoolOriginPlaceholder;
+  window.isPendingBracketMatch = isPendingBracketMatch;
   window.compMatchStats = compMatchStats;
   window.bracketFullyComplete = bracketFullyComplete;
   window.normalizeDate = normalizeDate;
@@ -475,6 +498,7 @@ export {
   sideName,
   hasBothSides,
   hasPoolOriginPlaceholder,
+  isPendingBracketMatch,
   compMatchStats,
   bracketFullyComplete,
   normalizeDate,

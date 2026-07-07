@@ -8241,6 +8241,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--surface);
 }
 .shiaijo-qrow--complete { opacity: 0.72; }
+/* Pending placeholder final (mp-y3nk): a scheduled knockout bout still waiting
+   on its "Winner of rX-mY" feeders. Deliberately NOT greyed out (the operator
+   asked for the placeholder text itself to be the signal): the row stays full
+   contrast so the matchup reads clearly. The neutral "Waiting" chip (not
+   navy/amber, per DESIGN.md Principle 3: everything that is neither running nor
+   an expected next action stays neutral) is the only added marker. */
+.shiaijo-qrow__waiting {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.shiaijo-pending .section-title { color: var(--ink-2); }
+/* Resolve-feeders modal rows (mp-y3nk Phase 3): one row per feeder the operator
+   must call, with the two competitors as toggle buttons. */
+.resolve-feeder { padding: 8px 0; border-bottom: 1px solid var(--line-2); }
+.resolve-feeder__label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
+.resolve-feeder__opts { display: flex; gap: 8px; flex-wrap: wrap; }
 .shiaijo-qrow__top {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   font-size: 12px;

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal } from '../admin_shiaijo.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as
@@ -330,6 +330,176 @@ describe('partitionShiaijoMatches', () => {
   });
 });
 
+
+// makeReconnectRefetcher gates a court re-sync on a genuine SSE reconnect (mp-y3nk
+// Phase 2): a court whose tablet dropped offline may have missed events (e.g. a
+// feeder resolved on another court), so on reconnect it must refetch to self-heal
+// rather than wait for the next ordinary event. Crucially it must NOT refetch on
+// the FIRST connect (that is the mount fetch's job) or it would double-fetch on
+// every page load.
+describe('makeReconnectRefetcher; refetch only on reconnect (open-after-error)', () => {
+  it('does not refetch on the first open (initial connect)', () => {
+    const spy = vi.fn();
+    makeReconnectRefetcher(spy)('open');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('refetches on an open that follows an error (a real reconnect)', () => {
+    const spy = vi.fn();
+    const h = makeReconnectRefetcher(spy);
+    h('error'); h('open');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('collapses a burst of errors into a single refetch on reconnect', () => {
+    const spy = vi.fn();
+    const h = makeReconnectRefetcher(spy);
+    h('error'); h('error'); h('open');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches again on each subsequent drop → reconnect cycle', () => {
+    const spy = vi.fn();
+    const h = makeReconnectRefetcher(spy);
+    h('error'); h('open'); h('error'); h('open');
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a repeated open with no intervening error (no spurious refetch)', () => {
+    const spy = vi.fn();
+    const h = makeReconnectRefetcher(spy);
+    h('error'); h('open'); h('open');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// pendingFeederSlots maps a pending placeholder final to the feeder matches whose
+// winners the operator can assert to make it runnable during an update outage
+// (mp-y3nk Phase 3). "Winner of rX-mY" resolves POSITIONALLY, mirroring the Go
+// parseWinnerOf: round index = rounds.length - X, match index = Y. Only sides
+// that are still placeholders yield a slot; a feeder whose own sides are not yet
+// resolved is returned as non-resolvable so the UI can disable it.
+describe('pendingFeederSlots; feeders an operator can assert to resolve a final', () => {
+  // 4-player bracket: rounds[0] = 2 semifinals, rounds[1] = the final. With
+  // rounds.length === 2, the final's feeders are "Winner of r2-m0/m1".
+  const makeRounds = () => ([
+    [
+      { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+      { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+    ],
+    [
+      { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+    ],
+  ]);
+
+  it('returns a resolvable slot per placeholder side with the feeder competitors as options', () => {
+    const rounds = makeRounds();
+    const slots = pendingFeederSlots(rounds[1][0], rounds);
+    expect(slots.length).toBe(2);
+    expect(slots[0]).toMatchObject({ side: 'A', placeholder: 'Winner of r2-m0', resolvable: true });
+    expect(slots[0].feeder.id).toBe('m-r2-0');
+    expect(slots[0].options.map(o => o.name)).toEqual(['Alice', 'Bob']);
+    expect(slots[1]).toMatchObject({ side: 'B', placeholder: 'Winner of r2-m1', resolvable: true });
+    expect(slots[1].feeder.id).toBe('m-r2-1');
+    expect(slots[1].options.map(o => o.name)).toEqual(['Carol', 'Dan']);
+  });
+
+  it('omits a side that is already resolved to a real competitor', () => {
+    const rounds = makeRounds();
+    rounds[1][0].sideA = { id: 'a', name: 'Alice' }; // r2-m0 already resolved
+    const slots = pendingFeederSlots(rounds[1][0], rounds);
+    expect(slots.length).toBe(1);
+    expect(slots[0].placeholder).toBe('Winner of r2-m1');
+  });
+
+  it('marks a feeder whose own sides are still placeholders as non-resolvable (no options)', () => {
+    const rounds = makeRounds();
+    rounds[0][0].sideA = { id: '', name: 'Winner of r3-m0' }; // feeder itself unresolved
+    const slots = pendingFeederSlots(rounds[1][0], rounds);
+    expect(slots[0]).toMatchObject({ placeholder: 'Winner of r2-m0', resolvable: false });
+    expect(slots[0].options).toEqual([]);
+  });
+
+  it('marks an out-of-range placeholder as non-resolvable with a null feeder', () => {
+    const rounds = makeRounds();
+    rounds[1][0].sideA = { id: '', name: 'Winner of r2-m9' }; // no such match index
+    const slots = pendingFeederSlots(rounds[1][0], rounds);
+    expect(slots[0]).toMatchObject({ placeholder: 'Winner of r2-m9', resolvable: false, feeder: null });
+  });
+
+  it('returns [] for a fully-resolved match and tolerates a missing bracket', () => {
+    const rounds = makeRounds();
+    rounds[1][0].sideA = { id: 'a', name: 'Alice' };
+    rounds[1][0].sideB = { id: 'c', name: 'Carol' };
+    expect(pendingFeederSlots(rounds[1][0], rounds)).toEqual([]);
+    expect(pendingFeederSlots(rounds[1][0], null)).toEqual([]);
+    expect(pendingFeederSlots(null, rounds)).toEqual([]);
+  });
+});
+
+// propagateBracketWinnerLocal advances a winner into the next round's placeholder
+// side ON THE CLIENT, so a court running fully offline (mp-y3nk offline console)
+// can complete a bout and have the next match: including the final: become
+// runnable without waiting for the server to propagate and the client to
+// refetch. It mirrors the Go engine's propagateBracketWinner positional rule:
+// a completed match at rounds[r][m] feeds rounds[r+1][floor(m/2)], filling sideA
+// when m is even and sideB when m is odd. Pure + immutable (returns fresh rounds)
+// so it is safe to drop into React state.
+describe('propagateBracketWinnerLocal; offline bracket advancement', () => {
+  const rounds = () => ([
+    [
+      { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+      { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+    ],
+    [
+      { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+    ],
+  ]);
+
+  it('completes the match and fills the final\'s sideA from an even-index feeder', () => {
+    const out = propagateBracketWinnerLocal(rounds(), 'm-r2-0', 'Alice');
+    expect(out[0][0].status).toBe('completed');
+    expect(out[0][0].winner).toMatchObject({ name: 'Alice' });
+    expect(out[1][0].sideA).toMatchObject({ id: 'a', name: 'Alice' }); // carries id, not just name
+    expect(out[1][0].sideB).toMatchObject({ name: 'Winner of r2-m1' });  // untouched
+  });
+
+  it('fills the final\'s sideB from an odd-index feeder', () => {
+    const out = propagateBracketWinnerLocal(rounds(), 'm-r2-1', 'Dan');
+    expect(out[1][0].sideB).toMatchObject({ id: 'd', name: 'Dan' });
+    expect(out[1][0].sideA).toMatchObject({ name: 'Winner of r2-m0' });
+  });
+
+  it('marks the final startable once BOTH feeders have resolved', () => {
+    let out = propagateBracketWinnerLocal(rounds(), 'm-r2-0', 'Alice');
+    out = propagateBracketWinnerLocal(out, 'm-r2-1', 'Carol');
+    expect(out[1][0].sideA).toMatchObject({ name: 'Alice' });
+    expect(out[1][0].sideB).toMatchObject({ name: 'Carol' });
+    expect(out[1][0].status).toBe('scheduled'); // both sides real → runnable
+  });
+
+  it('does not mutate the input (immutable)', () => {
+    const input = rounds();
+    const out = propagateBracketWinnerLocal(input, 'm-r2-0', 'Alice');
+    expect(input[1][0].sideA).toMatchObject({ name: 'Winner of r2-m0' }); // original untouched
+    expect(out).not.toBe(input);
+  });
+
+  it('completes a final with no downstream round and no error', () => {
+    const r = rounds();
+    r[1][0].sideA = { id: 'a', name: 'Alice' };
+    r[1][0].sideB = { id: 'c', name: 'Carol' };
+    const out = propagateBracketWinnerLocal(r, 'm-r1-0', 'Alice');
+    expect(out[1][0].status).toBe('completed');
+    expect(out[1][0].winner).toMatchObject({ name: 'Alice' });
+  });
+
+  it('returns the input unchanged for an unknown match id or missing rounds', () => {
+    const r = rounds();
+    expect(propagateBracketWinnerLocal(r, 'nope', 'X')).toBe(r);
+    expect(propagateBracketWinnerLocal(null, 'm-r2-0', 'Alice')).toBe(null);
+  });
+});
 
 describe('groupQueueMatches; Upcoming queue grouping', () => {
   const pool = (poolName, id) => ({ phase: 'pool', compFormat: 'mixed', poolName, id });

@@ -394,6 +394,45 @@ describe('subscribeSyncStatus: state transitions', () => {
 
 // 5. window.online event flushes the queue
 
+// mp-y3nk Phase 4: a feeder-winner assertion (override-winner) must survive an
+// update outage exactly like a score does. Offline it is queued as a terminal
+// write and replayed on reconnect (the server then propagates it into the
+// dependent final). A real 4xx (e.g. the feeder is not yet playable) still throws
+// so the operator sees the rejection instead of a silent no-op.
+describe('overrideBracketWinner: offline durability (Phase 4)', () => {
+    it('returns { queued: true } and enqueues on network failure', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        const result = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        expect(result).toMatchObject({ queued: true });
+    });
+
+    it('replays the queued assertion to the override-winner endpoint on reconnect', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new TypeError('network error'));
+        await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw'); // queued offline
+        await flushMicrotasks();
+
+        // Reconnect: fetch now succeeds; the online event drives the flush.
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({}) });
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+
+        const replay = global.fetch.mock.calls.find(([u]) => String(u).includes('/matches/m-r2-0/override-winner'));
+        expect(replay).toBeTruthy();
+        expect(replay[1].method).toBe('PUT');
+        expect(JSON.parse(replay[1].body)).toMatchObject({ winnerName: 'Alice' });
+    });
+
+    it('throws on a non-retryable 4xx (feeder not ready to override) so the operator sees it', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false, status: 400,
+            json: () => Promise.resolve({ error: 'knockout match not ready to override' }),
+        });
+        await expect(
+            API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')
+        ).rejects.toThrow('not ready to override');
+    });
+});
+
 describe('window.online event flushes the queue', () => {
     it('triggers a flush when the queue is non-empty', async () => {
         // Put something in the queue (first attempt fails).

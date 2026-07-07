@@ -14,7 +14,7 @@
 
 import { createTimerPool } from './timer_pool.jsx';
 
-const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh } = React;
+const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
 const AdminTopbar = window.AdminTopbar;
 const Breadcrumbs = window.Breadcrumbs;
@@ -22,6 +22,7 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const CourtPicker = window.CourtPicker;
 const BracketTree = window.BracketTree;
 const Icon = window.Icon;
+const Modal = window.Modal;
 const hasBothSides = window.hasBothSides;
 
 // Pure ordering/partition helpers (exported for unit tests). Matches sort
@@ -54,6 +55,115 @@ export function partitionShiaijoMatches(matches) {
 }
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
+
+// _bracketSideName reads a bracket side that may be a normalized {id,name}
+// object or a bare string. Mirrors admin_helpers.sideName without importing it
+// (admin_shiaijo reads its helpers off window; this stays pure for testing).
+function _bracketSideName(side) {
+    if (!side) return "";
+    return typeof side === "object" ? (side.name || "") : side;
+}
+
+const _WINNER_OF_RE = /^Winner of r(\d+)-m(\d+)$/;
+
+// pendingFeederSlots maps a pending placeholder final to the feeder matches whose
+// winners an operator can assert (via override-winner) to make it runnable during
+// an update outage (mp-y3nk Phase 3). For each side still reading "Winner of
+// rX-mY" it locates the feeder POSITIONALLY, mirroring the Go parseWinnerOf:
+// roundIndex = rounds.length - X, matchIndex = Y. A slot is `resolvable` only
+// when the feeder exists and both of ITS sides are real competitors (so the
+// operator picks a winner from the two `options`); a feeder that is itself
+// unresolved is returned non-resolvable so the caller disables it. Exported for
+// unit testing; returns [] for a resolved match or a missing bracket.
+export function pendingFeederSlots(finalMatch, rounds) {
+    if (!finalMatch || !Array.isArray(rounds)) return [];
+    const slots = [];
+    for (const side of ["A", "B"]) {
+        const name = _bracketSideName(side === "A" ? finalMatch.sideA : finalMatch.sideB);
+        const mm = _WINNER_OF_RE.exec(name);
+        if (!mm) continue; // resolved competitor (or empty) → not a slot
+        const roundIndex = rounds.length - Number(mm[1]);
+        const matchIndex = Number(mm[2]);
+        const feeder = (rounds[roundIndex] && rounds[roundIndex][matchIndex]) || null;
+        const a = feeder ? _bracketSideName(feeder.sideA) : "";
+        const b = feeder ? _bracketSideName(feeder.sideB) : "";
+        const feederResolved = !!feeder && !!a && !!b &&
+            !_WINNER_OF_RE.test(a) && !_WINNER_OF_RE.test(b);
+        slots.push({
+            side,
+            placeholder: name,
+            feeder,
+            resolvable: feederResolved,
+            options: feederResolved ? [feeder.sideA, feeder.sideB] : [],
+        });
+    }
+    return slots;
+}
+
+// propagateBracketWinnerLocal advances a winner into the next round's placeholder
+// side on the CLIENT (mp-y3nk offline console), so a court running fully offline
+// can complete a bout and have the next match: including the final: become
+// runnable without a server round-trip. Mirrors the Go engine
+// propagateBracketWinner positional rule: a completed match at rounds[r][m] feeds
+// rounds[r+1][floor(m/2)], filling sideA when m is even and sideB when m is odd.
+// The winning SIDE object (carrying id + name, not just the name) is copied up so
+// downstream highlight/scoring keys keep working. Pure + immutable: returns fresh
+// rounds and never mutates the input. The server remains authoritative; on
+// reconnect a refetch replaces this optimistic tree with the real one.
+export function propagateBracketWinnerLocal(rounds, matchId, winnerName) {
+    if (!Array.isArray(rounds) || !matchId) return rounds;
+    let R = -1, M = -1;
+    for (let r = 0; r < rounds.length; r++) {
+        const idx = (rounds[r] || []).findIndex((x) => x && x.id === matchId);
+        if (idx >= 0) { R = r; M = idx; break; }
+    }
+    if (R < 0) return rounds; // unknown id → no-op (identity preserved)
+
+    const match = rounds[R][M];
+    const aName = _bracketSideName(match.sideA);
+    const bName = _bracketSideName(match.sideB);
+    // The winning side OBJECT, so id-based highlighting survives advancement.
+    const winnerSide = winnerName === aName ? match.sideA
+        : winnerName === bName ? match.sideB
+        : winnerName;
+
+    // Shallow-clone every match so the returned tree shares no references with
+    // the input (immutability for React state).
+    const next = rounds.map((round) => round.map((x) => ({ ...x })));
+    next[R][M].winner = winnerSide;
+    next[R][M].status = "completed";
+
+    if (R < rounds.length - 1) {
+        const nm = next[R + 1][Math.floor(M / 2)];
+        if (nm) {
+            if (M % 2 === 0) nm.sideA = winnerSide; else nm.sideB = winnerSide;
+            // Both sides now real (no "Winner of" placeholder) → the match is
+            // runnable; promote a pending/blank status to scheduled.
+            const na = _bracketSideName(nm.sideA);
+            const nb = _bracketSideName(nm.sideB);
+            const bothResolved = na && nb && !_WINNER_OF_RE.test(na) && !_WINNER_OF_RE.test(nb);
+            if (bothResolved && (nm.status === "pending" || nm.status === "scheduled" || !nm.status)) {
+                nm.status = "scheduled";
+            }
+        }
+    }
+    return next;
+}
+
+// makeReconnectRefetcher builds an SSE onStatus handler that fires onReconnect()
+// only on an 'open' that FOLLOWS an 'error' (a genuine reconnect), never on the
+// first connect (mp-y3nk Phase 2). A court whose tablet dropped offline can miss
+// events while disconnected (e.g. a feeder resolved on another court); refetching
+// on reconnect self-heals its queue instead of waiting for the next ordinary
+// event. Gating on a prior error avoids a redundant double-fetch on page load,
+// where the mount fetch already runs. Exported for unit testing.
+export function makeReconnectRefetcher(onReconnect) {
+    let sawError = false;
+    return (status) => {
+        if (status === "error") { sawError = true; return; }
+        if (status === "open" && sawError) { sawError = false; onReconnect(); }
+    };
+}
 
 // How many of the most-recent completed bouts the Completed section shows
 // before the "Show all N" toggle. Keeps the live queue + standings above the
@@ -97,6 +207,109 @@ export function shiaijoScoreCell(m) {
     return s ? { kind: "ippon", ippon: s } : { kind: "none" };
 }
 
+// ResolveFeedersModal (mp-y3nk Phase 3): last-resort recovery when a court must
+// run a knockout final whose feeder results have not synced from other shiaijos
+// (dropped/delayed SSE). The operator asserts each unresolved feeder's winner;
+// each assertion is written via the existing override-winner endpoint, which
+// propagates and resolves the final's sides so it becomes startable. Deliberately
+// NOT a way to fabricate the final directly: the winner must be one of the
+// feeder's two real competitors, and the write is audited (IsOverridden). If the
+// real feeder result arrives later it re-propagates over the assertion.
+function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOptimisticResolve, showToast }) {
+    const rounds = (comp && comp.bracket && comp.bracket.rounds) || [];
+    const slots = React.useMemo(() => pendingFeederSlots(match, rounds), [match, rounds]);
+    const resolvable = slots.filter(s => s.resolvable);
+    const blocked = slots.filter(s => !s.resolvable);
+    // feeder id → asserted winner name.
+    const [picks, setPicks] = useStateSh({});
+    const [busy, setBusy] = useStateSh(false);
+    const [error, setError] = useStateSh("");
+    const allPicked = resolvable.length > 0 && resolvable.every(s => picks[s.feeder.id]);
+
+    const submit = async () => {
+        if (!allPicked || busy) return;
+        setBusy(true); setError("");
+        try {
+            // Sequential: each override is an independent one-side resolution, but
+            // serialising keeps a mid-way failure's partial state easy to reason
+            // about (some feeders resolved, the operator retries the rest).
+            let anyQueued = false;
+            for (const s of resolvable) {
+                const winner = picks[s.feeder.id];
+                const r = await window.API.overrideBracketWinner(comp.id, s.feeder.id, winner, password);
+                // Optimistically advance the LOCAL bracket so the final becomes
+                // startable immediately: even offline, where { queued: true } means
+                // the server has not confirmed yet. The queued write reconciles the
+                // server on reconnect; a refetch then replaces this optimistic tree.
+                if (onOptimisticResolve) onOptimisticResolve(comp.id, s.feeder.id, winner);
+                if (r && r.queued) anyQueued = true;
+            }
+            if (showToast) {
+                showToast(anyQueued
+                    ? "Recorded offline. This match is ready to run now and will sync when the court reconnects."
+                    : "Feeders resolved. The match is ready to start.");
+            }
+            if (onResolved) onResolved();
+            onClose();
+        } catch (e) {
+            setError((e && e.message) || "Could not resolve the feeders. Check your connection and try again.");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <Modal title="Run this match now" onClose={busy ? undefined : onClose} size="md" dismissable={!busy}>
+            <p className="hint" style={{ marginTop: 0 }}>
+                This match is waiting on earlier bouts whose results have not reached this court yet.
+                If you know their outcomes, record each winner below to make this match startable.
+                Recording a winner here is provisional: if the real result arrives later it takes over.
+            </p>
+            {resolvable.map((s) => (
+                <div key={s.feeder.id} className="resolve-feeder">
+                    <div className="resolve-feeder__label">Winner of {s.feeder.matchNumber ? `Match ${s.feeder.matchNumber}` : s.placeholder.replace(/^Winner of /, "")}</div>
+                    <div className="resolve-feeder__opts">
+                        {s.options.map((opt) => {
+                            const name = typeof opt === "object" ? opt.name : opt;
+                            const picked = picks[s.feeder.id] === name;
+                            return (
+                                <button
+                                    key={name}
+                                    type="button"
+                                    className={`btn btn--sm ${picked ? "btn--primary" : "btn--ghost"}`}
+                                    aria-pressed={picked}
+                                    disabled={busy}
+                                    onClick={() => setPicks((p) => ({ ...p, [s.feeder.id]: name }))}
+                                >
+                                    {name}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
+            {blocked.length > 0 && (
+                <p className="hint hint--sm" style={{ color: "var(--ink-3)" }}>
+                    {blocked.length === 1 ? "One feeder" : `${blocked.length} feeders`} cannot be resolved yet
+                    because {blocked.length === 1 ? "its own" : "their own"} earlier matches are still pending.
+                </p>
+            )}
+            {resolvable.length === 0 && (
+                <p className="hint hint--sm" style={{ color: "var(--ink-3)" }}>
+                    None of this match's feeders can be resolved yet. Score the earlier matches first.
+                </p>
+            )}
+            {error && <div className="alert alert--warn" role="alert">{error}</div>}
+            <div className="modal__actions" style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
+                <button type="button" className="btn btn--primary" onClick={submit} disabled={!allPicked || busy}>
+                    {busy ? "Recording…" : "Record & make startable"}
+                </button>
+            </div>
+        </Modal>
+    );
+}
+
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -122,16 +335,67 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // feed, not in the subscription. Until the first fetch resolves it falls back
     // to the prop aggregate so the queue is never momentarily blank.
     const [courtComps, setCourtComps] = useStateSh(null);
+    // True while a manual "Refresh" is in flight (button feedback only).
+    const [refreshing, setRefreshing] = useStateSh(false);
+    // Refetch this court's live feed. Hoisted (not an effect-local closure) so
+    // the SSE effect, the reconnect handler, AND the manual Refresh button all
+    // drive the same fetch. Guarded by mountedRef so a late resolve after
+    // unmount is dropped. Returns the promise so callers can await completion.
+    const refreshCourt = useCallbackSh(() => {
+        if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return Promise.resolve();
+        return window.API.fetchCourtMatches(court)
+            .then(comps => { if (mountedRef.current) setCourtComps(comps); })
+            .catch(err => console.error("Failed to fetch court matches", err));
+    }, [court]);
+    // Operator-triggered re-sync: the last-resort recovery when a court's tablet
+    // has fallen behind (dropped SSE, flaky venue WiFi) and the queue looks
+    // stale: e.g. a downstream final still shows placeholder feeders that have
+    // in fact resolved on the server. One tap re-pulls the authoritative feed.
+    const manualRefresh = useCallbackSh(() => {
+        setRefreshing(true);
+        Promise.resolve(refreshCourt()).finally(() => { if (mountedRef.current) setRefreshing(false); });
+    }, [refreshCourt]);
+    // Offline bracket advancement (mp-y3nk offline console): optimistically apply
+    // a feeder's asserted winner to the LOCAL court feed so a downstream final
+    // becomes runnable immediately: even with no server (the override write is
+    // separately queued for sync). The server stays authoritative: a later
+    // refetch/reconnect replaces this optimistic tree with the real one.
+    const applyLocalBracketWin = useCallbackSh((compId, feederId, winnerName) => {
+        setCourtComps((prev) => {
+            // Seed from the prop aggregate when the live feed hasn't materialised
+            // (e.g. offline before the first fetch resolved), so the optimistic
+            // advance still lands and courtComps takes over from the fallback.
+            const base = Array.isArray(prev) ? prev : (tournament.competitions || []);
+            if (!base.length) return prev;
+            let changed = false;
+            const next = base.map((c) => {
+                if (c.id !== compId || !c.bracket || !Array.isArray(c.bracket.rounds)) return c;
+                const rounds = propagateBracketWinnerLocal(c.bracket.rounds, feederId, winnerName);
+                if (rounds === c.bracket.rounds) return c;
+                changed = true;
+                return { ...c, bracket: { ...c.bracket, rounds } };
+            });
+            return changed ? next : prev;
+        });
+    }, [tournament.competitions]);
+    // Advance the local bracket when a bracket bout is scored to completion, so a
+    // court running offline sees the NEXT match (incl. the final) become runnable
+    // without the server round-trip. Belt-and-suspenders online (the refetch also
+    // reflects the server's propagation); the ONLY path that resolves it offline.
+    // Draws/no-winner (patch.winner null) never apply: knockout bouts always
+    // resolve to a winner before completing.
+    const maybeAdvanceLocal = useCallbackSh((match, patch) => {
+        if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
+        const w = patch.winner;
+        const wname = w && (typeof w === "object" ? w.name : w);
+        if (wname) applyLocalBracketWin(match.compId, match.id, wname);
+    }, [applyLocalBracketWin]);
     useEffectSh(() => {
         if (!court || !window.API || typeof window.API.fetchCourtMatches !== "function") return;
         let cancelled = false;
         const timerPool = createTimerPool();
-        const refresh = () => {
-            window.API.fetchCourtMatches(court)
-                .then(comps => { if (!cancelled && mountedRef.current) setCourtComps(comps); })
-                .catch(err => console.error("Failed to fetch court matches", err));
-        };
-        refresh();
+        const scheduleRefresh = () => timerPool.schedule(() => { if (!cancelled) refreshCourt(); }, 200 + Math.random() * 400);
+        refreshCourt();
         let unsub = () => {};
         if (typeof window.API.subscribeToEvents === "function") {
             // The feed is court-scoped server-side, so any match/schedule/comp
@@ -146,14 +410,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 // doesn't stay stale until the next ordinary event happens to arrive.
                 "resync_required",
             ]);
-            const off = window.API.subscribeToEvents((event) => {
-                if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
-                timerPool.schedule(() => { if (!cancelled) refresh(); }, 200 + Math.random() * 400);
-            });
+            // A RECONNECT (an 'open' following an 'error') forces an immediate
+            // refetch so a court that missed events while disconnected self-heals.
+            const onStatus = makeReconnectRefetcher(() => { if (!cancelled) scheduleRefresh(); });
+            const off = window.API.subscribeToEvents(
+                (event) => {
+                    if (cancelled || !event || !REFRESH_EVENTS.has(event.type)) return;
+                    scheduleRefresh();
+                },
+                onStatus
+            );
             unsub = () => { if (typeof off === "function") off(); };
         }
         return () => { cancelled = true; timerPool.clearAll(); unsub(); };
-    }, [court]);
+    }, [court, refreshCourt]);
 
     // Court-scoped competitions: the live feed once loaded, else the prop
     // aggregate as a transient fallback. All competition/match derivations below
@@ -188,6 +458,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // independent of scoring, so the operator can set the lineup and close
     // without starting (or hit Start from inside the modal).
     const [lineupMatch, setLineupMatch] = useStateSh(null);
+    // A pending placeholder final the operator is resolving to run during an
+    // update outage (mp-y3nk Phase 3): opens ResolveFeedersModal.
+    const [resolveMatch, setResolveMatch] = useStateSh(null);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useStateSh(null);
@@ -195,11 +468,25 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Short-circuit to [] for a blank/unknown court so an accidental landing
     // (e.g. /admin/shiaijo/%20) never sorts/partitions the whole tournament.
     // Same condition as courtKnown below.
-    const allMatches = useMemoSh(
+    // The court's full match set BEFORE the hasBothSides split. Actionable rows
+    // (allMatches) and pending placeholder finals (pendingPlaceholder) are both
+    // derived from this so the two are computed from one filtered pass.
+    const courtMatchesRaw = useMemoSh(
         () => (tournament.courts || []).includes(court)
-            ? window.filterMatchesByCourt(window.tournamentMatches({ competitions: courtCompetitions }).filter(hasBothSides), court)
+            ? window.filterMatchesByCourt(window.tournamentMatches({ competitions: courtCompetitions }), court)
             : [],
         [courtCompetitions, tournament.courts, court]
+    );
+    const allMatches = useMemoSh(() => courtMatchesRaw.filter(hasBothSides), [courtMatchesRaw]);
+    // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
+    // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
+    // become upNext, never enter moveMatch reordering, and never carry a Start
+    // button: a placeholder side has no participant to call to the court. They
+    // are rendered as non-actionable "later" rows so a court whose only remaining
+    // bout is a downstream final does not show a falsely-empty Upcoming list.
+    const pendingPlaceholder = useMemoSh(
+        () => courtMatchesRaw.filter(window.isPendingBracketMatch),
+        [courtMatchesRaw]
     );
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
@@ -210,10 +497,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const courtKnown = courts.includes(court);
 
     // All competitions that have at least one match on this court (AC3/AC4).
+    // Pending placeholder finals count too, so a court whose only remaining bout
+    // is a downstream final still surfaces its competition in the selector and
+    // is not treated as empty.
     const courtsComps = useMemoSh(() => {
         const seen = new Set();
         const out = [];
-        for (const m of allMatches) {
+        for (const m of [...allMatches, ...pendingPlaceholder]) {
             if (!seen.has(m.compId)) {
                 seen.add(m.compId);
                 const comp = courtCompetitions.find(c => c.id === m.compId);
@@ -221,7 +511,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             }
         }
         return out;
-    }, [allMatches, courtCompetitions]);
+    }, [allMatches, pendingPlaceholder, courtCompetitions]);
 
     // Effective selected competition: default logic runs when selectedCompId is
     // null or no longer present (e.g. a comp was removed). Priority: running
@@ -284,6 +574,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const filteredCompleted = useMemoSh(
         () => effectiveCompId ? completed.filter(m => m.compId === effectiveCompId) : completed,
         [completed, effectiveCompId]
+    );
+    // Pending placeholder finals for the selected competition, rendered as
+    // non-actionable "later" rows below Upcoming. Sorted by scheduled time so a
+    // multi-round pending tail reads in play order.
+    const filteredPending = useMemoSh(
+        () => {
+            const list = effectiveCompId ? pendingPlaceholder.filter(m => m.compId === effectiveCompId) : pendingPlaceholder;
+            return sortShiaijoMatches(list);
+        },
+        [pendingPlaceholder, effectiveCompId]
     );
 
     // The standings/context panel follows the court's current focus: not
@@ -536,7 +836,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // allDone: selected comp has no more matches to run on this court (AC4).
     // Scoped to the SELECTED competition, not the whole court: another comp may
     // still have matches here (the nudge banner surfaces that).
-    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && filteredScheduled.length === 0;
+    // A pending placeholder final for this comp means the court is NOT done: it
+    // has a downstream bout waiting on its feeders, so hold off the done state.
+    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && filteredScheduled.length === 0 && filteredPending.length === 0;
     const selectedCompName = (courtsComps.find((c) => c.id === effectiveCompId) || {}).name || "";
 
     return (
@@ -568,6 +870,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             <h1 className="page-head__title">Shiaijo {court}</h1>
                         )}
                         <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
+                        {courtKnown && typeof (window.API || {}).fetchCourtMatches === "function" && (
+                            // Manual re-sync: recovers a court whose tablet fell behind
+                            // (dropped SSE / flaky venue WiFi) so a stale queue: e.g. a
+                            // final still showing placeholder feeders that already
+                            // resolved server-side: is re-pulled on demand.
+                            <button
+                                type="button"
+                                className="btn btn--sm btn--ghost shiaijo-refresh"
+                                onClick={manualRefresh}
+                                disabled={refreshing}
+                                title="Re-pull this court's matches from the server (use if the queue looks out of date)"
+                            >
+                                {Icon && <Icon name="refresh" />}{" "}
+                                {refreshing ? "Refreshing…" : "Refresh"}
+                            </button>
+                        )}
                     </div>
                     {courtsComps.length > 0 && (() => {
                         // Mirror of the Shiaijo title on the right: the competition being
@@ -626,7 +944,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     </div>
                 )}
 
-                {courtKnown && allMatches.length === 0 && (
+                {courtKnown && allMatches.length === 0 && pendingPlaceholder.length === 0 && (
                     <div className="empty">
                         <h3>No matches on this court</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
@@ -635,7 +953,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     </div>
                 )}
 
-                {courtKnown && allMatches.length > 0 && (
+                {courtKnown && (allMatches.length > 0 || pendingPlaceholder.length > 0) && (
                     <div className="shiaijo">
                         {/* ── Queue (left) ───────────────────────────── */}
                         <div className="shiaijo__queue">
@@ -716,6 +1034,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                 />
+                            )}
+
+                            {/* Later: scheduled knockout bouts still waiting on a
+                                "Winner of rX-mY" feeder (mp-y3nk). Shown so a court
+                                whose only remaining bout is a downstream final does
+                                not read as an empty queue. Non-actionable: the sides
+                                are placeholders, so no Start/Call/move affordances are
+                                passed. Phase 3 adds an opt-in "resolve to run now". */}
+                            {filteredPending.length > 0 && (
+                                <div className="shiaijo-group shiaijo-pending">
+                                    <div className="section-title">
+                                        Later
+                                        <span className="shiaijo-count" aria-label={`${filteredPending.length} waiting on earlier matches`}>{filteredPending.length}</span>
+                                    </div>
+                                    <div className="shiaijo-pending__hint" style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
+                                        {filteredPending.length === 1 ? "This bout starts" : "These bouts start"} once the earlier matches that feed {filteredPending.length === 1 ? "it" : "them"} are scored.
+                                    </div>
+                                    <div className="score-editor__list">
+                                        {filteredPending.map((m) => (
+                                            <ShiaijoQueueRow key={matchKey(m)} m={m} pending onResolve={setResolveMatch} />
+                                        ))}
+                                    </div>
+                                </div>
                             )}
 
                             {filteredCompleted.length > 0 && (
@@ -802,6 +1143,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onSubmit={async (patch) => {
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // Optimistically advance the local bracket so an offline court
+                                            // sees the next match resolve (reconciled by refetch online).
+                                            maybeAdvanceLocal(selectedMatch, patch);
                                             // F5: queued write: return signal so the editor shows the pending-save banner.
                                             if (res && res.queued) return res;
                                         }
@@ -811,6 +1155,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         const next = nextActiveAfter(selectedMatch);
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
                                             // F5: queued write: do NOT advance. Return signal to editor.
                                             if (res && res.queued) return res;
@@ -892,6 +1237,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     onClose={() => setLineupMatch(null)}
                 />
             )}
+            {resolveMatch && Modal && (
+                <ResolveFeedersModal
+                    key={`resolve:${matchKey(resolveMatch)}`}
+                    match={resolveMatch}
+                    comp={courtCompetitions.find(c => c.id === resolveMatch.compId)}
+                    password={password}
+                    showToast={typeof showToast === "function" ? showToast : undefined}
+                    onOptimisticResolve={applyLocalBracketWin}
+                    onResolved={refreshCourt}
+                    onClose={() => setResolveMatch(null)}
+                />
+            )}
         </div>
     );
 }
@@ -965,7 +1322,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCall, callingKey, calledKey, startingKey, pending, onResolve }) {
     const isComplete = m.status === "completed";
     const scoreCell = shiaijoScoreCell(m);
     // Derive position in the full scheduled list to know when to disable ↑/↓.
@@ -977,7 +1334,10 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
     // Stacked card layout (not the wide score-editor grid): the matchup gets a
     // full-width line so names stay READABLE in the narrow queue column; the
     // controls live on their own line below so they never crowd the names.
-    const showActions = m.status === "scheduled" && (
+    // A `pending` placeholder final is NEVER actionable (its sides are still
+    // "Winner of rX-mY" feeders): suppress every control regardless of which
+    // handlers were passed, so the row can only ever be informational.
+    const showActions = !pending && m.status === "scheduled" && (
         (onMoveCourt && courts.length > 1) ||
         (onEnterLineup && isTeamMatch(m)) || onPick || onMove
     );
@@ -1000,6 +1360,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 </span>
                 <span className="shiaijo-qrow__state">
                     {isComplete && <span className="shiaijo-qrow__final">Final</span>}
+                    {pending && <span className="shiaijo-qrow__waiting">Waiting</span>}
                 </span>
             </div>
             <div className="shiaijo-qrow__match">
@@ -1055,6 +1416,17 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         Same pickMatch path as the Up Next card: defers an unscored running bout,
                         blocks while one is being scored, then starts this match for scoring. */}
                     {onPick && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
+                </div>
+            )}
+            {/* Pending placeholder final: the ONLY affordance is the opt-in
+                "Run now" recovery, which opens ResolveFeedersModal so the operator
+                can assert the unsynced feeder results. No Start/Call/move here. */}
+            {pending && onResolve && (
+                <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => onResolve(m)}
+                        title="Feeder results not synced from other courts? Record them to run this match now.">
+                        Run now
+                    </button>
                 </div>
             )}
         </div>

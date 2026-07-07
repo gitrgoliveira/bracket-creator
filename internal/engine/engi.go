@@ -1,4 +1,4 @@
-// Package engine, engi.go owns the ENTIRE Engi-kyogi (kata demonstration / flag
+// Package engine, engi.go owns the ENTIRE Engi-kyogi (kata competition / flag
 // scoring) vertical slice. Engi is a second scoring paradigm: bouts are decided
 // by referee flag counts (FlagsA/FlagsB) instead of ippon waza letters, and
 // standings rank by wins then accumulated own-side flags.

@@ -20,7 +20,8 @@
 //   - holds many Competitions.
 //
 // Competition: one event within a tournament (e.g., "Men's Individual", "Women's Teams").
-//   - kind: "individual" | "team"  (only two kinds: gender/age tags are metadata)
+//   - kind: "individual" | "team"  (the only two kinds; any division, e.g.
+//     Men's / Women's / Youth, is expressed in the competition name)
 //   - format: "playoffs" (knockout only) | "mixed" (pools + knockout) | "league" | "swiss"
 //     Note: the sample generator (applyFormat) only simulates "mixed" fully;
 //     "league" and "swiss" fall back to bracket-only display in demo data.
@@ -32,8 +33,7 @@
 // status, score. Score can be edited at any time by an admin.
 
 const DOJOS = ['Team Alpha', 'Team Beta', 'Team Chi', 'Team Delta', 'Team Epsilon', 'Team Eta', 'Team Gamma', 'Team Iota', 'Team Kappa', 'Team Lambda', 'Team Mu', 'Team Nu', 'Team Omega', 'Team Omicron', 'Team Phi', 'Team Pi', 'Team Psi', 'Team Rho', 'Team Sigma', 'Team Tau', 'Team Theta', 'Team Upsilon', 'Team Xi', 'Team Zeta'];
-const FIRST_M = ['Aaron', 'Albus', 'Arthur', 'Benjamin', 'Bilbo', 'Bram', 'Caleb', 'Charles', 'Daniel', 'Dylan', 'Eddard', 'Elijah', 'Finn', 'Frodo', 'Fyodor', 'Gabriel', 'Gandalf', 'George', 'Herman', 'Hudson', 'Inigo', 'Isaac', 'Jackson', 'Jon', 'Kaden', 'Kevin', 'Kurt', 'Legolas', 'Lewis', 'Liam', 'Luke', 'Mason', 'Michael', 'Moby', 'Nathan', 'Nathaniel', 'Neville', 'Nolan', 'Oliver', 'Oscar', 'Othello', 'Owen', 'Parker', 'Paul', 'Petyr', 'Philip', 'Quentin', 'Quinn', 'Quirinus', 'Ray', 'Robert', 'Ron', 'Ryan', 'Samwise', 'Sebastian', 'Steven', 'Thomas', 'Tristan', 'Tyrion', 'Ulysses', 'Uriel', 'Victor', 'Vincent', 'Voldemort', 'William', 'Willy', 'Xaro', 'Xavier', 'Yann', 'Yosef', 'Zachary'];
-const FIRST_F = ['Cersei', 'Daenerys', 'Emily', 'Hermione', 'Jane', 'Katniss', 'Mary', 'Sylvia', 'Ursula', 'Virginia', 'Ygritte'];
+const FIRST = ['Aaron', 'Albus', 'Arthur', 'Benjamin', 'Bilbo', 'Bram', 'Caleb', 'Cersei', 'Charles', 'Daenerys', 'Daniel', 'Dylan', 'Eddard', 'Elijah', 'Emily', 'Finn', 'Frodo', 'Fyodor', 'Gabriel', 'Gandalf', 'George', 'Herman', 'Hermione', 'Hudson', 'Inigo', 'Isaac', 'Jackson', 'Jane', 'Jon', 'Kaden', 'Katniss', 'Kevin', 'Kurt', 'Legolas', 'Lewis', 'Liam', 'Luke', 'Mary', 'Mason', 'Michael', 'Moby', 'Nathan', 'Nathaniel', 'Neville', 'Nolan', 'Oliver', 'Oscar', 'Othello', 'Owen', 'Parker', 'Paul', 'Petyr', 'Philip', 'Quentin', 'Quinn', 'Quirinus', 'Ray', 'Robert', 'Ron', 'Ryan', 'Samwise', 'Sebastian', 'Steven', 'Sylvia', 'Thomas', 'Tristan', 'Tyrion', 'Ulysses', 'Uriel', 'Ursula', 'Victor', 'Vincent', 'Virginia', 'Voldemort', 'William', 'Willy', 'Xaro', 'Xavier', 'Yann', 'Ygritte', 'Yosef', 'Zachary'];
 const LAST = ['Adams', 'Allen', 'Anderson', 'Asimov', 'Austen', 'Baelish', 'Baggins', 'Blake', 'Bradbury', 'Bronte', 'Carroll', 'Clark', 'Conan', 'Defoe', 'Dick', 'Dickens', 'Dostoevsky', 'Dumbledore', 'Evans', 'Everdeen', 'Gamgee', 'Granger', 'Green', 'Greenleaf', 'Hall', 'Hardy', 'Harris', 'Hawthorne', 'Herbert', 'Hernandez', 'Hill', 'Jackson', 'K Dick', 'K Le Guin', 'King', 'Lannister', 'Lee', 'Lewis', 'Longbottom', 'Lopez', 'Martel', 'Martin', 'Martinez', 'Melville', 'Montoya', 'Moore', 'Orwell', 'Plath', 'Quirrell', 'Rodriguez', 'Scott', 'Shakespeare', 'Shelley', 'Snow', 'Stark', 'Stoker', 'Targaryen', 'Taylor', 'Thomas', 'Thompson', 'Vonnegut', 'Walker', 'Weasley', 'White', 'Wilde', 'Wilson', 'Wonka', 'Woolf', 'Wright', 'Xhoan Daxos', 'Young', 'the Grey'];
 
 
@@ -48,23 +48,22 @@ function mergeMatchPatch(existing, patch) {
   return merged;
 }
 
-function makePlayer(i, gender, prefix, seed) {
-  const first = (gender === "F" ? FIRST_F : FIRST_M);
-  const fn = first[i % first.length];
-  const ln = LAST[(i * 7 + (gender === "F" ? 3 : 0)) % LAST.length];
+function makePlayer(i, prefix, seed) {
+  const fn = FIRST[i % FIRST.length];
+  const ln = LAST[(i * 7) % LAST.length];
   return { id: `${prefix}-p${i + 1}`, name: `${fn} ${ln}`, dojo: DOJOS[(i * 3) % DOJOS.length], seed: seed || null };
 }
 function makeTeam(i, prefix, seed) {
   const dojo = DOJOS[i % DOJOS.length];
   return { id: `${prefix}-t${i + 1}`, name: `${dojo} ${["A","B","C","Red","Blue"][i % 5]}`, dojo, seed: seed || null };
 }
-// kind: "individual" | "team". gender hint: "M" | "F" | "X" (for naming variety only).
-function makeCompetitors(count, kind, prefix, seedCount = 0, gender = "M") {
+// kind: "individual" | "team".
+function makeCompetitors(count, kind, prefix, seedCount = 0) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const seed = i < seedCount ? i + 1 : null;
     if (kind === "team") out.push(makeTeam(i, prefix, seed));
-    else out.push(makePlayer(i, gender, prefix, seed));
+    else out.push(makePlayer(i, prefix, seed));
   }
   return out;
 }
@@ -208,11 +207,11 @@ function poolWinners(pools) {
 // format: "playoffs" | "mixed" | "league" | "swiss"
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
-  const { id, name, kind, gender = "X", format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
+  const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
-  const players = count > 0 ? makeCompetitors(count, kind, id, seedCount, gender) : [];
+  const players = count > 0 ? makeCompetitors(count, kind, id, seedCount) : [];
   return {
-    id, name, kind, gender, format, status,
+    id, name, kind, format, status,
     teamSize: teamSize || (kind === "team" ? 5 : 0),
     poolSize: poolSize || 3,
     poolSizeMode: poolMode || "max",
@@ -281,8 +280,8 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "lc26-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "medium", seedCount: 4, status: "playoffs", startTime: "09:00", courts: ["A","B"] }),
-      buildCompetition({ id: "lc26-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "playoffs", sampleRoster: "small", seedCount: 2, status: "playoffs", startTime: "09:00", courts: ["C"] }),
+      buildCompetition({ id: "lc26-mi", name: "Men's Individual", kind: "individual", format: "playoffs", sampleRoster: "medium", seedCount: 4, status: "playoffs", startTime: "09:00", courts: ["A","B"] }),
+      buildCompetition({ id: "lc26-wi", name: "Women's Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 2, status: "playoffs", startTime: "09:00", courts: ["C"] }),
       buildCompetition({ id: "lc26-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B"] }),
     ];
     return buildTournament({ id: "lc2026", name: "London Cup 2026", date: "2026-05-12", venue: "Crystal Palace Sports Centre", courts, status: competitionStatus(comps), competitions: comps });
@@ -290,8 +289,8 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C", "D"];
     const comps = [
-      buildCompetition({ id: "ko-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "large", seedCount: 4, status: "pools", startTime: "09:00", courts: ["A","B"] }),
-      buildCompetition({ id: "ko-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "pools", startTime: "09:00", courts: ["C","D"] }),
+      buildCompetition({ id: "ko-mi", name: "Men's Individual", kind: "individual", format: "mixed", sampleRoster: "large", seedCount: 4, status: "pools", startTime: "09:00", courts: ["A","B"] }),
+      buildCompetition({ id: "ko-wi", name: "Women's Individual", kind: "individual", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "pools", startTime: "09:00", courts: ["C","D"] }),
       buildCompetition({ id: "ko-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "medium", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B","C","D"] }),
       buildCompetition({ id: "ko-wt", name: "Women's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "16:00", teamSize: 5, courts: ["A","B"] }),
     ];
@@ -300,16 +299,16 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A"];
     const comps = [
-      buildCompetition({ id: "wk-yi", name: "Youth Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
-      buildCompetition({ id: "wk-bi", name: "Beginners Individual", kind: "individual", gender: "M", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
+      buildCompetition({ id: "wk-yi", name: "Youth Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
+      buildCompetition({ id: "wk-bi", name: "Beginners Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
     ];
     return buildTournament({ id: "wakaba-cup", name: "Wakaba Cup: Beginners", date: "2026-06-04", venue: "Sanshukai Dojo", courts, status: "setup", competitions: comps });
   })(),
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "ako25-mi", name: "Men's Individual", kind: "individual", gender: "M", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
-      buildCompetition({ id: "ako25-wi", name: "Women's Individual", kind: "individual", gender: "F", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-mi", name: "Men's Individual", kind: "individual", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
+      buildCompetition({ id: "ako25-wi", name: "Women's Individual", kind: "individual", format: "mixed", sampleRoster: "medium", seedCount: 4, status: "completed", courts: ["A","B"] }),
       buildCompetition({ id: "ako25-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "completed", teamSize: 5, courts: ["A","B","C"] }),
     ];
     return buildTournament({ id: "autumn-open-2025", name: "Autumn Kendo Open 2025", date: "2025-11-08", venue: "City Arena", courts, status: "completed", competitions: comps });

@@ -359,6 +359,10 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               </div>
             </div>
           )}
+          {/* Standings ordering is decided by FORMAT (mp-ahu6): pools always
+              draw-order via PoolsViewer, leagues always rank-order via
+              LeagueStandingsViewer. Mirrored in admin_pools.jsx and
+              admin_shiaijo.jsx's ShiaijoContext. */}
           {effectiveTab === "pools" && hasPools && !isLeague && (
             <PoolsViewer pools={pools} standings={standings} poolMatches={poolMatches} tweaks={tweaks} competition={c} onMatchClick={setSelectedMatch} highlightPlayers={highlightPlayers} />
           )}

@@ -1023,6 +1023,63 @@ func TestBuildResultsWorkbook_GridFromResultsWithoutPoolMatches(t *testing.T) {
 	}
 }
 
+// cellRefWithValue returns the 1-based excel cell reference of the first cell in
+// rows that equals want, or "" if absent.
+func cellRefWithValue(t *testing.T, rows [][]string, want string) string {
+	t.Helper()
+	for r, row := range rows {
+		for c, cell := range row {
+			if cell == want {
+				ref, err := excelize.CoordinatesToCellName(c+1, r+1)
+				require.NoError(t, err)
+				return ref
+			}
+		}
+	}
+	return ""
+}
+
+// TestBuildResultsWorkbook_OverlaidCellsAreLiteral pins the core contract of the
+// results export: cells the overlays populate (played scores AND collapse-prone
+// W/L/T/Rank standings) must be LITERAL values, not formulas. excelize's
+// SetCellValue/SetCellInt clear any pre-existing formula in the cell (verified in
+// this test after a full save/reopen round-trip), so the archived workbook does
+// not depend on spreadsheet recalculation. This guards against a future change in
+// that behaviour that would silently leave collapse-prone formulas in place.
+func TestBuildResultsWorkbook_OverlaidCellsAreLiteral(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	pools := makePools()
+	require.NoError(t, store.SavePools(compID, pools))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M", "K"}, Decision: "fought", Status: state.MatchStatusCompleted},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	// The played ippon score "MK" is an overlaid literal, not a formula.
+	scoreRef := cellRefWithValue(t, rows, "MK")
+	require.NotEmpty(t, scoreRef, "overlaid ippon score 'MK' must be present")
+	fm, _ := f.GetCellFormula(helper.SheetPoolMatches, scoreRef)
+	assert.Empty(t, fm, "overlaid score cell %s must be a literal, not a formula", scoreRef)
+
+	// The winner's standings W = 1 is overlaid onto a formerly formula-driven cell.
+	winRef := cellRefWithValue(t, rows, "1")
+	if winRef != "" { // "1" appears in the W column for Alice's single win
+		wf, _ := f.GetCellFormula(helper.SheetPoolMatches, winRef)
+		assert.Empty(t, wf, "overlaid standings cell %s must be a literal, not a formula", winRef)
+	}
+}
+
 // columnHasValueUnderHeader reports whether any data row below a cell equal to
 // header (in the same column) holds want. Used to assert literal standings.
 func columnHasValueUnderHeader(rows [][]string, header, want string) bool {

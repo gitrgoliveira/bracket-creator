@@ -1494,10 +1494,12 @@ func TestRevertMatchToQueue(t *testing.T) {
 		matches := []state.MatchResult{
 			{
 				ID: "P1-run", SideA: "Alice", SideB: "Bob",
-				Status:   state.MatchStatusRunning,
-				IpponsA:  []string{"M"},
-				HansokuB: 1,
-				Decision: "fought",
+				Status:           state.MatchStatusRunning,
+				IpponsA:          []string{"M"},
+				HansokuB:         1,
+				Decision:         "fought",
+				ResultSource:     "admin",
+				CorrectionReason: "Scoring error: wrong waza",
 			},
 		}
 		require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1513,9 +1515,48 @@ func TestRevertMatchToQueue(t *testing.T) {
 		assert.Nil(t, updated[0].IpponsA)
 		assert.Equal(t, 0, updated[0].HansokuB)
 		assert.Empty(t, updated[0].Decision)
+		// Provenance/audit fields must be cleared so a requeued match carries
+		// no misleading result metadata.
+		assert.Empty(t, updated[0].ResultSource)
+		assert.Empty(t, updated[0].CorrectionReason)
 		// Identity fields must be preserved
 		assert.Equal(t, "Alice", updated[0].SideA)
 		assert.Equal(t, "Bob", updated[0].SideB)
+	})
+
+	t.Run("already-scheduled match with stale metadata is cleaned", func(t *testing.T) {
+		// A scheduled match that still carries stale score/audit data from an
+		// earlier partial write must be normalised to a clean scheduled match,
+		// not left as-is.
+		matches := []state.MatchResult{
+			{
+				ID: "P1-stale", SideA: "Ivan", SideB: "Judy",
+				Status:       state.MatchStatusScheduled,
+				IpponsA:      []string{"K"},
+				Winner:       "Ivan",
+				Decision:     "fought",
+				ResultSource: "self-reported",
+			},
+		}
+		require.NoError(t, store.SavePoolMatches(compID, matches))
+
+		err := eng.RevertMatchToQueue(compID, "P1-stale")
+		require.NoError(t, err)
+
+		updated, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		var m state.MatchResult
+		for _, mm := range updated {
+			if mm.ID == "P1-stale" {
+				m = mm
+			}
+		}
+		assert.Equal(t, state.MatchStatusScheduled, m.Status)
+		assert.Empty(t, m.Winner)
+		assert.Nil(t, m.IpponsA)
+		assert.Empty(t, m.Decision)
+		assert.Empty(t, m.ResultSource)
+		assert.Equal(t, "Ivan", m.SideA) // identity preserved
 	})
 
 	t.Run("running bracket match reverts to scheduled, downstream untouched", func(t *testing.T) {

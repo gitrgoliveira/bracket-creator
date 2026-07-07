@@ -1223,27 +1223,31 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	var alreadyCompleted bool
 
 	err := e.withPoolMatch(compId, matchId, func(r *state.MatchResult) {
-		switch r.Status {
-		case state.MatchStatusCompleted:
+		if r.Status == state.MatchStatusCompleted {
 			alreadyCompleted = true
-		case state.MatchStatusRunning:
-			r.Status = state.MatchStatusScheduled
-			r.Winner = ""
-			r.WinnerID = ""
-			r.IpponsA = nil
-			r.IpponsB = nil
-			r.HansokuA = 0
-			r.HansokuB = 0
-			r.Decision = ""
-			r.DecisionBy = ""
-			r.DecisionReason = ""
-			r.Encho = nil
-			r.SubResults = nil
-			r.FlagsA = 0
-			r.FlagsB = 0
-			r.DecidedByHantei = nil
-			// state.MatchStatusScheduled: already in queue, no-op
+			return
 		}
+		// Any non-completed match (running, or an already-scheduled match that
+		// still carries stale score/audit metadata from an earlier partial
+		// write) is normalised to a CLEAN scheduled match. Idempotent: a
+		// pristine scheduled match is left effectively unchanged.
+		r.Status = state.MatchStatusScheduled
+		r.Winner = ""
+		r.WinnerID = ""
+		r.IpponsA = nil
+		r.IpponsB = nil
+		r.HansokuA = 0
+		r.HansokuB = 0
+		r.Decision = ""
+		r.DecisionBy = ""
+		r.DecisionReason = ""
+		r.Encho = nil
+		r.SubResults = nil
+		r.FlagsA = 0
+		r.FlagsB = 0
+		r.DecidedByHantei = nil
+		r.ResultSource = ""
+		r.CorrectionReason = ""
 	})
 	if err == nil {
 		if alreadyCompleted {
@@ -1258,25 +1262,28 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	// Pool match not found; try the elimination bracket.
 	alreadyCompleted = false
 	if err = e.withBracketMatch(compId, matchId, func(m *state.BracketMatch) {
-		switch m.Status {
-		case state.MatchStatusCompleted:
+		if m.Status == state.MatchStatusCompleted {
 			alreadyCompleted = true
-		case state.MatchStatusRunning:
-			m.Status = state.MatchStatusScheduled
-			m.Winner = ""
-			m.ScoreA = ""
-			m.ScoreB = ""
-			m.Decision = ""
-			m.DecisionBy = ""
-			m.DecisionReason = ""
-			m.Encho = nil
-			m.SubResults = nil
-			m.FlagsA = 0
-			m.FlagsB = 0
-			m.DecidedByHantei = false
-			m.IsOverridden = false
-			// state.MatchStatusScheduled: already in queue, no-op
+			return
 		}
+		// Same contract as the pool path: normalise any non-completed match to
+		// a clean scheduled match, clearing stale score/provenance/audit fields
+		// even if it was already scheduled.
+		m.Status = state.MatchStatusScheduled
+		m.Winner = ""
+		m.ScoreA = ""
+		m.ScoreB = ""
+		m.Decision = ""
+		m.DecisionBy = ""
+		m.DecisionReason = ""
+		m.Encho = nil
+		m.SubResults = nil
+		m.FlagsA = 0
+		m.FlagsB = 0
+		m.DecidedByHantei = false
+		m.IsOverridden = false
+		m.ResultSource = ""
+		m.CorrectionReason = ""
 	}); err != nil {
 		// Neither pool nor bracket holds this match: surface a typed
 		// NotFoundError so the handler can answer 404 (a fabricated match id

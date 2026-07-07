@@ -114,3 +114,44 @@ func TestMatchLineupPUT_AlwaysEditable(t *testing.T) {
 	require.True(t, found)
 	assert.Equal(t, "p1-substitute", saved.Positions[domain.PosSenpo])
 }
+
+// TestMatchLineupDELETE_WhileRunning guards that a match-scoped lineup stays
+// deletable while its match is running (lineups are always editable since lock
+// removal), and that the DELETE still requires the admin password.
+func TestMatchLineupDELETE_WhileRunning(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: "teamA", SideB: "teamB", Status: state.MatchStatusRunning},
+	}))
+
+	// Seed a lineup for the running match.
+	seed := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(validPositionsBody()))
+	seed.Header.Set("X-Tournament-Password", "secret")
+	ws := httptest.NewRecorder()
+	r.ServeHTTP(ws, seed)
+	require.Equal(t, http.StatusOK, ws.Code, ws.Body.String())
+
+	// DELETE without the admin password must be rejected.
+	noAuth := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", nil)
+	wNoAuth := httptest.NewRecorder()
+	r.ServeHTTP(wNoAuth, noAuth)
+	assert.Equal(t, http.StatusUnauthorized, wNoAuth.Code, "delete must require the admin password")
+
+	// DELETE with auth must succeed even while the match is running.
+	del := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", nil)
+	del.Header.Set("X-Tournament-Password", "secret")
+	wDel := httptest.NewRecorder()
+	r.ServeHTTP(wDel, del)
+	require.Equal(t, http.StatusNoContent, wDel.Code, "delete while running must succeed: "+wDel.Body.String())
+
+	// The lineup must be gone.
+	lineups, err := store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	_, found := findMatchLineup(lineups, "teamA", "PoolA-0")
+	assert.False(t, found, "lineup should be removed after delete")
+}

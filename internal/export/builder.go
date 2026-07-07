@@ -149,6 +149,15 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			if err := overlayBracketScores(f, bracketByID, comp.TeamSize, comp.Mirror); err != nil {
 				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 			}
+			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
+			// broken ''! references for the entrant name cells. Overwrite them with
+			// the stored bracket's literal names (empty for unresolved slots) so the
+			// sheet is a valid literal snapshot with no broken formulas.
+			if len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+				if err := overlayPlayoffBracketNames(f, bracketByID, comp.TeamSize, comp.Mirror); err != nil {
+					return nil, fmt.Errorf("export: overlay playoff names: %w", err)
+				}
+			}
 		}
 
 		// Tree sheet.
@@ -911,6 +920,54 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 			// individual writer, which scans forward for the "1." ordinal.
 			if bm.Winner != "" {
 				writeWinnerCell(f, sheetName, rows, summaryExcelRow-1, headerCol, bm.Winner)
+			}
+		}
+	}
+	return nil
+}
+
+// overlayPlayoffBracketNames overwrites the elimination entrant name cells with
+// the stored bracket's literal SideA/SideB. Playoffs have no pool data sheet, so
+// the pool-oriented renderer points those cells at an empty pool-winner cell,
+// producing a broken ”! formula. Writing the literal names (or "" for an
+// unresolved slot, which clears the broken formula) yields a valid snapshot.
+//
+// Name cells sit at the court's start column (left) and start+6 (right) on the
+// entrant row (header + 2). Team brackets repeat the names on the IV/PW summary
+// row (header + 5 + teamSize), so those are overwritten too.
+func overlayPlayoffBracketNames(f *excelize.File, bracketByID map[string]state.BracketMatch, teamSize int, mirror bool) error {
+	sheetName := helper.SheetEliminationMatches
+	rows, err := f.GetRows(sheetName)
+	if err != nil {
+		return fmt.Errorf("overlayPlayoffBracketNames: get rows: %w", err)
+	}
+
+	for rowIdx, row := range rows {
+		for headerCol, cell := range row {
+			_, matchNum := parseRoundMatchLabel(cell)
+			if matchNum <= 0 {
+				continue
+			}
+			bm := findBracketMatchByNumber(bracketByID, matchNum)
+			if bm == nil {
+				continue
+			}
+
+			leftName, rightName := bm.SideA, bm.SideB
+			if mirror {
+				leftName, rightName = rightName, leftName
+			}
+			leftCol := colNum(headerCol + 1)  // court start column
+			rightCol := colNum(headerCol + 7) // start + 6 (endColName)
+
+			entrantRow := rowIdx + 3 // header (rowIdx+1) + 2
+			setCellStr(f, sheetName, leftCol, entrantRow, leftName)
+			setCellStr(f, sheetName, rightCol, entrantRow, rightName)
+
+			if teamSize > 0 {
+				summaryRow := rowIdx + 6 + teamSize // header + 5 + teamSize
+				setCellStr(f, sheetName, leftCol, summaryRow, leftName)
+				setCellStr(f, sheetName, rightCol, summaryRow, rightName)
 			}
 		}
 	}

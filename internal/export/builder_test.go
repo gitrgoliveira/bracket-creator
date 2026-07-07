@@ -884,7 +884,7 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "P1", Dojo: "D"}, {Name: "P2", Dojo: "D"}, {Name: "P3", Dojo: "D"}, {Name: "P4", Dojo: "D"},
+		{Name: "Alice", Dojo: "D"}, {Name: "Bob", Dojo: "D"}, {Name: "Carol", Dojo: "D"}, {Name: "Dave", Dojo: "D"},
 	}))
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -915,6 +915,9 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"playoffs (no pools) must render the bracket with its literal score 'MK'")
+	assert.True(t, sheetContainsCell(rows, "Alice"),
+		"playoffs bracket must render literal entrant names (no pool data to reference)")
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
 // TestBuildResultsWorkbook_SwissUnsupported covers the Swiss format, which has no
@@ -982,6 +985,30 @@ func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
 		"mixed pool grid must show the literal ippon score 'MK'")
 }
 
+// assertNoBrokenFormulas evaluates every formula cell in the sheet and fails if
+// any cannot be calculated or resolves to an Excel error (#REF!, #DIV/0!, …). The
+// results export overwrites the collapse-prone W/L/T/RANK/score formulas with
+// literals, so the only formulas left (cross-sheet name references) must resolve
+// cleanly in every completeness state.
+func assertNoBrokenFormulas(t *testing.T, f *excelize.File, sheet string) {
+	t.Helper()
+	rows, err := f.GetRows(sheet)
+	require.NoError(t, err)
+	for r := range rows {
+		for c := 0; c < 24; c++ {
+			col, _ := excelize.ColumnNumberToName(c + 1)
+			ref := fmt.Sprintf("%s%d", col, r+1)
+			fm, _ := f.GetCellFormula(sheet, ref)
+			if fm == "" {
+				continue
+			}
+			v, cerr := f.CalcCellValue(sheet, ref)
+			assert.NoErrorf(t, cerr, "%s!%s formula %q failed to calculate", sheet, ref, fm)
+			assert.NotContainsf(t, v, "#", "%s!%s formula %q resolved to an Excel error %q", sheet, ref, fm, v)
+		}
+	}
+}
+
 // TestBuildResultsWorkbook_IncompleteAllFormats exports every format immediately
 // after StartCompetition, with ZERO matches scored. A real tournament exports
 // mid-run, so an incomplete competition must still yield a valid workbook (or, for
@@ -1027,9 +1054,13 @@ func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
 			}
 			require.NoError(t, store.SaveCompetition(comp))
 
+			// Use non-cell-like names: a participant name that parses as an Excel
+			// cell reference (e.g. "P1" = column P row 1) trips a pre-existing
+			// leaf-detection edge case in the shared elimination renderer (mp-uagg).
+			names := []string{"Alice", "Bob", "Carol", "Dave", "Erin", "Frank", "Grace", "Heidi"}
 			players := make([]domain.Player, tc.players)
 			for i := range players {
-				players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "D"}
+				players[i] = domain.Player{Name: names[i], Dojo: "D"}
 			}
 			require.NoError(t, store.SaveParticipants(compID, players))
 			require.NoError(t, eng.StartCompetition(compID))
@@ -1045,6 +1076,9 @@ func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
 			require.NoError(t, err, "incomplete %s export must be a valid xlsx", tc.format)
 			defer f.Close()
 			assert.Contains(t, f.GetSheetList(), helper.SheetPoolMatches)
+			// No leftover formula may collapse to an Excel error in a 0-scored export.
+			assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
+			assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 		})
 	}
 }
@@ -1094,6 +1128,8 @@ func TestBuildResultsWorkbook_PartialPoolScoring(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"the one scored match must appear even though the pool is incomplete")
+	// Partial exports must not leave any broken formulas either.
+	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
 }
 
 // TestBuildResultsWorkbook_PlayoffsPartialBracket scores only the first bracket
@@ -1111,7 +1147,7 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "P1", Dojo: "D"}, {Name: "P2", Dojo: "D"}, {Name: "P3", Dojo: "D"}, {Name: "P4", Dojo: "D"},
+		{Name: "Alice", Dojo: "D"}, {Name: "Bob", Dojo: "D"}, {Name: "Carol", Dojo: "D"}, {Name: "Dave", Dojo: "D"},
 	}))
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1141,6 +1177,7 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"the played semifinal score must render even with the final unplayed")
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
 // makeTeamPools builds two team pools of two teams each, one team encounter per pool.

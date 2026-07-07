@@ -77,6 +77,41 @@ func TestDecisionSuffix(t *testing.T) {
 	}
 }
 
+func TestMiddleCellText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		decision string
+		suffix   string
+		want     string
+	}{
+		// Non-draw: just the suffix (may be empty).
+		{name: "fought, no suffix", decision: "fought", suffix: "", want: ""},
+		{name: "fought, kiken suffix", decision: "fought", suffix: "Kiken", want: "Kiken"},
+		{name: "daihyosen suffix only", decision: "daihyosen", suffix: "DH", want: "DH"},
+
+		// Draw alone -> bare "X".
+		{name: "draw, no suffix", decision: "hikiwake", suffix: "", want: "X"},
+
+		// The regression this helper fixes: draw AND suffix must be COMBINED,
+		// not overwritten. Previously the code wrote "X" then replaced it with
+		// the suffix, dropping the draw marker.
+		{name: "draw + encho", decision: "hikiwake", suffix: "(E)", want: "X (E)"},
+		{name: "draw + hantei", decision: "hikiwake", suffix: "Ht", want: "X Ht"},
+		{name: "draw + encho + hantei", decision: "hikiwake", suffix: "(E) Ht", want: "X (E) Ht"},
+		{name: "draw + DH", decision: "hikiwake", suffix: "DH", want: "X DH"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tc.want, MiddleCellText(tc.decision, tc.suffix))
+		})
+	}
+}
+
 func TestIpponsScore(t *testing.T) {
 	t.Parallel()
 

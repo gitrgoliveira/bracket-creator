@@ -378,6 +378,48 @@ func TestBuildResultsWorkbook_DrawMatch(t *testing.T) {
 	assert.True(t, foundX, "pool matches sheet must contain 'X' for a hikiwake (draw) with no ippons")
 }
 
+// TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker is the regression test for
+// the draw-marker overwrite bug: a hikiwake that also went to encho (or was
+// hantei-decided) must export the COMBINED "X (E)" / "X Ht" in the vs column, not
+// just the suffix. Previously the code wrote "X" then overwrote it with the
+// suffix, silently dropping the draw indicator from the archived workbook.
+func TestBuildResultsWorkbook_DrawWithSuffixKeepsMarker(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	pools := makePools()
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// A scoreless draw that went to overtime and stayed level.
+	results := []state.MatchResult{
+		{
+			ID:       "Pool A-0",
+			SideA:    "Alice",
+			SideB:    "Bob",
+			IpponsA:  []string{},
+			IpponsB:  []string{},
+			Decision: state.DecisionDraw,
+			Encho:    &state.EnchoMetadata{PeriodCount: 1},
+			Status:   state.MatchStatusCompleted,
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, results))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	assert.True(t, sheetContainsCell(rows, "X (E)"),
+		"a hikiwake-in-encho must export the combined 'X (E)' marker, not just '(E)'")
+	assert.False(t, sheetContainsCell(rows, "(E)"),
+		"the bare '(E)' cell must not appear: it means the draw marker was dropped")
+}
+
 // ------------------------------------------------------------
 // Unit tests for helper utilities
 // ------------------------------------------------------------
@@ -565,6 +607,87 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 		}
 	}
 	assert.True(t, foundM, "Pool C ippon 'M' must be present in two-court workbook")
+}
+
+// wColInBand returns the 0-based column index of the "W" standings header found
+// within the [bandStart, bandEnd) column range, or -1 if absent.
+func wColInBand(rows [][]string, bandStart, bandEnd int) int {
+	for _, row := range rows {
+		for c := bandStart; c < bandEnd && c < len(row); c++ {
+			if row[c] == "W" {
+				return c
+			}
+		}
+	}
+	return -1
+}
+
+// columnContains reports whether the given 0-based column holds a cell == want.
+func columnContains(rows [][]string, col int, want string) bool {
+	for _, row := range rows {
+		if col >= 0 && col < len(row) && row[col] == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBuildResultsWorkbook_MultiCourtStandingsColumns is the regression test for
+// the multi-court standings column-map bug: overlayPoolStandings built its
+// header map from the WHOLE row, and buildColumnMap keeps only the first
+// occurrence of each label. Pool Matches repeats the W/L/T/PW/PL/Rank headers
+// once per court band, so a win in a court-B pool used to be written into court
+// A's W column. Only Pool C (court B) is scored; court A's W column must stay
+// clean while court B's shows the win.
+func TestBuildResultsWorkbook_MultiCourtStandingsColumns(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "export-test-mcstand-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	compID := "mc-standings"
+	comp := &state.Competition{ID: compID, Name: "MC Standings", Courts: []string{"A", "B"}}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	makeP := func(name, a, b string) helper.Pool {
+		pl1, pl2 := makePlayer(a), makePlayer(b)
+		return helper.Pool{PoolName: name, Players: []helper.Player{pl1, pl2}, Matches: []helper.Match{{SideA: &pl1, SideB: &pl2}}}
+	}
+	// Pools 0,1 -> court A; pools 2,3 -> court B (contiguous assignment).
+	pools := []helper.Pool{
+		makeP("Pool A", "Alice", "Bob"),
+		makeP("Pool B", "Charlie", "Dave"),
+		makeP("Pool C", "Eve", "Frank"),
+		makeP("Pool D", "Grace", "Hank"),
+	}
+	require.NoError(t, store.SavePools(compID, pools))
+
+	// Score ONLY Pool C (court B): Eve wins, so Eve's standings W = 1.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool C-0", SideA: "Eve", SideB: "Frank", IpponsA: []string{"M"}, Decision: "fought", Status: state.MatchStatusCompleted, Winner: "Eve"},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetPoolMatches)
+	require.NoError(t, err)
+
+	courtAW := wColInBand(rows, 0, helper.CourtsColumnsPerCourt)
+	courtBW := wColInBand(rows, helper.CourtsColumnsPerCourt, 2*helper.CourtsColumnsPerCourt)
+	require.GreaterOrEqual(t, courtAW, 0, "court A W header must exist")
+	require.GreaterOrEqual(t, courtBW, 0, "court B W header must exist")
+
+	assert.True(t, columnContains(rows, courtBW, "1"),
+		"court B's W column must carry Eve's win (=1)")
+	assert.False(t, columnContains(rows, courtAW, "1"),
+		"court A pools are unscored: a '1' in court A's W column means court B's win leaked into court A (the multi-court colMap bug)")
 }
 
 // TestBuildResultsWorkbook_BracketTwoCourts guards the multi-court bracket
@@ -1390,4 +1513,124 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 
 	assert.True(t, sheetContainsCell(elimRows, "DH"), "daihyosen suffix 'DH' must appear on the team encounter")
 	assert.True(t, sheetContainsCell(elimRows, "Red A"), "winner 'Red A' must be written as a literal")
+}
+
+// formulaCellCount returns how many cells in the sheet carry a formula. Used to
+// distinguish a populated tree page from a blank one.
+func formulaCellCount(t *testing.T, f *excelize.File, sheet string) int {
+	t.Helper()
+	rows, err := f.GetRows(sheet)
+	require.NoError(t, err)
+	count := 0
+	for r := range rows {
+		for c := 0; c < 24; c++ {
+			col, _ := excelize.ColumnNumberToName(c + 1)
+			fm, _ := f.GetCellFormula(sheet, fmt.Sprintf("%s%d", col, r+1))
+			if fm != "" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// TestBuildResultsWorkbook_MultiPageTreePopulated is the regression test for the
+// blank-extra-tree-sheet bug: a bracket with more than MaxPlayersPerTree (16)
+// finalists spans multiple Tree pages. The previous implementation created
+// "Tree 2"+ as empty sheets and only rendered "Tree 1"; the fix copies the
+// styled template into every page and renders each subtree's leaves. A 32-entry
+// playoffs bracket needs 2 pages, so both must be populated and the bare "Tree"
+// template must be gone.
+func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := make([]domain.Player, 32)
+	for i := range players {
+		players[i] = domain.Player{Name: fmt.Sprintf("Player%02d", i+1), Dojo: "D"}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+
+	sheets := f.GetSheetList()
+	assert.Contains(t, sheets, "Tree 1", "first tree page must exist")
+	assert.Contains(t, sheets, "Tree 2", "second tree page must exist for a >16-entry bracket")
+	assert.NotContains(t, sheets, helper.SheetTree,
+		"the bare 'Tree' template must be consumed and deleted, not left alongside the pages")
+
+	assert.Greater(t, formulaCellCount(t, f, "Tree 2"), 1,
+		"second tree page must be populated (styled copy + rendered leaves), not blank")
+}
+
+// TestAttachPoolMatches_PrefersSideIDs is the regression test for the same-name
+// participant bug in attachPoolMatches: two competitors can share a name but sit
+// in different dojos (allowed), so a name-only side lookup attaches the wrong
+// Player. The fix resolves each side by its authoritative SideAID/SideBID UUID
+// first, falling back to the name only when no ID is present.
+func TestAttachPoolMatches_PrefersSideIDs(t *testing.T) {
+	t.Parallel()
+
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "id-1", Name: "Sam", Dojo: "North"},
+			{ID: "id-2", Name: "Sam", Dojo: "South"},
+		},
+	}}
+	results := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Sam", SideAID: "id-1", SideB: "Sam", SideBID: "id-2"},
+	}
+
+	attachPoolMatches(pools, results)
+
+	require.Len(t, pools[0].Matches, 1)
+	m := pools[0].Matches[0]
+	require.NotNil(t, m.SideA)
+	require.NotNil(t, m.SideB)
+	// Resolved by ID, so the two same-name sides map to DISTINCT players with the
+	// correct dojos, not both to whichever "Sam" was added last.
+	assert.Equal(t, "North", m.SideA.Dojo, "SideAID id-1 must resolve to the North Sam")
+	assert.Equal(t, "South", m.SideB.Dojo, "SideBID id-2 must resolve to the South Sam")
+	assert.NotSame(t, m.SideA, m.SideB, "same-name sides must resolve to distinct players")
+}
+
+// TestAttachPoolMatches_FallsBackToName verifies the resolver still works when
+// legacy results carry no side UUIDs (pre-UUID data): resolution falls back to
+// the display name.
+func TestAttachPoolMatches_FallsBackToName(t *testing.T) {
+	t.Parallel()
+
+	pools := []helper.Pool{{
+		PoolName: "Pool A",
+		Players: []helper.Player{
+			{ID: "id-1", Name: "Ann", Dojo: "North"},
+			{ID: "id-2", Name: "Bea", Dojo: "South"},
+		},
+	}}
+	results := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Ann", SideB: "Bea"}, // no SideAID/SideBID
+	}
+
+	attachPoolMatches(pools, results)
+
+	require.Len(t, pools[0].Matches, 1)
+	m := pools[0].Matches[0]
+	require.NotNil(t, m.SideA)
+	require.NotNil(t, m.SideB)
+	assert.Equal(t, "Ann", m.SideA.Name)
+	assert.Equal(t, "Bea", m.SideB.Name)
 }

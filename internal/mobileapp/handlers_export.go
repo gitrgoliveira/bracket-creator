@@ -41,9 +41,12 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 			return
 		}
 
+		// Quote the filename so user agents parse it as a single token. id is
+		// already validated by requireValidCompID (no quotes/spaces/control chars),
+		// so a plain quoted form is sufficient and can't break out of the header.
 		filename := fmt.Sprintf("results-%s.xlsx", id)
 		c.Header("Content-Description", "File Transfer")
-		c.Header("Content-Disposition", "attachment; filename="+filename)
+		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 		c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data)
 	})
 }

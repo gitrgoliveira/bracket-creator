@@ -160,22 +160,33 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 			}
 		}
 
-		// Tree sheet.
+		// Tree sheets: one visual bracket page per subtree. NewFileFromScratch
+		// creates a single styled "Tree" template; copy it into each page so every
+		// page keeps the bracket layout, render that page's leaf nodes, then delete
+		// the consumed template. This mirrors the CLI (cmd/create-pools.go) and,
+		// unlike the previous implementation, populates ALL pages for large brackets
+		// (>16 finalists) instead of leaving "Tree 2"+ blank.
 		numPages, _ := helper.TreePageLayout(len(finals), numCourts, false)
 		subtrees := helper.SubdivideTree(tree, numPages)
+		treeTemplateIdx, terr := f.GetSheetIndex(helper.SheetTree)
+		if terr != nil {
+			return nil, fmt.Errorf("export: find tree template sheet: %w", terr)
+		}
 		for i, subtree := range subtrees {
-			sheetName := helper.SheetTree
-			if i > 0 {
-				sheetName = fmt.Sprintf("Tree %d", i+1)
-				if _, err := f.NewSheet(sheetName); err != nil {
-					return nil, fmt.Errorf("export: create tree sheet: %w", err)
-				}
+			pageSheet := fmt.Sprintf("Tree %d", i+1)
+			pageIdx, nerr := f.NewSheet(pageSheet)
+			if nerr != nil {
+				return nil, fmt.Errorf("export: create tree sheet %s: %w", pageSheet, nerr)
 			}
-			if i == 0 {
-				d := helper.CalculateDepth(subtree)
-				helper.PrintLeafNodes(subtree, f, sheetName, 2*d, 1, d, true, matchWinners)
-				helper.SetTreeSheetTitle(f, sheetName, comp.Name)
+			if cerr := f.CopySheet(treeTemplateIdx, pageIdx); cerr != nil {
+				return nil, fmt.Errorf("export: copy tree template to %s: %w", pageSheet, cerr)
 			}
+			d := helper.CalculateDepth(subtree)
+			helper.PrintLeafNodes(subtree, f, pageSheet, 2*d, helper.TreeTitleRows+1, d, true, matchWinners)
+			helper.SetTreeSheetTitle(f, pageSheet, comp.Name)
+		}
+		if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
+			return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
 		}
 	}
 
@@ -196,6 +207,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 // overlayTeamPoolScores maps the N-th grid match to result ID "<Pool>-<N>", so
 // matches are ordered by the numeric suffix of that ID to keep both in lockstep.
 // Tiebreak/daihyosen results (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
+//
+// Each side is resolved to its pool Player by the authoritative SideAID/SideBID
+// UUID first, falling back to the display name, so same-name-different-dojo
+// participants are not conflated.
 func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 	for pi := range pools {
 		p := &pools[pi]
@@ -218,16 +233,33 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 		}
 		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
 
-		ptr := make(map[string]*helper.Player, len(p.Players))
+		byID := make(map[string]*helper.Player, len(p.Players))
+		byName := make(map[string]*helper.Player, len(p.Players))
 		for i := range p.Players {
-			ptr[p.Players[i].Name] = &p.Players[i]
+			pl := &p.Players[i]
+			if pl.ID != "" {
+				byID[pl.ID] = pl
+			}
+			byName[pl.Name] = pl
+		}
+		// Prefer the authoritative side UUID (SideAID/SideBID from pool-matches.csv)
+		// and fall back to the display name. Names are not unique within a
+		// competition (same name, different dojo is allowed), so a name-only lookup
+		// could attach the wrong Player and mislabel the grid; the UUID disambiguates.
+		resolve := func(id, name string) *helper.Player {
+			if id != "" {
+				if pl, ok := byID[id]; ok {
+					return pl
+				}
+			}
+			return byName[name]
 		}
 
 		p.Matches = make([]helper.Match, 0, len(mine))
 		for _, ir := range mine {
 			p.Matches = append(p.Matches, helper.Match{
-				SideA: ptr[ir.mr.SideA],
-				SideB: ptr[ir.mr.SideB],
+				SideA: resolve(ir.mr.SideAID, ir.mr.SideA),
+				SideB: resolve(ir.mr.SideBID, ir.mr.SideB),
 			})
 		}
 	}
@@ -314,8 +346,11 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 			}
 			pool := pools[poolsByCourt[c][poolOrder]]
 
-			// Column layout (1-based): startCol+1 = left victories (White/SideB),
-			// startCol+3 = middle/vs, startCol+5 = right victories (Red/SideA).
+			// Column layout (1-based) for the default mirror=false template:
+			// startCol+1 = left victories (Red/SideA), startCol+3 = middle/vs,
+			// startCol+5 = right victories (White/SideB). With mirror=true the sides
+			// swap physically (White left, Red right); leftIppons/rightIppons below
+			// are swapped to match, so lVCol/rVCol always align with the header.
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt
 			lVCol := colNum(courtStartCol + 1)
 			middleCol := colNum(courtStartCol + 3)
@@ -341,11 +376,8 @@ func overlayPoolScores(f *excelize.File, pools []helper.Pool, resultByID map[str
 
 				setCellStr(f, sheetName, lVCol, excelRow, IpponsScore(leftIppons))
 				setCellStr(f, sheetName, rVCol, excelRow, IpponsScore(rightIppons))
-				if mr.Decision == state.DecisionDraw {
-					setCellStr(f, sheetName, middleCol, excelRow, "X")
-				}
-				if sfx != "" {
-					setCellStr(f, sheetName, middleCol, excelRow, sfx)
+				if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
+					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
 			}
 		}
@@ -467,11 +499,8 @@ func writeTeamSummaryCells(f *excelize.File, sheetName string, courtStartCol, ex
 
 	hantei := mr.DecidedByHantei != nil && *mr.DecidedByHantei
 	sfx := DecisionSuffix(mr.Decision, mr.Encho, hantei)
-	if mr.Decision == state.DecisionDraw {
-		setCellStr(f, sheetName, middleCol, excelRow, "X")
-	}
-	if sfx != "" {
-		setCellStr(f, sheetName, middleCol, excelRow, sfx)
+	if mid := MiddleCellText(mr.Decision, sfx); mid != "" {
+		setCellStr(f, sheetName, middleCol, excelRow, mid)
 	}
 }
 
@@ -506,11 +535,8 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 
 		hantei := sub.DecidedByHantei
 		sfx := DecisionSuffix(sub.Decision, sub.Encho, hantei)
-		if sub.Decision == state.DecisionDraw {
-			setCellStr(f, sheetName, middleCol, excelRow, "X")
-		}
-		if sfx != "" {
-			setCellStr(f, sheetName, middleCol, excelRow, sfx)
+		if mid := MiddleCellText(sub.Decision, sfx); mid != "" {
+			setCellStr(f, sheetName, middleCol, excelRow, mid)
 		}
 	}
 }
@@ -573,7 +599,12 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				continue
 			}
 			byName := standingMap(poolStandings)
-			colMap := buildColumnMap(row)
+			// Scope the header map to THIS court's 8-column band. Pool Matches
+			// repeats the W/L/T/PW/PL/Rank headers once per court, and a whole-row
+			// map keeps only the first occurrence, so on a multi-court sheet every
+			// court past the first would otherwise write its standings into court 0's
+			// columns.
+			colMap := buildCourtColumnMap(row, startColIdx)
 
 			// Write standings literals for each player (in pool draw order).
 			for i, player := range pool.Players {
@@ -810,11 +841,8 @@ func overlayBracketScores(f *excelize.File, bracketByID map[string]state.Bracket
 			setCellStr(f, sheetName, lVCol, excelRow, leftScore)
 			setCellStr(f, sheetName, rVCol, excelRow, rightScore)
 
-			if bm.Decision == state.DecisionDraw {
-				setCellStr(f, sheetName, middleCol, excelRow, "X")
-			}
-			if sfx != "" {
-				setCellStr(f, sheetName, middleCol, excelRow, sfx)
+			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
+				setCellStr(f, sheetName, middleCol, excelRow, mid)
 			}
 
 			if bm.Winner != "" {
@@ -886,11 +914,8 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 					setCellStr(f, sheetName, rVCol, excelRow, s)
 				}
 				subSfx := DecisionSuffix(sub.Decision, sub.Encho, sub.DecidedByHantei)
-				if sub.Decision == state.DecisionDraw {
-					setCellStr(f, sheetName, middleCol, excelRow, "X")
-				}
-				if subSfx != "" {
-					setCellStr(f, sheetName, middleCol, excelRow, subSfx)
+				if mid := MiddleCellText(sub.Decision, subSfx); mid != "" {
+					setCellStr(f, sheetName, middleCol, excelRow, mid)
 				}
 			}
 
@@ -909,11 +934,8 @@ func overlayTeamBracketScores(f *excelize.File, bracketByID map[string]state.Bra
 			}
 
 			sfx := DecisionSuffix(bm.Decision, bm.Encho, bm.DecidedByHantei)
-			if bm.Decision == state.DecisionDraw {
-				setCellStr(f, sheetName, middleCol, summaryExcelRow, "X")
-			}
-			if sfx != "" {
-				setCellStr(f, sheetName, middleCol, summaryExcelRow, sfx)
+			if mid := MiddleCellText(bm.Decision, sfx); mid != "" {
+				setCellStr(f, sheetName, middleCol, summaryExcelRow, mid)
 			}
 
 			// Winner marker: the "1." row is 3 rows below the summary row; reuse the
@@ -1018,6 +1040,26 @@ func setIntCellDirect(f *excelize.File, sheet, col string, row, value int) {
 type matchJob struct {
 	poolIdx  int
 	matchIdx int
+}
+
+// buildCourtColumnMap returns header label -> 0-based ABSOLUTE column index,
+// scanning only the given court's 8-column band [startColIdx, startColIdx+8).
+// Pool Matches repeats the W/L/T/PW/PL/Rank headers once per court, so a
+// whole-row map (which keeps the first occurrence) collapses every court onto
+// court 0's columns; scoping to the band keeps each court's standings correct.
+func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
+	m := make(map[string]int, helper.CourtsColumnsPerCourt)
+	end := startColIdx + helper.CourtsColumnsPerCourt
+	for i := startColIdx; i < end && i < len(row); i++ {
+		cell := row[i]
+		if cell == "" {
+			continue
+		}
+		if _, exists := m[cell]; !exists {
+			m[cell] = i
+		}
+	}
+	return m
 }
 
 // buildColumnMap returns header label -> 0-based column index for all non-empty cells.

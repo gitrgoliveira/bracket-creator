@@ -867,6 +867,7 @@ func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
 	// collapsed formula 0).
 	assert.True(t, columnHasValueUnderHeader(rows, "W", "2"),
 		"standings W column must contain literal '2' for the pool winner")
+	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
 }
 
 // TestBuildResultsWorkbook_PlayoffsBracket covers the pure-knockout format, which
@@ -917,6 +918,59 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 		"playoffs (no pools) must render the bracket with its literal score 'MK'")
 	assert.True(t, sheetContainsCell(rows, "Alice"),
 		"playoffs bracket must render literal entrant names (no pool data to reference)")
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
+}
+
+// TestBuildResultsWorkbook_PlayoffsCellRefLikeNames is a regression test for
+// mp-uagg: internal/helper.printSingleEliminationMatch used to decide leaf- vs
+// match-feeder nodes by asking whether Node.LeafVal parsed as an Excel cell
+// reference (excelize.SplitCellName). A no-pools playoffs bracket renders raw
+// participant names as leaves (playoffFinalsFromParticipants), so a competitor
+// named like a cell coordinate ("P1" = column P row 1, "M3", "A4") was
+// misclassified as a match-feeder, producing a broken CONCATENATE(...,”!)
+// formula. The fix checks the structural Node.LeafNode flag instead.
+func TestBuildResultsWorkbook_PlayoffsCellRefLikeNames(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Kind = "individual"
+	comp.Format = state.CompFormatPlayoffs
+	comp.Status = "setup"
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "P1", Dojo: "D"}, {Name: "M3", Dojo: "D"}, {Name: "A4", Dojo: "D"}, {Name: "Z9", Dojo: "D"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, br)
+	for ri := range br.Rounds {
+		for mi := range br.Rounds[ri] {
+			m := &br.Rounds[ri][mi]
+			if m.SideA != "" && m.SideB != "" {
+				m.Winner = m.SideA
+				m.Status = state.MatchStatusCompleted
+				m.ScoreA = "MK"
+				m.Decision = "fought"
+			}
+		}
+	}
+	require.NoError(t, store.SaveBracket(compID, br))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	assert.True(t, sheetContainsCell(rows, "P1"),
+		"cell-ref-like entrant name 'P1' must render literally, not as a match-feeder reference")
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
@@ -983,6 +1037,11 @@ func TestBuildResultsWorkbook_MixedEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
 		"mixed pool grid must show the literal ippon score 'MK'")
+	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
+	// Mixed advances pool winners into a bracket: GenerateFinals renders finalist
+	// slots as "Pool-Ordinal" (e.g. "Pool A-1st"), so the Elimination Matches
+	// sheet is populated too and must be equally free of broken formulas.
+	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
 // assertNoBrokenFormulas evaluates every formula cell in the sheet and fails if
@@ -1054,10 +1113,12 @@ func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
 			}
 			require.NoError(t, store.SaveCompetition(comp))
 
-			// Use non-cell-like names: a participant name that parses as an Excel
-			// cell reference (e.g. "P1" = column P row 1) trips a pre-existing
-			// leaf-detection edge case in the shared elimination renderer (mp-uagg).
-			names := []string{"Alice", "Bob", "Carol", "Dave", "Erin", "Frank", "Grace", "Heidi"}
+			// A participant named like an Excel cell reference (e.g. "P1" = column P
+			// row 1) used to trip the shared elimination renderer's leaf-detection
+			// (mp-uagg, fixed alongside this test suite): it structurally checks
+			// Node.LeafNode now instead of parsing LeafVal as a cell name, so mixing
+			// such names in here doubles as regression coverage across every format.
+			names := []string{"Alice", "P1", "Carol", "M3", "Erin", "A4", "Grace", "Z9"}
 			players := make([]domain.Player, tc.players)
 			for i := range players {
 				players[i] = domain.Player{Name: names[i], Dojo: "D"}

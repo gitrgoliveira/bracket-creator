@@ -1054,8 +1054,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	startCell = startColName + fmt.Sprint(matchRow)
 	var leftCellValue, rightCellValue string
 
-	_, _, err := excelize.SplitCellName(eliminationMatch.Left.LeafVal)
-	if err != nil && len(eliminationMatch.Left.LeafVal) > 0 {
+	if eliminationMatch.Left.LeafNode && len(eliminationMatch.Left.LeafVal) > 0 {
 		if strings.Contains(eliminationMatch.Left.LeafVal, "Pool") {
 			leftCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Left.LeafVal, poolMatchWinners[eliminationMatch.Left.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Left.LeafVal].cell)
 		} else {
@@ -1074,8 +1073,7 @@ func printSingleEliminationMatch(f *excelize.File, sheetName string, elimination
 	//////////////////////////////////////
 	// eliminationMatch.Right checks if it is a pool winner
 	endCell = endColName + fmt.Sprint(matchRow)
-	_, _, err = excelize.SplitCellName(eliminationMatch.Right.LeafVal)
-	if err != nil && len(eliminationMatch.Right.LeafVal) > 0 {
+	if eliminationMatch.Right.LeafNode && len(eliminationMatch.Right.LeafVal) > 0 {
 		if strings.Contains(eliminationMatch.Right.LeafVal, "Pool") {
 			rightCellValue = fmt.Sprintf("CONCATENATE(\"%s \",'%s'!%s)", eliminationMatch.Right.LeafVal, poolMatchWinners[eliminationMatch.Right.LeafVal].sheetName, poolMatchWinners[eliminationMatch.Right.LeafVal].cell)
 		} else {

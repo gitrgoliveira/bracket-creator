@@ -35,7 +35,7 @@ var ErrCompetitionNotFound = errors.New("competition not found")
 // export). That function and the existing GET /api/competitions/:id/export
 // endpoint are not modified.
 //
-// Suggested download filename: "bracket-results-<compID>.xlsx".
+// Download filename served by the handler: "results-<compID>.xlsx".
 func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string) ([]byte, error) {
 	comp, err := store.LoadCompetition(compID)
 	if err != nil {
@@ -227,8 +227,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 // Tiebreak/daihyosen results (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
 //
 // Each side is resolved to its pool Player by the authoritative SideAID/SideBID
-// UUID first, falling back to the display name, so same-name-different-dojo
-// participants are not conflated.
+// UUID first, which disambiguates same-name-different-dojo participants. Legacy
+// results written before side UUIDs existed fall back to name matching (last
+// write wins in the name map), so exact-duplicate names in such old data can
+// still be conflated; current data always carries the UUIDs.
 func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) {
 	for pi := range pools {
 		p := &pools[pi]

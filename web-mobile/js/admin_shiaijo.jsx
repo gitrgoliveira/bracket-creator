@@ -189,8 +189,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // without starting (or hit Start from inside the modal).
     const [lineupMatch, setLineupMatch] = useStateSh(null);
     // Pending revert-to-queue confirmation. Set when the operator clicks
-    // "Send back to queue" on a running, unscored bout. Cleared on confirm or
-    // cancel. {compId, matchId, label}.
+    // "Send back to queue" on any running bout (scored or not). Cleared on
+    // confirm or cancel. Shape: {compId, matchId, label, scored} where `scored`
+    // drives the "entered score will be discarded" confirm copy.
     const [pendingRevert, setPendingRevert] = useStateSh(null);
     const [reverting, setReverting] = useStateSh(false);
     // Selected competition for filtering the queue. Default: running match's comp,

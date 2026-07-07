@@ -577,6 +577,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		// The match just left the running state, so its rev-guard high-water
+		// mark is dead. Drop it (mirrors the score handler's `!isRunning`
+		// cleanup) so a later re-start of this match, whose client may reuse the
+		// same RevSession or reset its rev counter, is not wrongly dropped as
+		// stale against a leftover mark.
+		runningRevStore.Delete(id + ":" + mid)
+
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,

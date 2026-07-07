@@ -869,6 +869,25 @@ func TestRevertMatchToQueueHandler(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+
+	t.Run("clears the runningRevStore rev-guard entry", func(t *testing.T) {
+		require.NoError(t, store.SavePoolMatches("rev1", []state.MatchResult{
+			{ID: "run-rev", SideA: "P1", SideB: "P2", Status: state.MatchStatusRunning},
+		}))
+		// Simulate a prior rev-guarded running autosave leaving a high-water mark.
+		matchKey := "rev1:run-rev"
+		runningRevStore.Store(matchKey, runningRev{Session: "sess-1", Rev: 3})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/rev1/matches/run-rev/revert-to-queue", nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		// The match left the running state, so its rev-guard mark must be gone,
+		// otherwise a later re-start could be wrongly dropped as stale.
+		_, present := runningRevStore.Load(matchKey)
+		assert.False(t, present, "runningRevStore entry must be cleared after revert-to-queue")
+	})
 }
 
 // TestScoreHandler_CompletionBroadcastContract verifies that scoring the final

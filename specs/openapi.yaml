@@ -1720,6 +1720,39 @@ paths:
                     type: string
                     description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
 
+  /api/competitions/{id}/matches/{mid}/revert-to-queue:
+    post:
+      tags: [matches]
+      summary: Send a running match back to the queue
+      description: |
+        Reverts a running (not-yet-completed) match to the `scheduled` state,
+        discarding any partial score and audit metadata, so an operator who
+        started the wrong bout can start the correct one instead. Idempotent: an
+        already-scheduled match is normalised to a clean scheduled match.
+        Broadcasts a `match_updated` event so viewers drop it from the live view.
+        Intentionally accessible to court operators in self-run mode (operational
+        play, the inverse of starting a match).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: Match reverted to the scheduled queue.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The match is already completed; correct it via the score editor instead.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/court:
     put:
       tags: [matches]
@@ -2097,12 +2130,6 @@ paths:
                 $ref: '#/components/schemas/TeamLineup'
         '400':
           $ref: '#/components/responses/BadRequest'
-        '409':
-          description: Lineup is locked and cannot be edited.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
     delete:
       tags: [competitions]
       summary: Delete team lineup for round
@@ -3541,11 +3568,6 @@ components:
           additionalProperties:
             type: string
           description: Map of position label to player ID.
-        lockedAt:
-          type:
-            - string
-            - "null"
-          format: date-time
 
     ScheduleEstimate:
       type: object

@@ -8363,6 +8363,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 12px;
   color: var(--ink-2);
 }
+.shiaijo-revert {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 
 /* Page title doubles as the court switcher: the H1 shows a chevron and a
    transparent native <select> overlays it (native picker + a11y, no duplicate

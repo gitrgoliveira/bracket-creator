@@ -75,7 +75,7 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     global.window.compMatches = () => [];
     global.window.API = {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
-      putTeamLineup: vi.fn().mockResolvedValue({ lockedAt: null }),
+      putTeamLineup: vi.fn().mockResolvedValue({}),
     };
     // mergeRosterWithAssigned must be available for the suggestions computation
     // in AdminLineup (it reads window.AdminLineupHelpers only in admin_schedule_lineup;
@@ -109,7 +109,6 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
         return extras.length ? [...arr, ...extras] : arr;
       },
       teamIdOf: (team) => team?.id || team?.ID || team?.name || team?.Name || '',
-      canRevise: () => false,
     };
     // useClickOutside is needed by LineupNameInput (called via window.useClickOutside).
     // ui.jsx is loaded by vitest.setup.js, which sets window.useClickOutside.

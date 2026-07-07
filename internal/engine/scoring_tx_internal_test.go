@@ -5,7 +5,6 @@ package engine
 // - recordMatchResultTx (0%)
 // - lookupExistingResultTx (bracket path + not-found)
 // - lookupMatchSidesTx (bracket path + not-found)
-// - maybeLockTeamLineupsForRoundTx (team comp branch)
 // - checkConcurrentIneligibilityTx (already-ineligible path)
 // - withPoolMatchTx (not-found branch)
 // - restoreCompetitorEligibilityTx (empty priorLoser + happy path)
@@ -250,72 +249,6 @@ func TestLookupMatchSidesTx_NotFound(t *testing.T) {
 		return nil
 	})
 	require.Error(t, txErr)
-}
-
-// TestMaybeLockTeamLineupsForRoundTx_TeamComp confirms the function
-// calls LockTeamLineupsForRound for a running match in a team
-// competition (TeamSize > 0).
-func TestMaybeLockTeamLineupsForRoundTx_TeamComp(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mlttr-team"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, TeamSize: 5,
-	}))
-
-	lineup := domain.TeamLineup{
-		TeamID: "TeamA",
-		Round:  0,
-		Positions: map[domain.Position]string{
-			domain.PosSenpo:   "p1",
-			domain.PosJiho:    "p2",
-			domain.PosChuken:  "p3",
-			domain.PosFukusho: "p4",
-			domain.PosTaisho:  "p5",
-		},
-	}
-	require.NoError(t, store.SetTeamLineup(compID, lineup, 5))
-
-	result := &state.MatchResult{Status: state.MatchStatusRunning}
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		eng.maybeLockTeamLineupsForRoundTx(tx, compID, result)
-		return nil
-	})
-
-	lineups, err := store.LoadTeamLineups(compID)
-	require.NoError(t, err)
-	// The lineup for round 0 must be locked. Key format: "teamID-round".
-	key := "TeamA-0"
-	got, ok := lineups[key]
-	require.True(t, ok)
-	assert.NotNil(t, got.LockedAt, "lineup must be locked after maybeLockTeamLineupsForRoundTx")
-}
-
-// TestMaybeLockTeamLineupsForRoundTx_NilResult confirms the nil guard
-// returns immediately without panicking.
-func TestMaybeLockTeamLineupsForRoundTx_NilResult(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mlttr-nil"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamSize: 5}))
-
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		eng.maybeLockTeamLineupsForRoundTx(tx, compID, nil)
-		return nil
-	})
-}
-
-// TestMaybeLockTeamLineupsForRoundTx_NonTeamComp confirms no lock
-// occurs when TeamSize == 0 (individual tournament).
-func TestMaybeLockTeamLineupsForRoundTx_NonTeamComp(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "mlttr-indiv"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, TeamSize: 0}))
-
-	result := &state.MatchResult{Status: state.MatchStatusCompleted}
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		eng.maybeLockTeamLineupsForRoundTx(tx, compID, result)
-		return nil
-	})
-	// No lineups to check, just confirm no panic and no error.
 }
 
 // TestCheckConcurrentIneligibilityTx_AlreadyIneligible confirms that the

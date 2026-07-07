@@ -1571,6 +1571,11 @@ func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
 	assert.Equal(t, "Bob", reloaded.Rounds[0][0].Winner, "older override must not overwrite")
 	assert.Equal(t, int64(200), reloaded.Rounds[0][0].ModifiedAt)
 	assert.Equal(t, "Bob", reloaded.Rounds[1][0].SideA, "final side must still reflect the newer winner")
+	// tri-review finding 2: a dropped override must NOT write a phantom audit
+	// record; the audit still reflects the winner that actually landed.
+	overrides, err := store.LoadOverrides(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", overrides.Winners[matchID], "stale override must not overwrite the audit record")
 
 	// A NEWER assertion at t=300 applies and re-stamps.
 	require.NoError(t, eng.OverrideBracketWinner(compID, matchID, "Alice", 300))
@@ -1578,6 +1583,39 @@ func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Alice", reloaded.Rounds[0][0].Winner, "newer override must apply")
 	assert.Equal(t, int64(300), reloaded.Rounds[0][0].ModifiedAt)
+}
+
+// tri-review finding 6: a deliberate operator CORRECTION (CorrectionReason set)
+// must bypass the timestamp last-write-wins guard, even when it carries an older
+// timestamp than the stored result. Otherwise a legitimate correction would be
+// silently swallowed with a false HTTP 200.
+func TestRecordBracketResult_CorrectionBypassesTimestampGuard(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "correction-ts"
+
+	createTestCompetition(t, store, compID, "playoffs", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	matchID := bracket.Rounds[0][0].ID // Alice vs Bob
+
+	// Record Bob as the winner at t=200.
+	require.NoError(t, eng.RecordMatchResult(compID, matchID, &state.MatchResult{
+		ID: matchID, Winner: "Bob", Status: state.MatchStatusCompleted, ModifiedAt: 200,
+	}))
+
+	// A correction at an OLDER t=100 must still apply because it is a deliberate
+	// operator override, not a reconnect replay.
+	require.NoError(t, eng.RecordMatchResult(compID, matchID, &state.MatchResult{
+		ID: matchID, Winner: "Alice", Status: state.MatchStatusCompleted, ModifiedAt: 100,
+		CorrectionReason: "scorer error",
+	}))
+
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", reloaded.Rounds[0][0].Winner, "correction must bypass the timestamp guard")
 }
 
 func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {

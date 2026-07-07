@@ -72,7 +72,7 @@ func (e *Engine) recordBracketMatchResultTx(tx state.StoreTx, compID, matchID st
 						return ErrMatchSideMismatch
 					}
 					// Timestamp last-write-wins (mp-y3nk); see recordBracketMatchResult.
-					if !domain.ApplyByTimestamp(result.ModifiedAt, m.ModifiedAt) {
+					if !applyBracketWrite(result, m.ModifiedAt) {
 						found = true
 						break
 					}

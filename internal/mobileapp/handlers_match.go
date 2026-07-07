@@ -300,6 +300,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		force := c.Query("force") == "true"
 
 		for i := range results {
+			// Reject a hostile/buggy far-future or negative client timestamp so
+			// it cannot freeze the match against later legitimate writes (mp-y3nk).
+			results[i].ModifiedAt = clampClientModifiedAt(results[i].ModifiedAt)
 			// T104/CHK029: enforce MaxEnchoPeriods cap on bulk-score payload
 			// (top-level and each sub-bout independently).
 			if enchoExceedsCap(results[i].Encho, comp, force) || anySubBoutEnchoExceedsCap(results[i].SubResults, comp, force) {
@@ -594,7 +597,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		if err := eng.OverrideBracketWinner(id, mid, winnerName, req.ModifiedAt); err != nil {
+		if err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -910,6 +913,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 
 		result := req.AsMatchResult()
+		// Reject a hostile/buggy far-future or negative client timestamp so it
+		// cannot freeze the match against later legitimate writes (mp-y3nk).
+		result.ModifiedAt = clampClientModifiedAt(result.ModifiedAt)
 		result.ResultSource = resultSource
 		// Normalize the audit reason once, before validation and the engine
 		// write, so a whitespace-only reason can't satisfy the correction gate

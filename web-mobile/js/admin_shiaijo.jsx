@@ -270,7 +270,7 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
                     <div className="resolve-feeder__label">Winner of {s.feeder.matchNumber ? `Match ${s.feeder.matchNumber}` : s.placeholder.replace(/^Winner of /, "")}</div>
                     <div className="resolve-feeder__opts">
                         {s.options.map((opt) => {
-                            const name = typeof opt === "object" ? opt.name : opt;
+                            const name = _bracketSideName(opt);
                             const picked = picks[s.feeder.id] === name;
                             return (
                                 <button
@@ -387,7 +387,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const maybeAdvanceLocal = useCallbackSh((match, patch) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
         const w = patch.winner;
-        const wname = w && (typeof w === "object" ? w.name : w);
+        const wname = _bracketSideName(w);
         if (wname) applyLocalBracketWin(match.compId, match.id, wname);
     }, [applyLocalBracketWin]);
     useEffectSh(() => {
